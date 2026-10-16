@@ -1,0 +1,619 @@
+diff --git a/app/api/cron/send-notifications/route.ts b/app/api/cron/send-notifications/route.ts
+index cb49b62f9..37d7f65d6 100644
+--- a/app/api/cron/send-notifications/route.ts
++++ b/app/api/cron/send-notifications/route.ts
+@@ -8,6 +8,8 @@ import { NextResponse } from 'next/server';
+ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+ import { isEmailConfigured } from '@/lib/email/service';
+ import { notifyUserOfPendingUpdates } from '@/lib/notifications/notify-user';
++import { notifySqliteWebhooks } from '@/lib/notifications/notify-sqlite';
++import { getDatabase, isSqliteMode } from '@/lib/db';
+ import type { UpdateCheckResult } from '@/types/notifications';
+ 
+ const BATCH_SIZE = 20;
+@@ -142,6 +144,32 @@ export async function GET(request: Request) {
+     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+   }
+ 
++  // Self-hosted deployments keep webhooks and detected updates in SQLite.
++  // Email needs Supabase-only preferences, so only webhooks are delivered.
++  if (isSqliteMode()) {
++    if (!process.env.CRON_SECRET) {
++      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
++    }
++    try {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const summary = await notifySqliteWebhooks(getDatabase(), sqliteWebhooks);
++      return NextResponse.json({
++        success: summary.errors.length === 0,
++        mode: 'sqlite',
++        emailsSent: 0,
++        webhooksSent: summary.webhooksSent,
++        updatesProcessed: summary.updatesProcessed,
++        channelUsers: summary.channelUsers,
++        errors: summary.errors.length > 0 ? summary.errors : undefined,
++      });
++    } catch (error) {
++      return NextResponse.json(
++        { error: error instanceof Error ? error.message : 'Notification run failed' },
++        { status: 500 }
++      );
++    }
++  }
++
+   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+ 
+diff --git a/app/api/webhooks/[id]/route.ts b/app/api/webhooks/[id]/route.ts
+index 91b19939c..71a8ef512 100644
+--- a/app/api/webhooks/[id]/route.ts
++++ b/app/api/webhooks/[id]/route.ts
+@@ -8,6 +8,7 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { parseAccessToken } from '@/lib/auth-utils';
++import { isSqliteMode } from '@/lib/db';
+ import { WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE } from '@/types/notifications';
+ import { validateWebhookUrl } from '@/lib/webhooks/service';
+ import type {
+@@ -23,6 +24,10 @@ interface RouteParams {
+   params: Promise<{ id: string }>;
+ }
+ 
++function maskSecret(webhook: WebhookConfiguration): WebhookConfiguration {
++  return { ...webhook, secret: webhook.secret ? '********' : null };
++}
++
+ /**
+  * GET /api/webhooks/[id]
+  * Get a specific webhook configuration
+@@ -39,6 +44,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
+ 
+     const { id } = await params;
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const webhook = await sqliteWebhooks.get(id, user.userId);
++      if (!webhook) {
++        return NextResponse.json(
++          { error: 'Webhook not found' },
++          { status: 404 }
++        );
++      }
++      return NextResponse.json({ webhook: maskSecret(webhook) });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json({ error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE }, { status: 503 });
+     }
+@@ -120,6 +137,25 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
+       );
+     }
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const changes: Parameters<typeof sqliteWebhooks.update>[2] = {};
++      if (body.name !== undefined) changes.name = body.name.trim();
++      if (body.url !== undefined) changes.url = body.url;
++      if (body.webhook_type !== undefined) changes.webhook_type = body.webhook_type;
++      if (body.headers !== undefined) changes.headers = body.headers;
++      if (body.is_enabled !== undefined) changes.is_enabled = body.is_enabled;
++      if ('secret' in body) changes.secret = body.secret ?? null;
++      const webhook = await sqliteWebhooks.update(id, user.userId, changes);
++      if (!webhook) {
++        return NextResponse.json(
++          { error: 'Webhook not found' },
++          { status: 404 }
++        );
++      }
++      return NextResponse.json({ webhook: maskSecret(webhook) });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json({ error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE }, { status: 503 });
+     }
+@@ -203,6 +239,12 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
+ 
+     const { id } = await params;
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      await sqliteWebhooks.delete(id, user.userId);
++      return NextResponse.json({ success: true });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json({ error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE }, { status: 503 });
+     }
+diff --git a/app/api/webhooks/[id]/test/route.ts b/app/api/webhooks/[id]/test/route.ts
+index 5c48ac26d..8ccb3b898 100644
+--- a/app/api/webhooks/[id]/test/route.ts
++++ b/app/api/webhooks/[id]/test/route.ts
+@@ -6,6 +6,7 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { parseAccessToken } from '@/lib/auth-utils';
++import { isSqliteMode } from '@/lib/db';
+ import { WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE } from '@/types/notifications';
+ import { sendTestWebhook } from '@/lib/webhooks/service';
+ import type { WebhookConfiguration } from '@/types/notifications';
+@@ -34,6 +35,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
+ 
+     const { id } = await params;
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const webhook = await sqliteWebhooks.get(id, user.userId);
++      if (!webhook) {
++        return NextResponse.json(
++          { error: 'Webhook not found' },
++          { status: 404 }
++        );
++      }
++      const result = await sendTestWebhook(webhook);
++      await sqliteWebhooks.recordResult(id, result.success);
++      return NextResponse.json({
++        success: result.success,
++        statusCode: result.statusCode,
++        error: result.error,
++      });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json({ error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE }, { status: 503 });
+     }
+diff --git a/app/api/webhooks/route.sqlite.test.ts b/app/api/webhooks/route.sqlite.test.ts
+new file mode 100644
+index 000000000..23d6c7094
+--- /dev/null
++++ b/app/api/webhooks/route.sqlite.test.ts
+@@ -0,0 +1,126 @@
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++const parseAccessTokenMock = vi.hoisted(() => vi.fn());
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: parseAccessTokenMock }));
++
++let tempDir: string;
++let list: typeof import('@/app/api/webhooks/route');
++let item: typeof import('@/app/api/webhooks/[id]/route');
++let test: typeof import('@/app/api/webhooks/[id]/test/route');
++let cron: typeof import('@/app/api/cron/send-notifications/route');
++
++beforeEach(async () => {
++  vi.resetModules();
++  tempDir = mkdtempSync(join(tmpdir(), 'intuneget-webhooks-'));
++  process.env.DATABASE_MODE = 'sqlite';
++  process.env.DATABASE_PATH = join(tempDir, 'app.db');
++  process.env.CRON_SECRET = 'cron-fixture';
++  parseAccessTokenMock.mockReset();
++  parseAccessTokenMock.mockResolvedValue({ userId: 'u1' });
++  vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
++  vi.doMock('@/lib/db', async () => {
++    const sqlite = await import('@/lib/db/sqlite');
++    return { getDatabase: () => sqlite.sqliteDb, isSqliteMode: () => true, resetDatabaseInstance: () => {} };
++  });
++  list = await import('@/app/api/webhooks/route');
++  item = await import('@/app/api/webhooks/[id]/route');
++  test = await import('@/app/api/webhooks/[id]/test/route');
++  cron = await import('@/app/api/cron/send-notifications/route');
++});
++
++afterEach(async () => {
++  const { closeSqliteDb } = await import('@/lib/db/sqlite');
++  closeSqliteDb();
++  rmSync(tempDir, { recursive: true, force: true });
++  delete process.env.DATABASE_MODE;
++  delete process.env.DATABASE_PATH;
++  delete process.env.CRON_SECRET;
++  vi.unstubAllGlobals();
++});
++
++const request = (url: string, method = 'GET', body?: unknown) => new NextRequest(`http://localhost${url}`, {
++  method, headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' },
++  body: body === undefined ? undefined : JSON.stringify(body),
++});
++const params = (id: string) => ({ params: Promise.resolve({ id }) });
++const valid = { name: ' Teams alerts ', url: 'https://example.test/hook', webhook_type: 'teams', secret: 'fixture-secret' };
++
++async function create(body: unknown = valid) {
++  return list.POST(request('/api/webhooks', 'POST', body));
++}
++
++describe('webhooks in SQLite mode', () => {
++  it('creates, lists, updates and deletes a webhook with the secret masked', async () => {
++    const created = await create();
++    expect(created.status).toBe(201);
++    const { webhook } = await created.json();
++    expect(webhook).toMatchObject({ name: 'Teams alerts', webhook_type: 'teams', secret: '********', headers: {}, is_enabled: true, failure_count: 0 });
++
++    expect((await (await list.GET(request('/api/webhooks'))).json()).webhooks).toHaveLength(1);
++
++    const updated = await item.PUT(request(`/api/webhooks/${webhook.id}`, 'PUT', { is_enabled: false, secret: null, headers: { 'X-Fixture': '1' } }), params(webhook.id));
++    expect(await updated.json()).toEqual({ webhook: expect.objectContaining({ is_enabled: false, secret: null, headers: { 'X-Fixture': '1' } }) });
++
++    expect((await item.DELETE(request(`/api/webhooks/${webhook.id}`, 'DELETE'), params(webhook.id))).status).toBe(200);
++    expect((await item.GET(request(`/api/webhooks/${webhook.id}`), params(webhook.id))).status).toBe(404);
++  });
++
++  it('keeps webhooks private to their owner', async () => {
++    const { webhook } = await (await create()).json();
++    parseAccessTokenMock.mockResolvedValue({ userId: 'u2' });
++    expect((await (await list.GET(request('/api/webhooks'))).json()).webhooks).toEqual([]);
++    expect((await item.GET(request(`/api/webhooks/${webhook.id}`), params(webhook.id))).status).toBe(404);
++    expect((await item.PUT(request(`/api/webhooks/${webhook.id}`, 'PUT', { name: 'x' }), params(webhook.id))).status).toBe(404);
++    expect((await test.POST(request(`/api/webhooks/${webhook.id}/test`, 'POST'), params(webhook.id))).status).toBe(404);
++    await item.DELETE(request(`/api/webhooks/${webhook.id}`, 'DELETE'), params(webhook.id));
++    parseAccessTokenMock.mockResolvedValue({ userId: 'u1' });
++    expect((await item.GET(request(`/api/webhooks/${webhook.id}`), params(webhook.id))).status).toBe(200);
++  });
++
++  it('enforces the ten webhook limit', async () => {
++    for (let i = 0; i < 10; i++) expect((await create()).status).toBe(201);
++    expect((await create()).status).toBe(400);
++  });
++
++  it('sends a test payload and records the result', async () => {
++    const { webhook } = await (await create()).json();
++    const response = await test.POST(request(`/api/webhooks/${webhook.id}/test`, 'POST'), params(webhook.id));
++    expect(await response.json()).toMatchObject({ success: true, statusCode: 200 });
++    expect(fetch).toHaveBeenCalledWith('https://example.test/hook', expect.anything());
++    const stored = (await (await item.GET(request(`/api/webhooks/${webhook.id}`), params(webhook.id))).json()).webhook;
++    expect(stored.last_success_at).toEqual(expect.any(String));
++  });
++
++  it('delivers pending updates once and again when a newer version appears', async () => {
++    await create();
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    const detected = { user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'i1', display_name: 'Vendor App', current_version: '1.0', latest_version: '2.0' };
++    await sqliteDb.updateCheckResults.upsert(detected);
++    const run = async () => (await cron.GET(new Request('http://localhost/api/cron/send-notifications', { headers: { authorization: 'Bearer cron-fixture' } }))).json();
++
++    expect(await run()).toMatchObject({ mode: 'sqlite', webhooksSent: 1, updatesProcessed: 1 });
++    expect(await run()).toMatchObject({ webhooksSent: 0, updatesProcessed: 0 });
++
++    await sqliteDb.updateCheckResults.upsert(detected);
++    expect(await run()).toMatchObject({ webhooksSent: 0 });
++    await sqliteDb.updateCheckResults.upsert({ ...detected, latest_version: '3.0' });
++    expect(await run()).toMatchObject({ webhooksSent: 1, updatesProcessed: 1 });
++  });
++
++  it('leaves ignored apps pending and rejects an unauthenticated run', async () => {
++    await create();
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    await sqliteDb.updateCheckResults.upsert({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'i1', display_name: 'Vendor App', current_version: '1.0', latest_version: '2.0' });
++    await sqliteDb.updatePolicies.upsert({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', policy_type: 'ignore' });
++
++    const unauthorized = await cron.GET(new Request('http://localhost/api/cron/send-notifications'));
++    expect(unauthorized.status).toBe(401);
++    const response = await cron.GET(new Request('http://localhost/api/cron/send-notifications', { headers: { authorization: 'Bearer cron-fixture' } }));
++    expect(await response.json()).toMatchObject({ webhooksSent: 0, updatesProcessed: 0 });
++    expect(fetch).not.toHaveBeenCalled();
++  });
++});
+diff --git a/app/api/webhooks/route.test.ts b/app/api/webhooks/route.test.ts
+index 0793570ec..bf145ab4f 100644
+--- a/app/api/webhooks/route.test.ts
++++ b/app/api/webhooks/route.test.ts
+@@ -25,7 +25,7 @@ const unavailable = { error: 'Webhook notifications require Supabase to be confi
+ beforeEach(() => {
+   vi.resetModules(); vi.doUnmock('@/lib/supabase');
+   fixture.allowed = true; fixture.client = null; clientFactory.mockClear();
+-  vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '');
++  vi.stubEnv('DATABASE_MODE', 'supabase'); vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '');
+   vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', ''); vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', '');
+   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Network forbidden in route tests'); }));
+ });
+diff --git a/app/api/webhooks/route.ts b/app/api/webhooks/route.ts
+index afe64c65b..72bfc97ba 100644
+--- a/app/api/webhooks/route.ts
++++ b/app/api/webhooks/route.ts
+@@ -7,6 +7,7 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { parseAccessToken } from '@/lib/auth-utils';
++import { isSqliteMode } from '@/lib/db';
+ import { validateWebhookUrl, detectWebhookType } from '@/lib/webhooks/service';
+ import { WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE } from '@/types/notifications';
+ import type {
+@@ -14,6 +15,10 @@ import type {
+   WebhookConfigurationInput,
+ } from '@/types/notifications';
+ 
++function maskSecret(webhook: WebhookConfiguration): WebhookConfiguration {
++  return { ...webhook, secret: webhook.secret ? '********' : null };
++}
++
+ /**
+  * GET /api/webhooks
+  * List all webhook configurations for the user
+@@ -28,6 +33,12 @@ export async function GET(request: NextRequest) {
+       );
+     }
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const webhooks = await sqliteWebhooks.list(user.userId);
++      return NextResponse.json({ webhooks: webhooks.map(maskSecret) });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json(
+         { error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE },
+@@ -121,6 +132,25 @@ export async function POST(request: NextRequest) {
+       );
+     }
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      if ((await sqliteWebhooks.count(user.userId)) >= 10) {
++        return NextResponse.json(
++          { error: 'Maximum of 10 webhooks allowed per user' },
++          { status: 400 }
++        );
++      }
++      const webhook = await sqliteWebhooks.create(user.userId, {
++        name: body.name.trim(),
++        url: body.url,
++        webhook_type: webhookType,
++        secret: body.secret || null,
++        headers: body.headers || {},
++        is_enabled: body.is_enabled ?? true,
++      });
++      return NextResponse.json({ webhook: maskSecret(webhook) }, { status: 201 });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json(
+         { error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE },
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index c4fa05f17..4655bd849 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -26,6 +26,7 @@ import type {
+   AutoUpdateHistoryWithPolicy,
+   AutoUpdateStatus,
+ } from '@/types/update-policies';
++import type { WebhookConfiguration } from '@/types/notifications';
+ import { runSqliteMigrations } from './sqlite-migrations';
+ 
+ // Singleton database instance
+@@ -115,6 +116,107 @@ function buildSetClause(
+   return { clause: assignments.join(', '), values };
+ }
+ 
++type WebhookRow = Omit<WebhookConfiguration, 'headers' | 'is_enabled'> & { headers: string; is_enabled: number };
++const webhookRow = (row: unknown): WebhookConfiguration => {
++  const stored = row as WebhookRow;
++  return { ...stored, headers: JSON.parse(stored.headers || '{}'), is_enabled: stored.is_enabled === 1 };
++};
++type WebhookFields = Pick<WebhookConfiguration, 'name' | 'url' | 'webhook_type' | 'secret' | 'headers' | 'is_enabled'>;
++
++// HRM patch: created outside the versioned migrations so it never takes a
++// schema version upstream may assign to a different table later.
++let webhookTableReady = false;
++function getWebhookDb(): Database.Database {
++  const database = getDb();
++  if (!webhookTableReady) {
++    database.exec(`CREATE TABLE IF NOT EXISTS webhook_configurations (
++      id TEXT PRIMARY KEY,
++      user_id TEXT NOT NULL,
++      name TEXT NOT NULL,
++      url TEXT NOT NULL,
++      webhook_type TEXT NOT NULL CHECK (webhook_type IN ('slack', 'teams', 'discord', 'custom')),
++      secret TEXT,
++      headers TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(headers)),
++      is_enabled INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
++      failure_count INTEGER NOT NULL DEFAULT 0,
++      last_failure_at TEXT,
++      last_success_at TEXT,
++      created_at TEXT NOT NULL,
++      updated_at TEXT NOT NULL
++    );
++    CREATE INDEX IF NOT EXISTS idx_webhook_configurations_user ON webhook_configurations(user_id, created_at DESC);`);
++    webhookTableReady = true;
++  }
++  return database;
++}
++
++/**
++ * Local webhook configurations and the pending update reads the webhook
++ * notifier needs. Every read and write is scoped to the owning user.
++ */
++export const sqliteWebhooks = {
++  async list(userId: string): Promise<WebhookConfiguration[]> {
++    return getWebhookDb().prepare('SELECT * FROM webhook_configurations WHERE user_id = ? ORDER BY created_at DESC, id DESC').all(userId).map(webhookRow);
++  },
++  async count(userId: string): Promise<number> {
++    return (getWebhookDb().prepare('SELECT COUNT(*) AS count FROM webhook_configurations WHERE user_id = ?').get(userId) as { count: number }).count;
++  },
++  async get(id: string, userId: string): Promise<WebhookConfiguration | null> {
++    const row = getWebhookDb().prepare('SELECT * FROM webhook_configurations WHERE id = ? AND user_id = ?').get(id, userId);
++    return row ? webhookRow(row) : null;
++  },
++  async create(userId: string, fields: WebhookFields): Promise<WebhookConfiguration> {
++    const database = getWebhookDb();
++    const id = crypto.randomUUID();
++    const now = new Date().toISOString();
++    database
++      .prepare('INSERT INTO webhook_configurations (id, user_id, name, url, webhook_type, secret, headers, is_enabled, failure_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)')
++      .run(id, userId, fields.name, fields.url, fields.webhook_type, fields.secret, JSON.stringify(fields.headers ?? {}), fields.is_enabled ? 1 : 0, now, now);
++    return webhookRow(database.prepare('SELECT * FROM webhook_configurations WHERE id = ?').get(id));
++  },
++  async update(id: string, userId: string, data: Partial<WebhookFields>): Promise<WebhookConfiguration | null> {
++    const database = getWebhookDb();
++    const { clause, values } = buildSetClause(
++      { ...data, updated_at: new Date().toISOString() },
++      { json: new Set(['headers']), boolean: new Set(['is_enabled']) }
++    );
++    if (database.prepare(`UPDATE webhook_configurations SET ${clause} WHERE id = ? AND user_id = ?`).run(...values, id, userId).changes === 0) return null;
++    return webhookRow(database.prepare('SELECT * FROM webhook_configurations WHERE id = ?').get(id));
++  },
++  async delete(id: string, userId: string): Promise<boolean> {
++    return getWebhookDb().prepare('DELETE FROM webhook_configurations WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
++  },
++  /** Record a delivery outcome for the circuit breaker. */
++  async recordResult(id: string, success: boolean): Promise<void> {
++    const now = new Date().toISOString();
++    getWebhookDb()
++      .prepare(success
++        ? 'UPDATE webhook_configurations SET last_success_at = ?, failure_count = 0, updated_at = ? WHERE id = ?'
++        : 'UPDATE webhook_configurations SET last_failure_at = ?, failure_count = failure_count + 1, updated_at = ? WHERE id = ?')
++      .run(now, now, id);
++  },
++  /** Users with at least one enabled webhook. */
++  async listUsersWithEnabled(): Promise<string[]> {
++    return (getWebhookDb().prepare('SELECT DISTINCT user_id FROM webhook_configurations WHERE is_enabled = 1 ORDER BY user_id').all() as Array<{ user_id: string }>).map(row => row.user_id);
++  },
++  async listEnabled(userId: string): Promise<WebhookConfiguration[]> {
++    return getWebhookDb().prepare('SELECT * FROM webhook_configurations WHERE user_id = ? AND is_enabled = 1 ORDER BY created_at, id').all(userId).map(webhookRow);
++  },
++  /** Detected updates not yet notified or dismissed, newest first. */
++  async listPendingUpdates(userId: string): Promise<UpdateCheckResult[]> {
++    return (getWebhookDb()
++      .prepare('SELECT * FROM update_check_results WHERE user_id = ? AND notified_at IS NULL AND dismissed_at IS NULL ORDER BY detected_at DESC, id')
++      .all(userId) as Record<string, unknown>[]).map(parseCheckResultRow);
++  },
++  async markNotified(ids: string[]): Promise<void> {
++    if (ids.length === 0) return;
++    const database = getWebhookDb();
++    const now = new Date().toISOString();
++    const statement = database.prepare('UPDATE update_check_results SET notified_at = ? WHERE id = ?');
++    database.transaction(() => { for (const id of ids) statement.run(now, id); })();
++  },
++};
++
+ /**
+  * SQLite implementation of the database adapter
+  */
+@@ -798,6 +900,11 @@ export const sqliteDb: DatabaseAdapter = {
+              latest_version = excluded.latest_version,
+              is_critical = excluded.is_critical,
+              is_managed = excluded.is_managed,
++             notified_at = CASE
++               WHEN update_check_results.latest_version = excluded.latest_version
++               THEN update_check_results.notified_at
++               ELSE NULL
++             END,
+              updated_at = excluded.updated_at`
+         )
+         .run(
+@@ -993,5 +1100,6 @@ export function closeSqliteDb(): void {
+   if (db) {
+     db.close();
+     db = null;
++    webhookTableReady = false;
+   }
+ }
+diff --git a/lib/notifications/notify-sqlite.ts b/lib/notifications/notify-sqlite.ts
+new file mode 100644
+index 000000000..92af7aa61
+--- /dev/null
++++ b/lib/notifications/notify-sqlite.ts
+@@ -0,0 +1,103 @@
++/**
++ * Webhook notifications for self-hosted SQLite deployments.
++ *
++ * Mirrors the webhook half of notifyUserOfPendingUpdates against the local
++ * database. Email preferences, user profiles, and notification history live
++ * only in Supabase, so this path delivers webhooks and nothing else.
++ */
++
++import type { DatabaseAdapter } from '@/lib/db/types';
++import type { sqliteWebhooks as SqliteWebhooks } from '@/lib/db/sqlite';
++import { deliverWebhook } from '@/lib/webhooks/service';
++import type { AppUpdate, NotificationPayload, UpdateCheckResult } from '@/types/notifications';
++import { shouldSkipUpdate } from '@/types/update-policies';
++
++export interface SqliteNotifySummary {
++  webhooksSent: number;
++  updatesProcessed: number;
++  channelUsers: number;
++  errors: string[];
++}
++
++/**
++ * Deliver every pending update to its owner's enabled webhooks and mark the
++ * delivered updates notified. As in the hosted path, updates skipped by an
++ * ignore or pin policy stay pending, and updates no webhook accepted are
++ * retried on the next run.
++ */
++export async function notifySqliteWebhooks(
++  db: DatabaseAdapter,
++  webhooks: typeof SqliteWebhooks
++): Promise<SqliteNotifySummary> {
++  const summary: SqliteNotifySummary = { webhooksSent: 0, updatesProcessed: 0, channelUsers: 0, errors: [] };
++  const userIds = await webhooks.listUsersWithEnabled();
++  summary.channelUsers = userIds.length;
++
++  for (const userId of userIds) {
++    const pending = await webhooks.listPendingUpdates(userId);
++    if (pending.length === 0) continue;
++
++    const policies = await db.updatePolicies.list(userId);
++    const policyByApp = new Map(policies.map((policy) => [`${policy.tenant_id}:${policy.winget_id}`, policy]));
++    const updates = pending.filter(
++      (u) => !shouldSkipUpdate(policyByApp.get(`${u.tenant_id}:${u.winget_id}`), u.latest_version)
++    );
++    if (updates.length === 0) continue;
++
++    const tenantUpdates = new Map<string, UpdateCheckResult[]>();
++    updates.forEach((u) => {
++      if (!tenantUpdates.has(u.tenant_id)) {
++        tenantUpdates.set(u.tenant_id, []);
++      }
++      tenantUpdates.get(u.tenant_id)!.push(u);
++    });
++
++    const userWebhooks = await webhooks.listEnabled(userId);
++    const notifiedIds: string[] = [];
++
++    for (const [tenantId, tenantUpdateList] of tenantUpdates) {
++      const appUpdates: AppUpdate[] = tenantUpdateList.map((u) => ({
++        app_name: u.display_name,
++        winget_id: u.winget_id,
++        intune_app_id: u.intune_app_id,
++        current_version: u.current_version,
++        latest_version: u.latest_version,
++        is_critical: u.is_critical,
++      }));
++
++      const payload: NotificationPayload = {
++        event: 'app_updates_available',
++        timestamp: new Date().toISOString(),
++        tenant_id: tenantId,
++        updates: appUpdates,
++        summary: { total: appUpdates.length, critical: appUpdates.filter((u) => u.is_critical).length },
++      };
++
++      let delivered = false;
++      for (const webhook of userWebhooks) {
++        const result = await deliverWebhook(webhook, payload);
++        await webhooks.recordResult(webhook.id, result.success);
++        // Keep the in-memory count current so the circuit breaker sees
++        // failures from earlier tenants in this run.
++        webhook.failure_count = result.success ? 0 : webhook.failure_count + 1;
++        if (!result.success) webhook.last_failure_at = new Date().toISOString();
++
++        if (result.success) {
++          delivered = true;
++          summary.webhooksSent++;
++        } else {
++          summary.errors.push(`Webhook ${webhook.name} failed: ${result.error}`);
++        }
++      }
++
++      if (delivered) {
++        notifiedIds.push(...tenantUpdateList.map((u) => u.id));
++      }
++    }
++
++    await webhooks.markNotified(notifiedIds);
++    summary.updatesProcessed += notifiedIds.length;
++  }
++
++  return summary;
++}

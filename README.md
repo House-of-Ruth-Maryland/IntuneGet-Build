@@ -13,6 +13,7 @@ Build settings mirror upstream's release workflow (pinned actions, provenance, S
 |---|---|---|
 | `0001-qa-gate-skip-without-supabase.patch` | In SQLite (no Supabase) mode the QA gate calls Supabase unconditionally, so GitHub-mode packaging can't start. | Upstream guards `enforceQaGate` for self-hosted installs. |
 | `0002-tenant-view-without-supabase.patch` | Deployments → "All in tenant" (`GET /api/package?scope=tenant`) calls Supabase unconditionally, so the team view fails in SQLite mode. | Upstream guards the tenant-scope branch. |
+| `0003-webhooks-without-supabase.patch` | Settings → Notifications webhooks return 503 in SQLite mode, and `/api/cron/send-notifications` needs Supabase. Stores webhooks in SQLite (table created outside the versioned migrations so it can't collide with upstream migration numbers) and delivers them from the cron; email still needs Supabase. Schedule `/api/cron/send-notifications` after `/api/cron/check-updates`. | Upstream supports webhooks in SQLite mode. |
 
 ## Branding
 
