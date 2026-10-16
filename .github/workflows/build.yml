@@ -1,0 +1,76 @@
+name: Build patched IntuneGet image
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream ugurkocde/IntuneGet tag to build
+        required: true
+        default: v0.8.1
+      hrm_rev:
+        description: HRM patch revision (bump when patches change)
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/house-of-ruth-maryland/intuneget
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out upstream
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ugurkocde/IntuneGet
+          ref: ${{ inputs.upstream_ref }}
+          path: upstream
+          persist-credentials: false
+
+      - name: Check out HRM patches
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: hrm
+          persist-credentials: false
+
+      - name: Apply patches
+        working-directory: upstream
+        run: |
+          for p in ../hrm/patches/*.patch; do
+            echo "Applying $p"
+            git apply --verbose "$p"
+          done
+          git diff --stat
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: upstream
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ inputs.upstream_ref }}-hrm.${{ inputs.hrm_rev }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=IntuneGet ${{ inputs.upstream_ref }} with HRM patches (see patches/)
+            org.opencontainers.image.version=${{ inputs.upstream_ref }}-hrm.${{ inputs.hrm_rev }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder
+            NEXT_PUBLIC_AZURE_AD_CLIENT_ID=placeholder
