@@ -12,6 +12,7 @@ Build settings mirror upstream's release workflow (pinned actions, provenance, S
 | Patch | Why | Drop when |
 |---|---|---|
 | `0001-qa-gate-skip-without-supabase.patch` | In SQLite (no Supabase) mode the QA gate calls Supabase unconditionally, so GitHub-mode packaging can't start. | Upstream guards `enforceQaGate` for self-hosted installs. |
+| `0002-tenant-view-without-supabase.patch` | Deployments → "All in tenant" (`GET /api/package?scope=tenant`) calls Supabase unconditionally, so the team view fails in SQLite mode. | Upstream guards the tenant-scope branch. |
 
 ## Build
 

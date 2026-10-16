@@ -1,0 +1,25 @@
+--- a/app/api/package/route.ts
++++ b/app/api/package/route.ts
+@@ -1027,12 +1027,16 @@
+     const scope = searchParams.get('scope');
+     if (scope === 'tenant') {
+       const mspTenantId = request.headers.get('X-MSP-Tenant-Id');
+-      const { tenantId, errorResponse } = await resolveTargetTenantId({
+-        supabase: createServerClient(),
+-        userId: user.userId,
+-        tokenTenantId: user.tenantId,
+-        requestedTenantId: mspTenantId,
+-      });
++      // HRM patch: without Supabase there is no MSP tenant mapping; use the
++      // signed-in user's tenant, matching POST and /api/intune/apps/deployed.
++      const { tenantId, errorResponse } = isSupabaseServerConfigured()
++        ? await resolveTargetTenantId({
++            supabase: createServerClient(),
++            userId: user.userId,
++            tokenTenantId: user.tenantId,
++            requestedTenantId: mspTenantId,
++          })
++        : { tenantId: user.tenantId, errorResponse: null };
+       if (errorResponse) {
+         return errorResponse;
+       }
