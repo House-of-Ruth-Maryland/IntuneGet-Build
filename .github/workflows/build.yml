@@ -47,6 +47,20 @@ jobs:
           done
           git diff --stat
 
+      - name: Apply HRM branding (logo + icons)
+        working-directory: upstream
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq librsvg2-bin imagemagick >/dev/null
+          SRC=../hrm/branding/hrm-mark.svg
+          cp "$SRC" public/favicon.svg
+          for s in 16 32; do rsvg-convert -w $s -h $s "$SRC" -o public/favicon-${s}x${s}.png; done
+          rsvg-convert -w 180 -h 180 -b white "$SRC" -o public/apple-touch-icon.png
+          for s in 192 512; do rsvg-convert -w $s -h $s "$SRC" -o public/logo-$s.png; done
+          rsvg-convert -w 48 -h 48 "$SRC" -o /tmp/f48.png
+          convert public/favicon-16x16.png public/favicon-32x32.png /tmp/f48.png public/favicon.ico
+          cp public/favicon.ico app/favicon.ico
+          ls -la public/favicon* public/apple-touch-icon.png public/logo-*.png app/favicon.ico
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 

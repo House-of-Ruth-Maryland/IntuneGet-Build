@@ -14,6 +14,12 @@ Build settings mirror upstream's release workflow (pinned actions, provenance, S
 | `0001-qa-gate-skip-without-supabase.patch` | In SQLite (no Supabase) mode the QA gate calls Supabase unconditionally, so GitHub-mode packaging can't start. | Upstream guards `enforceQaGate` for self-hosted installs. |
 | `0002-tenant-view-without-supabase.patch` | Deployments → "All in tenant" (`GET /api/package?scope=tenant`) calls Supabase unconditionally, so the team view fails in SQLite mode. | Upstream guards the tenant-scope branch. |
 
+## Branding
+
+`branding/hrm-mark.svg` (House of Ruth Maryland mark, from hruth.org) replaces the IntuneGet
+logo: the build writes it to `public/favicon.svg` (sidebar logo + tab icon) and renders the
+PNG/ICO icon sizes from it.
+
 ## Build
 
 Actions → "Build patched IntuneGet image" → Run workflow (choose the upstream tag).
