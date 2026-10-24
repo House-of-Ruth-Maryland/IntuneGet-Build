@@ -35,6 +35,7 @@ jobs:
       packaging_workflow: ${{ steps.workflow.outputs.result }}
       tsc: ${{ steps.tests.outputs.tsc }}
       tests: ${{ steps.tests.outputs.tests }}
+      mappings: ${{ steps.mappings.outputs.result }}
     steps:
       - name: Check out HRM patches
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -152,6 +153,23 @@ jobs:
             echo "tests=failed ($(grep -E '^ +Tests ' ../test.log | tail -n 1 | tr -s ' ' | sed -e 's/^ //' -e 's/|/,/g'))" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check app mapping IDs against WinGet
+        # Patch 0004's live check: every built-in app mapping must resolve in
+        # winget-pkgs the way Claim looks it up.
+        id: mappings
+        if: steps.patches.outputs.result == 'ok'
+        working-directory: upstream
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VALIDATE_WINGET_IDS: "1"
+        run: |
+          if npx vitest run lib/__tests__/app-mappings-winget.test.ts 2>&1 | tee ../mappings.log; [ "${PIPESTATUS[0]}" = 0 ]; then
+            echo "result=all resolve" >> "$GITHUB_OUTPUT"
+          else
+            missing=$(sed -nE 's/.*MISSING_WINGET_IDS=//p' ../mappings.log | tail -n 1)
+            echo "result=failed${missing:+ (not found in WinGet: $missing)}" >> "$GITHUB_OUTPUT"
+          fi
+
   propose:
     # Opens the PR or issue. Never runs upstream code.
     needs: test
@@ -172,6 +190,7 @@ jobs:
       PACKAGING_WORKFLOW: ${{ needs.test.outputs.packaging_workflow }}
       TSC: ${{ needs.test.outputs.tsc }}
       TESTS: ${{ needs.test.outputs.tests }}
+      MAPPINGS: ${{ needs.test.outputs.mappings }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Check out
@@ -209,6 +228,7 @@ jobs:
           | HRM patches apply | $PATCHES |
           | Type check | $TSC |
           | Upstream tests | $TESTS |
+          | App mapping IDs | $MAPPINGS |
           | Migration numbers | $MIGRATIONS |
           | Packaging workflow | $PACKAGING_WORKFLOW |
 
@@ -218,6 +238,7 @@ jobs:
           - [ ] Read the upstream release notes.
           - [ ] If the packaging workflow changed, update IntuneGet-Workflows to the $LATEST version (merge that before the Deploy PR).
           - [ ] If migration numbers clash, rework the patch first.
+          - [ ] If app mapping IDs fail, fix them in patch 0004 (or list products that aren't in WinGet there).
 
           Run: $RUN_URL
           EOF

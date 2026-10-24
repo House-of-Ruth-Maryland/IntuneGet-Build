@@ -14,6 +14,7 @@ Build settings mirror upstream's release workflow (pinned actions, provenance, S
 | `0001-qa-gate-skip-without-supabase.patch` | In SQLite (no Supabase) mode the QA gate calls Supabase unconditionally, so GitHub-mode packaging can't start. From v0.8.2 the gate also checks installer reputation (VirusTotal) in Supabase, so this patch skips that check too in SQLite mode. | Upstream guards `enforceQaGate` for self-hosted installs. |
 | `0002-tenant-view-without-supabase.patch` | Deployments → "All in tenant" (`GET /api/package?scope=tenant`) calls Supabase unconditionally, so the team view fails in SQLite mode. | Upstream guards the tenant-scope branch. |
 | `0003-webhooks-without-supabase.patch` | Settings → Notifications webhooks return 503 in SQLite mode, and `/api/cron/send-notifications` needs Supabase. Stores webhooks in SQLite (migration 9, `webhook_configurations`, created with `IF NOT EXISTS` so tables made by earlier builds are kept) and delivers them from the cron; email still needs Supabase. The VM runs `/api/cron/send-notifications` after each `/api/cron/check-updates`. | Upstream supports webhooks in SQLite mode. |
+| `0004-app-mappings-winget-ids.patch` | Seven built-in app mappings point to WinGet IDs that don't exist (for example `Webex.Webex`; the real ID is `Cisco.Webex`), so Claim fails with "Failed to fetch package manifest". Fixes them and adds a live check (`VALIDATE_WINGET_IDS=1`) that every mapped ID resolves; products not in WinGet are listed in the test. | Upstream fixes the IDs and validates them. |
 
 ## Branding
 

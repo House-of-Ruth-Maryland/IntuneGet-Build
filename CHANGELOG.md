@@ -8,4 +8,6 @@
   migration-number and packaging-workflow results. Merging it builds the image and opens the Deploy PR.
 - The VM runs `/api/cron/check-updates` twice a day and `/api/cron/send-notifications` after each.
 - Webhook migration 9 keeps a webhook table created by earlier builds.
+- Claim works for Webex, Wireshark, 1Password, Nmap, Brave, AnyDesk and DBeaver: patch 0004 corrects their
+  WinGet IDs, and the weekly check now verifies every built-in app mapping against WinGet.
 - Builds use IntuneGet v0.8.2 (patch 0001 rebased; patch 0003 updated).

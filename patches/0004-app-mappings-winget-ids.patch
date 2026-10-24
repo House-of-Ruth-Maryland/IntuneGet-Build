@@ -1,0 +1,138 @@
+diff --git a/lib/__tests__/app-mappings-winget.test.ts b/lib/__tests__/app-mappings-winget.test.ts
+new file mode 100644
+index 000000000..5210e9d23
+--- /dev/null
++++ b/lib/__tests__/app-mappings-winget.test.ts
+@@ -0,0 +1,69 @@
++import { describe, expect, it } from 'vitest';
++import { APP_MAPPINGS } from '@/lib/app-mappings';
++import { fetchAvailableVersionsLive } from '@/lib/manifest-api';
++
++// Live check that every mapped ID resolves in microsoft/winget-pkgs the same
++// way Claim does. Off by default because it calls the GitHub API; run with
++// VALIDATE_WINGET_IDS=1, and GITHUB_TOKEN set to avoid the anonymous rate limit.
++
++// Mapped so installed copies are recognised, but not distributed through WinGet,
++// so they can't be claimed. Checked 2026-10-23.
++const NOT_IN_WINGET = new Set([
++  'Adobe.AfterEffects',
++  'Adobe.Illustrator',
++  'Adobe.InDesign',
++  'Adobe.Photoshop',
++  'Adobe.PremierePro',
++  'BMCSoftware.FootPrints',
++  'BlueJeans.BlueJeans',
++  'Cisco.CiscoSecureClient',
++  'CrowdStrike.FalconSensor',
++  'ESET.NOD32Antivirus',
++  'Fortinet.FortiClient',
++  'Ivanti.Workspace',
++  'ManageEngine.DesktopCentral',
++  'McAfee.Agent',
++  'Microsoft.Access',
++  'Microsoft.Excel',
++  'Microsoft.PowerPoint',
++  'Microsoft.Project',
++  'Microsoft.Visio',
++  'Microsoft.Word',
++  'NordVPN.NordVPN',
++  'PaloAltoNetworks.GlobalProtect',
++  'Progress.MOVEit.Transfer',
++  'SAP.SAPLogon',
++  'ServiceNow.Agent',
++  'SolarWinds.DamewareRemote',
++  'Sophos.SophosHome',
++  'Symantec.EndpointProtection',
++  'Trend.ApexOne',
++  'VMware.WorkstationPlayer',
++  'VMware.WorkstationPro',
++]);
++
++const ids = [...new Set(APP_MAPPINGS.map((mapping) => mapping.wingetId))];
++
++async function hasVersions(id: string): Promise<boolean> {
++  return (await fetchAvailableVersionsLive(id, { strict: true })).length > 0;
++}
++
++describe.skipIf(!process.env.VALIDATE_WINGET_IDS)('APP_MAPPINGS WinGet IDs', () => {
++  it('resolves every mapped ID to at least one WinGet version', async () => {
++    const missing: string[] = [];
++    for (const id of ids.filter((id) => !NOT_IN_WINGET.has(id))) {
++      if (!(await hasVersions(id))) missing.push(id);
++    }
++    console.log(`MISSING_WINGET_IDS=${missing.join(',')}`);
++    expect(missing).toEqual([]);
++  }, 300_000);
++
++  it('keeps the not-in-WinGet list current', async () => {
++    const stale = [...NOT_IN_WINGET].filter((id) => !ids.includes(id));
++    const nowInWinget: string[] = [];
++    for (const id of [...NOT_IN_WINGET].filter((id) => ids.includes(id))) {
++      if (await hasVersions(id)) nowInWinget.push(id);
++    }
++    expect({ stale, nowInWinget }).toEqual({ stale: [], nowInWinget: [] });
++  }, 300_000);
++});
+diff --git a/lib/app-mappings.ts b/lib/app-mappings.ts
+index 000dc71f6..e40b02deb 100644
+--- a/lib/app-mappings.ts
++++ b/lib/app-mappings.ts
+@@ -33,7 +33,7 @@ export const APP_MAPPINGS: AppMapping[] = [
+     publisher: 'Microsoft',
+   },
+   {
+-    wingetId: 'BraveSoftware.BraveBrowser',
++    wingetId: 'Brave.Brave',
+     aliases: ['brave', 'brave browser'],
+     publisher: 'Brave Software',
+   },
+@@ -153,7 +153,7 @@ export const APP_MAPPINGS: AppMapping[] = [
+     publisher: 'TeamViewer',
+   },
+   {
+-    wingetId: 'AnyDeskSoftwareGmbH.AnyDesk',
++    wingetId: 'AnyDesk.AnyDesk',
+     aliases: ['anydesk', 'any desk'],
+     publisher: 'AnyDesk',
+   },
+@@ -266,7 +266,7 @@ export const APP_MAPPINGS: AppMapping[] = [
+     publisher: 'CrowdStrike',
+   },
+   {
+-    wingetId: '1Password.1Password',
++    wingetId: 'AgileBits.1Password',
+     aliases: ['1password', 'one password'],
+     publisher: 'AgileBits',
+   },
+@@ -359,19 +359,19 @@ export const APP_MAPPINGS: AppMapping[] = [
+ 
+   // Networking Tools
+   {
+-    wingetId: 'Wireshark.Wireshark',
++    wingetId: 'WiresharkFoundation.Wireshark',
+     aliases: ['wireshark', 'wire shark'],
+     publisher: 'Wireshark Foundation',
+   },
+   {
+-    wingetId: 'Nmap.Nmap',
++    wingetId: 'Insecure.Nmap',
+     aliases: ['nmap', 'network mapper'],
+     publisher: 'Nmap Project',
+   },
+ 
+   // Media & Communication
+   {
+-    wingetId: 'Webex.Webex',
++    wingetId: 'Cisco.Webex',
+     aliases: ['webex', 'cisco webex', 'webex meetings'],
+     publisher: 'Cisco',
+   },
+@@ -444,7 +444,7 @@ export const APP_MAPPINGS: AppMapping[] = [
+ 
+   // Database
+   {
+-    wingetId: 'dbeaver.dbeaver',
++    wingetId: 'DBeaver.DBeaver.Community',
+     aliases: ['dbeaver', 'dbeaver community'],
+     publisher: 'DBeaver',
+   },

@@ -47,6 +47,10 @@ HRM IT notes.
 - **Migration numbers:** patches that add SQLite migrations take the next number after upstream's
   highest. Use `IF NOT EXISTS` so a table created by an earlier build is kept. If upstream reaches the
   same number, renumber the HRM migration above upstream's highest before building. The weekly check flags this.
+- **App mapping IDs:** patch 0004 checks that every built-in app mapping resolves in WinGet. Run it on a
+  patched tree with `VALIDATE_WINGET_IDS=1 GITHUB_TOKEN=$(gh auth token) npx vitest run lib/__tests__/app-mappings-winget.test.ts`.
+  Fix a failing ID only after confirming the replacement's package name matches the product; add products
+  that WinGet doesn't distribute to `NOT_IN_WINGET` in that test.
 - A patch change on `main` builds a new `hrm.N` and opens a Deploy PR.
 - Update the patch table in README.md and add a CHANGELOG.md entry.
 
