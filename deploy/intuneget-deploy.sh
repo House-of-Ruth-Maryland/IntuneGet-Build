@@ -15,6 +15,10 @@
 # Settings can be overridden in /etc/default/intuneget-deploy.
 set -euo pipefail
 
+# Load the VM's settings when run by hand (the systemd unit loads them too).
+DEFAULTS_FILE=${DEFAULTS_FILE:-/etc/default/intuneget-deploy}
+if [ -r "$DEFAULTS_FILE" ]; then set -a; . "$DEFAULTS_FILE"; set +a; fi
+
 COMPOSE_DIR=${COMPOSE_DIR:-/opt/intuneget}
 OVERRIDE_FILE=${OVERRIDE_FILE:-$COMPOSE_DIR/docker-compose.override.yml}
 # The compose files read their secrets from this file (docker compose --env-file).
