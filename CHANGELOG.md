@@ -18,4 +18,5 @@
 - Images now go to HRM's private Azure Container Registry. GitHub signs in with OIDC and the VM with its
   managed identity, so no registry password or token is stored anywhere. A weekly task keeps the 5
   newest versions.
+- The update check runs at 03:30 and 15:30 New York time and notifications at 04:00 and 16:00 (the first VM timers ran both in the early morning only). `intuneget-deploy status` works when run by hand.
 - Builds use IntuneGet v0.8.2 (patch 0001 rebased; patch 0003 updated).
