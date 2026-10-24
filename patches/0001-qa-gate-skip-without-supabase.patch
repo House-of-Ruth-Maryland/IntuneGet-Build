@@ -1,7 +1,21 @@
---- a/lib/qa/gate.ts	2026-10-15 20:55:08
-+++ b/lib/qa/gate.ts	2026-10-15 20:55:08
-@@ -2,7 +2,7 @@
- import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
+diff --git a/lib/qa/gate.test.ts b/lib/qa/gate.test.ts
+index 3ed95dfdc..bfcf3b6c6 100644
+--- a/lib/qa/gate.test.ts
++++ b/lib/qa/gate.test.ts
+@@ -16,6 +16,7 @@ vi.mock('@/lib/catalog', () => ({
+   getCatalogSource: () => ({ getQaResult: getQaResultMock }),
+ }));
+ vi.mock('@/lib/supabase', () => ({
++  isSupabaseServerConfigured: () => true,
+   createServerClient: () => ({
+     from: () => {
+       const builder: Record<string, unknown> = {};
+diff --git a/lib/qa/gate.ts b/lib/qa/gate.ts
+index b1e23e910..3abc162bb 100644
+--- a/lib/qa/gate.ts
++++ b/lib/qa/gate.ts
+@@ -2,7 +2,7 @@ import { getCatalogSource } from '@/lib/catalog';
+ import { CuratedEvidenceMismatchError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
  import { getApprovedCuratedRelease } from '@/lib/curated-catalog/server';
  import { classifyQaFailure } from '@/lib/qa/classify';
 -import { createServerClient } from '@/lib/supabase';
@@ -9,7 +23,7 @@
  import {
    getPackageCompatibilityBlock,
    type PackageCompatibilityBlockCode,
-@@ -151,6 +151,11 @@
+@@ -157,6 +157,11 @@ export async function enforceQaGate(input: {
    }
    if (input.sourceType === 'custom') return;
  

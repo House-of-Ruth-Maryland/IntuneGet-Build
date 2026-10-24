@@ -369,21 +369,136 @@ index afe64c65b..72bfc97ba 100644
      if (!isSupabaseServerConfigured()) {
        return NextResponse.json(
          { error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE },
+diff --git a/docs/SELF_HOSTING.md b/docs/SELF_HOSTING.md
+index 728d2a802..290fc89de 100644
+--- a/docs/SELF_HOSTING.md
++++ b/docs/SELF_HOSTING.md
+@@ -187,18 +187,32 @@ Optional catalog snapshot overrides (sensible defaults, normally unset):
+ > Note: app update policies and their auto-update history are stored locally in
+ > SQLite. Manual package links and app claims also stay in SQLite and are
+ > reflected when refreshing unmanaged apps for the signed in tenant.
+-> Other Supabase-backed surfaces (dashboard history, notifications,
+-> automatic update triggering, and MSP features) still require Supabase; the
+-> catalog and update policies run Supabase-less.
++> Webhook notifications are also stored in SQLite (see Notification
++> Configuration). Other Supabase-backed surfaces (dashboard history, email
++> notifications, automatic update triggering, and MSP features) still require
++> Supabase; the catalog and update policies run Supabase-less.
+ 
+ ### Notification Configuration
+ 
+-Email preferences, webhook configurations, and notification history require
+-Supabase. A deployment using only SQLite cannot store these settings.
+-**Settings → Notifications** shows which configuration is missing and links to
+-this section.
++Webhook notifications (Slack, Teams, Discord, or custom endpoints) work with
++`DATABASE_MODE=sqlite`. Webhook configurations are stored in the local
++database. To deliver them, schedule the notification endpoint after the update
++check described in [Automatic updates](#automatic-updates-sqlite-mode):
+ 
+-To enable notifications, complete the [Supabase setup](DATABASE_SETUP.md),
++```cron
++45 3 * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://intune.example.com/api/cron/send-notifications
++```
++
++Each run sends every update that has not been notified yet to the owner's
++enabled webhooks, grouped by tenant, and an update is sent again only when a
++newer version is detected. Ignored and pinned apps are skipped, as in the
++hosted service. SQLite mode does not keep notification history.
++
++Email preferences and notification history require Supabase. A deployment using
++only SQLite cannot store these settings. **Settings → Notifications** shows
++which configuration is missing and links to this section.
++
++To enable email notifications, complete the [Supabase setup](DATABASE_SETUP.md),
+ including its migrations, and configure the server environment variables
+ `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
+ `SUPABASE_SERVICE_ROLE_KEY`. Keep the service role key on the server.
+@@ -406,7 +420,8 @@ twice a day, matching the catalog sync.
+ 
+ Differences from the hosted service: the self-hosted check uses the catalog
+ only (no live Intune query), and it does not run hosted QA, send
+-notifications, or require tenant consent. Rate limits and the failure circuit
++notifications (schedule `/api/cron/send-notifications` for webhooks), or
++require tenant consent. Rate limits and the failure circuit
+ breaker still apply, and jobs are created in `queued` state for the local
+ packager.
+ 
+diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
+index 612cbd4f9..e62068537 100644
+--- a/lib/db/__tests__/job-create.test.ts
++++ b/lib/db/__tests__/job-create.test.ts
+@@ -49,8 +49,8 @@ function readStoredJob(id: string): Record<string, unknown> {
+   closeDb?.();
+   const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
+   try {
+-    // Version 8 includes manual mappings and automatic update scope.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(8);
++    // Version 9 includes manual mappings, automatic update scope, and webhooks.
++    expect(stored.pragma('user_version', { simple: true })).toBe(9);
+     return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
+   } finally {
+     stored.close();
+diff --git a/lib/db/sqlite-migrations.test.ts b/lib/db/sqlite-migrations.test.ts
+index f4f2dbc07..602630222 100644
+--- a/lib/db/sqlite-migrations.test.ts
++++ b/lib/db/sqlite-migrations.test.ts
+@@ -43,6 +43,7 @@ describe('sqlite migrations', () => {
+         'update_check_results',
+         'curated_licence_attestations',
+         'claimed_apps',
++        'webhook_configurations',
+       ])
+     );
+     db.close();
+diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
+index 228492fe3..8dcfc2d23 100644
+--- a/lib/db/sqlite-migrations.ts
++++ b/lib/db/sqlite-migrations.ts
+@@ -306,6 +306,28 @@ export const MIGRATIONS: SqliteMigration[] = [
+       db.exec("ALTER TABLE app_update_policies ADD COLUMN auto_update_scope TEXT NOT NULL DEFAULT 'all' CHECK (auto_update_scope IN ('all', 'minor', 'major'));");
+     },
+   },
++  {
++    version: 9,
++    name: 'local webhook configurations',
++    up: db => {
++      db.exec(`CREATE TABLE webhook_configurations (
++        id TEXT PRIMARY KEY,
++        user_id TEXT NOT NULL,
++        name TEXT NOT NULL,
++        url TEXT NOT NULL,
++        webhook_type TEXT NOT NULL CHECK (webhook_type IN ('slack', 'teams', 'discord', 'custom')),
++        secret TEXT,
++        headers TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(headers)),
++        is_enabled INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
++        failure_count INTEGER NOT NULL DEFAULT 0,
++        last_failure_at TEXT,
++        last_success_at TEXT,
++        created_at TEXT NOT NULL,
++        updated_at TEXT NOT NULL
++      );
++      CREATE INDEX idx_webhook_configurations_user ON webhook_configurations(user_id, created_at DESC);`);
++    },
++  },
+ ];
+ 
+ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
 diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
-index c4fa05f17..4655bd849 100644
+index 443b2e5cd..222c4b0ea 100644
 --- a/lib/db/sqlite.ts
 +++ b/lib/db/sqlite.ts
-@@ -26,6 +26,7 @@ import type {
+@@ -31,6 +31,7 @@ import type {
    AutoUpdateHistoryWithPolicy,
    AutoUpdateStatus,
  } from '@/types/update-policies';
 +import type { WebhookConfiguration } from '@/types/notifications';
  import { runSqliteMigrations } from './sqlite-migrations';
+ import { INTUNE_APPROVAL_CHECKPOINT_STATUSES } from '@/lib/intune-approval';
  
- // Singleton database instance
-@@ -115,6 +116,107 @@ function buildSetClause(
-   return { clause: assignments.join(', '), values };
- }
+@@ -179,6 +180,80 @@ export const sqliteManualMappings = {
+   },
+ };
  
 +type WebhookRow = Omit<WebhookConfiguration, 'headers' | 'is_enabled'> & { headers: string; is_enabled: number };
 +const webhookRow = (row: unknown): WebhookConfiguration => {
@@ -392,50 +507,23 @@ index c4fa05f17..4655bd849 100644
 +};
 +type WebhookFields = Pick<WebhookConfiguration, 'name' | 'url' | 'webhook_type' | 'secret' | 'headers' | 'is_enabled'>;
 +
-+// HRM patch: created outside the versioned migrations so it never takes a
-+// schema version upstream may assign to a different table later.
-+let webhookTableReady = false;
-+function getWebhookDb(): Database.Database {
-+  const database = getDb();
-+  if (!webhookTableReady) {
-+    database.exec(`CREATE TABLE IF NOT EXISTS webhook_configurations (
-+      id TEXT PRIMARY KEY,
-+      user_id TEXT NOT NULL,
-+      name TEXT NOT NULL,
-+      url TEXT NOT NULL,
-+      webhook_type TEXT NOT NULL CHECK (webhook_type IN ('slack', 'teams', 'discord', 'custom')),
-+      secret TEXT,
-+      headers TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(headers)),
-+      is_enabled INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
-+      failure_count INTEGER NOT NULL DEFAULT 0,
-+      last_failure_at TEXT,
-+      last_success_at TEXT,
-+      created_at TEXT NOT NULL,
-+      updated_at TEXT NOT NULL
-+    );
-+    CREATE INDEX IF NOT EXISTS idx_webhook_configurations_user ON webhook_configurations(user_id, created_at DESC);`);
-+    webhookTableReady = true;
-+  }
-+  return database;
-+}
-+
 +/**
 + * Local webhook configurations and the pending update reads the webhook
 + * notifier needs. Every read and write is scoped to the owning user.
 + */
 +export const sqliteWebhooks = {
 +  async list(userId: string): Promise<WebhookConfiguration[]> {
-+    return getWebhookDb().prepare('SELECT * FROM webhook_configurations WHERE user_id = ? ORDER BY created_at DESC, id DESC').all(userId).map(webhookRow);
++    return getDb().prepare('SELECT * FROM webhook_configurations WHERE user_id = ? ORDER BY created_at DESC, id DESC').all(userId).map(webhookRow);
 +  },
 +  async count(userId: string): Promise<number> {
-+    return (getWebhookDb().prepare('SELECT COUNT(*) AS count FROM webhook_configurations WHERE user_id = ?').get(userId) as { count: number }).count;
++    return (getDb().prepare('SELECT COUNT(*) AS count FROM webhook_configurations WHERE user_id = ?').get(userId) as { count: number }).count;
 +  },
 +  async get(id: string, userId: string): Promise<WebhookConfiguration | null> {
-+    const row = getWebhookDb().prepare('SELECT * FROM webhook_configurations WHERE id = ? AND user_id = ?').get(id, userId);
++    const row = getDb().prepare('SELECT * FROM webhook_configurations WHERE id = ? AND user_id = ?').get(id, userId);
 +    return row ? webhookRow(row) : null;
 +  },
 +  async create(userId: string, fields: WebhookFields): Promise<WebhookConfiguration> {
-+    const database = getWebhookDb();
++    const database = getDb();
 +    const id = crypto.randomUUID();
 +    const now = new Date().toISOString();
 +    database
@@ -444,7 +532,7 @@ index c4fa05f17..4655bd849 100644
 +    return webhookRow(database.prepare('SELECT * FROM webhook_configurations WHERE id = ?').get(id));
 +  },
 +  async update(id: string, userId: string, data: Partial<WebhookFields>): Promise<WebhookConfiguration | null> {
-+    const database = getWebhookDb();
++    const database = getDb();
 +    const { clause, values } = buildSetClause(
 +      { ...data, updated_at: new Date().toISOString() },
 +      { json: new Set(['headers']), boolean: new Set(['is_enabled']) }
@@ -453,12 +541,12 @@ index c4fa05f17..4655bd849 100644
 +    return webhookRow(database.prepare('SELECT * FROM webhook_configurations WHERE id = ?').get(id));
 +  },
 +  async delete(id: string, userId: string): Promise<boolean> {
-+    return getWebhookDb().prepare('DELETE FROM webhook_configurations WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
++    return getDb().prepare('DELETE FROM webhook_configurations WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
 +  },
 +  /** Record a delivery outcome for the circuit breaker. */
 +  async recordResult(id: string, success: boolean): Promise<void> {
 +    const now = new Date().toISOString();
-+    getWebhookDb()
++    getDb()
 +      .prepare(success
 +        ? 'UPDATE webhook_configurations SET last_success_at = ?, failure_count = 0, updated_at = ? WHERE id = ?'
 +        : 'UPDATE webhook_configurations SET last_failure_at = ?, failure_count = failure_count + 1, updated_at = ? WHERE id = ?')
@@ -466,30 +554,30 @@ index c4fa05f17..4655bd849 100644
 +  },
 +  /** Users with at least one enabled webhook. */
 +  async listUsersWithEnabled(): Promise<string[]> {
-+    return (getWebhookDb().prepare('SELECT DISTINCT user_id FROM webhook_configurations WHERE is_enabled = 1 ORDER BY user_id').all() as Array<{ user_id: string }>).map(row => row.user_id);
++    return (getDb().prepare('SELECT DISTINCT user_id FROM webhook_configurations WHERE is_enabled = 1 ORDER BY user_id').all() as Array<{ user_id: string }>).map(row => row.user_id);
 +  },
 +  async listEnabled(userId: string): Promise<WebhookConfiguration[]> {
-+    return getWebhookDb().prepare('SELECT * FROM webhook_configurations WHERE user_id = ? AND is_enabled = 1 ORDER BY created_at, id').all(userId).map(webhookRow);
++    return getDb().prepare('SELECT * FROM webhook_configurations WHERE user_id = ? AND is_enabled = 1 ORDER BY created_at, id').all(userId).map(webhookRow);
 +  },
 +  /** Detected updates not yet notified or dismissed, newest first. */
 +  async listPendingUpdates(userId: string): Promise<UpdateCheckResult[]> {
-+    return (getWebhookDb()
++    return (getDb()
 +      .prepare('SELECT * FROM update_check_results WHERE user_id = ? AND notified_at IS NULL AND dismissed_at IS NULL ORDER BY detected_at DESC, id')
 +      .all(userId) as Record<string, unknown>[]).map(parseCheckResultRow);
 +  },
 +  async markNotified(ids: string[]): Promise<void> {
 +    if (ids.length === 0) return;
-+    const database = getWebhookDb();
++    const database = getDb();
 +    const now = new Date().toISOString();
 +    const statement = database.prepare('UPDATE update_check_results SET notified_at = ? WHERE id = ?');
 +    database.transaction(() => { for (const id of ids) statement.run(now, id); })();
 +  },
 +};
 +
- /**
-  * SQLite implementation of the database adapter
-  */
-@@ -798,6 +900,11 @@ export const sqliteDb: DatabaseAdapter = {
+ /** SQLite implementation of the database adapter. */
+ export const sqliteDb: DatabaseAdapter = {
+   customAppDefinitions: {
+@@ -914,6 +989,11 @@ export const sqliteDb: DatabaseAdapter = {
               latest_version = excluded.latest_version,
               is_critical = excluded.is_critical,
               is_managed = excluded.is_managed,
@@ -501,13 +589,6 @@ index c4fa05f17..4655bd849 100644
               updated_at = excluded.updated_at`
          )
          .run(
-@@ -993,5 +1100,6 @@ export function closeSqliteDb(): void {
-   if (db) {
-     db.close();
-     db = null;
-+    webhookTableReady = false;
-   }
- }
 diff --git a/lib/notifications/notify-sqlite.ts b/lib/notifications/notify-sqlite.ts
 new file mode 100644
 index 000000000..92af7aa61

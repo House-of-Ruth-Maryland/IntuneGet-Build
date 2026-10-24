@@ -6,7 +6,7 @@ on:
       upstream_ref:
         description: Upstream ugurkocde/IntuneGet tag to build
         required: true
-        default: v0.8.1
+        default: v0.8.2
       hrm_rev:
         description: HRM patch revision (bump when patches change)
         required: true
