@@ -17,6 +17,8 @@ set -euo pipefail
 
 COMPOSE_DIR=${COMPOSE_DIR:-/opt/intuneget}
 OVERRIDE_FILE=${OVERRIDE_FILE:-$COMPOSE_DIR/docker-compose.override.yml}
+# The compose files read their secrets from this file (docker compose --env-file).
+ENV_FILE=${ENV_FILE:-$COMPOSE_DIR/.env.local}
 SERVICE=${SERVICE:-web}
 IMAGE_REPO=${IMAGE_REPO:-ghcr.io/house-of-ruth-maryland/intuneget}
 VERSION_URL=${VERSION_URL:-https://api.github.com/repos/House-of-Ruth-Maryland/IntuneGet-Build/contents/deploy/version?ref=main}
@@ -37,7 +39,10 @@ write_status() { # result from to message
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" "$4" > "$STATE_DIR/status.json"
 }
 
-compose() { (cd "$COMPOSE_DIR" && docker compose "$@"); }
+compose() {
+  [ -f "$ENV_FILE" ] || { log "missing $ENV_FILE; not starting the app without its settings"; return 1; }
+  (cd "$COMPOSE_DIR" && docker compose --env-file "$ENV_FILE" "$@")
+}
 
 current_tag() {
   sed -nE "s#^[[:space:]]*image:[[:space:]]*${IMAGE_REPO}:([^[:space:]]+)[[:space:]]*\$#\1#p" "$OVERRIDE_FILE" | head -n 1
