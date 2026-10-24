@@ -242,4 +242,10 @@ jobs:
 
           Run: $RUN_URL
           EOF
-          gh pr create --base main --head "$branch" --title "Build upstream $LATEST" --body-file body.md
+          title="Build upstream $LATEST"
+          if ! gh pr create --base main --head "$branch" --title "$title" --body-file body.md; then
+            # The organization doesn't let Actions open PRs; leave a one-click link instead.
+            url="https://github.com/$GITHUB_REPOSITORY/compare/main...$branch?quick_pull=1&title=$(jq -rn --arg s "$title" '$s|@uri')&body=$(jq -rn --rawfile s body.md '$s|@uri')"
+            { echo "### Build upstream PR not opened automatically"; echo; echo "[Create pull request]($url)"; } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=Build upstream PR not opened::Open it from the run summary: Create pull request."
+          fi

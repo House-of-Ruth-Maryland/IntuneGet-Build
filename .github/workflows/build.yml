@@ -159,4 +159,10 @@ jobs:
 
           After merging, check on the VM: \`sudo intuneget-deploy status\`
           EOF
-          gh pr create --base main --head "$branch" --title "Deploy $TAG" --body-file body.md
+          title="Deploy $TAG"
+          if ! gh pr create --base main --head "$branch" --title "$title" --body-file body.md; then
+            # The organization doesn't let Actions open PRs; leave a one-click link instead.
+            url="https://github.com/$GITHUB_REPOSITORY/compare/main...$branch?quick_pull=1&title=$(jq -rn --arg s "$title" '$s|@uri')&body=$(jq -rn --rawfile s body.md '$s|@uri')"
+            { echo "### Deploy PR not opened automatically"; echo; echo "[Create pull request]($url)"; } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=Deploy PR not opened::Open it from the run summary: Create pull request."
+          fi

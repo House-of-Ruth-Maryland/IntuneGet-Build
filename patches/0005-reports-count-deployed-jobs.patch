@@ -1,0 +1,67 @@
+diff --git a/app/api/analytics/route.test.ts b/app/api/analytics/route.test.ts
+new file mode 100644
+index 000000000..8f6159578
+--- /dev/null
++++ b/app/api/analytics/route.test.ts
+@@ -0,0 +1,19 @@
++import { NextRequest } from 'next/server';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getByUserId: mocks.jobs } }) }));
++import { GET } from './route';
++const today = new Date().toISOString();
++const job = (id: string, status: string) => ({ id, status, winget_id: 'Example.App', display_name: 'Example', publisher: 'Example Publisher', error_message: status === 'failed' ? 'fixture error' : null, created_at: today, completed_at: today });
++const request = () => new NextRequest('http://localhost/api/analytics?days=7');
++beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'caller' }); });
++describe('deployment analytics', () => {
++  it('counts deployed jobs from GitHub-mode packaging as successful', async () => {
++    mocks.jobs.mockResolvedValue([job('a', 'deployed'), job('b', 'deployed'), job('c', 'completed'), job('d', 'failed'), job('e', 'queued')]);
++    const v = await (await GET(request())).json();
++    expect(v.summary).toMatchObject({ totalJobs: 5, completedJobs: 3, failedJobs: 1, pendingJobs: 1, successRate: 75 });
++    expect(v.dailyDeployments.reduce((n: number, d: { completed: number }) => n + d.completed, 0)).toBe(3);
++    expect(v.topApps).toEqual([{ wingetId: 'Example.App', displayName: 'Example', publisher: 'Example Publisher', count: 3 }]);
++  });
++});
+diff --git a/app/api/analytics/route.ts b/app/api/analytics/route.ts
+index 69f85145e..5fa5fc0b1 100644
+--- a/app/api/analytics/route.ts
++++ b/app/api/analytics/route.ts
+@@ -28,6 +28,10 @@ interface RecentFailure {
+   createdAt: string;
+ }
+ 
++// GitHub-mode packaging finishes jobs as 'deployed'; the hosted flow uses
++// 'completed'. Count both, as the dashboard statistics do.
++const isSuccessful = (status: string) => status === 'completed' || status === 'deployed';
++
+ export async function GET(request: NextRequest) {
+   try {
+     const user = await parseAccessToken(request.headers.get('Authorization'));
+@@ -74,7 +78,7 @@ export async function GET(request: NextRequest) {
+     const allJobs = (jobs || []) as PackagingJobAnalytics[];
+ 
+     // Calculate success rate
+-    const completedJobs = allJobs.filter((j) => j.status === 'completed').length;
++    const completedJobs = allJobs.filter((j) => isSuccessful(j.status)).length;
+     const failedJobs = allJobs.filter((j) => j.status === 'failed').length;
+     const totalFinished = completedJobs + failedJobs;
+     const successRate = totalFinished > 0 ? Math.round((completedJobs / totalFinished) * 100) : 0;
+@@ -98,7 +102,7 @@ export async function GET(request: NextRequest) {
+ 
+       const existing = dailyMap.get(date);
+       if (existing) {
+-        if (job.status === 'completed') {
++        if (isSuccessful(job.status)) {
+           existing.completed++;
+         } else if (job.status === 'failed') {
+           existing.failed++;
+@@ -118,7 +122,7 @@ export async function GET(request: NextRequest) {
+     const appCounts = new Map<string, { displayName: string; publisher: string; count: number }>();
+ 
+     allJobs
+-      .filter((j) => j.status === 'completed')
++      .filter((j) => isSuccessful(j.status))
+       .forEach((job) => {
+         const existing = appCounts.get(job.winget_id);
+         if (existing) {
