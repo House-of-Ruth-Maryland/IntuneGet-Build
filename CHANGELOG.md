@@ -15,4 +15,7 @@
 - When GitHub doesn't let Actions open a PR, the build and weekly check put a one-click
   "Create pull request" link in the run summary instead.
 - The VM deploy script starts the app with its settings file (`.env.local`) and refuses to start it without one.
+- Images now go to HRM's private Azure Container Registry. GitHub signs in with OIDC and the VM with its
+  managed identity, so no registry password or token is stored anywhere. A weekly task keeps the 5
+  newest versions.
 - Builds use IntuneGet v0.8.2 (patch 0001 rebased; patch 0003 updated).

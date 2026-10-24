@@ -20,7 +20,10 @@ OVERRIDE_FILE=${OVERRIDE_FILE:-$COMPOSE_DIR/docker-compose.override.yml}
 # The compose files read their secrets from this file (docker compose --env-file).
 ENV_FILE=${ENV_FILE:-$COMPOSE_DIR/.env.local}
 SERVICE=${SERVICE:-web}
-IMAGE_REPO=${IMAGE_REPO:-ghcr.io/house-of-ruth-maryland/intuneget}
+# The image to deploy, for example <registry>.azurecr.io/intuneget. Set in
+# /etc/default/intuneget-deploy so registry names stay out of this public repo.
+IMAGE_REPO=${IMAGE_REPO:?set IMAGE_REPO in /etc/default/intuneget-deploy}
+REGISTRY=${IMAGE_REPO%%/*}
 VERSION_URL=${VERSION_URL:-https://api.github.com/repos/House-of-Ruth-Maryland/IntuneGet-Build/contents/deploy/version?ref=main}
 DATA_DIR=${DATA_DIR:-/var/lib/docker/volumes/intuneget_intuneget-data/_data}
 BACKUP_DIR=${BACKUP_DIR:-$COMPOSE_DIR/backups}
@@ -57,6 +60,26 @@ set_tag() { # tag
 
 # Older-than test for tags like v0.8.1-hrm.3: sort -V orders them correctly.
 is_older() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ]; }
+
+# Pulls an image tag. For Azure Container Registry, signs in with the VM's
+# managed identity (AcrPull): a short-lived registry token, kept in a temporary
+# Docker config that is removed after the pull.
+pull_image() { # tag
+  local cfg rc aad refresh
+  case "$REGISTRY" in *.azurecr.io) ;; *) docker pull -q "$IMAGE_REPO:$1" >/dev/null; return ;; esac
+  aad=$(curl -fsS --max-time 20 -H Metadata:true \
+    "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" | jq -r .access_token) || return 1
+  refresh=$(curl -fsS --max-time 20 -X POST --data-urlencode grant_type=access_token \
+    --data-urlencode "service=$REGISTRY" --data-urlencode "access_token=$aad" \
+    "https://$REGISTRY/oauth2/exchange" | jq -r .refresh_token) || return 1
+  [ -n "$refresh" ] && [ "$refresh" != null ] || { log "no registry token for $REGISTRY"; return 1; }
+  cfg=$(mktemp -d)
+  rc=0
+  printf '%s' "$refresh" | DOCKER_CONFIG=$cfg docker login "$REGISTRY" -u 00000000-0000-0000-0000-000000000000 --password-stdin >/dev/null &&
+    DOCKER_CONFIG=$cfg docker pull -q "$IMAGE_REPO:$1" >/dev/null || rc=1
+  rm -rf "$cfg"
+  return "$rc"
+}
 
 wait_healthy() {
   local waited=0 id state health
@@ -131,7 +154,7 @@ deploy() {
     fi
   fi
 
-  if ! docker pull -q "$IMAGE_REPO:$desired" >/dev/null; then
+  if ! pull_image "$desired"; then
     log "$IMAGE_REPO:$desired is not available yet; will try again"
     write_status waiting "$current" "$desired" "image not available yet"
     return 0
@@ -156,6 +179,8 @@ deploy() {
   log "$desired failed; rolling back to $current"
   echo "$desired" > "$STATE_DIR/failed"
   compose stop "$SERVICE" || true
+  # The previous image is normally still on the VM; fetch it again if it was removed.
+  docker image inspect "$IMAGE_REPO:$current" >/dev/null 2>&1 || pull_image "$current" || true
   if restore "$dest" && compose up -d "$SERVICE" && wait_healthy; then
     write_status rolled_back "$current" "$desired" "restored $dest"
   else

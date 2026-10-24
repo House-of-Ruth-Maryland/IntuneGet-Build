@@ -5,6 +5,10 @@
 # Where the app listens on this VM (the published port in docker-compose.yml).
 APP_URL=http://127.0.0.1:3000
 
+# The image to deploy (required), for example <registry>.azurecr.io/intuneget.
+# The VM signs in to Azure Container Registry with its managed identity (AcrPull).
+IMAGE_REPO=
+
 # Defaults, change only if the server layout changes:
 # COMPOSE_DIR=/opt/intuneget
 # ENV_FILE=/opt/intuneget/.env.local

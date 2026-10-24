@@ -26,7 +26,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/house-of-ruth-maryland/intuneget
+  REGISTRY: ${{ vars.ACR_LOGIN_SERVER }}
+  IMAGE: ${{ vars.ACR_LOGIN_SERVER }}/intuneget
 
 jobs:
   build:
@@ -34,7 +35,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
+      id-token: write # OIDC sign-in to Azure; no stored secret
     outputs:
       tag: ${{ steps.rev.outputs.tag }}
     steps:
@@ -87,21 +88,41 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Log in to GHCR
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign in to Azure Container Registry
+        # An Entra app with a federated credential for this repo's main branch
+        # (AcrPush on the registry only); no stored secret. Uses the runner's
+        # Azure CLI; the registry token is masked and lives only in this job.
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        run: |
+          oidc=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r .value)
+          az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID" --federated-token "$oidc" --allow-no-subscriptions -o none
+          aad=$(az account get-access-token --resource https://management.azure.com/ --query accessToken -o tsv)
+          refresh=$(curl -fsS -X POST --data-urlencode grant_type=access_token --data-urlencode "service=$REGISTRY" --data-urlencode "tenant=$AZURE_TENANT_ID" --data-urlencode "access_token=$aad" "https://$REGISTRY/oauth2/exchange" | jq -r .refresh_token)
+          echo "::add-mask::$refresh"
+          printf '%s' "$refresh" | docker login "$REGISTRY" -u 00000000-0000-0000-0000-000000000000 --password-stdin
+          echo "ACR_REFRESH_TOKEN=$refresh" >> "$GITHUB_ENV"
 
       - name: Pick the next HRM revision
-        # Tags are <upstream>-hrm.<n>; take the first n not already published.
+        # Tags are <upstream>-hrm.<n>; take one more than the highest n already
+        # published, so a number is never reused after cleanup deletes old tags.
         id: rev
         env:
           REF: ${{ steps.ref.outputs.ref }}
         run: |
-          n=1
-          while docker buildx imagetools inspect "$IMAGE:$REF-hrm.$n" >/dev/null 2>&1; do n=$((n + 1)); done
+          access=$(curl -fsS -X POST --data-urlencode grant_type=refresh_token --data-urlencode "service=$REGISTRY" \
+            --data-urlencode "scope=repository:intuneget:pull" --data-urlencode "refresh_token=$ACR_REFRESH_TOKEN" \
+            "https://$REGISTRY/oauth2/token" | jq -r .access_token)
+          echo "::add-mask::$access"
+          code=$(curl -sS -o tags.json -w '%{http_code}' -H "Authorization: Bearer $access" "https://$REGISTRY/v2/intuneget/tags/list?n=1000")
+          case "$code" in
+            200) ;;
+            404) echo '{"tags":[]}' > tags.json ;; # first image for this app
+            *) echo "::error::Could not list existing tags (HTTP $code)"; exit 1 ;;
+          esac
+          max=$(jq -r '.tags[]?' tags.json | sed -nE "s/^${REF//./\\.}-hrm\.([0-9]+)$/\1/p" | sort -n | tail -n 1)
+          n=$(( ${max:-0} + 1 ))
           echo "tag=$REF-hrm.$n" >> "$GITHUB_OUTPUT"
           echo "Building $IMAGE:$REF-hrm.$n"
 
