@@ -1,0 +1,13 @@
+# /etc/default/intuneget-deploy (copied from IntuneGet-Build deploy/systemd).
+# Settings for intuneget-deploy and the cron timers. No secrets here: the cron
+# secret lives in /etc/intuneget/cron-auth.header.
+
+# Where the app listens on this VM (the published port in docker-compose.yml).
+APP_URL=http://127.0.0.1:3000
+
+# Defaults, change only if the server layout changes:
+# COMPOSE_DIR=/opt/intuneget
+# SERVICE=web
+# DATA_DIR=/var/lib/docker/volumes/intuneget_intuneget-data/_data
+# KEEP_BACKUPS=5
+# HEALTH_TIMEOUT=300

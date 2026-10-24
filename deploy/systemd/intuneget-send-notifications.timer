@@ -1,0 +1,10 @@
+[Unit]
+Description=Send update notifications after each update check
+
+[Timer]
+OnCalendar=*-*-* 04:00,16:00 America/New_York
+Persistent=true
+Unit=intuneget-cron@send-notifications.service
+
+[Install]
+WantedBy=timers.target

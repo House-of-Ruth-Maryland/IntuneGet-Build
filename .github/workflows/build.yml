@@ -1,20 +1,29 @@
 name: Build patched IntuneGet image
 
+# Builds when upstream-ref, the patches or the branding change on main, then
+# opens a "Deploy" PR that moves deploy/version to the new image. Building never
+# changes the server; merging the Deploy PR does.
+
 on:
+  push:
+    branches: [main]
+    paths:
+      - upstream-ref
+      - patches/**
+      - branding/**
+      - .github/workflows/build.yml
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: Upstream ugurkocde/IntuneGet tag to build
-        required: true
-        default: v0.8.2
-      hrm_rev:
-        description: HRM patch revision (bump when patches change)
-        required: true
-        default: "1"
+        description: Upstream ugurkocde/IntuneGet tag to build (blank uses upstream-ref)
+        required: false
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: build
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/house-of-ruth-maryland/intuneget
@@ -23,19 +32,33 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.rev.outputs.tag }}
     steps:
-      - name: Check out upstream
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: ugurkocde/IntuneGet
-          ref: ${{ inputs.upstream_ref }}
-          path: upstream
-          persist-credentials: false
-
       - name: Check out HRM patches
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: hrm
+          persist-credentials: false
+
+      - name: Choose the upstream tag
+        id: ref
+        env:
+          INPUT_REF: ${{ inputs.upstream_ref }}
+        run: |
+          ref="${INPUT_REF:-$(tr -d '[:space:]' < hrm/upstream-ref)}"
+          [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Not an upstream tag: '$ref'"; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ugurkocde/IntuneGet
+          ref: ${{ steps.ref.outputs.ref }}
+          path: upstream
           persist-credentials: false
 
       - name: Apply patches
@@ -71,20 +94,69 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Pick the next HRM revision
+        # Tags are <upstream>-hrm.<n>; take the first n not already published.
+        id: rev
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          n=1
+          while docker buildx imagetools inspect "$IMAGE:$REF-hrm.$n" >/dev/null 2>&1; do n=$((n + 1)); done
+          echo "tag=$REF-hrm.$n" >> "$GITHUB_OUTPUT"
+          echo "Building $IMAGE:$REF-hrm.$n"
+
       - name: Build and push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: upstream
           platforms: linux/amd64
           push: true
-          tags: ${{ env.IMAGE }}:${{ inputs.upstream_ref }}-hrm.${{ inputs.hrm_rev }}
+          tags: ${{ env.IMAGE }}:${{ steps.rev.outputs.tag }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=IntuneGet ${{ inputs.upstream_ref }} with HRM patches (see patches/)
-            org.opencontainers.image.version=${{ inputs.upstream_ref }}-hrm.${{ inputs.hrm_rev }}
+            org.opencontainers.image.description=IntuneGet ${{ steps.ref.outputs.ref }} with HRM patches (see patches/)
+            org.opencontainers.image.version=${{ steps.rev.outputs.tag }}
           provenance: mode=max
           sbom: true
           build-args: |
             NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
             NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder
             NEXT_PUBLIC_AZURE_AD_CLIENT_ID=placeholder
+
+  propose-deploy:
+    # Opens the PR that moves deploy/version. Merging it deploys to the VM.
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.build.outputs.tag }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Open the Deploy PR
+        run: |
+          current=$(tr -d '[:space:]' < deploy/version)
+          branch="deploy/$TAG"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          echo "$TAG" > deploy/version
+          git commit -am "Deploy $TAG"
+          git push origin "$branch"
+          cat > body.md <<EOF
+          Moves the IntuneGet server from \`$current\` to \`$TAG\` (built in $RUN_URL).
+
+          **Merging this deploys to production.** Within about 5 minutes the VM backs up its data, switches the image and waits for it to report healthy. If it doesn't, the VM restores the backup and goes back to \`$current\`.
+
+          Before merging:
+          - [ ] IntuneGet-Workflows has the packaging workflow for this upstream version.
+
+          After merging, check on the VM: \`sudo intuneget-deploy status\`
+          EOF
+          gh pr create --base main --head "$branch" --title "Deploy $TAG" --body-file body.md

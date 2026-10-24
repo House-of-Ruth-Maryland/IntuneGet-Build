@@ -1,0 +1,10 @@
+[Unit]
+Description=Run IntuneGet /api/cron/%i
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/intuneget-deploy
+# The header file holds "Authorization: Bearer <CRON_SECRET>" (root only), so
+# the secret never appears in the process list.
+ExecStart=/usr/bin/curl -fsS --max-time 900 -H @/etc/intuneget/cron-auth.header ${APP_URL}/api/cron/%i

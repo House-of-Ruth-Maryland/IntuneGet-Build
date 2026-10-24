@@ -1,0 +1,224 @@
+name: Check for a new upstream release
+
+# Weekly: if ugurkocde/IntuneGet has a newer release than upstream-ref, apply
+# the HRM patches to it, run upstream's type check and tests, and open a PR
+# that moves upstream-ref (merging it builds the image). If a patch no longer
+# applies, open an issue instead.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1" # Mondays 13:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-check
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: ugurkocde/IntuneGet
+
+jobs:
+  test:
+    # Runs upstream code, so it gets a read-only token and no saved credentials.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      new: ${{ steps.latest.outputs.new }}
+      current: ${{ steps.latest.outputs.current }}
+      latest: ${{ steps.latest.outputs.latest }}
+      patches: ${{ steps.patches.outputs.result }}
+      failed_patches: ${{ steps.patches.outputs.failed }}
+      migrations: ${{ steps.migrations.outputs.result }}
+      packaging_workflow: ${{ steps.workflow.outputs.result }}
+      tsc: ${{ steps.tests.outputs.tsc }}
+      tests: ${{ steps.tests.outputs.tests }}
+    steps:
+      - name: Check out HRM patches
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: hrm
+          persist-credentials: false
+
+      - name: Find the latest upstream release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(tr -d '[:space:]' < hrm/upstream-ref)
+          latest=$(gh release view --repo "$UPSTREAM" --json tagName --jq .tagName)
+          [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Unexpected upstream tag '$latest'"; exit 1; }
+          new=false
+          if [ "$latest" != "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)" = "$latest" ]; then
+            if gh api "repos/$GITHUB_REPOSITORY/branches/upstream/$latest" >/dev/null 2>&1; then
+              echo "A PR branch for $latest already exists."
+            elif [ "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"Patches don't apply to $latest\" in:title" --json number --jq length)" != 0 ]; then
+              echo "An open issue for $latest already exists."
+            else
+              new=true
+            fi
+          fi
+          echo "Current $current, latest $latest, new: $new"
+          { echo "current=$current"; echo "latest=$latest"; echo "new=$new"; } >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream
+        if: steps.latest.outputs.new == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ugurkocde/IntuneGet
+          ref: ${{ steps.latest.outputs.latest }}
+          path: upstream
+          persist-credentials: false
+
+      - name: Check HRM migration numbers
+        # HRM patches add numbered SQLite migrations. If upstream now uses the
+        # same numbers, the server would skip one of them.
+        id: migrations
+        if: steps.latest.outputs.new == 'true'
+        run: |
+          upstream_max=$(grep -oE 'version: [0-9]+' upstream/lib/db/sqlite-migrations.ts | grep -oE '[0-9]+' | sort -n | tail -n 1)
+          hrm=$(grep -hoE '^\+ +version: [0-9]+' hrm/patches/*.patch | grep -oE '[0-9]+' | sort -n | tr '\n' ' ')
+          clash=""
+          for n in $hrm; do
+            if [ "$n" -le "$upstream_max" ]; then clash="$clash $n"; fi
+          done
+          if [ -n "$clash" ]; then
+            echo "result=clash: upstream now goes up to migration $upstream_max and HRM uses$clash" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=ok (upstream up to $upstream_max, HRM uses ${hrm% })" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply HRM patches
+        id: patches
+        if: steps.latest.outputs.new == 'true'
+        working-directory: upstream
+        run: |
+          failed=""
+          for p in ../hrm/patches/*.patch; do
+            if git apply "$p"; then echo "Applied $p"; else failed="$failed $(basename "$p")"; fi
+          done
+          if [ -n "$failed" ]; then
+            { echo "result=failed"; echo "failed=${failed# }"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "result=ok" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare the packaging workflow
+        # IntuneGet-Workflows keeps a copy of this file that must match the server version.
+        id: workflow
+        if: steps.latest.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT: ${{ steps.latest.outputs.current }}
+          LATEST: ${{ steps.latest.outputs.latest }}
+        run: |
+          file=.github/workflows-reference/package-intunewin.yml
+          get() { gh api "repos/$UPSTREAM/contents/$file?ref=$1" -H 'Accept: application/vnd.github.raw'; }
+          if diff -u <(get "$CURRENT") <(get "$LATEST"); then
+            echo "result=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=changed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read upstream's Node.js version
+        id: node
+        if: steps.patches.outputs.result == 'ok'
+        run: |
+          version=$(sed -nE 's/^ +NODE_VERSION: "?([0-9.]+)"?.*/\1/p' upstream/.github/workflows/ci.yml | head -n 1)
+          echo "version=${version:-24}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.patches.outputs.result == 'ok'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+
+      - name: Type check and tests
+        id: tests
+        if: steps.patches.outputs.result == 'ok'
+        working-directory: upstream
+        run: |
+          # Same install as upstream's CI test job.
+          if ! { npm ci --no-audit --no-fund && (cd packager && npm ci --ignore-scripts --no-audit --no-fund); }; then
+            { echo "tsc=not run (install failed)"; echo "tests=not run (install failed)"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if npx tsc --noEmit -p .; then echo "tsc=passed" >> "$GITHUB_OUTPUT"; else echo "tsc=failed" >> "$GITHUB_OUTPUT"; fi
+          if npm test 2>&1 | tee ../test.log; [ "${PIPESTATUS[0]}" = 0 ]; then
+            echo "tests=passed" >> "$GITHUB_OUTPUT"
+          else
+            echo "tests=failed ($(grep -E '^ +Tests ' ../test.log | tail -n 1 | tr -s ' ' | sed -e 's/^ //' -e 's/|/,/g'))" >> "$GITHUB_OUTPUT"
+          fi
+
+  propose:
+    # Opens the PR or issue. Never runs upstream code.
+    needs: test
+    if: needs.test.outputs.new == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CURRENT: ${{ needs.test.outputs.current }}
+      LATEST: ${{ needs.test.outputs.latest }}
+      PATCHES: ${{ needs.test.outputs.patches }}
+      FAILED_PATCHES: ${{ needs.test.outputs.failed_patches }}
+      MIGRATIONS: ${{ needs.test.outputs.migrations }}
+      PACKAGING_WORKFLOW: ${{ needs.test.outputs.packaging_workflow }}
+      TSC: ${{ needs.test.outputs.tsc }}
+      TESTS: ${{ needs.test.outputs.tests }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Open an issue when patches don't apply
+        if: needs.test.outputs.patches != 'ok'
+        run: |
+          cat > body.md <<EOF
+          Upstream released [$LATEST](https://github.com/$UPSTREAM/releases/tag/$LATEST). These HRM patches no longer apply to it: \`$FAILED_PATCHES\`.
+
+          Rework them against $LATEST (see CLAUDE.md, "Upgrading to a new upstream release"), then move \`upstream-ref\` to $LATEST in a PR.
+
+          - Migration numbers: $MIGRATIONS
+          - Packaging workflow: $PACKAGING_WORKFLOW
+          - Run: $RUN_URL
+          EOF
+          gh issue create --title "Patches don't apply to $LATEST" --body-file body.md
+
+      - name: Open the upgrade PR
+        if: needs.test.outputs.patches == 'ok'
+        run: |
+          branch="upstream/$LATEST"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          echo "$LATEST" > upstream-ref
+          git commit -am "Build upstream $LATEST"
+          git push origin "$branch"
+          cat > body.md <<EOF
+          Upstream released [$LATEST](https://github.com/$UPSTREAM/releases/tag/$LATEST) ([changes since $CURRENT](https://github.com/$UPSTREAM/compare/$CURRENT...$LATEST)).
+
+          | Check | Result |
+          |---|---|
+          | HRM patches apply | $PATCHES |
+          | Type check | $TSC |
+          | Upstream tests | $TESTS |
+          | Migration numbers | $MIGRATIONS |
+          | Packaging workflow | $PACKAGING_WORKFLOW |
+
+          Merging this builds the image and opens a "Deploy" PR. It does not change the server.
+
+          Before merging:
+          - [ ] Read the upstream release notes.
+          - [ ] If the packaging workflow changed, update IntuneGet-Workflows to the $LATEST version (merge that before the Deploy PR).
+          - [ ] If migration numbers clash, rework the patch first.
+
+          Run: $RUN_URL
+          EOF
+          gh pr create --base main --head "$branch" --title "Build upstream $LATEST" --body-file body.md

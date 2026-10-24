@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for app updates twice a day
+
+[Timer]
+OnCalendar=*-*-* 03:30,15:30 America/New_York
+Persistent=true
+Unit=intuneget-cron@check-updates.service
+
+[Install]
+WantedBy=timers.target
