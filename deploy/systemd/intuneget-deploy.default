@@ -7,6 +7,7 @@ APP_URL=http://127.0.0.1:3000
 
 # Defaults, change only if the server layout changes:
 # COMPOSE_DIR=/opt/intuneget
+# ENV_FILE=/opt/intuneget/.env.local
 # SERVICE=web
 # DATA_DIR=/var/lib/docker/volumes/intuneget_intuneget-data/_data
 # KEEP_BACKUPS=5

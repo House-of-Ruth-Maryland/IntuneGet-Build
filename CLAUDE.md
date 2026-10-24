@@ -62,14 +62,16 @@ HRM IT notes.
   pruned, the script refuses and changes nothing; restore by hand (below) or from an Azure snapshot.
 - A failed deploy rolls back and is not retried. After fixing the cause: `sudo intuneget-deploy retry`.
 - If `deploy/version` names an image that isn't built yet, the VM waits and tries again.
+- Always run compose on the VM with `--env-file .env.local`; that file holds the app's settings and
+  secrets. Without it the app starts with blank settings.
 
 Manual restore of a backup on the VM:
 
 ```bash
-cd /opt/intuneget && sudo docker compose stop web
+cd /opt/intuneget && sudo docker compose --env-file .env.local stop web
 sudo rsync -a --delete /opt/intuneget/backups/<backup>/data/ /var/lib/docker/volumes/intuneget_intuneget-data/_data/
 sudo cp /opt/intuneget/backups/<backup>/docker-compose.override.yml /opt/intuneget/
-sudo docker compose up -d web
+sudo docker compose --env-file .env.local up -d web
 ```
 
 Then make `deploy/version` match the restored tag, or the next timer run will deploy again.
