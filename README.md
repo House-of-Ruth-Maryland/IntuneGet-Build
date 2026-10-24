@@ -15,6 +15,7 @@ Build settings mirror upstream's release workflow (pinned actions, provenance, S
 | `0002-tenant-view-without-supabase.patch` | Deployments → "All in tenant" (`GET /api/package?scope=tenant`) calls Supabase unconditionally, so the team view fails in SQLite mode. | Upstream guards the tenant-scope branch. |
 | `0003-webhooks-without-supabase.patch` | Settings → Notifications webhooks return 503 in SQLite mode, and `/api/cron/send-notifications` needs Supabase. Stores webhooks in SQLite (migration 9, `webhook_configurations`, created with `IF NOT EXISTS` so tables made by earlier builds are kept) and delivers them from the cron; email still needs Supabase. The VM runs `/api/cron/send-notifications` after each `/api/cron/check-updates`. | Upstream supports webhooks in SQLite mode. |
 | `0004-app-mappings-winget-ids.patch` | Seven built-in app mappings point to WinGet IDs that don't exist (for example `Webex.Webex`; the real ID is `Cisco.Webex`), so Claim fails with "Failed to fetch package manifest". Fixes them and adds a live check (`VALIDATE_WINGET_IDS=1`) that every mapped ID resolves; products not in WinGet are listed in the test. | Upstream fixes the IDs and validates them. |
+| `0005-reports-count-deployed-jobs.patch` | Reports counts only `completed` jobs as successful, but GitHub-mode packaging finishes jobs as `deployed`, so Successful, the success rate and the charts stay at zero. Counts both, as the dashboard statistics already do. | Upstream counts `deployed` in `/api/analytics`. |
 
 ## Branding
 

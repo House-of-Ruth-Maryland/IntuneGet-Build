@@ -10,4 +10,8 @@
 - Webhook migration 9 keeps a webhook table created by earlier builds.
 - Claim works for Webex, Wireshark, 1Password, Nmap, Brave, AnyDesk and DBeaver: patch 0004 corrects their
   WinGet IDs, and the weekly check now verifies every built-in app mapping against WinGet.
+- Reports shows successful deployments (patch 0005): jobs packaged through GitHub finish as `deployed`,
+  which Reports didn't count.
+- When GitHub doesn't let Actions open a PR, the build and weekly check put a one-click
+  "Create pull request" link in the run summary instead.
 - Builds use IntuneGet v0.8.2 (patch 0001 rebased; patch 0003 updated).
