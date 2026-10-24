@@ -21,6 +21,21 @@ HRM IT notes.
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
 | `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: build `<tag>-hrm.<n>` and open the "Deploy" PR. |
 
+## Registry and sign-in
+
+- Images go to HRM's shared Azure Container Registry (Basic tier, private). Its address, and the IDs
+  GitHub signs in with, are repo variables: `ACR_LOGIN_SERVER`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`.
+  None of them is a secret, but keep registry and resource names out of files in this public repo.
+- **Build:** an Entra app with a federated credential for this repo's `main` branch (it uses GitHub's
+  immutable subject, `repo:<org>@<org id>/<repo>@<repo id>:ref:refs/heads/main`) holds AcrPush on the
+  registry only. No client secret exists.
+- **VM:** its system-assigned managed identity holds AcrPull on the registry only. The deploy script
+  swaps it for a short-lived registry token per pull and deletes it afterwards.
+- **Cleanup:** an ACR task runs every Sunday at 07:00 UTC and keeps the 5 newest tags of each app (plus
+  removes untagged manifests). It goes by build date, not by what's deployed.
+- Other HRM apps can use the same registry: give each repo its own app registration and federated
+  credential with AcrPush, and each host AcrPull.
+
 ## Release flow
 
 1. Weekly check opens **"Build upstream vX"**. Read the release notes and the checks table.
@@ -85,7 +100,7 @@ Reinstall them deliberately, on the VM over SSH:
 git clone --depth 1 https://github.com/House-of-Ruth-Maryland/IntuneGet-Build /tmp/igb && cd /tmp/igb
 sudo install -m 0755 deploy/intuneget-deploy.sh /usr/local/sbin/intuneget-deploy
 sudo install -m 0644 deploy/systemd/*.service deploy/systemd/*.timer /etc/systemd/system/
-sudo install -m 0644 deploy/systemd/intuneget-deploy.default /etc/default/intuneget-deploy  # first time only; set APP_URL
+sudo install -m 0644 deploy/systemd/intuneget-deploy.default /etc/default/intuneget-deploy  # first time only; set IMAGE_REPO and APP_URL
 sudo systemctl daemon-reload
 ```
 
