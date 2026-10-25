@@ -1,0 +1,206 @@
+diff --git a/lib/webhooks/managed-identity.test.ts b/lib/webhooks/managed-identity.test.ts
+new file mode 100644
+index 000000000..5e124c540
+--- /dev/null
++++ b/lib/webhooks/managed-identity.test.ts
+@@ -0,0 +1,94 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import type { WebhookConfiguration } from '@/types/notifications';
++import { isPowerPlatformWebhookUrl, resetManagedIdentityTokenCache, webhookAuthHeaders } from './managed-identity';
++import { deliverFormattedWebhook, sendTestWebhook } from './service';
++
++const FLOW_URL = 'https://default0000.00.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/abc/triggers/manual/paths/invoke?api-version=1';
++const SLACK_URL = 'https://hooks.slack.com/services/T000/B000/fixture';
++const fetchMock = vi.fn();
++const nowSeconds = () => Math.floor(Date.now() / 1000);
++const imdsReply = (token: string, expiresOn = nowSeconds() + 86_400) =>
++  new Response(JSON.stringify({ access_token: token, expires_on: String(expiresOn) }), { status: 200 });
++const webhook = (url: string, type: WebhookConfiguration['webhook_type'] = 'teams') =>
++  ({ id: 'w1', user_id: 'u1', name: 'IT Ops', url, webhook_type: type, secret: null, headers: {}, is_enabled: true, failure_count: 0, last_failure_at: null }) as unknown as WebhookConfiguration;
++const sentHeaders = (call: number) => fetchMock.mock.calls[call][1].headers as Record<string, string>;
++
++beforeEach(() => {
++  resetManagedIdentityTokenCache();
++  fetchMock.mockReset();
++  vi.stubGlobal('fetch', fetchMock);
++  process.env.WEBHOOK_MANAGED_IDENTITY = 'true';
++});
++afterEach(() => {
++  vi.unstubAllGlobals();
++  delete process.env.WEBHOOK_MANAGED_IDENTITY;
++});
++
++describe('managed identity webhook sign-in', () => {
++  it('recognises only HTTPS Power Platform webhook hosts', () => {
++    expect(isPowerPlatformWebhookUrl(FLOW_URL)).toBe(true);
++    expect(isPowerPlatformWebhookUrl('https://prod-01.westus.logic.azure.com/workflows/abc')).toBe(true);
++    expect(isPowerPlatformWebhookUrl(SLACK_URL)).toBe(false);
++    expect(isPowerPlatformWebhookUrl('https://environment.api.powerplatform.com.attacker.example.test/x')).toBe(false);
++    expect(isPowerPlatformWebhookUrl('http://default0000.00.environment.api.powerplatform.com/x')).toBe(false);
++    expect(isPowerPlatformWebhookUrl('not a url')).toBe(false);
++  });
++
++  it('asks the managed identity endpoint for a Power Automate token', async () => {
++    fetchMock.mockResolvedValueOnce(imdsReply('token-1'));
++    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({ Authorization: 'Bearer token-1' });
++    const [url, init] = fetchMock.mock.calls[0];
++    expect(url).toContain('169.254.169.254');
++    expect(url).toContain(encodeURIComponent('https://service.flow.microsoft.com/'));
++    expect(init.headers).toEqual({ Metadata: 'true' });
++  });
++
++  it('never adds a token for other hosts or when switched off', async () => {
++    expect(await webhookAuthHeaders(SLACK_URL)).toEqual({});
++    delete process.env.WEBHOOK_MANAGED_IDENTITY;
++    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({});
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++
++  it('reuses the token and renews it shortly before it expires', async () => {
++    fetchMock.mockResolvedValueOnce(imdsReply('token-1', nowSeconds() + 3600));
++    await webhookAuthHeaders(FLOW_URL);
++    await webhookAuthHeaders(FLOW_URL);
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++
++    resetManagedIdentityTokenCache();
++    fetchMock.mockResolvedValueOnce(imdsReply('token-2', nowSeconds() + 120));
++    fetchMock.mockResolvedValueOnce(imdsReply('token-3'));
++    await webhookAuthHeaders(FLOW_URL);
++    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({ Authorization: 'Bearer token-3' });
++  });
++
++  it('sends unsigned when the token request fails', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    fetchMock.mockResolvedValueOnce(new Response('no identity', { status: 400 }));
++    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({});
++    expect(warn).toHaveBeenCalled();
++    warn.mockRestore();
++  });
++});
++
++describe('webhook senders', () => {
++  it('signs deliveries to a Power Automate flow', async () => {
++    fetchMock.mockResolvedValueOnce(imdsReply('token-1')).mockResolvedValueOnce(new Response('', { status: 202 }));
++    expect((await deliverFormattedWebhook(webhook(FLOW_URL), { type: 'message' })).success).toBe(true);
++    expect(sentHeaders(1).Authorization).toBe('Bearer token-1');
++  });
++
++  it('signs the settings page test message', async () => {
++    fetchMock.mockResolvedValueOnce(imdsReply('token-1')).mockResolvedValueOnce(new Response('', { status: 202 }));
++    expect((await sendTestWebhook(webhook(FLOW_URL))).success).toBe(true);
++    expect(sentHeaders(1).Authorization).toBe('Bearer token-1');
++  });
++
++  it('does not sign Slack deliveries', async () => {
++    fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }));
++    await deliverFormattedWebhook(webhook(SLACK_URL, 'slack'), { blocks: [] });
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++    expect(sentHeaders(0).Authorization).toBeUndefined();
++  });
++});
+diff --git a/lib/webhooks/managed-identity.ts b/lib/webhooks/managed-identity.ts
+new file mode 100644
+index 000000000..890004023
+--- /dev/null
++++ b/lib/webhooks/managed-identity.ts
+@@ -0,0 +1,70 @@
++/**
++ * Managed identity sign-in for Power Automate webhooks (HRM patch).
++ *
++ * Teams Workflows' V2 webhook trigger refuses unsigned requests. When
++ * WEBHOOK_MANAGED_IDENTITY=true, webhooks to Power Platform hosts carry a
++ * bearer token for the server's Azure managed identity, so the flow can allow
++ * only that identity ("Specific users in my tenant"). The token is never sent
++ * to any other host.
++ */
++
++const IMDS_URL = 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01';
++const FLOW_RESOURCE = 'https://service.flow.microsoft.com/';
++const POWER_PLATFORM_HOSTS = ['.environment.api.powerplatform.com', '.logic.azure.com'];
++const RENEW_BEFORE_MS = 5 * 60 * 1000;
++
++let cached: { token: string; expiresAt: number } | null = null;
++
++export function isManagedIdentityEnabled(): boolean {
++  return process.env.WEBHOOK_MANAGED_IDENTITY === 'true';
++}
++
++/** True for HTTPS Power Automate / Logic Apps webhook URLs only. */
++export function isPowerPlatformWebhookUrl(url: string): boolean {
++  try {
++    const parsed = new URL(url);
++    const host = parsed.hostname.toLowerCase();
++    return parsed.protocol === 'https:' && POWER_PLATFORM_HOSTS.some((suffix) => host.endsWith(suffix));
++  } catch {
++    return false;
++  }
++}
++
++async function getFlowToken(): Promise<string> {
++  if (cached && Date.now() < cached.expiresAt - RENEW_BEFORE_MS) return cached.token;
++
++  const response = await fetch(`${IMDS_URL}&resource=${encodeURIComponent(FLOW_RESOURCE)}`, {
++    headers: { Metadata: 'true' },
++    signal: AbortSignal.timeout(5000),
++  });
++  if (!response.ok) throw new Error(`Managed identity token request failed: HTTP ${response.status}`);
++
++  const body = (await response.json()) as { access_token?: string; expires_on?: string | number };
++  if (!body.access_token) throw new Error('Managed identity returned no token');
++  const expiresOn = Number(body.expires_on);
++  cached = {
++    token: body.access_token,
++    expiresAt: Number.isFinite(expiresOn) && expiresOn > 0 ? expiresOn * 1000 : Date.now() + 60 * 60 * 1000,
++  };
++  return cached.token;
++}
++
++/**
++ * Authorization header for a webhook URL, or none. A failed token request is
++ * logged and the webhook is sent unsigned, so the flow's refusal shows up as an
++ * ordinary delivery failure.
++ */
++export async function webhookAuthHeaders(url: string): Promise<Record<string, string>> {
++  if (!isManagedIdentityEnabled() || !isPowerPlatformWebhookUrl(url)) return {};
++  try {
++    return { Authorization: `Bearer ${await getFlowToken()}` };
++  } catch (error) {
++    console.warn('[Webhooks] Could not get a managed identity token:', error instanceof Error ? error.message : error);
++    return {};
++  }
++}
++
++/** Test helper: forget the cached token. */
++export function resetManagedIdentityTokenCache(): void {
++  cached = null;
++}
+diff --git a/lib/webhooks/service.ts b/lib/webhooks/service.ts
+index 3df9b2a22..0f418cf20 100644
+--- a/lib/webhooks/service.ts
++++ b/lib/webhooks/service.ts
+@@ -19,6 +19,7 @@ import {
+   formatTeamsTestMessage,
+   formatDiscordTestMessage,
+ } from './formatters';
++import { webhookAuthHeaders } from './managed-identity';
+ 
+ // Circuit breaker thresholds
+ const MAX_FAILURES = 5;
+@@ -155,6 +156,8 @@ export async function deliverFormattedWebhook(
+     'Content-Type': 'application/json',
+     'User-Agent': 'IntuneGet-Webhook/1.0',
+     ...webhook.headers,
++    // HRM patch: sign in to Power Automate webhooks as the server's managed identity
++    ...(await webhookAuthHeaders(webhook.url)),
+   };
+ 
+   // Add signature if secret is configured
+@@ -240,6 +243,8 @@ export async function sendTestWebhook(
+     'Content-Type': 'application/json',
+     'User-Agent': 'IntuneGet-Webhook/1.0',
+     ...webhook.headers,
++    // HRM patch: sign in to Power Automate webhooks as the server's managed identity
++    ...(await webhookAuthHeaders(webhook.url)),
+   };
+ 
+   if (webhook.secret) {

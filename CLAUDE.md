@@ -71,9 +71,16 @@ HRM IT notes.
 
 ## Notifications
 
-- Webhooks are set up in IntuneGet under Settings → Notifications. For a Teams channel, create the URL
-  with Teams Workflows ("Post to a channel when a webhook request is received"); leave the secret
-  empty. The workflow runs as the account that created it, so use a shared IT account.
+- Webhooks are set up in IntuneGet under Settings → Notifications (type Microsoft Teams, no secret).
+- **Teams channel flow** (Power Automate): trigger "When a Teams webhook request is received (V2)",
+  Who can trigger = **Specific users in my tenant**, Allowed users = the VM's managed identity object ID
+  (`az vm identity show -g <rg> -n <vm> --query principalId -o tsv`). Then "Apply to each" over the
+  trigger's Attachments, with "Post card in a chat or channel" (Flow bot, the channel, card
+  `item()?['content']`). Unsigned or other callers get 401/403.
+- Patch 0007 signs those posts: set `WEBHOOK_MANAGED_IDENTITY=true` in `.env.local` and pass it
+  through `docker-compose.override.yml` (`- WEBHOOK_MANAGED_IDENTITY=${WEBHOOK_MANAGED_IDENTITY}`).
+- The flow posts with its owner's Teams connection. Keep an IT admins security group as co-owner, and
+  move the connection to a shared IT account if the owner changes.
 - Update notifications (patch 0003) go to the webhook owner's webhooks after each update check.
 - Deployment results (patch 0006) go to **every** enabled webhook on the server as soon as a job
   finishes as deployed or failed. That's correct only while the server serves one Intune tenant.
