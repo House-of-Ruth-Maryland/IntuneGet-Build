@@ -1,0 +1,516 @@
+diff --git a/app/api/intune/unmanaged-apps/route.ts b/app/api/intune/unmanaged-apps/route.ts
+index 72a2b30c2..95c6eea2e 100644
+--- a/app/api/intune/unmanaged-apps/route.ts
++++ b/app/api/intune/unmanaged-apps/route.ts
+@@ -8,7 +8,8 @@ import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
+ import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
+ import { parseAccessToken } from '@/lib/auth-utils';
+ import { getDatabase, isSqliteMode } from '@/lib/db';
+-import { matchDiscoveredApp, filterUserApps, isSystemApp, normalizeAppName } from '@/lib/matching/app-matcher';
++import { filterUserApps, isSystemApp, normalizeAppName } from '@/lib/matching/app-matcher';
++import { matchDiscoveredAppWithCatalog } from '@/lib/matching/catalog-matcher';
+ import { compareVersions } from '@/lib/version-compare';
+ import { getServicePrincipalToken, invalidateServicePrincipalToken } from '@/lib/intune/graph-client';
+ import type {
+@@ -584,9 +585,11 @@ export async function GET(request: NextRequest) {
+           wingetName: null,
+           confidence: 1.0,
+           partialMatches: [],
++          isStoreApp: false,
+         };
+       } else {
+-        matchResult = matchDiscoveredApp(app);
++        // HRM patch: built-in mappings, then the full catalog by name words
++        matchResult = await matchDiscoveredAppWithCatalog(app);
+       }
+ 
+       unmanagedApps.push({
+@@ -602,6 +605,7 @@ export async function GET(request: NextRequest) {
+         matchedPackageName: matchResult.wingetName,
+         matchConfidence: matchResult.confidence,
+         partialMatches: matchResult.partialMatches,
++        isStoreApp: matchResult.isStoreApp,
+         isClaimed: claimedMap.has(app.id),
+         claimStatus: claimedMap.get(app.id) as UnmanagedApp['claimStatus'],
+         lastSynced: now,
+diff --git a/components/unmanaged/MatchStatusBadge.tsx b/components/unmanaged/MatchStatusBadge.tsx
+index d8ae157f9..cf43b5f0d 100644
+--- a/components/unmanaged/MatchStatusBadge.tsx
++++ b/components/unmanaged/MatchStatusBadge.tsx
+@@ -1,6 +1,6 @@
+ 'use client';
+ 
+-import { CheckCircle2, AlertCircle, HelpCircle, Clock } from 'lucide-react';
++import { CheckCircle2, AlertCircle, HelpCircle, Clock, Store } from 'lucide-react';
+ import {
+   Tooltip,
+   TooltipContent,
+@@ -14,6 +14,8 @@ import type { MatchStatus } from '@/types/unmanaged';
+ interface MatchStatusBadgeProps {
+   status: MatchStatus;
+   confidence?: number | null;
++  /** HRM patch: Microsoft Store app, which can't be matched to WinGet */
++  storeApp?: boolean;
+   className?: string;
+ }
+ 
+@@ -45,7 +47,24 @@ function getConfidenceTooltip(status: MatchStatus, confidence: number | null | u
+   return `${pct}% confidence - weak match. Consider linking a different package.`;
+ }
+ 
+-export function MatchStatusBadge({ status, confidence, className }: MatchStatusBadgeProps) {
++export function MatchStatusBadge({ status, confidence, storeApp, className }: MatchStatusBadgeProps) {
++  if (storeApp) {
++    return (
++      <TooltipProvider>
++        <Tooltip>
++          <TooltipTrigger asChild>
++            <StatusBadge tone="info" icon={Store} className={cn('cursor-default', className)}>
++              <span>Microsoft Store app</span>
++            </StatusBadge>
++          </TooltipTrigger>
++          <TooltipContent side="top" className="max-w-[260px]">
++            <p>Installed from the Microsoft Store, not WinGet. Deploy it in Intune as a Microsoft Store app.</p>
++          </TooltipContent>
++        </Tooltip>
++      </TooltipProvider>
++    );
++  }
++
+   const config = statusConfig[status];
+ 
+   const showConfidence = confidence !== null && confidence !== undefined && status !== 'unmatched';
+diff --git a/components/unmanaged/UnmanagedAppCard.tsx b/components/unmanaged/UnmanagedAppCard.tsx
+index cd49c673d..2a8c89b19 100644
+--- a/components/unmanaged/UnmanagedAppCard.tsx
++++ b/components/unmanaged/UnmanagedAppCard.tsx
+@@ -31,7 +31,8 @@ function UnmanagedAppCardComponent({
+   isClaimLoading = false,
+ }: UnmanagedAppCardProps) {
+   const canClaim = app.matchStatus === 'matched' && !app.isClaimed;
+-  const canLink = app.matchStatus === 'unmatched' || app.matchStatus === 'partial';
++  // HRM patch: Microsoft Store apps can't be linked to a WinGet package
++  const canLink = !app.isStoreApp && (app.matchStatus === 'unmatched' || app.matchStatus === 'partial');
+   const hasPartialSuggestions = app.partialMatches && app.partialMatches.length > 0;
+ 
+   return (
+@@ -104,7 +105,7 @@ function UnmanagedAppCardComponent({
+                 </span>
+               </div>
+             )}
+-            <MatchStatusBadge status={app.matchStatus} confidence={app.matchConfidence} />
++            <MatchStatusBadge status={app.matchStatus} confidence={app.matchConfidence} storeApp={app.isStoreApp} />
+           </div>
+ 
+           {/* Matched package info */}
+@@ -201,6 +202,7 @@ export const UnmanagedAppCard = memo(UnmanagedAppCardComponent, (prev, next) =>
+     prev.app.version === next.app.version &&
+     prev.app.deviceCount === next.app.deviceCount &&
+     prev.app.matchStatus === next.app.matchStatus &&
++    prev.app.isStoreApp === next.app.isStoreApp &&
+     prev.app.matchedPackageId === next.app.matchedPackageId &&
+     prev.app.matchConfidence === next.app.matchConfidence &&
+     prev.app.isClaimed === next.app.isClaimed &&
+diff --git a/components/unmanaged/UnmanagedListRow.tsx b/components/unmanaged/UnmanagedListRow.tsx
+index 6b56bbc07..aba74858c 100644
+--- a/components/unmanaged/UnmanagedListRow.tsx
++++ b/components/unmanaged/UnmanagedListRow.tsx
+@@ -40,7 +40,8 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+ }: UnmanagedListRowProps) {
+   const prefersReducedMotion = useReducedMotion();
+   const canClaim = app.matchStatus === 'matched' && !app.isClaimed;
+-  const canLink = app.matchStatus === 'unmatched' || app.matchStatus === 'partial';
++  // HRM patch: Microsoft Store apps can't be linked to a WinGet package
++  const canLink = !app.isStoreApp && (app.matchStatus === 'unmatched' || app.matchStatus === 'partial');
+   const hasPartialSuggestions = app.partialMatches && app.partialMatches.length > 0;
+ 
+   return (
+@@ -113,7 +114,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+           )}
+ 
+           {/* Status badge */}
+-          <MatchStatusBadge status={app.matchStatus} confidence={app.matchConfidence} />
++          <MatchStatusBadge status={app.matchStatus} confidence={app.matchConfidence} storeApp={app.isStoreApp} />
+ 
+           {/* Actions */}
+           <div className="flex items-center gap-2">
+diff --git a/lib/catalog/snapshot-source.test.ts b/lib/catalog/snapshot-source.test.ts
+index fd27c4327..ac1f0c5aa 100644
+--- a/lib/catalog/snapshot-source.test.ts
++++ b/lib/catalog/snapshot-source.test.ts
+@@ -341,6 +341,14 @@ describe('SnapshotCatalogSource', () => {
+     });
+   });
+ 
++  it('searchCuratedAppsByNameWords needs every word in the name (HRM patch)', async () => {
++    expect((await source.searchCuratedAppsByNameWords(['google', 'chrome'], 10)).map((m) => m.wingetId)).toContain('Google.Chrome');
++    expect(await source.searchCuratedAppsByNameWords(['chrome', 'nonexistentword'], 10)).toEqual([]);
++    expect(await source.searchCuratedAppsByNameWords([], 10)).toEqual([]);
++    // Quotes can't break out of the full-text query.
++    await expect(source.searchCuratedAppsByNameWords(['chr"ome', '"'], 10)).resolves.toBeInstanceOf(Array);
++  });
++
+   it('existence checks behave like the Supabase source', async () => {
+     expect(await source.appExists('Google.Chrome')).toBe(true);
+     expect(await source.appExists('Does.NotExist')).toBe(false);
+diff --git a/lib/catalog/snapshot-source.ts b/lib/catalog/snapshot-source.ts
+index 43aa1acf8..df6d25401 100644
+--- a/lib/catalog/snapshot-source.ts
++++ b/lib/catalog/snapshot-source.ts
+@@ -805,6 +805,42 @@ export class SnapshotCatalogSource implements CatalogSource {
+   // matching
+   // ---------------------------------------------------------------------------
+ 
++  async searchCuratedAppsByNameWords(words: string[], limit: number): Promise<CuratedAppMatch[]> {
++    const terms = words.map((word) => word.replace(/"/g, '').trim()).filter(Boolean);
++    if (terms.length === 0) return [];
++    // FTS5 column filter: every word must appear in the name.
++    const match = `name : (${terms.map((term) => `"${term}"`).join(' AND ')})`;
++    return withDb(
++      (db) => {
++        const rows = db
++          .prepare(
++            `SELECT ca.winget_id, ca.name, ca.publisher, ca.latest_version
++             FROM curated_fts f
++             JOIN curated_apps ca ON ca.id = f.rowid
++             WHERE curated_fts MATCH @match
++               AND ca.is_verified = 1
++               AND ca.latest_version IS NOT NULL
++               AND ca.is_locale_variant = 0
++             ORDER BY ca.popularity_rank IS NULL, ca.popularity_rank ASC
++             LIMIT @limit`
++          )
++          .all({ match, limit }) as {
++          winget_id: string;
++          name: string;
++          publisher: string;
++          latest_version: string | null;
++        }[];
++        return rows.map((app) => ({
++          wingetId: app.winget_id,
++          name: app.name,
++          publisher: app.publisher,
++          latestVersion: app.latest_version,
++        }));
++      },
++      () => []
++    );
++  }
++
+   async searchCuratedAppsForMatching(term: string): Promise<CuratedAppMatch[]> {
+     if (!term || term.length < 2) {
+       return [];
+diff --git a/lib/catalog/types.ts b/lib/catalog/types.ts
+index a39448e86..c097880bf 100644
+--- a/lib/catalog/types.ts
++++ b/lib/catalog/types.ts
+@@ -266,6 +266,13 @@ export interface CatalogSource {
+   /** searchCuratedApps body from lib/app-mappings (ILIKE on name/publisher/id). */
+   searchCuratedAppsForMatching(term: string): Promise<CuratedAppMatch[]>;
+ 
++  /**
++   * HRM patch: catalog apps whose name contains every word (full-text, name
++   * column only), for Discovered Apps matching. Optional: sources without it
++   * skip the catalog step.
++   */
++  searchCuratedAppsByNameWords?(words: string[], limit: number): Promise<CuratedAppMatch[]>;
++
+   /** sccm_winget_mappings resolution from lib/matching/sccm-matcher checkSccmMapping. */
+   getSccmMapping(query: SccmMappingQuery, tenantId: string): Promise<SccmMappingResult | null>;
+ 
+diff --git a/lib/matching/__tests__/catalog-matcher.test.ts b/lib/matching/__tests__/catalog-matcher.test.ts
+new file mode 100644
+index 000000000..8f86d85e7
+--- /dev/null
++++ b/lib/matching/__tests__/catalog-matcher.test.ts
+@@ -0,0 +1,107 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import type { CuratedAppMatch } from '@/lib/app-mappings';
++import type { GraphUnmanagedApp } from '@/types/unmanaged';
++
++const catalog = vi.hoisted(() => ({ search: vi.fn(), withWordSearch: true }));
++vi.mock('@/lib/catalog', () => ({
++  getCatalogSource: () => (catalog.withWordSearch ? { searchCuratedAppsByNameWords: catalog.search } : {}),
++}));
++
++import { isStoreApp, matchDiscoveredAppWithCatalog } from '../catalog-matcher';
++
++const entry = (wingetId: string, name: string, publisher: string): CuratedAppMatch => ({ wingetId, name, publisher, latestVersion: '1.0' });
++const CATALOG = [
++  entry('Intermedia.Unite', 'Intermedia Unite', 'Intermedia.net, Inc.'),
++  entry('Cisco.Webex', 'Webex', 'Cisco Systems, Inc'),
++  entry('Ubiquiti.UniFiOSServer', 'UniFi OS Server', 'Ubiquiti Inc.'),
++  entry('Adobe.Acrobat.Pro.2020', 'Adobe Acrobat 2020', 'Adobe Inc.'),
++  entry('Microsoft.VCRedist.2015+.arm64', 'Microsoft Visual C++ 2015-2022 Redistributable (Arm64)', 'Microsoft Corporation'),
++  entry('Microsoft.VCRedist.2015+.x64', 'Microsoft Visual C++ 2015-2022 Redistributable (x64)', 'Microsoft Corporation'),
++  entry('Contoso.Editor', 'Contoso Editor', 'Contoso Ltd'),
++  entry('Contoso.Editor.Preview', 'Contoso Editor', 'Contoso Ltd'),
++  entry('Fabrikam.Notes', 'Fabrikam Notes', 'Fabrikam'),
++];
++// Fake full-text search: every word must appear in the catalog name.
++const searchByWords = async (words: string[]) =>
++  CATALOG.filter((app) => words.every((word) => app.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').includes(word.replace(/[^a-z0-9]+/g, ' ').trim())));
++
++const app = (displayName: string, publisher: string | null = null): GraphUnmanagedApp =>
++  ({ id: `id-${displayName}`, displayName, publisher, version: '1.0', deviceCount: 1, platform: 'windows' }) as unknown as GraphUnmanagedApp;
++
++beforeEach(() => {
++  catalog.withWordSearch = true;
++  catalog.search.mockReset();
++  catalog.search.mockImplementation(searchByWords);
++});
++
++describe('Microsoft Store apps', () => {
++  it('recognises package-style names and certificate publishers', () => {
++    expect(isStoreApp(app('XeroxCorp.PrintExperience', 'CN=8D94148D-A6AB-4A8E-9DBF-1D4D1E2F1A2B'))).toBe(true);
++    expect(isStoreApp(app('AD2F1837.HPSupportAssistant', null))).toBe(true);
++    expect(isStoreApp(app('HP Support Assistant', 'CN=ED346674-0FA1-4272-85CE-3187C9C86E26'))).toBe(true);
++    expect(isStoreApp(app('Notepad++', 'Notepad++ Team'))).toBe(false);
++    expect(isStoreApp(app('Google Chrome', 'Google LLC'))).toBe(false);
++  });
++
++  it('marks them and never looks them up', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('XeroxCorp.PrintExperience', 'CN=8D94148D'));
++    expect(result).toMatchObject({ status: 'unmatched', isStoreApp: true, partialMatches: [] });
++    expect(catalog.search).not.toHaveBeenCalled();
++  });
++});
++
++describe('catalog matching', () => {
++  it('matches an app only the catalog knows, ignoring the version in its name', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('Intermedia Unite 2.33.58', 'Intermedia.net, Inc.'));
++    expect(result).toMatchObject({ status: 'matched', wingetId: 'Intermedia.Unite', confidence: 1, isStoreApp: false });
++  });
++
++  it('keeps exact built-in mappings without a catalog lookup', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('Google Chrome', 'Google LLC'));
++    expect(result).toMatchObject({ status: 'matched', wingetId: 'Google.Chrome', confidence: 1 });
++    expect(catalog.search).not.toHaveBeenCalled();
++  });
++
++  it('suggests instead of matching when two catalog entries are equally close', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('Contoso Editor', 'Contoso Ltd'));
++    expect(result.status).toBe('partial');
++    expect(result.partialMatches.map((m) => m.wingetId)).toEqual(expect.arrayContaining(['Contoso.Editor', 'Contoso.Editor.Preview']));
++  });
++
++  it('suggests instead of matching when the publisher is unknown or different', async () => {
++    expect((await matchDiscoveredAppWithCatalog(app('Fabrikam Notes', null))).status).toBe('partial');
++    expect((await matchDiscoveredAppWithCatalog(app('Fabrikam Notes', 'Someone Else'))).status).toBe('partial');
++    expect((await matchDiscoveredAppWithCatalog(app('Fabrikam Notes', 'Fabrikam'))).status).toBe('matched');
++  });
++
++  it('does not offer ARM-only packages for an x64 app', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.40.33810', 'Microsoft Corporation'));
++    expect(result.partialMatches.map((m) => m.wingetId)).not.toContain('Microsoft.VCRedist.2015+.arm64');
++    expect(result.wingetId).toBe('Microsoft.VCRedist.2015+.x64');
++  });
++});
++
++describe('suggestions need a shared meaningful word', () => {
++  it('never suggests security agents for "UniFi Endpoint"', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('UniFi Endpoint', 'Ubiquiti Inc'));
++    const ids = result.partialMatches.map((m) => m.wingetId);
++    expect(ids).not.toContain('McAfee.Agent');
++    expect(ids).not.toContain('Symantec.EndpointProtection');
++    expect(result.wingetId).not.toBe('McAfee.Agent');
++  });
++
++  it('works without a catalog word search (hosted catalog)', async () => {
++    catalog.withWordSearch = false;
++    const result = await matchDiscoveredAppWithCatalog(app('UniFi Endpoint', 'Ubiquiti Inc'));
++    expect(result).toMatchObject({ status: 'unmatched', isStoreApp: false });
++  });
++
++  it('carries on without the catalog when the lookup fails', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    catalog.search.mockRejectedValue(new Error('snapshot unavailable'));
++    const result = await matchDiscoveredAppWithCatalog(app('Intermedia Unite', 'Intermedia.net, Inc.'));
++    expect(result.status).toBe('unmatched');
++    expect(warn).toHaveBeenCalled();
++    warn.mockRestore();
++  });
++});
+diff --git a/lib/matching/catalog-matcher.ts b/lib/matching/catalog-matcher.ts
+new file mode 100644
+index 000000000..c97a1106f
+--- /dev/null
++++ b/lib/matching/catalog-matcher.ts
+@@ -0,0 +1,164 @@
++/**
++ * Discovered Apps matching against the full catalog (HRM patch).
++ *
++ * Upstream matches discovered apps only against the ~90 built-in mappings, and
++ * scores suggestions by letter similarity ("UniFi Endpoint" vs "McAfee
++ * Endpoint" scores 67%). This wraps that matcher:
++ *   1. Microsoft Store apps are recognised and never matched to WinGet.
++ *   2. Exact built-in mappings still win.
++ *   3. Other apps are matched against the catalog by name words. A match is
++ *      automatic only when the names are identical, the publisher agrees and no
++ *      other candidate comes close; anything else becomes a suggestion.
++ *   4. Built-in suggestions are kept only when they share a meaningful word
++ *      with the app's name.
++ */
++
++import { getCatalogSource } from '@/lib/catalog';
++import type { CuratedAppMatch } from '@/lib/app-mappings';
++import type { GraphUnmanagedApp, PartialMatch } from '@/types/unmanaged';
++import { matchDiscoveredApp, normalizeAppName, normalizePublisher, type MatchResult } from './app-matcher';
++
++export interface CatalogMatchResult extends MatchResult {
++  isStoreApp: boolean;
++}
++
++// Words too common to identify an app on their own.
++const GENERIC_WORDS = new Set([
++  'microsoft', 'the', 'for', 'and', 'agent', 'client', 'endpoint', 'update', 'updater', 'tool', 'tools',
++  'service', 'services', 'driver', 'drivers', 'software', 'plugin', 'app', 'pro', 'dc', 'en', 'us',
++  'media', 'player', 'manager', 'suite', 'edition', 'runtime', 'support', 'assistant', 'helper',
++]);
++const AUTO_MATCH_MARGIN = 0.15;
++const SUGGESTION_MIN_SCORE = 0.6;
++const MAX_SUGGESTIONS = 3;
++const CANDIDATE_LIMIT = 25;
++
++const noMatch = (isStoreApp: boolean): CatalogMatchResult => ({
++  status: 'unmatched', wingetId: null, wingetName: null, confidence: 0, partialMatches: [], isStoreApp,
++});
++
++function words(text: string): string[] {
++  return text.toLowerCase().split(/[\s\-_.]+/).filter((word) => word.length >= 2);
++}
++
++function meaningfulWords(text: string): string[] {
++  return words(text).filter((word) => !GENERIC_WORDS.has(word));
++}
++
++/**
++ * Microsoft Store (MSIX) apps report a package-style name such as
++ * "XeroxCorp.PrintExperience" or a certificate subject ("CN=...") as publisher.
++ * IntuneGet deploys WinGet packages, so these can't be claimed here.
++ */
++export function isStoreApp(app: Pick<GraphUnmanagedApp, 'displayName' | 'publisher'>): boolean {
++  const name = app.displayName.trim();
++  const packageStyleName = /^[A-Za-z0-9]+(\.[A-Za-z0-9]+)+$/.test(name) && !/\s/.test(name);
++  return packageStyleName || /^CN=/i.test(app.publisher?.trim() || '');
++}
++
++function publisherAgrees(discovered: string | null, catalog: string): boolean {
++  const a = normalizePublisher(discovered).split(' ')[0];
++  const b = normalizePublisher(catalog).split(' ')[0];
++  return Boolean(a && b) && (a === b || a.startsWith(b) || b.startsWith(a));
++}
++
++// ARM-only packages aren't offered for apps whose name doesn't mention ARM.
++function isArmOnly(wingetId: string, appName: string): boolean {
++  return /(^|\.)arm(64)?($|\.)/i.test(wingetId) && !/\barm/i.test(appName);
++}
++
++interface ScoredCandidate { app: CuratedAppMatch; score: number; exact: boolean; publisherMatch: boolean }
++
++function scoreCandidate(name: string, publisher: string | null, candidate: CuratedAppMatch): ScoredCandidate {
++  const candidateName = normalizeAppName(candidate.name);
++  const nameWords = new Set(words(name));
++  const candidateWords = new Set(words(candidateName));
++  const shared = [...nameWords].filter((word) => candidateWords.has(word)).length;
++  const union = new Set([...nameWords, ...candidateWords]).size || 1;
++  const exact = candidateName === name;
++  const prefix = !exact && (candidateName.startsWith(`${name} `) || name.startsWith(`${candidateName} `));
++  const publisherMatch = publisherAgrees(publisher, candidate.publisher);
++  const score = (exact ? 1 : prefix ? 0.8 : shared / union) + (publisherMatch ? 0.15 : 0);
++  return { app: candidate, score, exact, publisherMatch };
++}
++
++function sharesMeaningfulWord(name: string, suggestion: PartialMatch): boolean {
++  const nameWords = new Set(meaningfulWords(name));
++  const suggestionWords = [...meaningfulWords(suggestion.name), ...meaningfulWords(suggestion.wingetId.split('.').slice(1).join(' '))];
++  return suggestionWords.some((word) => nameWords.has(word));
++}
++
++async function catalogCandidates(name: string): Promise<CuratedAppMatch[]> {
++  const catalog = getCatalogSource();
++  if (!catalog.searchCuratedAppsByNameWords) return [];
++  const key = meaningfulWords(name);
++  const searchWords = key.length > 0 ? key : words(name);
++  if (searchWords.length === 0) return [];
++  try {
++    return await catalog.searchCuratedAppsByNameWords(searchWords, CANDIDATE_LIMIT);
++  } catch (error) {
++    console.warn('[Discovered apps] Catalog lookup failed:', error instanceof Error ? error.message : error);
++    return [];
++  }
++}
++
++/**
++ * Match one discovered app: built-in mappings, then the catalog, with
++ * suggestions only where a meaningful word is shared.
++ */
++export async function matchDiscoveredAppWithCatalog(app: GraphUnmanagedApp): Promise<CatalogMatchResult> {
++  if (isStoreApp(app)) return noMatch(true);
++
++  const builtIn = matchDiscoveredApp(app);
++  if (builtIn.status === 'matched' && builtIn.confidence >= 1) return { ...builtIn, isStoreApp: false };
++
++  const name = normalizeAppName(app.displayName);
++  const scored = (await catalogCandidates(name))
++    .filter((candidate) => !isArmOnly(candidate.wingetId, app.displayName))
++    .map((candidate) => scoreCandidate(name, app.publisher, candidate))
++    .sort((a, b) => b.score - a.score);
++
++  const [best, runnerUp] = scored;
++  if (best && best.exact && best.publisherMatch && (!runnerUp || best.score - runnerUp.score >= AUTO_MATCH_MARGIN)) {
++    return {
++      status: 'matched',
++      wingetId: best.app.wingetId,
++      wingetName: best.app.name,
++      confidence: 1,
++      partialMatches: [],
++      isStoreApp: false,
++    };
++  }
++
++  const fromCatalog: PartialMatch[] = scored
++    .filter((candidate) => candidate.score >= SUGGESTION_MIN_SCORE)
++    .map((candidate) => ({
++      wingetId: candidate.app.wingetId,
++      name: candidate.app.name,
++      publisher: candidate.app.publisher,
++      version: candidate.app.latestVersion,
++      confidence: Math.min(candidate.score, 0.99),
++    }));
++  const builtInSuggestions: PartialMatch[] = [
++    ...(builtIn.wingetId && builtIn.status !== 'unmatched'
++      ? [{ wingetId: builtIn.wingetId, name: builtIn.wingetName || builtIn.wingetId, publisher: '', version: null, confidence: Math.min(builtIn.confidence, 0.99) }]
++      : []),
++    ...builtIn.partialMatches,
++  ].filter((suggestion) => sharesMeaningfulWord(name, suggestion));
++
++  const seen = new Set<string>();
++  const suggestions = [...fromCatalog, ...builtInSuggestions]
++    .sort((a, b) => b.confidence - a.confidence)
++    .filter((suggestion) => !seen.has(suggestion.wingetId.toLowerCase()) && seen.add(suggestion.wingetId.toLowerCase()))
++    .slice(0, MAX_SUGGESTIONS);
++
++  if (suggestions.length === 0) return noMatch(false);
++  return {
++    status: 'partial',
++    wingetId: suggestions[0].wingetId,
++    wingetName: suggestions[0].name,
++    confidence: suggestions[0].confidence,
++    partialMatches: suggestions,
++    isStoreApp: false,
++  };
++}
+diff --git a/types/unmanaged.ts b/types/unmanaged.ts
+index 4bc758c5c..d801be085 100644
+--- a/types/unmanaged.ts
++++ b/types/unmanaged.ts
+@@ -42,6 +42,8 @@ export interface UnmanagedApp {
+   matchedPackageName: string | null;
+   matchConfidence: number | null;
+   partialMatches?: PartialMatch[];
++  /** HRM patch: a Microsoft Store (MSIX) app, which IntuneGet can't deploy from WinGet */
++  isStoreApp?: boolean;
+   isClaimed: boolean;
+   claimStatus?: ClaimStatus;
+   lastSynced: string;
