@@ -2,6 +2,8 @@
 
 ## 2026-10-24
 
+- IntuneGet signs its posts to Teams Workflows with the server's Azure identity (patch 0007), so the
+  IT Ops flow accepts only the IntuneGet server. No secret is stored.
 - Deployment results reach Teams, Slack, Discord or custom webhooks (patch 0006): every deployed or
   failed app posts one message with its version, who deployed it and links to Intune and the GitHub run.
 
