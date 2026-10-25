@@ -77,8 +77,11 @@ HRM IT notes.
   (`az vm identity show -g <rg> -n <vm> --query principalId -o tsv`). Then "Apply to each" over the
   trigger's Attachments, with "Post card in a chat or channel" (Flow bot, the channel, card
   `item()?['content']`). Unsigned or other callers get 401/403.
-- Patch 0007 signs those posts: set `WEBHOOK_MANAGED_IDENTITY=true` in `.env.local` and pass it
-  through `docker-compose.override.yml` (`- WEBHOOK_MANAGED_IDENTITY=${WEBHOOK_MANAGED_IDENTITY}`).
+- Patch 0007 signs those posts: put the flow's exact HTTP URL in `WEBHOOK_MANAGED_IDENTITY_URLS` in
+  `.env.local` (several URLs separated by commas) and pass it through `docker-compose.override.yml`
+  (`- WEBHOOK_MANAGED_IDENTITY_URLS=${WEBHOOK_MANAGED_IDENTITY_URLS:-}`). Never widen this to a host or
+  domain: anyone can own a Power Automate or Logic Apps URL, and a signed test message to their URL
+  would hand them the server's token.
 - The flow posts with its owner's Teams connection. Keep an IT admins security group as co-owner, and
   move the connection to a shared IT account if the owner changes.
 - Update notifications (patch 0003) go to the webhook owner's webhooks after each update check.
@@ -122,11 +125,11 @@ sudo install -m 0644 deploy/systemd/intuneget-deploy.default /etc/default/intune
 sudo systemctl daemon-reload
 ```
 
-First time only, the cron secret (the app's `CRON_SECRET`) goes in a root-only header file:
+First time only, generate the cron secret on the VM. It goes into `.env.local` for the app and into a
+root-only header file for the timers, and is never printed:
 
 ```bash
-sudo install -d -m 0700 /etc/intuneget
-sudo sh -c 'umask 077; printf "Authorization: Bearer %s\n" "$CRON_SECRET" > /etc/intuneget/cron-auth.header'
+sudo sh -c 'umask 077; s=$(openssl rand -hex 32); printf "\nCRON_SECRET=%s\n" "$s" >> /opt/intuneget/.env.local; install -d -m 0700 /etc/intuneget; printf "Authorization: Bearer %s\n" "$s" > /etc/intuneget/cron-auth.header'
 ```
 
 Check, then enable:

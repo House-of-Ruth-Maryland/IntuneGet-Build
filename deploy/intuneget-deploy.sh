@@ -33,6 +33,8 @@ DATA_DIR=${DATA_DIR:-/var/lib/docker/volumes/intuneget_intuneget-data/_data}
 BACKUP_DIR=${BACKUP_DIR:-$COMPOSE_DIR/backups}
 KEEP_BACKUPS=${KEEP_BACKUPS:-5}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-300}
+# The SQLite database inside DATA_DIR; a backup without it is not a backup.
+DB_FILE=${DB_FILE:-intuneget.db}
 STATE_DIR=${STATE_DIR:-/var/lib/intuneget-deploy}
 LOCK_FILE=${LOCK_FILE:-/run/intuneget-deploy.lock}
 
@@ -102,18 +104,36 @@ wait_healthy() {
   return 1
 }
 
-backup() { # from-tag; prints the backup path
-  local dest
-  dest="$BACKUP_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$$-from-$1"
-  mkdir "$dest"
-  cp -a "$DATA_DIR" "$dest/data"
-  cp -a "$OVERRIDE_FILE" "$dest/docker-compose.override.yml"
-  echo "$dest"
+# Room for a full copy of the data, twice over, before the app is stopped.
+has_backup_space() {
+  local need free
+  need=$(( $(du -sk "$DATA_DIR" | cut -f1) * 2 ))
+  free=$(df -Pk "$BACKUP_DIR" | awk 'NR==2 {print $4}')
+  [ -n "$free" ] && [ "$free" -ge "$need" ]
 }
 
-restore() { # backup path
-  rsync -a --delete "$1/data/" "$DATA_DIR/"
-  cp -a "$1/docker-compose.override.yml" "$OVERRIDE_FILE"
+# A backup is usable only if it has the database and every data file.
+backup_is_complete() { # backup path
+  [ -s "$1/data/$DB_FILE" ] && [ -f "$1/docker-compose.override.yml" ] &&
+    [ "$(find "$1/data" -type f | wc -l)" -eq "$(find "$DATA_DIR" -type f | wc -l)" ]
+}
+
+# Runs inside $(...), where set -e doesn't apply: every step is checked.
+backup() { # from-tag; prints the backup path, or fails and leaves nothing behind
+  local dest
+  dest="$BACKUP_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$$-from-$1"
+  if mkdir "$dest" && cp -a "$DATA_DIR" "$dest/data" &&
+     cp -a "$OVERRIDE_FILE" "$dest/docker-compose.override.yml" && backup_is_complete "$dest"; then
+    echo "$dest"
+    return 0
+  fi
+  rm -rf -- "$dest"
+  return 1
+}
+
+restore() { # backup path; refuses an incomplete backup
+  [ -s "$1/data/$DB_FILE" ] && [ -f "$1/docker-compose.override.yml" ] || { log "backup $1 is incomplete; not restoring"; return 1; }
+  rsync -a --delete "$1/data/" "$DATA_DIR/" && cp -a "$1/docker-compose.override.yml" "$OVERRIDE_FILE"
 }
 
 prune_backups() {
@@ -164,13 +184,26 @@ deploy() {
     return 0
   fi
 
+  if ! has_backup_space; then
+    log "not enough free disk space for a backup; not changing anything"
+    write_status refused "$current" "$desired" "not enough disk space for a backup"
+    echo "$desired" > "$STATE_DIR/failed"
+    return 1
+  fi
+
   log "deploying $desired (was $current)"
   compose stop "$SERVICE"
-  dest=$(backup "$current")
+  if ! dest=$(backup "$current"); then
+    log "backup failed; starting $current again and not deploying"
+    echo "$desired" > "$STATE_DIR/failed"
+    compose up -d "$SERVICE" || true
+    write_status backup_failed "$current" "$desired" "backup failed; nothing changed"
+    return 1
+  fi
   log "backup saved to $dest"
 
   [ -z "$target_backup" ] || log "going back to an older version: restoring $target_backup"
-  if { [ -z "$target_backup" ] || rsync -a --delete "$target_backup/data/" "$DATA_DIR/"; } &&
+  if { [ -z "$target_backup" ] || { [ -s "$target_backup/data/$DB_FILE" ] && rsync -a --delete "$target_backup/data/" "$DATA_DIR/"; }; } &&
      set_tag "$desired" && compose up -d "$SERVICE" && wait_healthy; then
     log "$desired is healthy"
     write_status deployed "$current" "$desired" "backup $dest"

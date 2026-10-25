@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-25
+
+- Security release: Next.js 16.4.3 and other dependency updates close two critical and three high
+  advisories (patch 0008).
+- The deploy gate again blocks versions the catalog snapshot marks malicious or failed (patch 0001
+  had skipped that check on SQLite servers).
+- Teams Workflows posts are signed only for the exact flow URLs the server lists, and never follow
+  redirects (patch 0007 had signed any Power Automate or Logic Apps URL).
+- The VM deploy stops if its backup can't be made in full (disk space, failed copy), so a rollback
+  can never restore an incomplete backup over the live data.
+
 ## 2026-10-24
 
 - IntuneGet signs its posts to Teams Workflows with the server's Azure identity (patch 0007), so the
