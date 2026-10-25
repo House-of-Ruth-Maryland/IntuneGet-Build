@@ -2,6 +2,10 @@
 
 ## 2026-10-25
 
+- Discovered Apps matches against the full catalog (about 15,800 apps), not just ~90 built-in ones, so apps
+  like Intermedia Unite can be claimed. Close or uncertain matches become suggestions; nonsense
+  suggestions such as McAfee for "UniFi Endpoint" are gone; Microsoft Store apps are labelled as such
+  (patch 0009).
 - Security release: Next.js 16.4.3 and other dependency updates close two critical and three high
   advisories (patch 0008).
 - The deploy gate again blocks versions the catalog snapshot marks malicious or failed (patch 0001
