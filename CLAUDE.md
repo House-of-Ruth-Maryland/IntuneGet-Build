@@ -24,8 +24,9 @@ HRM IT notes.
 ## Registry and sign-in
 
 - Images go to HRM's shared Azure Container Registry (Basic tier, private). Its address, and the IDs
-  GitHub signs in with, are repo variables: `ACR_LOGIN_SERVER`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`.
-  None of them is a secret, but keep registry and resource names out of files in this public repo.
+  GitHub signs in with, are repo secrets: `ACR_LOGIN_SERVER`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`.
+  None of them is truly secret, but run logs here are public and GitHub masks only secrets, so never
+  move them back to variables. Keep registry and resource names out of files, logs and step output.
 - **Build:** an Entra app with a federated credential for this repo's `main` branch (it uses GitHub's
   immutable subject, `repo:<org>@<org id>/<repo>@<repo id>:ref:refs/heads/main`) holds AcrPush on the
   registry only. No client secret exists.

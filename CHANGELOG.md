@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-25
+
+- The build keeps the registry address and Azure sign-in IDs out of its public run logs: they're now
+  repo secrets, which GitHub masks, instead of variables.
+
 ## 2026-10-24
 
 - IntuneGet signs its posts to Teams Workflows with the server's Azure identity (patch 0007), so the
