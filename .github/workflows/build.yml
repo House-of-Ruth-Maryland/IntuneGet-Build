@@ -25,9 +25,11 @@ concurrency:
   group: build
   cancel-in-progress: false
 
+# Secrets, not variables: this repo and its run logs are public, and GitHub masks
+# secrets everywhere a log would print them (including each step's env list).
 env:
-  REGISTRY: ${{ vars.ACR_LOGIN_SERVER }}
-  IMAGE: ${{ vars.ACR_LOGIN_SERVER }}/intuneget
+  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  IMAGE: ${{ secrets.ACR_LOGIN_SERVER }}/intuneget
 
 jobs:
   build:
@@ -93,8 +95,8 @@ jobs:
         # (AcrPush on the registry only); no stored secret. Uses the runner's
         # Azure CLI; the registry token is masked and lives only in this job.
         env:
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           oidc=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r .value)
           az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID" --federated-token "$oidc" --allow-no-subscriptions -o none

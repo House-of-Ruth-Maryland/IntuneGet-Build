@@ -3,7 +3,7 @@
 Builds HRM's IntuneGet container image: upstream
 [ugurkocde/IntuneGet](https://github.com/ugurkocde/IntuneGet) at a release tag,
 plus the small patches in `patches/`. Published to HRM's private Azure Container Registry as
-`intuneget:<tag>-hrm.<rev>` (the registry address is the repo variable `ACR_LOGIN_SERVER`).
+`intuneget:<tag>-hrm.<rev>` (the registry address is the repo secret `ACR_LOGIN_SERVER`).
 
 Build settings mirror upstream's release workflow (pinned actions, provenance, SBOM).
 
