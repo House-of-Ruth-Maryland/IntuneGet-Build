@@ -1,15 +1,17 @@
 diff --git a/lib/webhooks/managed-identity.test.ts b/lib/webhooks/managed-identity.test.ts
 new file mode 100644
-index 000000000..5e124c540
+index 000000000..c1406842a
 --- /dev/null
 +++ b/lib/webhooks/managed-identity.test.ts
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,124 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import type { WebhookConfiguration } from '@/types/notifications';
-+import { isPowerPlatformWebhookUrl, resetManagedIdentityTokenCache, webhookAuthHeaders } from './managed-identity';
++import { isSignedWebhookUrl, resetManagedIdentityTokenCache, webhookAuthHeaders } from './managed-identity';
 +import { deliverFormattedWebhook, sendTestWebhook } from './service';
 +
 +const FLOW_URL = 'https://default0000.00.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/abc/triggers/manual/paths/invoke?api-version=1';
++const OTHER_TENANT_FLOW = 'https://default9999.99.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/evil/triggers/manual/paths/invoke?api-version=1';
++const OTHER_LOGIC_APP = 'https://prod-01.westus.logic.azure.com/workflows/evil/triggers/manual/paths/invoke';
 +const SLACK_URL = 'https://hooks.slack.com/services/T000/B000/fixture';
 +const fetchMock = vi.fn();
 +const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -17,29 +19,48 @@ index 000000000..5e124c540
 +  new Response(JSON.stringify({ access_token: token, expires_on: String(expiresOn) }), { status: 200 });
 +const webhook = (url: string, type: WebhookConfiguration['webhook_type'] = 'teams') =>
 +  ({ id: 'w1', user_id: 'u1', name: 'IT Ops', url, webhook_type: type, secret: null, headers: {}, is_enabled: true, failure_count: 0, last_failure_at: null }) as unknown as WebhookConfiguration;
-+const sentHeaders = (call: number) => fetchMock.mock.calls[call][1].headers as Record<string, string>;
++const sent = (call: number) => fetchMock.mock.calls[call][1] as RequestInit & { headers: Record<string, string> };
 +
 +beforeEach(() => {
 +  resetManagedIdentityTokenCache();
 +  fetchMock.mockReset();
 +  vi.stubGlobal('fetch', fetchMock);
-+  process.env.WEBHOOK_MANAGED_IDENTITY = 'true';
++  process.env.WEBHOOK_MANAGED_IDENTITY_URLS = FLOW_URL;
 +});
 +afterEach(() => {
 +  vi.unstubAllGlobals();
-+  delete process.env.WEBHOOK_MANAGED_IDENTITY;
++  delete process.env.WEBHOOK_MANAGED_IDENTITY_URLS;
 +});
 +
-+describe('managed identity webhook sign-in', () => {
-+  it('recognises only HTTPS Power Platform webhook hosts', () => {
-+    expect(isPowerPlatformWebhookUrl(FLOW_URL)).toBe(true);
-+    expect(isPowerPlatformWebhookUrl('https://prod-01.westus.logic.azure.com/workflows/abc')).toBe(true);
-+    expect(isPowerPlatformWebhookUrl(SLACK_URL)).toBe(false);
-+    expect(isPowerPlatformWebhookUrl('https://environment.api.powerplatform.com.attacker.example.test/x')).toBe(false);
-+    expect(isPowerPlatformWebhookUrl('http://default0000.00.environment.api.powerplatform.com/x')).toBe(false);
-+    expect(isPowerPlatformWebhookUrl('not a url')).toBe(false);
++describe('which webhook URLs are signed', () => {
++  it('signs only the exact allowed flow URL', () => {
++    expect(isSignedWebhookUrl(FLOW_URL)).toBe(true);
++    // Default port and a different api-version are the same endpoint.
++    expect(isSignedWebhookUrl(FLOW_URL.replace(':443', '').replace('api-version=1', 'api-version=2'))).toBe(true);
 +  });
 +
++  it("never signs another tenant's Power Automate flow or Logic App", () => {
++    expect(isSignedWebhookUrl(OTHER_TENANT_FLOW)).toBe(false);
++    expect(isSignedWebhookUrl(OTHER_LOGIC_APP)).toBe(false);
++  });
++
++  it('never signs a different path on the allowed host, plain HTTP or look-alike hosts', () => {
++    expect(isSignedWebhookUrl(FLOW_URL.replace('/abc/', '/other/'))).toBe(false);
++    expect(isSignedWebhookUrl(FLOW_URL.replace('https:', 'http:'))).toBe(false);
++    expect(isSignedWebhookUrl(FLOW_URL.replace('powerplatform.com', 'powerplatform.com.attacker.example.test'))).toBe(false);
++    expect(isSignedWebhookUrl(SLACK_URL)).toBe(false);
++    expect(isSignedWebhookUrl('not a url')).toBe(false);
++  });
++
++  it('signs nothing when no URLs are configured, and accepts several', () => {
++    delete process.env.WEBHOOK_MANAGED_IDENTITY_URLS;
++    expect(isSignedWebhookUrl(FLOW_URL)).toBe(false);
++    process.env.WEBHOOK_MANAGED_IDENTITY_URLS = `${OTHER_LOGIC_APP}, ${FLOW_URL}`;
++    expect(isSignedWebhookUrl(FLOW_URL)).toBe(true);
++  });
++});
++
++describe('managed identity token', () => {
 +  it('asks the managed identity endpoint for a Power Automate token', async () => {
 +    fetchMock.mockResolvedValueOnce(imdsReply('token-1'));
 +    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({ Authorization: 'Bearer token-1' });
@@ -49,10 +70,9 @@ index 000000000..5e124c540
 +    expect(init.headers).toEqual({ Metadata: 'true' });
 +  });
 +
-+  it('never adds a token for other hosts or when switched off', async () => {
++  it('never requests a token for URLs that are not allowed', async () => {
++    expect(await webhookAuthHeaders(OTHER_TENANT_FLOW)).toEqual({});
 +    expect(await webhookAuthHeaders(SLACK_URL)).toEqual({});
-+    delete process.env.WEBHOOK_MANAGED_IDENTITY;
-+    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({});
 +    expect(fetchMock).not.toHaveBeenCalled();
 +  });
 +
@@ -79,61 +99,83 @@ index 000000000..5e124c540
 +});
 +
 +describe('webhook senders', () => {
-+  it('signs deliveries to a Power Automate flow', async () => {
++  it('signs deliveries to the allowed flow and refuses redirects', async () => {
 +    fetchMock.mockResolvedValueOnce(imdsReply('token-1')).mockResolvedValueOnce(new Response('', { status: 202 }));
 +    expect((await deliverFormattedWebhook(webhook(FLOW_URL), { type: 'message' })).success).toBe(true);
-+    expect(sentHeaders(1).Authorization).toBe('Bearer token-1');
++    expect(sent(1).headers.Authorization).toBe('Bearer token-1');
++    expect(sent(1).redirect).toBe('error');
 +  });
 +
-+  it('signs the settings page test message', async () => {
++  it('signs the settings page test message and refuses redirects', async () => {
 +    fetchMock.mockResolvedValueOnce(imdsReply('token-1')).mockResolvedValueOnce(new Response('', { status: 202 }));
 +    expect((await sendTestWebhook(webhook(FLOW_URL))).success).toBe(true);
-+    expect(sentHeaders(1).Authorization).toBe('Bearer token-1');
++    expect(sent(1).headers.Authorization).toBe('Bearer token-1');
++    expect(sent(1).redirect).toBe('error');
++  });
++
++  it("does not sign a test sent to another tenant's flow", async () => {
++    fetchMock.mockResolvedValueOnce(new Response('', { status: 202 }));
++    await sendTestWebhook(webhook(OTHER_TENANT_FLOW));
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++    expect(sent(0).headers.Authorization).toBeUndefined();
++    expect(sent(0).redirect).toBe('follow');
 +  });
 +
 +  it('does not sign Slack deliveries', async () => {
 +    fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }));
 +    await deliverFormattedWebhook(webhook(SLACK_URL, 'slack'), { blocks: [] });
 +    expect(fetchMock).toHaveBeenCalledTimes(1);
-+    expect(sentHeaders(0).Authorization).toBeUndefined();
++    expect(sent(0).headers.Authorization).toBeUndefined();
 +  });
 +});
 diff --git a/lib/webhooks/managed-identity.ts b/lib/webhooks/managed-identity.ts
 new file mode 100644
-index 000000000..890004023
+index 000000000..59fc438d5
 --- /dev/null
 +++ b/lib/webhooks/managed-identity.ts
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,83 @@
 +/**
 + * Managed identity sign-in for Power Automate webhooks (HRM patch).
 + *
-+ * Teams Workflows' V2 webhook trigger refuses unsigned requests. When
-+ * WEBHOOK_MANAGED_IDENTITY=true, webhooks to Power Platform hosts carry a
-+ * bearer token for the server's Azure managed identity, so the flow can allow
-+ * only that identity ("Specific users in my tenant"). The token is never sent
-+ * to any other host.
++ * Teams Workflows' V2 webhook trigger refuses unsigned requests. Webhooks to
++ * the flow URLs listed in WEBHOOK_MANAGED_IDENTITY_URLS carry a bearer token
++ * for the server's Azure managed identity, so the flow can allow only that
++ * identity ("Specific users in my tenant"). Only exact URLs set by the server
++ * admin are signed: any tenant can own a Power Automate or Logic Apps URL, so a
++ * host suffix check would hand the token to whoever creates a webhook.
 + */
 +
 +const IMDS_URL = 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01';
 +const FLOW_RESOURCE = 'https://service.flow.microsoft.com/';
-+const POWER_PLATFORM_HOSTS = ['.environment.api.powerplatform.com', '.logic.azure.com'];
 +const RENEW_BEFORE_MS = 5 * 60 * 1000;
 +
 +let cached: { token: string; expiresAt: number } | null = null;
 +
-+export function isManagedIdentityEnabled(): boolean {
-+  return process.env.WEBHOOK_MANAGED_IDENTITY === 'true';
++function parseHttps(url: string): URL | null {
++  try {
++    const parsed = new URL(url.trim());
++    return parsed.protocol === 'https:' ? parsed : null;
++  } catch {
++    return null;
++  }
 +}
 +
-+/** True for HTTPS Power Automate / Logic Apps webhook URLs only. */
-+export function isPowerPlatformWebhookUrl(url: string): boolean {
-+  try {
-+    const parsed = new URL(url);
-+    const host = parsed.hostname.toLowerCase();
-+    return parsed.protocol === 'https:' && POWER_PLATFORM_HOSTS.some((suffix) => host.endsWith(suffix));
-+  } catch {
-+    return false;
-+  }
++/** The flow URLs the server admin allows to receive a signed request. */
++function allowedUrls(): URL[] {
++  return (process.env.WEBHOOK_MANAGED_IDENTITY_URLS || '')
++    .split(/[\s,]+/)
++    .map(parseHttps)
++    .filter((url): url is URL => url !== null);
++}
++
++/**
++ * True when the URL is exactly one of the allowed flow URLs: same scheme, host,
++ * port and path. The query string (for example api-version) may differ.
++ */
++export function isSignedWebhookUrl(url: string): boolean {
++  const target = parseHttps(url);
++  if (!target) return false;
++  return allowedUrls().some((allowed) => allowed.origin === target.origin && allowed.pathname === target.pathname);
 +}
 +
 +async function getFlowToken(): Promise<string> {
@@ -156,12 +198,13 @@ index 000000000..890004023
 +}
 +
 +/**
-+ * Authorization header for a webhook URL, or none. A failed token request is
-+ * logged and the webhook is sent unsigned, so the flow's refusal shows up as an
-+ * ordinary delivery failure.
++ * Authorization header for an allowed flow URL, or none. A failed token request
++ * is logged and the webhook is sent unsigned, so the flow's refusal shows up as
++ * an ordinary delivery failure. Callers must not follow redirects for signed
++ * requests (see isSignedWebhookUrl).
 + */
 +export async function webhookAuthHeaders(url: string): Promise<Record<string, string>> {
-+  if (!isManagedIdentityEnabled() || !isPowerPlatformWebhookUrl(url)) return {};
++  if (!isSignedWebhookUrl(url)) return {};
 +  try {
 +    return { Authorization: `Bearer ${await getFlowToken()}` };
 +  } catch (error) {
@@ -175,14 +218,14 @@ index 000000000..890004023
 +  cached = null;
 +}
 diff --git a/lib/webhooks/service.ts b/lib/webhooks/service.ts
-index 3df9b2a22..0f418cf20 100644
+index 3df9b2a22..032d47e54 100644
 --- a/lib/webhooks/service.ts
 +++ b/lib/webhooks/service.ts
 @@ -19,6 +19,7 @@ import {
    formatTeamsTestMessage,
    formatDiscordTestMessage,
  } from './formatters';
-+import { webhookAuthHeaders } from './managed-identity';
++import { isSignedWebhookUrl, webhookAuthHeaders } from './managed-identity';
  
  // Circuit breaker thresholds
  const MAX_FAILURES = 5;
@@ -195,7 +238,16 @@ index 3df9b2a22..0f418cf20 100644
    };
  
    // Add signature if secret is configured
-@@ -240,6 +243,8 @@ export async function sendTestWebhook(
+@@ -181,6 +184,8 @@ export async function deliverFormattedWebhook(
+         headers,
+         body: payloadString,
+         signal: controller.signal,
++        // HRM patch: a signed request must not follow a redirect elsewhere
++        redirect: isSignedWebhookUrl(webhook.url) ? 'error' : 'follow',
+       });
+ 
+       clearTimeout(timeoutId);
+@@ -240,6 +245,8 @@ export async function sendTestWebhook(
      'Content-Type': 'application/json',
      'User-Agent': 'IntuneGet-Webhook/1.0',
      ...webhook.headers,
@@ -204,3 +256,12 @@ index 3df9b2a22..0f418cf20 100644
    };
  
    if (webhook.secret) {
+@@ -255,6 +262,8 @@ export async function sendTestWebhook(
+       headers,
+       body: payloadString,
+       signal: controller.signal,
++      // HRM patch: a signed request must not follow a redirect elsewhere
++      redirect: isSignedWebhookUrl(webhook.url) ? 'error' : 'follow',
+     });
+ 
+     clearTimeout(timeoutId);

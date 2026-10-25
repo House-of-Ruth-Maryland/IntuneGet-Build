@@ -1,17 +1,76 @@
 diff --git a/lib/qa/gate.test.ts b/lib/qa/gate.test.ts
-index 3ed95dfdc..bfcf3b6c6 100644
+index 3ed95dfdc..7d81705c1 100644
 --- a/lib/qa/gate.test.ts
 +++ b/lib/qa/gate.test.ts
-@@ -16,6 +16,7 @@ vi.mock('@/lib/catalog', () => ({
+@@ -6,7 +6,9 @@ const {
+   getPackageCompatibilityBlockMock,
+   getPackageResultMock,
+   packageEqMock,
++  supabaseConfiguredMock,
+ } = vi.hoisted(() => ({
++  supabaseConfiguredMock: vi.fn(() => true),
+   getQaResultMock: vi.fn(),
+   getPackageCompatibilityBlockMock: vi.fn(),
+   getPackageResultMock: vi.fn(),
+@@ -16,6 +18,7 @@ vi.mock('@/lib/catalog', () => ({
    getCatalogSource: () => ({ getQaResult: getQaResultMock }),
  }));
  vi.mock('@/lib/supabase', () => ({
-+  isSupabaseServerConfigured: () => true,
++  isSupabaseServerConfigured: supabaseConfiguredMock,
    createServerClient: () => ({
      from: () => {
        const builder: Record<string, unknown> = {};
+@@ -94,6 +97,7 @@ const failedRow = {
+ 
+ describe('enforceQaGate', () => {
+   beforeEach(() => {
++    supabaseConfiguredMock.mockReturnValue(true);
+     getQaResultMock.mockReset();
+     getPackageCompatibilityBlockMock.mockReset();
+     getPackageCompatibilityBlockMock.mockResolvedValue(null);
+@@ -935,3 +939,40 @@ describe('enforceQaGate', () => {
+     ).rejects.toBeInstanceOf(QaGateNotPassedError);
+   });
+ });
++
++describe('enforceQaGate without Supabase (HRM self-hosted SQLite)', () => {
++  const request = { wingetId: 'OpenJS.NodeJS', version: '26.7.0', architecture: 'x64', installerSha256, packageProfileSha256 };
++  beforeEach(() => {
++    supabaseConfiguredMock.mockReturnValue(false);
++    getQaResultMock.mockReset();
++    getPackageResultMock.mockReset();
++    getPackageCompatibilityBlockMock.mockReset();
++  });
++
++  it('never queries Supabase', async () => {
++    getQaResultMock.mockResolvedValue({ ...failedRow, outcome: 'Passed' });
++    await expect(enforceQaGate(request)).resolves.toBeUndefined();
++    expect(getPackageResultMock).not.toHaveBeenCalled();
++    expect(getPackageCompatibilityBlockMock).not.toHaveBeenCalled();
++  });
++
++  it('blocks a version the catalog snapshot marks malicious, even with an override', async () => {
++    getQaResultMock.mockResolvedValue({ ...failedRow, outcome: 'Passed', virustotal_malicious: 3 });
++    await expect(enforceQaGate(request)).rejects.toBeInstanceOf(QaSecurityGateError);
++    await expect(enforceQaGate({ ...request, qaOverride: true })).rejects.toBeInstanceOf(QaSecurityGateError);
++  });
++
++  it('blocks a version whose snapshot test failed unless overridden', async () => {
++    getQaResultMock.mockResolvedValue(failedRow);
++    await expect(enforceQaGate(request)).rejects.toBeInstanceOf(QaGateError);
++    await expect(enforceQaGate({ ...request, qaOverride: true })).resolves.toBeUndefined();
++    await expect(enforceQaGate({ ...request, qaOverride: true, requirePassed: true })).rejects.toBeInstanceOf(QaGateError);
++  });
++
++  it('allows versions the snapshot has no verdict for', async () => {
++    getQaResultMock.mockResolvedValue(null);
++    await expect(enforceQaGate(request)).resolves.toBeUndefined();
++    getQaResultMock.mockResolvedValue({ ...failedRow, tested_version: '26.6.0' });
++    await expect(enforceQaGate(request)).resolves.toBeUndefined();
++  });
++});
 diff --git a/lib/qa/gate.ts b/lib/qa/gate.ts
-index b1e23e910..3abc162bb 100644
+index b1e23e910..185f88701 100644
 --- a/lib/qa/gate.ts
 +++ b/lib/qa/gate.ts
 @@ -2,7 +2,7 @@ import { getCatalogSource } from '@/lib/catalog';
@@ -23,15 +82,46 @@ index b1e23e910..3abc162bb 100644
  import {
    getPackageCompatibilityBlock,
    type PackageCompatibilityBlockCode,
-@@ -157,6 +157,11 @@ export async function enforceQaGate(input: {
+@@ -157,6 +157,15 @@ export async function enforceQaGate(input: {
    }
    if (input.sourceType === 'custom') return;
  
-+  // HRM patch: self-hosted SQLite installs have no QA results store, so there is
-+  // nothing to check against; without this, GitHub-mode dispatch throws
-+  // "Supabase URL and service role key are required".
-+  if (!isSupabaseServerConfigured()) return;
++  // HRM patch: self-hosted SQLite installs have no Supabase QA results store, so
++  // the Supabase checks below would throw. Still apply the catalog snapshot's
++  // verdict: a malicious VirusTotal result blocks even with an installability
++  // override (as the Supabase security gate does), a failed test respects it.
++  if (!isSupabaseServerConfigured()) {
++    await enforceCatalogQaVerdict(input, { allowFailedOutcome: Boolean(input.qaOverride && !input.requirePassed) });
++    return;
++  }
 +
    const architecture = (input.architecture || 'x64').toLowerCase();
    const installerSha256 = input.installerSha256?.trim().toUpperCase() || '';
    const packageProfileSha256 = input.packageProfileSha256?.trim().toUpperCase() || '';
+@@ -285,6 +294,17 @@ export async function enforceQaGate(input: {
+     });
+   }
+ 
++  await enforceCatalogQaVerdict(input, { allowFailedOutcome: false });
++}
++
++/**
++ * Apply the catalog snapshot's QA verdict for this exact version and
++ * architecture (HRM patch: shared with the SQLite path above).
++ */
++async function enforceCatalogQaVerdict(
++  input: { wingetId: string; version: string; architecture?: string },
++  options: { allowFailedOutcome: boolean }
++): Promise<void> {
+   const row = await getCatalogSource().getQaResult(input.wingetId);
+ 
+   if (
+@@ -306,7 +326,7 @@ export async function enforceQaGate(input: {
+     });
+   }
+ 
+-  if (row.outcome !== 'Failed') return;
++  if (row.outcome !== 'Failed' || options.allowFailedOutcome) return;
+ 
+   throw new QaGateError({
+     wingetId: row.winget_id,
