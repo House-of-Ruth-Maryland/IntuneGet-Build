@@ -1,0 +1,560 @@
+diff --git a/app/api/package/callback/route.ts b/app/api/package/callback/route.ts
+index 3ea3af3fe..da5ba5c14 100644
+--- a/app/api/package/callback/route.ts
++++ b/app/api/package/callback/route.ts
+@@ -9,6 +9,7 @@ import { getDatabase } from '@/lib/db';
+ import { verifyCallbackSignature } from '@/lib/callback-signature';
+ import { onJobCompleted } from '@/lib/msp/batch-orchestrator';
+ import { handleAutoUpdateJobCompletion } from '@/lib/auto-update/cleanup';
++import { notifyDeploymentWebhooks } from '@/lib/notifications/notify-deployment';
+ import { ensureUpdatePolicy, parseCartUpdatePolicy } from '@/lib/update-policies/ensure-policy';
+ import { quarantineInstaller } from '@/lib/installer-preflight';
+ import {
+@@ -214,6 +215,14 @@ export async function POST(request: NextRequest) {
+       }
+     }
+ 
++    // HRM patch: post deployment results to the configured webhooks. Runs
++    // after the state transition, so a repeated callback can't post twice.
++    if (data.status === 'deployed' || data.status === 'failed') {
++      notifyDeploymentWebhooks(updatedJob).catch((err) => {
++        console.error('[Callback] Deployment webhook error:', err);
++      });
++    }
++
+     // Check if this job belongs to a batch deployment item.
+     if (data.status === 'deployed' || data.status === 'failed' || data.status === 'duplicate_skipped') {
+       const jobStatus = data.status === 'failed' ? 'failed' : 'completed';
+diff --git a/app/api/package/callback/route.webhooks.test.ts b/app/api/package/callback/route.webhooks.test.ts
+new file mode 100644
+index 000000000..a5f117723
+--- /dev/null
++++ b/app/api/package/callback/route.webhooks.test.ts
+@@ -0,0 +1,66 @@
++import { NextRequest } from 'next/server';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++
++const mocks = vi.hoisted(() => ({ getById: vi.fn(), update: vi.fn(), notify: vi.fn() }));
++vi.mock('@/lib/db', () => ({
++  getDatabase: () => ({ jobs: { getById: mocks.getById, update: mocks.update }, uploadHistory: { create: vi.fn().mockResolvedValue({}) } }),
++}));
++vi.mock('@/lib/callback-signature', () => ({ verifyCallbackSignature: () => true }));
++vi.mock('@/lib/msp/batch-orchestrator', () => ({ onJobCompleted: vi.fn().mockResolvedValue(undefined) }));
++vi.mock('@/lib/auto-update/cleanup', () => ({ handleAutoUpdateJobCompletion: vi.fn().mockResolvedValue(undefined) }));
++vi.mock('@/lib/update-policies/ensure-policy', () => ({ parseCartUpdatePolicy: () => null, ensureUpdatePolicy: vi.fn() }));
++vi.mock('@/lib/installer-preflight', () => ({ quarantineInstaller: vi.fn() }));
++vi.mock('@/lib/notifications/notify-deployment', () => ({ notifyDeploymentWebhooks: mocks.notify }));
++
++import { POST } from './route';
++
++const JOB_ID = '6f1b4f0e-2c1a-4b7e-9f4a-0d3c2b1a0e9f';
++const callback = (body: Record<string, unknown>) =>
++  new NextRequest('http://localhost/api/package/callback', { method: 'POST', body: JSON.stringify({ jobId: JOB_ID, ...body }), headers: { 'X-Signature': 'fixture' } });
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  process.env.CALLBACK_SECRET = 'fixture-secret';
++  mocks.getById.mockResolvedValue({ id: JOB_ID, status: 'uploading', updated_at: '2026-10-24T20:00:00.000Z', package_config: null });
++  mocks.update.mockImplementation(async (_id: string, data: Record<string, unknown>) => ({ id: JOB_ID, ...data }));
++  mocks.notify.mockResolvedValue({ webhooksSent: 1, errors: [] });
++});
++
++describe('package callback deployment webhooks', () => {
++  it('notifies once for a deployed job, with the saved job', async () => {
++    const response = await POST(callback({ status: 'deployed', intuneAppId: 'app-1', intuneAppUrl: 'https://intune.example.test/app/1' }));
++    expect(response.status).toBe(200);
++    expect(mocks.notify).toHaveBeenCalledTimes(1);
++    expect(mocks.notify.mock.calls[0][0]).toMatchObject({ id: JOB_ID, status: 'deployed', intune_app_url: 'https://intune.example.test/app/1' });
++  });
++
++  it('notifies once for a failed job', async () => {
++    await POST(callback({ status: 'failed', message: 'Graph upload timed out', errorStage: 'upload' }));
++    expect(mocks.notify).toHaveBeenCalledTimes(1);
++    expect(mocks.notify.mock.calls[0][0]).toMatchObject({ status: 'failed', error_message: 'Graph upload timed out' });
++  });
++
++  it('does not notify for progress or duplicate_skipped callbacks', async () => {
++    await POST(callback({ status: 'uploading', progress: 50 }));
++    await POST(callback({ status: 'duplicate_skipped', intuneAppId: 'app-1' }));
++    expect(mocks.notify).not.toHaveBeenCalled();
++  });
++
++  it('does not notify again when a finished job gets a repeated callback', async () => {
++    mocks.getById.mockResolvedValue({ id: JOB_ID, status: 'deployed', updated_at: '2026-10-24T20:00:00.000Z', package_config: null });
++    const body = await (await POST(callback({ status: 'deployed', intuneAppId: 'app-1' }))).json();
++    expect(body.ignored).toBe(true);
++    expect(mocks.notify).not.toHaveBeenCalled();
++  });
++
++  it('answers the workflow normally when webhook delivery fails', async () => {
++    mocks.notify.mockRejectedValue(new Error('network down'));
++    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
++    const response = await POST(callback({ status: 'deployed', intuneAppId: 'app-1' }));
++    expect(response.status).toBe(200);
++    expect((await response.json()).success).toBe(true);
++    await new Promise((resolve) => setTimeout(resolve, 0));
++    expect(errorLog).toHaveBeenCalledWith('[Callback] Deployment webhook error:', expect.any(Error));
++    errorLog.mockRestore();
++  });
++});
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 222c4b0ea..c5d4db318 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -239,6 +239,10 @@ export const sqliteWebhooks = {
+   async listEnabled(userId: string): Promise<WebhookConfiguration[]> {
+     return getDb().prepare('SELECT * FROM webhook_configurations WHERE user_id = ? AND is_enabled = 1 ORDER BY created_at, id').all(userId).map(webhookRow);
+   },
++  /** Every enabled webhook on this server, whoever owns it (deployment results). */
++  async listAllEnabled(): Promise<WebhookConfiguration[]> {
++    return getDb().prepare('SELECT * FROM webhook_configurations WHERE is_enabled = 1 ORDER BY created_at, id').all().map(webhookRow);
++  },
+   /** Detected updates not yet notified or dismissed, newest first. */
+   async listPendingUpdates(userId: string): Promise<UpdateCheckResult[]> {
+     return (getDb()
+diff --git a/lib/notifications/notify-deployment.test.ts b/lib/notifications/notify-deployment.test.ts
+new file mode 100644
+index 000000000..65bb12283
+--- /dev/null
++++ b/lib/notifications/notify-deployment.test.ts
+@@ -0,0 +1,54 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import type { PackagingJob } from '@/lib/db/types';
++import type { WebhookConfiguration } from '@/types/notifications';
++
++const mocks = vi.hoisted(() => ({ deliver: vi.fn(), sqliteMode: vi.fn() }));
++vi.mock('@/lib/webhooks/service', () => ({ deliverFormattedWebhook: mocks.deliver }));
++vi.mock('@/lib/db', () => ({ isSqliteMode: mocks.sqliteMode }));
++
++import { notifyDeploymentWebhooks } from './notify-deployment';
++
++const webhook = (id: string, user: string, type: WebhookConfiguration['webhook_type'] = 'teams') =>
++  ({ id, user_id: user, name: `Hook ${id}`, url: `https://hooks.example.test/${id}`, webhook_type: type, secret: null, headers: {}, is_enabled: true, failure_count: 0 }) as unknown as WebhookConfiguration;
++const job = (status: string) => ({ id: 'job-1', status, display_name: 'Example App', winget_id: 'Example.App', version: '1.0', user_email: 'attorney.one@example.test' }) as PackagingJob;
++const store = (hooks: WebhookConfiguration[]) => ({ listAllEnabled: vi.fn().mockResolvedValue(hooks), recordResult: vi.fn().mockResolvedValue(undefined) });
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.sqliteMode.mockReturnValue(true);
++  mocks.deliver.mockResolvedValue({ success: true });
++});
++
++describe('notifyDeploymentWebhooks', () => {
++  it('sends to every enabled webhook across users and records each result', async () => {
++    const hooks = [webhook('a', 'user-1'), webhook('b', 'user-2', 'slack')];
++    const s = store(hooks);
++    mocks.deliver.mockResolvedValueOnce({ success: true }).mockResolvedValueOnce({ success: false, error: 'HTTP 404' });
++    const summary = await notifyDeploymentWebhooks(job('deployed'), s);
++    expect(mocks.deliver).toHaveBeenCalledTimes(2);
++    expect(mocks.deliver.mock.calls[0][1]).toMatchObject({ type: 'message' });
++    expect(mocks.deliver.mock.calls[1][1]).toHaveProperty('blocks');
++    expect(s.recordResult).toHaveBeenNthCalledWith(1, 'a', true);
++    expect(s.recordResult).toHaveBeenNthCalledWith(2, 'b', false);
++    expect(summary).toEqual({ webhooksSent: 1, errors: ['Webhook Hook b failed: HTTP 404'] });
++  });
++
++  it('sends failed jobs too', async () => {
++    const s = store([webhook('a', 'user-1')]);
++    await notifyDeploymentWebhooks(job('failed'), s);
++    expect(mocks.deliver).toHaveBeenCalledTimes(1);
++  });
++
++  it('ignores other statuses', async () => {
++    const s = store([webhook('a', 'user-1')]);
++    for (const status of ['duplicate_skipped', 'cancelled', 'packaging']) await notifyDeploymentWebhooks(job(status), s);
++    expect(s.listAllEnabled).not.toHaveBeenCalled();
++    expect(mocks.deliver).not.toHaveBeenCalled();
++  });
++
++  it('does nothing in hosted (Supabase) mode', async () => {
++    mocks.sqliteMode.mockReturnValue(false);
++    expect(await notifyDeploymentWebhooks(job('deployed'))).toEqual({ webhooksSent: 0, errors: [] });
++    expect(mocks.deliver).not.toHaveBeenCalled();
++  });
++});
+diff --git a/lib/notifications/notify-deployment.ts b/lib/notifications/notify-deployment.ts
+new file mode 100644
+index 000000000..c89bb0d29
+--- /dev/null
++++ b/lib/notifications/notify-deployment.ts
+@@ -0,0 +1,53 @@
++/**
++ * Deployment result webhooks for self-hosted SQLite deployments (HRM patch).
++ *
++ * When a packaging job finishes as deployed or failed, post one message to
++ * every enabled webhook on this server, whoever owns it, so a shared channel
++ * sees every deployment. SQLite mode has no tenant table, so "every webhook"
++ * assumes the server serves one Intune tenant.
++ */
++
++import { isSqliteMode } from '@/lib/db';
++import type { PackagingJob } from '@/lib/db/types';
++import type { sqliteWebhooks as SqliteWebhooks } from '@/lib/db/sqlite';
++import { formatDeploymentPayload } from '@/lib/webhooks/deployment-formatters';
++import { deliverFormattedWebhook } from '@/lib/webhooks/service';
++
++export type DeploymentWebhookStore = Pick<typeof SqliteWebhooks, 'listAllEnabled' | 'recordResult'>;
++
++export interface DeploymentNotifySummary {
++  webhooksSent: number;
++  errors: string[];
++}
++
++/**
++ * Send a finished job to every enabled webhook. Hosted (Supabase) mode is
++ * left to upstream's MSP deployment events.
++ */
++export async function notifyDeploymentWebhooks(
++  job: PackagingJob,
++  store?: DeploymentWebhookStore
++): Promise<DeploymentNotifySummary> {
++  const summary: DeploymentNotifySummary = { webhooksSent: 0, errors: [] };
++  if (job.status !== 'deployed' && job.status !== 'failed') return summary;
++
++  if (!store) {
++    if (!isSqliteMode()) return summary;
++    store = (await import('@/lib/db/sqlite')).sqliteWebhooks;
++  }
++
++  for (const webhook of await store.listAllEnabled()) {
++    const result = await deliverFormattedWebhook(webhook, formatDeploymentPayload(webhook.webhook_type, job));
++    await store.recordResult(webhook.id, result.success);
++    if (result.success) {
++      summary.webhooksSent++;
++    } else {
++      summary.errors.push(`Webhook ${webhook.name} failed: ${result.error}`);
++    }
++  }
++
++  if (summary.errors.length > 0) {
++    console.warn(`[Deployment webhooks] ${summary.errors.length} delivery error(s) for job ${job.id}`, summary.errors);
++  }
++  return summary;
++}
+diff --git a/lib/webhooks/deployment-formatters.test.ts b/lib/webhooks/deployment-formatters.test.ts
+new file mode 100644
+index 000000000..e0e8d8f56
+--- /dev/null
++++ b/lib/webhooks/deployment-formatters.test.ts
+@@ -0,0 +1,78 @@
++import { describe, expect, it } from 'vitest';
++import type { PackagingJob } from '@/lib/db/types';
++import { buildDeploymentData, formatDeploymentPayload } from './deployment-formatters';
++
++const job = (overrides: Partial<PackagingJob> = {}) => ({
++  id: 'job-1',
++  status: 'deployed',
++  display_name: 'Example App',
++  winget_id: 'Example.App',
++  version: '1.2.3',
++  architecture: 'x64',
++  publisher: 'Example Publisher',
++  user_email: 'attorney.one@example.test',
++  tenant_id: 'tenant-1',
++  intune_app_url: 'https://intune.example.test/app/1',
++  github_run_url: 'https://github.example.test/run/1',
++  error_message: null,
++  error_stage: null,
++  error_category: null,
++  completed_at: '2026-10-24T20:43:27.000Z',
++  ...overrides,
++}) as PackagingJob;
++
++const failed = (message: string) => job({ status: 'failed', error_message: message, error_stage: 'upload', error_category: 'intune_api' });
++
++describe('deployment webhook formatters', () => {
++  it('builds a completed event with the Intune link', () => {
++    const event = buildDeploymentData(job());
++    expect(event.event_type).toBe('deployment.completed');
++    expect(event.timestamp).toBe('2026-10-24T20:43:27.000Z');
++    expect(event.data).toMatchObject({ winget_id: 'Example.App', deployed_by: 'attorney.one@example.test', intune_app_url: 'https://intune.example.test/app/1', error: null });
++  });
++
++  it('builds a failed event with a truncated error and no Intune link', () => {
++    const event = buildDeploymentData(failed('x'.repeat(500)));
++    expect(event.event_type).toBe('deployment.failed');
++    expect(event.data.intune_app_url).toBeNull();
++    expect(event.data.error).toMatchObject({ stage: 'upload', category: 'intune_api' });
++    expect(event.data.error!.message).toHaveLength(301);
++  });
++
++  it('formats a Teams Adaptive Card, green for deployed and red for failed', () => {
++    const ok = formatDeploymentPayload('teams', job()) as any;
++    expect(ok.type).toBe('message');
++    const card = ok.attachments[0].content;
++    expect(ok.attachments[0].contentType).toBe('application/vnd.microsoft.card.adaptive');
++    expect(card.body[0]).toMatchObject({ text: 'Deployed: Example App 1.2.3', color: 'Good' });
++    expect(card.body[1].facts).toContainEqual({ title: 'Deployed by', value: 'attorney.one@example.test' });
++    expect(card.actions.map((a: any) => a.title)).toEqual(['Open in Intune', 'View GitHub run']);
++
++    const bad = (formatDeploymentPayload('teams', failed('Graph upload timed out')) as any).attachments[0].content;
++    expect(bad.body[0]).toMatchObject({ text: 'Failed: Example App 1.2.3', color: 'Attention' });
++    expect(bad.body[2].text).toBe('Stage: upload · Category: intune_api\nGraph upload timed out');
++    expect(bad.actions.map((a: any) => a.title)).toEqual(['View GitHub run']);
++  });
++
++  it('formats Slack blocks and escapes control characters', () => {
++    const payload = formatDeploymentPayload('slack', job({ winget_id: 'A<B>&C' })) as any;
++    expect(payload.blocks[0].text.text).toBe('Deployed: Example App 1.2.3');
++    expect(payload.blocks[1].fields[0].text).toBe('*App*\nA&lt;B&gt;&amp;C');
++    expect(payload.blocks.at(-1).elements[0].text).toContain('<https://intune.example.test/app/1|Open in Intune>');
++  });
++
++  it('formats a Discord embed coloured by result', () => {
++    const ok = (formatDeploymentPayload('discord', job()) as any).embeds[0];
++    const bad = (formatDeploymentPayload('discord', failed('boom')) as any).embeds[0];
++    expect(ok.url).toBe('https://intune.example.test/app/1');
++    expect(ok.color).not.toBe(bad.color);
++    expect(bad.fields.find((f: any) => f.name === 'Error').value).toContain('boom');
++  });
++
++  it('sends plain JSON to custom webhooks and omits missing links', () => {
++    const payload = formatDeploymentPayload('custom', job({ intune_app_url: null, github_run_url: null })) as any;
++    expect(payload.event_type).toBe('deployment.completed');
++    const card = (formatDeploymentPayload('teams', job({ intune_app_url: null, github_run_url: null })) as any).attachments[0].content;
++    expect(card.actions).toEqual([]);
++  });
++});
+diff --git a/lib/webhooks/deployment-formatters.ts b/lib/webhooks/deployment-formatters.ts
+new file mode 100644
+index 000000000..03477b6eb
+--- /dev/null
++++ b/lib/webhooks/deployment-formatters.ts
+@@ -0,0 +1,205 @@
++/**
++ * Deployment Result Formatters (HRM patch)
++ * Format one finished packaging job (deployed or failed) for each webhook
++ * platform. Only app details, the deploying staff member, links and the
++ * error summary are sent.
++ */
++
++import type { PackagingJob } from '@/lib/db/types';
++import type { WebhookType } from '@/types/notifications';
++
++export type DeploymentEventType = 'deployment.completed' | 'deployment.failed';
++
++export interface DeploymentWebhookData {
++  event_type: DeploymentEventType;
++  timestamp: string;
++  data: {
++    job_id: string;
++    display_name: string;
++    winget_id: string;
++    version: string;
++    architecture: string | null;
++    publisher: string | null;
++    deployed_by: string | null;
++    tenant_id: string | null;
++    intune_app_url: string | null;
++    github_run_url: string | null;
++    error: { stage: string | null; category: string | null; message: string } | null;
++  };
++}
++
++const ERROR_TEXT_LIMIT = 300;
++const DISCORD_SUCCESS_COLOR = 0x22c55e;
++const DISCORD_FAILURE_COLOR = 0xdc2626;
++
++function truncate(text: string, limit: number): string {
++  return text.length > limit ? `${text.slice(0, limit)}…` : text;
++}
++
++function formatTime(iso: string): string {
++  return `${iso.replace('T', ' ').slice(0, 16)} UTC`;
++}
++
++// Slack mrkdwn treats &, < and > as control characters.
++function escapeSlack(text: string): string {
++  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
++}
++
++/**
++ * Build the machine-readable event for a finished job
++ */
++export function buildDeploymentData(job: PackagingJob): DeploymentWebhookData {
++  const failed = job.status === 'failed';
++  return {
++    event_type: failed ? 'deployment.failed' : 'deployment.completed',
++    timestamp: job.completed_at || new Date().toISOString(),
++    data: {
++      job_id: job.id,
++      display_name: job.display_name,
++      winget_id: job.winget_id,
++      version: job.version,
++      architecture: job.architecture,
++      publisher: job.publisher,
++      deployed_by: job.user_email,
++      tenant_id: job.tenant_id,
++      intune_app_url: failed ? null : job.intune_app_url,
++      github_run_url: job.github_run_url,
++      error: failed
++        ? {
++            stage: job.error_stage,
++            category: job.error_category,
++            message: truncate(job.error_message || 'Unknown error', ERROR_TEXT_LIMIT),
++          }
++        : null,
++    },
++  };
++}
++
++function title(event: DeploymentWebhookData): string {
++  const { display_name, version } = event.data;
++  return `${event.event_type === 'deployment.failed' ? 'Failed' : 'Deployed'}: ${display_name} ${version}`;
++}
++
++function facts(event: DeploymentWebhookData): Array<{ title: string; value: string }> {
++  const { data } = event;
++  const list = [
++    { title: 'App', value: data.winget_id },
++    { title: 'Version', value: data.version },
++  ];
++  if (data.architecture) list.push({ title: 'Architecture', value: data.architecture });
++  list.push({ title: 'Deployed by', value: data.deployed_by || 'Unknown' });
++  list.push({ title: 'Time', value: formatTime(event.timestamp) });
++  return list;
++}
++
++function errorLine(event: DeploymentWebhookData): string | null {
++  const error = event.data.error;
++  if (!error) return null;
++  const where = [error.stage && `Stage: ${error.stage}`, error.category && `Category: ${error.category}`]
++    .filter(Boolean)
++    .join(' · ');
++  return where ? `${where}\n${error.message}` : error.message;
++}
++
++function links(event: DeploymentWebhookData): Array<{ label: string; url: string }> {
++  const list: Array<{ label: string; url: string }> = [];
++  if (event.data.intune_app_url) list.push({ label: 'Open in Intune', url: event.data.intune_app_url });
++  if (event.data.github_run_url) list.push({ label: 'View GitHub run', url: event.data.github_run_url });
++  return list;
++}
++
++/**
++ * Format a deployment result for Microsoft Teams (Adaptive Card, as Teams
++ * Workflows expects)
++ */
++export function formatTeamsDeployment(event: DeploymentWebhookData) {
++  const failed = event.event_type === 'deployment.failed';
++  const error = errorLine(event);
++  const body: unknown[] = [
++    { type: 'TextBlock', text: title(event), size: 'Large', weight: 'Bolder', color: failed ? 'Attention' : 'Good', wrap: true },
++    { type: 'FactSet', facts: facts(event) },
++  ];
++  if (error) body.push({ type: 'TextBlock', text: error, wrap: true, color: 'Attention' });
++
++  return {
++    type: 'message',
++    data: event,
++    attachments: [
++      {
++        contentType: 'application/vnd.microsoft.card.adaptive',
++        content: {
++          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
++          type: 'AdaptiveCard',
++          version: '1.4',
++          body,
++          actions: links(event).map((link) => ({ type: 'Action.OpenUrl', title: link.label, url: link.url })),
++        },
++      },
++    ],
++  };
++}
++
++/**
++ * Format a deployment result for Slack
++ */
++export function formatSlackDeployment(event: DeploymentWebhookData) {
++  const error = errorLine(event);
++  const blocks: unknown[] = [
++    { type: 'header', text: { type: 'plain_text', text: title(event), emoji: true } },
++    {
++      type: 'section',
++      fields: facts(event).map((fact) => ({ type: 'mrkdwn', text: `*${fact.title}*\n${escapeSlack(fact.value)}` })),
++    },
++  ];
++  if (error) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `:x: ${escapeSlack(error)}` } });
++  const linkList = links(event);
++  if (linkList.length > 0) {
++    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: linkList.map((link) => `<${link.url}|${link.label}>`).join(' | ') }] });
++  }
++  return { data: event, blocks };
++}
++
++/**
++ * Format a deployment result for Discord
++ */
++export function formatDiscordDeployment(event: DeploymentWebhookData) {
++  const failed = event.event_type === 'deployment.failed';
++  const error = errorLine(event);
++  const fields = facts(event).map((fact) => ({ name: fact.title, value: fact.value, inline: true }));
++  if (error) fields.push({ name: 'Error', value: error, inline: false });
++  const linkList = links(event);
++  if (linkList.length > 0) {
++    fields.push({ name: 'Links', value: linkList.map((link) => `[${link.label}](${link.url})`).join(' | '), inline: false });
++  }
++  return {
++    data: event,
++    embeds: [
++      {
++        title: title(event),
++        url: event.data.intune_app_url || undefined,
++        color: failed ? DISCORD_FAILURE_COLOR : DISCORD_SUCCESS_COLOR,
++        fields,
++        footer: { text: 'IntuneGet' },
++        timestamp: event.timestamp,
++      },
++    ],
++  };
++}
++
++/**
++ * Format a finished job for the given webhook type
++ */
++export function formatDeploymentPayload(webhookType: WebhookType, job: PackagingJob): unknown {
++  const event = buildDeploymentData(job);
++  switch (webhookType) {
++    case 'slack':
++      return formatSlackDeployment(event);
++    case 'teams':
++      return formatTeamsDeployment(event);
++    case 'discord':
++      return formatDiscordDeployment(event);
++    case 'custom':
++    default:
++      return event;
++  }
++}
+diff --git a/lib/webhooks/service.ts b/lib/webhooks/service.ts
+index c9e417f8e..3df9b2a22 100644
+--- a/lib/webhooks/service.ts
++++ b/lib/webhooks/service.ts
+@@ -124,6 +124,18 @@ export async function deliverWebhook(
+   webhook: WebhookConfiguration,
+   payload: NotificationPayload,
+   options: WebhookDeliveryOptions = {}
++): Promise<WebhookDeliveryResult> {
++  return deliverFormattedWebhook(webhook, formatPayload(webhook.webhook_type, payload), options);
++}
++
++/**
++ * Deliver an already formatted body with the same retries, signature and
++ * circuit breaker as deliverWebhook (HRM patch: used for deployment results).
++ */
++export async function deliverFormattedWebhook(
++  webhook: WebhookConfiguration,
++  formattedPayload: unknown,
++  options: WebhookDeliveryOptions = {}
+ ): Promise<WebhookDeliveryResult> {
+   const opts = { ...DEFAULT_OPTIONS, ...options };
+ 
+@@ -136,8 +148,6 @@ export async function deliverWebhook(
+     };
+   }
+ 
+-  // Format payload for webhook type
+-  const formattedPayload = formatPayload(webhook.webhook_type, payload);
+   const payloadString = JSON.stringify(formattedPayload);
+ 
+   // Build headers
