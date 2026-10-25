@@ -69,6 +69,17 @@ HRM IT notes.
 - A patch change on `main` builds a new `hrm.N` and opens a Deploy PR.
 - Update the patch table in README.md and add a CHANGELOG.md entry.
 
+## Notifications
+
+- Webhooks are set up in IntuneGet under Settings → Notifications. For a Teams channel, create the URL
+  with Teams Workflows ("Post to a channel when a webhook request is received"); leave the secret
+  empty. The workflow runs as the account that created it, so use a shared IT account.
+- Update notifications (patch 0003) go to the webhook owner's webhooks after each update check.
+- Deployment results (patch 0006) go to **every** enabled webhook on the server as soon as a job
+  finishes as deployed or failed. That's correct only while the server serves one Intune tenant.
+- Messages carry app names, versions, staff emails, links and error text only; never add device,
+  user or client details to them.
+
 ## Deploys and rollback
 
 - Roll back by reverting the Deploy PR. Going to an older version restores the backup taken when the

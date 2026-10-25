@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-24
+
+- Deployment results reach Teams, Slack, Discord or custom webhooks (patch 0006): every deployed or
+  failed app posts one message with its version, who deployed it and links to Intune and the GitHub run.
+
 ## 2026-10-23
 
 - The server now upgrades itself from `deploy/version`: merging a "Deploy" PR backs up its data,
