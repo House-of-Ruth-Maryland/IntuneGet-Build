@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-27
+
+- cloudflared on the VM now updates itself nightly through apt. Its own updater had failed every
+  night because it was installed from Cloudflare's package repository. The tunnel restarts only when
+  a new version is installed.
+
 ## 2026-10-25
 
 - Discovered Apps matches against the full catalog (about 15,800 apps), not just ~90 built-in ones, so apps
