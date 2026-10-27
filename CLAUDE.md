@@ -18,6 +18,7 @@ HRM IT notes.
 | `deploy/version` | Image tag the server should run (for example `v0.8.2-hrm.1`). **Changing it on `main` deploys to production.** |
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
 | `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day. |
+| `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
 | `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: build `<tag>-hrm.<n>` and open the "Deploy" PR. |
 
@@ -122,7 +123,20 @@ git clone --depth 1 https://github.com/House-of-Ruth-Maryland/IntuneGet-Build /t
 sudo install -m 0755 deploy/intuneget-deploy.sh /usr/local/sbin/intuneget-deploy
 sudo install -m 0644 deploy/systemd/*.service deploy/systemd/*.timer /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/intuneget-deploy.default /etc/default/intuneget-deploy  # first time only; set IMAGE_REPO and APP_URL
+sudo install -m 0755 deploy/cloudflared-apt-update.sh /usr/local/sbin/cloudflared-apt-update
+sudo install -D -m 0644 deploy/systemd/cloudflared-update.service.d/apt.conf /etc/systemd/system/cloudflared-update.service.d/apt.conf
 sudo systemctl daemon-reload
+```
+
+cloudflared comes from Cloudflare's apt repository. The `cloudflared-update` timer that
+`cloudflared service install` creates runs `cloudflared update` at midnight UTC, which refuses to
+update an apt install, so the drop-in points that timer at `cloudflared-apt-update` instead. It
+updates only the cloudflared package, restarts the tunnel only when the version changed (the site is
+unreachable for a few seconds) and fails if the tunnel isn't back within two minutes. To update by
+hand and see the result:
+
+```bash
+sudo systemctl start cloudflared-update.service && journalctl -u cloudflared-update.service -n 5 --no-pager
 ```
 
 First time only, generate the cron secret on the VM. It goes into `.env.local` for the app and into a
