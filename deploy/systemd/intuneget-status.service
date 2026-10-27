@@ -1,0 +1,8 @@
+[Unit]
+Description=Write IntuneGet server status for the Home page
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/intuneget-deploy
+ExecStart=/usr/local/sbin/intuneget-status

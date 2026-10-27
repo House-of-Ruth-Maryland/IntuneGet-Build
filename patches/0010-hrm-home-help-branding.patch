@@ -1,0 +1,1903 @@
+diff --git a/app/(app)/auth/signin/SignInClient.tsx b/app/(app)/auth/signin/SignInClient.tsx
+index cf4cc155d..4d165b145 100644
+--- a/app/(app)/auth/signin/SignInClient.tsx
++++ b/app/(app)/auth/signin/SignInClient.tsx
+@@ -2,9 +2,8 @@
+ 
+ import { useRouter } from 'next/navigation';
+ import { useEffect, useState, useCallback } from 'react';
+-import Link from 'next/link';
+ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+-import { Shield, Loader2, Package, ChevronDown, Copy, Check, AlertTriangle, Users, Boxes, ArrowLeft } from 'lucide-react';
++import { Shield, Loader2, ChevronDown, Copy, Check, AlertTriangle, LifeBuoy } from 'lucide-react';
+ import dynamic from 'next/dynamic';
+ import { T, Var } from "gt-next";
+ import { VerificationSceneFallback } from '@/components/auth/verification-scene/VerificationSceneFallback';
+@@ -12,11 +11,10 @@ import { Button } from '@/components/ui/button';
+ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+ import { getAdminConsentUrl } from '@/lib/msal-config';
+ import { markOnboardingComplete, clearOnboardingCache } from '@/lib/onboarding-utils';
+-import { trackSigninClick, useLandingStats } from '@/hooks/useLandingStats';
++import { trackSigninClick } from '@/hooks/useLandingStats';
+ import { GradientOrb } from '@/components/landing/ui/GradientOrb';
+ import { GridBackground } from '@/components/landing/ui/GridBackground';
+ import { FadeIn } from '@/components/landing/animations/FadeIn';
+-import { CountUp } from '@/components/landing/animations/CountUp';
+ import { springPresets } from '@/lib/animations/variants';
+ import {
+   rememberPostAuthRedirect,
+@@ -46,7 +44,6 @@ function MicrosoftLogo({ className }: { className?: string }) {
+ 
+ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+   const { isAuthenticated, signIn, signInRedirect, signOut, getAccessToken } = useMicrosoftAuth();
+-  const { signinClicks, appsSupported } = useLandingStats();
+   const router = useRouter();
+   const shouldReduceMotion = useReducedMotion();
+   const [isSigningIn, setIsSigningIn] = useState(false);
+@@ -262,11 +259,11 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+         />
+         <div
+           className="absolute -top-24 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full"
+-          style={{ background: 'radial-gradient(circle, rgba(8, 145, 178, 0.22) 0%, transparent 68%)' }}
++          style={{ background: 'radial-gradient(circle, rgba(103, 48, 144, 0.22) 0%, transparent 68%)' }}
+         />
+         <div
+           className="absolute bottom-[-180px] right-[-140px] h-[420px] w-[420px] rounded-full"
+-          style={{ background: 'radial-gradient(circle, rgba(124, 58, 237, 0.16) 0%, transparent 70%)' }}
++          style={{ background: 'radial-gradient(circle, rgba(90, 131, 140, 0.16) 0%, transparent 70%)' }}
+         />
+       </div>
+ 
+@@ -293,7 +290,7 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+         <div
+           className="absolute left-[-12%] right-[-8%] top-[28%] h-72 -rotate-3 pointer-events-none"
+           style={{
+-            background: 'linear-gradient(90deg, transparent 0%, rgba(8, 145, 178, 0.13) 18%, rgba(124, 58, 237, 0.1) 52%, transparent 86%)',
++            background: 'linear-gradient(90deg, transparent 0%, rgba(103, 48, 144, 0.13) 18%, rgba(90, 131, 140, 0.1) 52%, transparent 86%)',
+           }}
+         />
+         <div
+@@ -330,13 +327,11 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+             <div className="mb-7 flex items-center gap-4">
+               <div className="relative">
+                 <div className="absolute -inset-3 rounded-2xl bg-accent-cyan/20 blur-2xl" />
+-                <div className="relative flex h-14 w-14 items-center justify-center rounded-xl border border-white/20 bg-gradient-to-br from-accent-cyan to-accent-violet shadow-glow-cyan">
+-                  <Package className="h-7 w-7 text-white" />
+-                </div>
++                <img src="/favicon.svg" alt="" className="relative h-14 w-14 rounded-xl" />
+               </div>
+               <div>
+                 <h1 className="text-2xl font-bold text-text-primary"><T>IntuneGet</T></h1>
+-                <p className="text-sm font-medium text-text-muted"><T>Winget for Intune</T></p>
++                <p className="text-sm font-medium text-text-muted">House of Ruth Maryland</p>
+               </div>
+             </div>
+           </FadeIn>
+@@ -348,15 +343,14 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+             animate={{ opacity: 1, scale: 1, y: 0 }}
+             transition={{ duration: 0.5, delay: 0.05, ease: [0.25, 0.46, 0.45, 0.94] }}
+           >
+-            <span className="gradient-text-cyan"><T><Var>{appsSupported.toLocaleString()}</Var> Apps.</T></span>
++            <span className="gradient-text-cyan">App deployments</span>
+             <br />
+-            <span className="text-text-primary"><T>One Click.</T></span>
++            <span className="text-text-primary">for HRM computers</span>
+           </motion.h2>
+ 
+           <FadeIn animateOnMount delay={0.1}>
+             <p className="mb-6 max-w-md text-lg leading-relaxed text-text-secondary">
+-              <T>Deploy Win32 applications to Microsoft Intune with ease.
+-              Search Winget, configure, and upload in minutes.</T>
++              Deploy and update the apps on HRM computers through Intune.
+             </p>
+           </FadeIn>
+ 
+@@ -367,75 +361,13 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+             <div className="h-px w-16 bg-gradient-to-r from-accent-violet/35 to-transparent" />
+           </div>
+ 
+-          {/* Trust stats */}
+-          <FadeIn animateOnMount delay={0.15}>
+-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted"><T>Trusted by IT admins</T></p>
+-            <div className="flex flex-wrap gap-3">
+-              <motion.div
+-                whileHover={shouldReduceMotion ? {} : { y: -4 }}
+-                transition={springPresets.snappy}
+-                className="group relative flex min-w-[176px] items-center gap-3 overflow-hidden rounded-xl border border-accent-cyan/20 bg-bg-elevated/75 p-3.5 shadow-soft-md backdrop-blur-md transition-colors hover:border-accent-cyan/35"
+-              >
+-                <div
+-                  className="absolute inset-y-0 left-0 w-1 bg-accent-cyan"
+-                  aria-hidden="true"
+-                />
+-                <div
+-                  className="absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+-                  style={{ background: 'linear-gradient(135deg, rgba(8, 145, 178, 0.08), transparent 58%)' }}
+-                  aria-hidden="true"
+-                />
+-                <div className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-accent-cyan/20 bg-accent-cyan/10">
+-                  <Users className="h-5 w-5 text-accent-cyan" />
+-                </div>
+-                <div className="relative">
+-                  <p className="gradient-text-cyan text-2xl font-extrabold leading-none">
+-                    <CountUp end={signinClicks} suffix="+" duration={1.5} delay={0.3} />
+-                  </p>
+-                  <p className="mt-1 text-sm font-medium text-text-muted"><T>Admins</T></p>
+-                </div>
+-              </motion.div>
+-              <motion.div
+-                whileHover={shouldReduceMotion ? {} : { y: -4 }}
+-                transition={springPresets.snappy}
+-                className="group relative flex min-w-[176px] items-center gap-3 overflow-hidden rounded-xl border border-accent-violet/20 bg-bg-elevated/75 p-3.5 shadow-soft-md backdrop-blur-md transition-colors hover:border-accent-violet/35"
+-              >
+-                <div
+-                  className="absolute inset-y-0 left-0 w-1 bg-accent-violet"
+-                  aria-hidden="true"
+-                />
+-                <div
+-                  className="absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+-                  style={{ background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.08), transparent 58%)' }}
+-                  aria-hidden="true"
+-                />
+-                <div className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-accent-violet/20 bg-accent-violet/10">
+-                  <Boxes className="h-5 w-5 text-accent-violet" />
+-                </div>
+-                <div className="relative">
+-                  <p className="gradient-text-violet text-2xl font-extrabold leading-none">
+-                    <CountUp end={appsSupported} suffix="+" duration={1.5} delay={0.4} />
+-                  </p>
+-                  <p className="mt-1 text-sm font-medium text-text-muted"><T>Apps available</T></p>
+-                </div>
+-              </motion.div>
+-            </div>
+-          </FadeIn>
+-
+-          {/* Multi-tenant badge */}
+-          <FadeIn animateOnMount delay={0.2}>
+-            <div className="mt-5 inline-flex w-fit items-center gap-2 rounded-full border border-emerald-500/20 bg-bg-elevated/60 px-3 py-2 text-sm font-medium text-text-secondary shadow-soft backdrop-blur-md">
+-              <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_14px_rgba(16,185,129,0.45)]" />
+-              <span><T>Multi-tenant support - works with any Entra ID tenant</T></span>
+-            </div>
+-          </FadeIn>
+         </div>
+ 
+         {/* Cyan glow accent along divider */}
+         <div
+           className="absolute top-0 right-0 bottom-0 w-px pointer-events-none"
+           style={{
+-            background: 'linear-gradient(to bottom, transparent 8%, rgba(8, 145, 178, 0.42) 34%, rgba(124, 58, 237, 0.28) 58%, transparent 90%)',
++            background: 'linear-gradient(to bottom, transparent 8%, rgba(103, 48, 144, 0.42) 34%, rgba(90, 131, 140, 0.28) 58%, transparent 90%)',
+           }}
+         />
+       </div>
+@@ -460,11 +392,11 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+           />
+           <div
+             className="absolute left-1/2 top-[44%] h-[680px] w-[680px] -translate-x-1/2 -translate-y-1/3 rounded-full"
+-            style={{ background: 'radial-gradient(circle, rgba(8, 145, 178, 0.12) 0%, rgba(124, 58, 237, 0.06) 38%, transparent 68%)' }}
++            style={{ background: 'radial-gradient(circle, rgba(103, 48, 144, 0.12) 0%, rgba(90, 131, 140, 0.06) 38%, transparent 68%)' }}
+           />
+           <div
+             className="absolute bottom-[-260px] left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full lg:hidden"
+-            style={{ background: 'radial-gradient(circle, rgba(124, 58, 237, 0.14) 0%, transparent 68%)' }}
++            style={{ background: 'radial-gradient(circle, rgba(90, 131, 140, 0.14) 0%, transparent 68%)' }}
+           />
+         </div>
+ 
+@@ -473,30 +405,17 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+           <FadeIn animateOnMount className="mb-7 flex flex-col items-center rounded-2xl border border-overlay/10 bg-bg-elevated/70 px-5 py-4 shadow-soft-md backdrop-blur-md lg:hidden">
+             <div className="relative mb-4">
+               <div className="absolute -inset-4 rounded-2xl bg-accent-cyan/25 blur-2xl" />
+-              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-white/20 bg-gradient-to-br from-accent-cyan to-accent-violet shadow-glow-cyan">
+-                <Package className="h-8 w-8 text-white" />
+-              </div>
++              <img src="/favicon.svg" alt="" className="relative h-16 w-16 rounded-2xl" />
+             </div>
+             <h1 className="text-2xl font-bold text-text-primary"><T>IntuneGet</T></h1>
+-            <p className="text-sm font-medium text-text-muted"><T>Winget for Intune</T></p>
+-            {/* Mobile trust strip */}
+-            <div className="mt-4 flex w-full items-center justify-center gap-2 text-xs font-medium text-text-secondary">
+-              <span className="flex items-center gap-1.5 rounded-full border border-accent-cyan/20 bg-accent-cyan/10 px-2.5 py-1">
+-                <Users className="h-3 w-3 text-accent-cyan" />
+-                <T><Var>{signinClicks.toLocaleString()}</Var>+ admins</T>
+-              </span>
+-              <span className="flex items-center gap-1.5 rounded-full border border-accent-violet/20 bg-accent-violet/10 px-2.5 py-1">
+-                <Boxes className="h-3 w-3 text-accent-violet" />
+-                <T><Var>{appsSupported.toLocaleString()}</Var>+ apps</T>
+-              </span>
+-            </div>
++            <p className="text-sm font-medium text-text-muted">House of Ruth Maryland</p>
+           </FadeIn>
+ 
+           {/* Sign in card */}
+           <motion.div
+             className="relative rounded-[1.35rem] bg-gradient-to-br from-accent-cyan/35 via-overlay/10 to-accent-violet/30 p-px"
+             style={{
+-              boxShadow: '0 24px 70px rgba(8, 145, 178, 0.14), 0 10px 28px rgb(var(--overlay) / 0.08)',
++              boxShadow: '0 24px 70px rgba(103, 48, 144, 0.14), 0 10px 28px rgb(var(--overlay) / 0.08)',
+             }}
+             initial={false}
+             animate={{ opacity: 1, y: 0, scale: 1 }}
+@@ -505,19 +424,19 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+             <div className="relative overflow-hidden rounded-[1.28rem] border border-white/10 bg-bg-elevated/95 backdrop-blur-xl">
+               <div
+                 className="absolute inset-x-0 top-0 h-1.5"
+-                style={{ background: 'linear-gradient(90deg, rgba(8, 145, 178, 0.95), rgba(124, 58, 237, 0.85), rgba(8, 145, 178, 0.55))' }}
++                style={{ background: 'linear-gradient(90deg, rgba(103, 48, 144, 0.95), rgba(90, 131, 140, 0.85), rgba(103, 48, 144, 0.55))' }}
+               />
+               <div
+                 className="absolute inset-x-8 top-0 h-20 pointer-events-none"
+-                style={{ background: 'radial-gradient(ellipse at top, rgba(8, 145, 178, 0.16), transparent 70%)' }}
++                style={{ background: 'radial-gradient(ellipse at top, rgba(103, 48, 144, 0.16), transparent 70%)' }}
+               />
+ 
+               {/* Card content with intentional spacing */}
+               <div className="relative px-8 pb-6 pt-10 sm:px-10 sm:pb-7 sm:pt-11">
+                 <div className="mb-8 text-center">
+-                  <h2 className="text-2xl font-extrabold tracking-tight text-text-primary"><T>Start Deploying</T></h2>
++                  <h2 className="text-2xl font-extrabold tracking-tight text-text-primary">Sign in</h2>
+                   <p className="mx-auto mt-2 max-w-[300px] text-sm leading-relaxed text-text-muted">
+-                    <T>Sign in with your work account to get started</T>
++                    Use your HRM work account.
+                   </p>
+                 </div>
+ 
+@@ -588,11 +507,6 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+                   <p>
+                     <T>Intune actions run server-side through an app registration your admin approves, so privileged Graph access is never handed to the browser.</T>
+                   </p>
+-                  <p>
+-                    <Link href="/security" className="font-medium text-accent-cyan hover:underline">
+-                      <T>See the full permission list and data flow</T>
+-                    </Link>
+-                  </p>
+                 </div>
+               </div>
+ 
+@@ -675,17 +589,15 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+           {/* Footer links */}
+           <FadeIn animateOnMount delay={0.15}>
+             <div className="mt-6 flex items-center justify-center gap-2 text-sm font-medium text-text-muted">
+-              <Link href="/" className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors hover:bg-overlay/[0.04] hover:text-text-primary">
+-                <ArrowLeft className="h-3.5 w-3.5" />
+-                <T>Back to home</T>
+-              </Link>
+-              <span className="h-4 w-px bg-overlay/15" />
+-              <Link
+-                href="/docs/docker"
+-                className="rounded-full px-3 py-1.5 transition-colors hover:bg-overlay/[0.04] hover:text-text-primary"
++              <a
++                href="https://support.hruthmd.org"
++                target="_blank"
++                rel="noopener noreferrer"
++                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors hover:bg-overlay/[0.04] hover:text-text-primary"
+               >
+-                <T>Self-host guide</T>
+-              </Link>
++                <LifeBuoy className="h-3.5 w-3.5" aria-hidden="true" />
++                Trouble signing in? Contact HRM Support
++              </a>
+             </div>
+           </FadeIn>
+         </div>
+diff --git a/app/(app)/dashboard/help/page.tsx b/app/(app)/dashboard/help/page.tsx
+new file mode 100644
+index 000000000..46e12bc3d
+--- /dev/null
++++ b/app/(app)/dashboard/help/page.tsx
+@@ -0,0 +1,75 @@
++'use client';
++
++// HRM patch: help for HRM IT in place of upstream's public docs.
++
++import Link from 'next/link';
++import { ExternalLink, LifeBuoy } from 'lucide-react';
++import { PageHeader } from '@/components/dashboard';
++import { HELP_SECTIONS, HRM_SUPPORT_URL } from '@/lib/hrm/help-content';
++
++export default function HelpPage() {
++  return (
++    <div className="space-y-6 max-w-3xl">
++      <PageHeader
++        title="Help"
++        description="How HRM uses IntuneGet, and where to go when something goes wrong."
++        icon={LifeBuoy}
++      />
++
++      <nav aria-label="Help topics" className="flex flex-wrap gap-2">
++        {HELP_SECTIONS.map((section) => (
++          <a
++            key={section.id}
++            href={`#${section.id}`}
++            className="text-sm px-3 py-1 rounded-full border border-overlay/10 text-text-secondary hover:text-accent-cyan hover:border-accent-cyan/40"
++          >
++            {section.title}
++          </a>
++        ))}
++      </nav>
++
++      {HELP_SECTIONS.map((section) => (
++        <section
++          key={section.id}
++          id={section.id}
++          aria-labelledby={`${section.id}-title`}
++          className="scroll-mt-20 rounded-xl border border-overlay/10 bg-bg-elevated p-5"
++        >
++          <h2 id={`${section.id}-title`} className="text-lg font-semibold text-text-primary mb-3">
++            {section.title}
++          </h2>
++          <ul className="list-disc pl-5 space-y-2 text-sm text-text-secondary leading-relaxed">
++            {section.points.map((point) => (
++              <li key={point}>{point}</li>
++            ))}
++          </ul>
++          {section.links && (
++            <div className="mt-4 flex flex-wrap gap-4">
++              {section.links.map((link) => (
++                <Link
++                  key={link.href}
++                  href={link.href}
++                  target="_blank"
++                  rel="noopener noreferrer"
++                  className="inline-flex items-center gap-1.5 text-sm font-medium text-accent-cyan hover:underline"
++                >
++                  {link.label}
++                  <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
++                  <span className="sr-only">(opens in a new tab)</span>
++                </Link>
++              ))}
++            </div>
++          )}
++        </section>
++      ))}
++
++      <p className="text-sm text-text-muted">
++        Still stuck?{' '}
++        <a href={HRM_SUPPORT_URL} target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline">
++          Contact HRM Support
++        </a>
++        .
++      </p>
++    </div>
++  );
++}
+diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
+index bade6e949..8813d782f 100644
+--- a/app/(app)/dashboard/layout.tsx
++++ b/app/(app)/dashboard/layout.tsx
+@@ -239,12 +239,13 @@ export default function DashboardLayout({
+               <div className="flex items-start sm:items-center gap-3 min-w-0">
+                 <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5 sm:mt-0" />
+                 <div className="min-w-0">
+-                  <p className="text-sm font-medium text-amber-200">
++                  {/* HRM patch: readable on the light theme, and HRM Support instead of "your administrator". */}
++                  <p className="text-sm font-medium text-amber-800">
+                     <T>Unable to verify organization setup</T>
+                   </p>
+-                  <p className="text-xs text-amber-200/70">
++                  <p className="text-xs text-amber-700">
+                     {errorType === 'missing_credentials'
+-                      ? <T>Server configuration issue. Contact your administrator.</T>
++                      ? 'The server is missing its Intune settings. Contact HRM Support.'
+                       : <T>Please check your connection and try again.</T>}
+                   </p>
+                 </div>
+diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
+index 24e1de8db..5de7ae816 100644
+--- a/app/(app)/dashboard/page.tsx
++++ b/app/(app)/dashboard/page.tsx
+@@ -10,11 +10,11 @@ import {
+   AlertCircle,
+   CheckCircle2,
+   Loader2,
+-  Zap,
+-  X,
+   KeyRound,
+-  Rocket,
+-  RotateCcw,
++  ArrowUpCircle,
++  Hourglass,
++  LifeBuoy,
++  Radar,
+ } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+@@ -24,8 +24,10 @@ import { useDashboardStats } from '@/hooks/useAnalytics';
+ import { useMspOptional } from '@/hooks/useMspOptional';
+ import { useOnboardingStatus } from '@/hooks/useOnboardingStatus';
+ import { RecentActivityList, PageHeader } from '@/components/dashboard';
+-import { useUserSettings } from '@/components/providers/UserSettingsProvider';
+ import { T, Var } from 'gt-next';
++import { useAvailableUpdates } from '@/hooks/use-updates';
++import { useHrmHome } from '@/hooks/useHrmHome';
++import { ServerStatusCard } from '@/components/hrm/ServerStatusCard';
+ 
+ function getTimeBasedGreeting(): React.ReactNode {
+   const hour = new Date().getHours();
+@@ -40,7 +42,10 @@ export default function DashboardPage() {
+   const { isMspUser } = useMspOptional();
+   const { data: stats, isLoading: statsLoading, isError: statsError } = useDashboardStats(statisticsScope);
+   const { errorType } = useOnboardingStatus();
+-  const { settings, setQuickStartDismissed } = useUserSettings();
++  // HRM patch: tenant-wide activity, updates waiting and server status for the Home page.
++  const { data: tenantStats, isLoading: tenantLoading } = useDashboardStats('tenant');
++  const { data: updates } = useAvailableUpdates();
++  const { data: home, isLoading: homeLoading } = useHrmHome();
+   const [mounted, setMounted] = useState(false);
+   const [greeting, setGreeting] = useState<React.ReactNode>(<T>Welcome back</T>);
+ 
+@@ -49,10 +54,6 @@ export default function DashboardPage() {
+     setGreeting(getTimeBasedGreeting());
+   }, []);
+ 
+-  const handleDismissQuickStart = async () => {
+-    await setQuickStartDismissed(true);
+-  };
+-
+   // Build attention items
+   const attentionItems = useMemo(() => {
+     const items: Array<{
+@@ -65,19 +66,42 @@ export default function DashboardPage() {
+       color: 'error' | 'warning' | 'cyan';
+     }> = [];
+ 
+-    if (statisticsScope === 'mine' && stats && stats.failed > 0) {
++    const updateCount = updates?.count ?? 0;
++    if (updateCount > 0) {
++      items.push({
++        id: 'updates-waiting',
++        icon: ArrowUpCircle,
++        title: updateCount !== 1 ? `${updateCount} app updates waiting` : '1 app update waiting',
++        description: 'New versions of apps deployed in Intune',
++        href: '/dashboard/updates',
++        actionLabel: 'Review',
++        color: 'cyan',
++      });
++    }
++    const failedRecent = home?.attention?.failedRecent ?? 0;
++    if (failedRecent > 0) {
+       items.push({
+         id: 'failed-deployments',
+         icon: AlertCircle,
+-        title: stats.failed !== 1
+-          ? <T><Var>{stats.failed}</Var> failed deployments</T>
+-          : <T><Var>{stats.failed}</Var> failed deployment</T>,
+-        description: <T>Review failed deployments and take action</T>,
++        title: failedRecent !== 1 ? `${failedRecent} failed deployments this week` : '1 failed deployment this week',
++        description: 'Across HRM, in the last 7 days',
+         href: '/dashboard/uploads?status=failed',
+-        actionLabel: <T>View Details</T>,
++        actionLabel: 'View',
+         color: 'error',
+       });
+     }
++    const stuck = home?.attention?.stuck ?? 0;
++    if (stuck > 0) {
++      items.push({
++        id: 'stuck-jobs',
++        icon: Hourglass,
++        title: stuck !== 1 ? `${stuck} deployments stuck` : '1 deployment stuck',
++        description: 'Queued or packaging for more than 2 hours',
++        href: '/dashboard/uploads?status=pending',
++        actionLabel: 'View',
++        color: 'warning',
++      });
++    }
+ 
+     if (errorType === 'network_error' || errorType === 'missing_credentials') {
+       items.push({
+@@ -85,7 +109,7 @@ export default function DashboardPage() {
+         icon: KeyRound,
+         title: <T>Connection issue detected</T>,
+         description: errorType === 'missing_credentials'
+-          ? <T>Server configuration issue. Contact your administrator.</T>
++          ? 'The server is missing its Intune settings. Contact HRM Support.'
+           : <T>Unable to verify organization setup. Check your connection.</T>,
+         href: '/dashboard/settings',
+         actionLabel: <T>Settings</T>,
+@@ -94,14 +118,14 @@ export default function DashboardPage() {
+     }
+ 
+     return items;
+-  }, [stats, errorType, statisticsScope]);
++  }, [updates, home, errorType]);
+ 
+   return (
+     <div className="space-y-8">
+       {/* Welcome header using PageHeader */}
+       <PageHeader
+         title={<T><Var>{greeting}</Var>, <Var>{user?.name?.split(' ')[0] || 'User'}</Var></T>}
+-        description={<T>Deploy Windows applications to Intune with precision and ease</T>}
++        description="House of Ruth Maryland's app deployments"
+         gradient
+         gradientColors="cyan"
+       />
+@@ -112,10 +136,13 @@ export default function DashboardPage() {
+       {/* Non-blocking nudge to re-consent for the assignment-filters permission */}
+       <FilterPermissionNudge />
+ 
+-      {/* Needs Attention section */}
+-      {attentionItems.length > 0 && (
+-        <div className={mounted ? 'animate-fade-up stagger-1' : 'opacity-0'}>
+-          <div className="space-y-3">
++      {/* HRM patch: layout B. Work on the left, server status and shortcuts on the right. */}
++      <div className="grid gap-6 lg:grid-cols-3">
++        <div className="space-y-6 lg:col-span-2 min-w-0">
++          <section aria-labelledby="attention-title" className={mounted ? 'animate-fade-up stagger-1' : 'opacity-0'}>
++            <h2 id="attention-title" className="text-lg font-semibold text-text-primary mb-3">Needs attention</h2>
++            {attentionItems.length > 0 ? (
++              <div className="space-y-3">
+             {attentionItems.map((item) => {
+               const colorMap = {
+                 error: {
+@@ -158,9 +185,60 @@ export default function DashboardPage() {
+                 </div>
+               );
+             })}
+-          </div>
++              </div>
++            ) : (
++              <div className="glass-light rounded-xl p-4 flex items-center gap-3">
++                <CheckCircle2 className="w-5 h-5 text-status-success flex-shrink-0" aria-hidden="true" />
++                <p className="text-sm text-text-secondary">Nothing needs attention right now.</p>
++              </div>
++            )}
++          </section>
++
++          <section aria-labelledby="recent-title" className={`glass-light rounded-xl p-6 ${mounted ? 'animate-fade-up stagger-2' : 'opacity-0'}`}>
++            <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
++              <div className="flex items-center gap-2">
++                <Clock className="w-5 h-5 text-accent-violet" aria-hidden="true" />
++                <h2 id="recent-title" className="text-lg font-semibold text-text-primary">Recent deployments</h2>
++              </div>
++              <div className="flex items-center gap-4 text-sm">
++                <Link href="/dashboard/uploads?status=failed" className="text-accent-cyan hover:underline">Failed only</Link>
++                <Link href="/dashboard/uploads" className="text-accent-cyan hover:underline">View all</Link>
++              </div>
++            </div>
++            <RecentActivityList activities={tenantStats?.recentActivity} loading={tenantLoading} />
++          </section>
+         </div>
+-      )}
++
++        <div className="space-y-6 min-w-0">
++          <ServerStatusCard status={home?.server} loading={homeLoading} />
++
++          <section aria-labelledby="shortcuts-title" className="glass-light rounded-xl p-5">
++            <h2 id="shortcuts-title" className="text-lg font-semibold text-text-primary mb-3">Shortcuts</h2>
++            <div className="grid gap-2">
++              <Link href="/dashboard/apps">
++                <Button className="w-full justify-start bg-accent-cyan hover:bg-accent-cyan-dim text-white border-0">
++                  <Package className="w-4 h-4 mr-2" aria-hidden="true" />Deploy an app
++                </Button>
++              </Link>
++              <Link href="/dashboard/updates">
++                <Button variant="outline" className="w-full justify-start">
++                  <ArrowUpCircle className="w-4 h-4 mr-2" aria-hidden="true" />Review updates
++                </Button>
++              </Link>
++              <Link href="/dashboard/unmanaged">
++                <Button variant="outline" className="w-full justify-start">
++                  <Radar className="w-4 h-4 mr-2" aria-hidden="true" />Discovered apps
++                </Button>
++              </Link>
++              <Link href="/dashboard/help">
++                <Button variant="outline" className="w-full justify-start">
++                  <LifeBuoy className="w-4 h-4 mr-2" aria-hidden="true" />Help
++                </Button>
++              </Link>
++            </div>
++          </section>
++        </div>
++      </div>
+ 
+       {/* Stat cards */}
+       <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Deployment statistics scope">
+@@ -219,156 +297,6 @@ export default function DashboardPage() {
+           {stats.perUser.length === 0 && <p className="text-text-muted"><T>No deployment activity in this tenant.</T></p>}
+         </section>
+       )}
+-
+-      {/* Main content grid */}
+-      <div className="grid gap-6 lg:grid-cols-2">
+-        {/* Quick start - dismissible */}
+-        {!settings.quickStartDismissed && (
+-          <div className={`glass-light rounded-xl p-6 ${mounted ? 'animate-fade-up stagger-5' : 'opacity-0'}`}>
+-            <div className="flex items-center justify-between mb-6">
+-              <div className="flex items-center gap-2">
+-                <Zap className="w-5 h-5 text-accent-cyan" />
+-                <h2 className="text-lg font-semibold text-text-primary"><T>Quick Start</T></h2>
+-              </div>
+-              <button
+-                onClick={handleDismissQuickStart}
+-                className="text-text-muted hover:text-text-primary transition-colors p-1 rounded-lg hover:bg-overlay/5"
+-                aria-label="Dismiss Quick Start"
+-              >
+-                <X className="w-4 h-4" />
+-              </button>
+-            </div>
+-
+-            <div className="relative">
+-              <div className="absolute left-4 top-8 bottom-8 w-px bg-gradient-to-b from-accent-cyan via-accent-violet to-accent-cyan/20" />
+-
+-              <div className="space-y-4">
+-                <QuickStartStep
+-                  number={1}
+-                  title={<T>Browse the App Catalog</T>}
+-                  description={<T>Search from 13,000+ Winget packages</T>}
+-                  href="/dashboard/apps"
+-                />
+-                <QuickStartStep
+-                  number={2}
+-                  title={<T>Configure & Add to Cart</T>}
+-                  description={<T>Select architecture, scope, and detection rules</T>}
+-                />
+-                <QuickStartStep
+-                  number={3}
+-                  title={<T>Deploy to Intune</T>}
+-                  description={<T>One-click deployment to your tenant</T>}
+-                />
+-              </div>
+-            </div>
+-
+-            <Link href="/dashboard/apps">
+-              <Button className="w-full mt-6 bg-gradient-to-r from-accent-cyan to-accent-violet hover:opacity-90 text-bg-elevated border-0 shadow-glow-cyan">
+-                <Package className="w-4 h-4 mr-2" />
+-                <T>Browse App Catalog</T>
+-                <ArrowRight className="w-4 h-4 ml-2" />
+-              </Button>
+-            </Link>
+-          </div>
+-        )}
+-
+-        {/* Frequently deployed - shown when Quick Start is dismissed */}
+-        {settings.quickStartDismissed && stats?.frequentlyDeployed && stats.frequentlyDeployed.length > 0 && (
+-          <div className={`glass-light rounded-xl p-6 ${mounted ? 'animate-fade-up stagger-5' : 'opacity-0'}`}>
+-            <div className="flex items-center gap-2 mb-6">
+-              <Rocket className="w-5 h-5 text-accent-cyan" />
+-              <h2 className="text-lg font-semibold text-text-primary"><T>Frequently Deployed</T></h2>
+-            </div>
+-
+-            <div className="space-y-3">
+-              {stats.frequentlyDeployed.slice(0, 5).map((app) => (
+-                <Link
+-                  key={app.winget_id}
+-                  href={`/dashboard/apps?search=${encodeURIComponent(app.winget_id)}`}
+-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-overlay/5 transition-all group"
+-                >
+-                  <div className="flex items-center gap-3 min-w-0">
+-                    <div className="w-8 h-8 rounded-lg bg-accent-cyan/10 flex items-center justify-center flex-shrink-0">
+-                      <Package className="w-4 h-4 text-accent-cyan" />
+-                    </div>
+-                    <div className="min-w-0">
+-                      <p className="text-sm font-medium text-text-primary truncate group-hover:text-accent-cyan-bright transition-colors">
+-                        {app.display_name}
+-                      </p>
+-                      <p className="text-xs text-text-muted"><T><Var>{app.deploy_count}</Var> deployments</T></p>
+-                    </div>
+-                  </div>
+-                  <Button size="sm" variant="ghost" className="text-text-muted hover:text-accent-cyan flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+-                    <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+-                    <T>Redeploy</T>
+-                  </Button>
+-                </Link>
+-              ))}
+-            </div>
+-
+-            <Link href="/dashboard/apps">
+-              <Button variant="ghost" className="w-full mt-4 text-text-secondary hover:text-text-primary">
+-                <T>Browse All Apps</T>
+-                <ArrowRight className="w-4 h-4 ml-2" />
+-              </Button>
+-            </Link>
+-          </div>
+-        )}
+-
+-        {/* If Quick Start dismissed but no frequent apps, show browse CTA */}
+-        {settings.quickStartDismissed && (!stats?.frequentlyDeployed || stats.frequentlyDeployed.length === 0) && (
+-          <div className={`glass-light rounded-xl p-6 flex flex-col items-center justify-center text-center ${mounted ? 'animate-fade-up stagger-5' : 'opacity-0'}`}>
+-            <Package className="w-10 h-10 text-accent-cyan/40 mb-3" />
+-            <h3 className="text-text-primary font-medium mb-1"><T>Start deploying</T></h3>
+-            <p className="text-text-muted text-sm mb-4"><T>Browse the App Catalog to deploy your first packages</T></p>
+-            <Link href="/dashboard/apps">
+-              <Button className="bg-gradient-to-r from-accent-cyan to-accent-violet hover:opacity-90 text-bg-elevated border-0">
+-                <Package className="w-4 h-4 mr-2" />
+-                <T>Browse App Catalog</T>
+-              </Button>
+-            </Link>
+-          </div>
+-        )}
+-
+-        {/* Recent activity */}
+-        <div className={`glass-light rounded-xl p-6 ${mounted ? 'animate-fade-up stagger-6' : 'opacity-0'}`}>
+-          <div className="flex items-center justify-between mb-6">
+-            <div className="flex items-center gap-2">
+-              <Clock className="w-5 h-5 text-accent-violet" />
+-              <h2 className="text-lg font-semibold text-text-primary"><T>Recent Activity</T></h2>
+-            </div>
+-            <Link
+-              href="/dashboard/uploads"
+-              className="text-sm text-accent-cyan hover:text-accent-cyan-bright transition-colors"
+-            >
+-              <T>View all</T>
+-            </Link>
+-          </div>
+-
+-          <RecentActivityList
+-            activities={stats?.recentActivity}
+-            loading={statsLoading}
+-          />
+-        </div>
+-      </div>
+-
+-      {/* Intune connection status - compact, only show when connected */}
+-      <div className={`glass-light rounded-xl p-4 ${mounted ? 'animate-fade-up animation-delay-300' : 'opacity-0'}`}>
+-        <div className="flex items-center gap-3">
+-          <CheckCircle2 className="w-5 h-5 text-status-success flex-shrink-0" />
+-          <div className="flex-1 min-w-0">
+-            <span className="text-text-primary text-sm font-medium"><T>Connected to Microsoft Intune</T></span>
+-            <span className="text-text-muted text-sm ml-2">
+-              {user?.email}
+-            </span>
+-          </div>
+-          <Link href="/dashboard/settings">
+-            <Button variant="ghost" size="sm" className="text-text-muted hover:text-text-primary text-xs">
+-              <T>Settings</T>
+-            </Button>
+-          </Link>
+-        </div>
+-      </div>
+     </div>
+   );
+ }
+@@ -448,32 +376,3 @@ function StatCard({
+   return content;
+ }
+ 
+-function QuickStartStep({
+-  number,
+-  title,
+-  description,
+-  href,
+-}: {
+-  number: number;
+-  title: React.ReactNode;
+-  description: React.ReactNode;
+-  href?: string;
+-}) {
+-  const content = (
+-    <div className="group relative flex items-start gap-4 p-3 rounded-lg hover:bg-overlay/5 transition-all cursor-pointer">
+-      <div className="relative z-10 w-8 h-8 rounded-full bg-gradient-to-br from-accent-cyan to-accent-violet text-bg-elevated flex items-center justify-center font-medium text-sm flex-shrink-0 shadow-glow-cyan">
+-        {number}
+-      </div>
+-      <div className="pt-0.5">
+-        <p className="text-text-primary font-medium group-hover:text-accent-cyan-bright transition-colors">{title}</p>
+-        <p className="text-text-muted text-sm">{description}</p>
+-      </div>
+-    </div>
+-  );
+-
+-  if (href) {
+-    return <Link href={href}>{content}</Link>;
+-  }
+-
+-  return content;
+-}
+diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
+index 7495a8ad5..bb2ea7fb3 100644
+--- a/app/(app)/dashboard/uploads/page.tsx
++++ b/app/(app)/dashboard/uploads/page.tsx
+@@ -806,9 +806,9 @@ function UploadJobCard({
+               className="absolute inset-0 rounded-xl"
+               animate={{
+                 boxShadow: [
+-                  `0 0 0 0px ${job.status === 'uploading' ? 'rgba(124, 58, 237, 0.3)' : 'rgba(8, 145, 178, 0.3)'}`,
+-                  `0 0 0 6px ${job.status === 'uploading' ? 'rgba(124, 58, 237, 0)' : 'rgba(8, 145, 178, 0)'}`,
+-                  `0 0 0 0px ${job.status === 'uploading' ? 'rgba(124, 58, 237, 0.3)' : 'rgba(8, 145, 178, 0.3)'}`,
++                  `0 0 0 0px ${job.status === 'uploading' ? 'rgba(90, 131, 140, 0.3)' : 'rgba(103, 48, 144, 0.3)'}`,
++                  `0 0 0 6px ${job.status === 'uploading' ? 'rgba(90, 131, 140, 0)' : 'rgba(103, 48, 144, 0)'}`,
++                  `0 0 0 0px ${job.status === 'uploading' ? 'rgba(90, 131, 140, 0.3)' : 'rgba(103, 48, 144, 0.3)'}`,
+                 ],
+               }}
+               transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+diff --git a/app/api/hrm/home/route.test.ts b/app/api/hrm/home/route.test.ts
+new file mode 100644
+index 000000000..b14e8acb4
+--- /dev/null
++++ b/app/api/hrm/home/route.test.ts
+@@ -0,0 +1,36 @@
++import { NextRequest } from 'next/server';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn(), status: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getAnalyticsJobs: mocks.jobs } }) }));
++vi.mock('@/lib/hrm/home', async (original) => ({ ...(await original<typeof import('@/lib/hrm/home')>()), readServerStatus: mocks.status }));
++import { GET } from './route';
++
++const request = () => new NextRequest('http://localhost/api/hrm/home');
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.auth.mockResolvedValue({ userId: 'caller', tenantId: 'token-tenant' });
++  mocks.jobs.mockResolvedValue([]);
++  mocks.status.mockResolvedValue({ reported: false, reason: 'missing' });
++});
++
++describe('HRM home route', () => {
++  it('requires sign-in before reading anything', async () => {
++    mocks.auth.mockResolvedValue(null);
++    expect((await GET(request())).status).toBe(401);
++    expect(mocks.jobs).not.toHaveBeenCalled();
++    expect(mocks.status).not.toHaveBeenCalled();
++  });
++
++  it('reads only the signed-in tenant and is never cached', async () => {
++    const response = await GET(request());
++    expect(mocks.jobs).toHaveBeenCalledWith({ tenantId: 'token-tenant' });
++    expect(response.headers.get('cache-control')).toBe('private, no-store');
++    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' } });
++  });
++
++  it('still returns server status when the job query fails', async () => {
++    mocks.jobs.mockRejectedValue(new Error('db busy'));
++    expect(await (await GET(request())).json()).toMatchObject({ attention: null, server: { reported: false } });
++  });
++});
+diff --git a/app/api/hrm/home/route.ts b/app/api/hrm/home/route.ts
+new file mode 100644
+index 000000000..c1f693757
+--- /dev/null
++++ b/app/api/hrm/home/route.ts
+@@ -0,0 +1,20 @@
++// HRM patch: Home page data (needs attention counts and server status).
++
++import { NextRequest, NextResponse } from 'next/server';
++import { getDatabase } from '@/lib/db';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { attentionCounts, readServerStatus } from '@/lib/hrm/home';
++
++export async function GET(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
++
++  const [jobs, server] = await Promise.all([
++    getDatabase().jobs.getAnalyticsJobs({ tenantId: user.tenantId }).catch(() => null),
++    readServerStatus(),
++  ]);
++  return NextResponse.json(
++    { attention: jobs ? attentionCounts(jobs) : null, server },
++    { headers: { 'Cache-Control': 'private, no-store' } },
++  );
++}
+diff --git a/app/globals.css b/app/globals.css
+index d1fdf2c7d..5f2a7be95 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -100,11 +100,11 @@ pre {
+   --bg-elevated: 255 255 255;
+ 
+   /* Accent colors - Electric Cyan (adjusted for light) */
+-  --accent-cyan: #0891b2;
+-  --accent-cyan-bright: #06b6d4;
+-  --accent-cyan-dim: #0e7490;
+-  --accent-violet: #7c3aed;
+-  --accent-violet-bright: #8b5cf6;
++  --accent-cyan: #673090;
++  --accent-cyan-bright: #855aa6;
++  --accent-cyan-dim: #412160;
++  --accent-violet: #5a838c;
++  --accent-violet-bright: #5dc19d;
+ 
+   /* Text hierarchy (light theme) - RGB channels */
+   --text-primary: 15 23 42;
+@@ -123,13 +123,13 @@ pre {
+   --status-error: #ef4444;
+ 
+   --selection-text: #0f172a;
+-  --selection-bg: rgba(8, 145, 178, 0.2);
++  --selection-bg: rgba(103, 48, 144, 0.2);
+   --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+   --glass-bg: rgba(255, 255, 255, 0.9);
+   --glass-border: rgba(15, 23, 42, 0.08);
+   --grid-line: rgba(0, 0, 0, 0.04);
+-  --focus-ring: rgba(8, 145, 178, 0.5);
++  --focus-ring: rgba(103, 48, 144, 0.5);
+ }
+ 
+ .dark {
+@@ -150,7 +150,7 @@ pre {
+   --surface-inverse: 230 237 249;
+ 
+   --selection-text: #e5e7eb;
+-  --selection-bg: rgba(8, 145, 178, 0.3);
++  --selection-bg: rgba(103, 48, 144, 0.3);
+   --scrollbar-thumb: rgba(148, 163, 184, 0.32);
+   --scrollbar-thumb-hover: rgba(148, 163, 184, 0.42);
+   --glass-bg: rgba(10, 18, 33, 0.84);
+@@ -167,21 +167,21 @@ pre {
+     --card-foreground: 24 10% 10%;
+     --popover: 0 0% 100%;
+     --popover-foreground: 24 10% 10%;
+-    --primary: 191 91% 37%;
++    --primary: 275 50% 38%;
+     --primary-foreground: 0 0% 100%;
+     --secondary: 24 6% 96%;
+     --secondary-foreground: 24 10% 10%;
+     --muted: 24 6% 96%;
+     --muted-foreground: 24 6% 45%;
+-    --accent: 262 83% 58%;
++    --accent: 191 22% 45%;
+     --accent-foreground: 0 0% 100%;
+     --destructive: 0 84% 60%;
+     --destructive-foreground: 0 0% 100%;
+     --border: 24 6% 90%;
+     --input: 24 6% 90%;
+-    --ring: 191 91% 37%;
+-    --chart-1: 191 91% 37%;
+-    --chart-2: 262 83% 58%;
++    --ring: 275 50% 38%;
++    --chart-1: 275 50% 38%;
++    --chart-2: 191 22% 45%;
+     --chart-3: 142 76% 36%;
+     --chart-4: 38 92% 50%;
+     --chart-5: 0 84% 60%;
+@@ -196,20 +196,20 @@ pre {
+   --card-foreground: 210 20% 95%;
+   --popover: 222 47% 16%;
+   --popover-foreground: 210 20% 95%;
+-  --primary: 191 91% 61%;
++  --primary: 275 30% 63%;
+   --primary-foreground: 222 47% 11%;
+   --secondary: 216 17% 24%;
+   --secondary-foreground: 210 20% 95%;
+   --muted: 216 17% 24%;
+   --muted-foreground: 218 11% 75%;
+-  --accent: 262 83% 58%;
++  --accent: 191 22% 45%;
+   --accent-foreground: 0 0% 100%;
+   --destructive: 0 72% 58%;
+   --destructive-foreground: 0 0% 100%;
+   --border: 216 17% 30%;
+   --input: 216 17% 30%;
+-  --ring: 191 91% 61%;
+-  --chart-1: 191 91% 61%;
++  --ring: 275 30% 63%;
++  --chart-1: 275 30% 63%;
+   --chart-2: 262 83% 68%;
+   --chart-3: 142 76% 45%;
+   --chart-4: 38 92% 58%;
+@@ -232,21 +232,21 @@ pre {
+ 
+   /* ===== GRADIENT TEXT UTILITIES ===== */
+   .gradient-text-cyan {
+-    background: linear-gradient(135deg, #0891b2, #06b6d4, #22d3ee);
++    background: linear-gradient(135deg, #673090, #855aa6, #a483bc);
+     -webkit-background-clip: text;
+     -webkit-text-fill-color: transparent;
+     background-clip: text;
+   }
+ 
+   .gradient-text-violet {
+-    background: linear-gradient(135deg, #7c3aed, #8b5cf6, #a78bfa);
++    background: linear-gradient(135deg, #5a838c, #5dc19d, #8fd4ba);
+     -webkit-background-clip: text;
+     -webkit-text-fill-color: transparent;
+     background-clip: text;
+   }
+ 
+   .gradient-text-mixed {
+-    background: linear-gradient(135deg, #0891b2, #7c3aed, #06b6d4);
++    background: linear-gradient(135deg, #673090, #5a838c, #855aa6);
+     -webkit-background-clip: text;
+     -webkit-text-fill-color: transparent;
+     background-clip: text;
+@@ -266,28 +266,28 @@ pre {
+   }
+ 
+   .glow-cyan {
+-    box-shadow: 0 0 20px rgba(8, 145, 178, 0.15);
++    box-shadow: 0 0 20px rgba(103, 48, 144, 0.15);
+   }
+ 
+   .glow-cyan-lg {
+-    box-shadow: 0 0 40px rgba(8, 145, 178, 0.2);
++    box-shadow: 0 0 40px rgba(103, 48, 144, 0.2);
+   }
+ 
+   .glow-violet {
+-    box-shadow: 0 0 20px rgba(124, 58, 237, 0.15);
++    box-shadow: 0 0 20px rgba(90, 131, 140, 0.15);
+   }
+ 
+   .glow-violet-lg {
+-    box-shadow: 0 0 40px rgba(124, 58, 237, 0.2);
++    box-shadow: 0 0 40px rgba(90, 131, 140, 0.2);
+   }
+ 
+   /* Border accent */
+   .border-accent-cyan {
+-    box-shadow: 0 0 0 1px rgba(8, 145, 178, 0.2);
++    box-shadow: 0 0 0 1px rgba(103, 48, 144, 0.2);
+   }
+ 
+   .border-accent-violet {
+-    box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.2);
++    box-shadow: 0 0 0 1px rgba(90, 131, 140, 0.2);
+   }
+ 
+   /* ===== GLASS MORPHISM EFFECTS (Light) ===== */
+@@ -301,7 +301,7 @@ pre {
+ 
+   .glass-light-hover:hover {
+     background: var(--glass-bg);
+-    border-color: rgba(8, 145, 178, 0.28);
++    border-color: rgba(103, 48, 144, 0.28);
+   }
+ 
+   /* ===== BACKGROUND PATTERNS (Light Theme) ===== */
+@@ -310,7 +310,7 @@ pre {
+   }
+ 
+   .bg-dots-light {
+-    background-image: radial-gradient(circle, rgba(8, 145, 178, 0.08) 1px, transparent 1px);
++    background-image: radial-gradient(circle, rgba(103, 48, 144, 0.08) 1px, transparent 1px);
+     background-size: 24px 24px;
+   }
+ 
+@@ -337,33 +337,33 @@ pre {
+   }
+ 
+   .bg-gradient-radial-cyan {
+-    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(8, 145, 178, 0.06), transparent);
++    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(103, 48, 144, 0.06), transparent);
+   }
+ 
+   .bg-gradient-radial-violet {
+-    background: radial-gradient(ellipse 60% 40% at 80% 100%, rgba(124, 58, 237, 0.04), transparent);
++    background: radial-gradient(ellipse 60% 40% at 80% 100%, rgba(90, 131, 140, 0.04), transparent);
+   }
+ 
+   /* Dark mode gradient overrides */
+   .dark .bg-gradient-radial-cyan {
+-    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(8, 145, 178, 0.12), transparent);
++    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(103, 48, 144, 0.12), transparent);
+   }
+   .dark .bg-gradient-radial-violet {
+-    background: radial-gradient(ellipse 60% 40% at 80% 100%, rgba(124, 58, 237, 0.08), transparent);
++    background: radial-gradient(ellipse 60% 40% at 80% 100%, rgba(90, 131, 140, 0.08), transparent);
+   }
+ 
+   /* ===== DEPLOYMENT FEED PROCESSING GRADIENTS ===== */
+   .processing-gradient {
+-    background: linear-gradient(125deg, rgba(8, 145, 178, 0.06), rgba(255, 255, 255, 0.96) 52%, rgba(124, 58, 237, 0.04));
++    background: linear-gradient(125deg, rgba(103, 48, 144, 0.06), rgba(255, 255, 255, 0.96) 52%, rgba(90, 131, 140, 0.04));
+   }
+   .processing-gradient-calm {
+-    background: linear-gradient(125deg, rgba(8, 145, 178, 0.04), rgba(255, 255, 255, 0.97) 54%, rgba(124, 58, 237, 0.03));
++    background: linear-gradient(125deg, rgba(103, 48, 144, 0.04), rgba(255, 255, 255, 0.97) 54%, rgba(90, 131, 140, 0.03));
+   }
+   .dark .processing-gradient {
+-    background: linear-gradient(125deg, rgba(8, 145, 178, 0.12), rgba(21, 35, 58, 0.96) 52%, rgba(124, 58, 237, 0.08));
++    background: linear-gradient(125deg, rgba(103, 48, 144, 0.12), rgba(21, 35, 58, 0.96) 52%, rgba(90, 131, 140, 0.08));
+   }
+   .dark .processing-gradient-calm {
+-    background: linear-gradient(125deg, rgba(8, 145, 178, 0.08), rgba(21, 35, 58, 0.97) 54%, rgba(124, 58, 237, 0.06));
++    background: linear-gradient(125deg, rgba(103, 48, 144, 0.08), rgba(21, 35, 58, 0.97) 54%, rgba(90, 131, 140, 0.06));
+   }
+ 
+   /* ===== MASK UTILITIES ===== */
+@@ -444,7 +444,7 @@ pre {
+     background: linear-gradient(
+       90deg,
+       transparent 0%,
+-      rgba(8, 145, 178, 0.08) 50%,
++      rgba(103, 48, 144, 0.08) 50%,
+       transparent 100%
+     );
+     background-size: 200% 100%;
+@@ -591,10 +591,10 @@ pre {
+ 
+ @keyframes ring-pulse {
+   0%, 100% {
+-    box-shadow: 0 0 0 0px rgba(8, 145, 178, 0.3);
++    box-shadow: 0 0 0 0px rgba(103, 48, 144, 0.3);
+   }
+   50% {
+-    box-shadow: 0 0 0 6px rgba(8, 145, 178, 0);
++    box-shadow: 0 0 0 6px rgba(103, 48, 144, 0);
+   }
+ }
+ 
+diff --git a/app/layout.tsx b/app/layout.tsx
+index 517010b3f..f2e8ef396 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -19,9 +19,9 @@ const PLAUSIBLE_DOMAIN = process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN;
+ 
+ export const metadata: Metadata = {
+   metadataBase: new URL("https://www.intuneget.com"),
+-  title: "IntuneGet | Free Intune App Deployment Tool - Deploy Winget Apps in Minutes",
+-  description:
+-    "Deploy any Winget app to Microsoft Intune in about 5 minutes. Free, open-source tool. No scripting, no IntuneWin packaging, no per-device licensing.",
++  // HRM patch: internal tool name in the browser tab.
++  title: "IntuneGet · HRM",
++  description: "House of Ruth Maryland's IntuneGet server for deploying apps to Intune.",
+   keywords: [
+     "Intune app deployment",
+     "Winget Intune",
+diff --git a/app/manifest.ts b/app/manifest.ts
+index bc4484fdd..952d1c557 100644
+--- a/app/manifest.ts
++++ b/app/manifest.ts
+@@ -2,14 +2,14 @@ import { MetadataRoute } from "next";
+ 
+ export default function manifest(): MetadataRoute.Manifest {
+   return {
+-    name: "IntuneGet - Deploy Winget Apps to Intune",
++    name: "IntuneGet · House of Ruth Maryland",
+     short_name: "IntuneGet",
+     description:
+       "Streamline your Microsoft Intune app deployment process with Winget integration. Package and upload applications effortlessly.",
+     start_url: "/",
+     display: "standalone",
+     background_color: "#0a0a0f",
+-    theme_color: "#06b6d4",
++    theme_color: "#673090",
+     icons: [
+       {
+         src: "/logo-192.png",
+diff --git a/components/auth/verification-scene/PackageBox.tsx b/components/auth/verification-scene/PackageBox.tsx
+index 56ba90b62..fe36ffb43 100644
+--- a/components/auth/verification-scene/PackageBox.tsx
++++ b/components/auth/verification-scene/PackageBox.tsx
+@@ -54,10 +54,10 @@ export function PackageBox() {
+         <RoundedBox args={[1.2, 1.2, 1.2]} radius={0.12} smoothness={4}>
+           <meshStandardMaterial
+             ref={materialRef}
+-            color="#0891b2"
++            color="#673090"
+             metalness={0.3}
+             roughness={0.4}
+-            emissive="#06b6d4"
++            emissive="#855aa6"
+             emissiveIntensity={0}
+           />
+         </RoundedBox>
+@@ -67,7 +67,7 @@ export function PackageBox() {
+           <meshBasicMaterial
+             ref={edgeMaterialRef}
+             wireframe
+-            color="#22d3ee"
++            color="#a483bc"
+             transparent
+             opacity={0.2}
+           />
+diff --git a/components/auth/verification-scene/SceneLights.tsx b/components/auth/verification-scene/SceneLights.tsx
+index 27c710577..776a9b69c 100644
+--- a/components/auth/verification-scene/SceneLights.tsx
++++ b/components/auth/verification-scene/SceneLights.tsx
+@@ -17,7 +17,7 @@ export function SceneLights() {
+       <pointLight
+         position={[-3, 1, 2]}
+         intensity={0.6}
+-        color="#0891b2"
++        color="#673090"
+         distance={10}
+       />
+ 
+@@ -25,7 +25,7 @@ export function SceneLights() {
+       <pointLight
+         position={[2, -2, 1]}
+         intensity={0.4}
+-        color="#7c3aed"
++        color="#5a838c"
+         distance={8}
+       />
+ 
+@@ -33,7 +33,7 @@ export function SceneLights() {
+       <pointLight
+         position={[0, 1, -3]}
+         intensity={0.3}
+-        color="#06b6d4"
++        color="#855aa6"
+         distance={8}
+       />
+     </>
+diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
+index e941306a7..df241f609 100644
+--- a/components/dashboard/Sidebar.tsx
++++ b/components/dashboard/Sidebar.tsx
+@@ -21,6 +21,7 @@ import {
+   Layers,
+   Webhook,
+   Lightbulb,
++  LifeBuoy,
+   PanelLeftClose,
+   PanelLeftOpen,
+ } from 'lucide-react';
+@@ -50,7 +51,7 @@ type NavGroup = {
+ };
+ 
+ const coreNav: NavItem[] = [
+-  { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
++  { name: 'Home', href: '/dashboard', icon: LayoutDashboard },
+   { name: 'App Catalog', href: '/dashboard/apps', icon: Package },
+   { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket },
+   { name: 'Discovered Apps', href: '/dashboard/unmanaged', icon: Radar },
+@@ -67,6 +68,13 @@ const analyticsNav: NavItem[] = [
+   { name: 'App Requests', href: '/dashboard/app-requests', icon: Lightbulb },
+ ];
+ 
++// HRM patch: help for HRM IT, and no SCCM, MSP or public app-request items
++// (SCCM doesn't work on a SQLite server; HRM is one organization).
++const helpNav: NavItem[] = [
++  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy },
++];
++const HRM_HIDDEN_HREFS = new Set(['/dashboard/sccm', '/dashboard/app-requests']);
++
+ const mspNav: NavItem[] = [
+   { name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 },
+   { name: 'Batch Deploy', href: '/dashboard/msp/batch', icon: Layers },
+@@ -114,7 +122,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+     ? managementItems
+     : managementItems.filter((item) => item.href !== '/dashboard/updates');
+ 
+-  const navGroups: NavGroup[] = [
++  const upstreamGroups: NavGroup[] = [
+     { items: coreNav },
+     { label: 'Management', items: visibleManagementItems },
+     {
+@@ -127,6 +135,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+       ? [{ label: 'MSP', items: mspNav }]
+       : [{ label: 'MSP', items: [{ name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 }] }]),
+   ];
++  const navGroups: NavGroup[] = [
++    ...upstreamGroups
++      .filter((group) => group.label !== 'MSP')
++      .map((group) => ({ ...group, items: group.items.filter((item) => !HRM_HIDDEN_HREFS.has(item.href)) }))
++      .filter((group) => group.items.length > 0),
++    { label: 'Support', items: helpNav },
++  ];
+ 
+   const sidebarContent = (
+     <div className="flex flex-col h-full">
+@@ -153,9 +168,10 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+                 animate={{ opacity: 1, width: 'auto' }}
+                 exit={{ opacity: 0, width: 0 }}
+                 transition={{ duration: 0.15 }}
+-                className="text-xl font-bold text-text-primary tracking-tight whitespace-nowrap overflow-hidden"
++                className="flex flex-col whitespace-nowrap overflow-hidden"
+               >
+-                <T>IntuneGet</T>
++                <span className="text-xl font-bold text-text-primary tracking-tight leading-tight"><T>IntuneGet</T></span>
++                <span className="text-xs text-text-muted leading-tight">House of Ruth Maryland</span>
+               </motion.span>
+             )}
+           </AnimatePresence>
+diff --git a/components/hrm/ServerStatusCard.tsx b/components/hrm/ServerStatusCard.tsx
+new file mode 100644
+index 000000000..6f1c02f2e
+--- /dev/null
++++ b/components/hrm/ServerStatusCard.tsx
+@@ -0,0 +1,98 @@
++'use client';
++
++// HRM patch: the Home page's server status card.
++
++import { Server, Loader2 } from 'lucide-react';
++import type { ServerStatus } from '@/lib/hrm/home';
++
++function relative(iso: string | null | undefined, now = Date.now()): string {
++  const at = iso ? Date.parse(iso) : NaN;
++  if (!Number.isFinite(at)) return 'Never';
++  const minutes = Math.max(0, Math.round((now - at) / 60000));
++  if (minutes < 60) return minutes <= 1 ? 'Just now' : `${minutes} min ago`;
++  const hours = Math.round(minutes / 60);
++  if (hours < 48) return `${hours} h ago`;
++  return `${Math.round(hours / 24)} days ago`;
++}
++
++function size(kb: number): string {
++  return kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.round(kb / 1024)} MB`;
++}
++
++function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'bad'; children: React.ReactNode }) {
++  const tones = {
++    ok: 'bg-status-success/10 text-status-success',
++    warn: 'bg-status-warning/10 text-status-warning',
++    bad: 'bg-status-error/10 text-status-error',
++  };
++  return <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tones[tone]}`}>{children}</span>;
++}
++
++function Row({ label, children }: { label: string; children: React.ReactNode }) {
++  return (
++    <div className="flex items-center justify-between gap-3 py-2 border-t border-overlay/5 first:border-t-0">
++      <dt className="text-sm text-text-muted">{label}</dt>
++      <dd className="text-sm text-text-primary text-right">{children}</dd>
++    </div>
++  );
++}
++
++export function ServerStatusCard({ status, loading }: { status?: ServerStatus; loading?: boolean }) {
++  return (
++    <section aria-labelledby="server-status-title" className="glass-light rounded-xl p-5 border-t-4 border-t-accent-violet-bright">
++      <div className="flex items-center gap-2 mb-3">
++        <Server className="w-5 h-5 text-accent-cyan" aria-hidden="true" />
++        <h2 id="server-status-title" className="text-lg font-semibold text-text-primary">Server status</h2>
++        {status?.reported && (
++          <span className="ml-auto">{status.problems.length === 0 ? <Pill tone="ok">Healthy</Pill> : <Pill tone="warn">Check</Pill>}</span>
++        )}
++      </div>
++
++      {loading && !status ? (
++        <Loader2 className="w-5 h-5 text-text-secondary animate-spin" aria-label="Loading server status" />
++      ) : !status?.reported ? (
++        <p className="text-sm text-text-muted">
++          {status?.reason === 'stale'
++            ? `Status not reported since ${relative(status.generatedAt)}. The status timer on the server may have stopped.`
++            : 'Status not reported. The status timer on the server may not be installed yet.'}
++        </p>
++      ) : (
++        <dl>
++          <Row label="Version">{status.version ?? 'Unknown'}</Row>
++          <Row label="Last deploy">
++            {status.lastDeploy ? (
++              <span className="inline-flex items-center gap-2">
++                {relative(status.lastDeploy.time)}
++                {status.problems.includes('deploy') && <Pill tone="bad">{status.lastDeploy.result.replace('_', ' ')}</Pill>}
++              </span>
++            ) : 'Never'}
++          </Row>
++          <Row label="Last backup">
++            {status.lastBackup ? `${relative(status.lastBackup.at)}, ${size(status.lastBackup.sizeKb)}` : 'None'}
++          </Row>
++          <Row label="Update check">
++            {status.problems.includes('updateCheck') ? <Pill tone="bad">Failed</Pill> : relative(status.updateCheck.at)}
++          </Row>
++          <Row label="Update alerts">
++            {status.problems.includes('notifications') ? <Pill tone="bad">Failed</Pill> : relative(status.notifications.at)}
++          </Row>
++          <Row label="Disk">
++            {status.diskWarning ? <Pill tone="warn">{Math.round(status.diskRatio * 100)}% used</Pill> : `${Math.round(status.diskRatio * 100)}% used`}
++          </Row>
++          <Row label="Tunnel">
++            {status.problems.includes('tunnel') ? (
++              <Pill tone="bad">Not running</Pill>
++            ) : status.problems.includes('tunnelUpdate') ? (
++              <Pill tone="warn">Update failed</Pill>
++            ) : (
++              <span className="inline-flex items-center gap-2">
++                {status.tunnel.version ?? ''}
++                <Pill tone="ok">Running</Pill>
++              </span>
++            )}
++          </Row>
++        </dl>
++      )}
++    </section>
++  );
++}
+diff --git a/components/qa/QaDialog.module.css b/components/qa/QaDialog.module.css
+index 7750457a1..5a5621c77 100644
+--- a/components/qa/QaDialog.module.css
++++ b/components/qa/QaDialog.module.css
+@@ -18,7 +18,7 @@
+   --bg-surface: 255 255 255;
+   --bg-elevated: 248 250 252;
+   --text-muted: 71 85 105;
+-  --accent-cyan: #0e7490;
++  --accent-cyan: #412160;
+   --status-warning: #92400e;
+   --status-error: #b91c1c;
+   --status-success: #047857;
+diff --git a/components/unmanaged/UnmanagedToolbar.tsx b/components/unmanaged/UnmanagedToolbar.tsx
+index 47deadceb..0f308f8c1 100644
+--- a/components/unmanaged/UnmanagedToolbar.tsx
++++ b/components/unmanaged/UnmanagedToolbar.tsx
+@@ -292,7 +292,7 @@ export function UnmanagedToolbar({
+           active={filters.matchStatus === 'all'}
+           onClick={() => handleMatchStatusChange('all')}
+           count={statusCounts.all}
+-          color="#06b6d4"
++          color="#855aa6"
+         >
+           All
+         </FilterChip>
+@@ -329,7 +329,7 @@ export function UnmanagedToolbar({
+         <FilterChip
+           active={!filters.showClaimed}
+           onClick={() => onFiltersChange({ ...filters, showClaimed: !filters.showClaimed })}
+-          color="#8b5cf6"
++          color="#5dc19d"
+         >
+           {filters.showClaimed ? 'Showing Claimed' : 'Hiding Claimed'}
+         </FilterChip>
+diff --git a/hooks/useHrmHome.ts b/hooks/useHrmHome.ts
+new file mode 100644
+index 000000000..36cd4da6e
+--- /dev/null
++++ b/hooks/useHrmHome.ts
+@@ -0,0 +1,28 @@
++'use client';
++
++// HRM patch: Home page data from /api/hrm/home.
++
++import { useQuery } from '@tanstack/react-query';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++import type { ServerStatus } from '@/lib/hrm/home';
++
++export interface HrmHomeData {
++  attention: { failedRecent: number; stuck: number } | null;
++  server: ServerStatus;
++}
++
++export function useHrmHome() {
++  const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
++  return useQuery<HrmHomeData>({
++    queryKey: ['hrm', 'home'],
++    queryFn: async () => {
++      const token = await getAccessToken();
++      if (!token) throw new Error('Not authenticated');
++      const response = await fetch('/api/hrm/home', { headers: { Authorization: `Bearer ${token}` } });
++      if (!response.ok) throw new Error('Failed to load the Home page');
++      return response.json();
++    },
++    enabled: isAuthenticated,
++    refetchInterval: 60 * 1000,
++  });
++}
+diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
+new file mode 100644
+index 000000000..4f1043a5b
+--- /dev/null
++++ b/lib/hrm/__tests__/help-content.test.ts
+@@ -0,0 +1,22 @@
++import { describe, expect, it } from 'vitest';
++import { HELP_SECTIONS } from '../help-content';
++
++describe('help content', () => {
++  const text = HELP_SECTIONS.flatMap((s) => [s.title, ...s.points, ...(s.links ?? []).map((l) => l.label)]);
++
++  it('uses unique section ids and https links only', () => {
++    const ids = HELP_SECTIONS.map((s) => s.id);
++    expect(new Set(ids).size).toBe(ids.length);
++    for (const link of HELP_SECTIONS.flatMap((s) => s.links ?? [])) expect(link.href).toMatch(/^https:\/\//);
++  });
++
++  it('points to HRM Support, never "contact IT"', () => {
++    expect(HELP_SECTIONS.some((s) => s.links?.some((l) => l.href === 'https://support.hruthmd.org'))).toBe(true);
++    expect(text.join(' ')).not.toMatch(/contact IT/i);
++  });
++
++  it('follows HRM writing rules: sentence-case titles, no em dashes', () => {
++    for (const s of HELP_SECTIONS) expect(s.title.slice(1)).not.toMatch(/\b(?!Enrollment|Status|Page|Teams|ESP)[A-Z][a-z]+/);
++    expect(text.join(' ')).not.toContain('—');
++  });
++});
+diff --git a/lib/hrm/__tests__/home.test.ts b/lib/hrm/__tests__/home.test.ts
+new file mode 100644
+index 000000000..a7463eeff
+--- /dev/null
++++ b/lib/hrm/__tests__/home.test.ts
+@@ -0,0 +1,67 @@
++import { describe, expect, it } from 'vitest';
++import type { AnalyticsJob } from '@/lib/db/types';
++import { attentionCounts, interpretServerStatus } from '../home';
++
++const NOW = new Date('2026-10-27T12:00:00Z');
++const file = (over: Record<string, unknown> = {}) => JSON.stringify({
++  generatedAt: '2026-10-27T11:58:00Z',
++  version: 'v0.8.2-hrm.9',
++  startedAt: '2026-10-27T10:00:00Z',
++  lastDeploy: { time: '2026-10-27T10:00:00Z', result: 'deployed', from: 'v0.8.2-hrm.8', to: 'v0.8.2-hrm.9' },
++  lastBackup: { at: '2026-10-27T09:59:00Z', sizeKb: 90000 },
++  disk: { totalKb: 1000, usedKb: 600 },
++  updateCheck: { result: 'success', at: '2026-10-27T07:30:00Z' },
++  notifications: { result: 'success', at: '2026-10-27T08:00:00Z' },
++  tunnel: { version: '2026.10.4', running: true, lastUpdate: { result: 'success', at: '2026-10-27T00:00:00Z' } },
++  ...over,
++});
++
++describe('server status file', () => {
++  it('reports a healthy server', () => {
++    const status = interpretServerStatus(file(), NOW);
++    expect(status).toMatchObject({ reported: true, version: 'v0.8.2-hrm.9', diskWarning: false, problems: [] });
++  });
++
++  it('never guesses when the file is missing, unreadable or old', () => {
++    expect(interpretServerStatus(null, NOW)).toEqual({ reported: false, reason: 'missing' });
++    expect(interpretServerStatus('{not json', NOW)).toEqual({ reported: false, reason: 'unreadable' });
++    expect(interpretServerStatus('{}', NOW)).toEqual({ reported: false, reason: 'unreadable' });
++    expect(interpretServerStatus(file({ generatedAt: '2026-10-27T11:40:00Z' }), NOW)).toMatchObject({ reported: false, reason: 'stale' });
++  });
++
++  it('flags disk, deploy, timers and the tunnel', () => {
++    const status = interpretServerStatus(file({
++      disk: { totalKb: 100, usedKb: 90 },
++      lastDeploy: { time: '2026-10-27T10:00:00Z', result: 'rolled_back', from: 'a', to: 'b' },
++      updateCheck: { result: 'exit-code', at: '2026-10-27T07:30:00Z' },
++      notifications: { result: 'timeout', at: null },
++      tunnel: { version: '2026.10.4', running: false, lastUpdate: { result: 'success', at: null } },
++    }), NOW);
++    expect(status.reported && status.problems).toEqual(['disk', 'deploy', 'updateCheck', 'notifications', 'tunnel']);
++  });
++
++  it('treats a waiting deploy as normal and a failed tunnel update as a warning', () => {
++    const status = interpretServerStatus(file({
++      lastDeploy: { time: '2026-10-27T10:00:00Z', result: 'waiting', from: 'a', to: 'b' },
++      tunnel: { version: '2026.10.4', running: true, lastUpdate: { result: 'exit-code', at: null } },
++    }), NOW);
++    expect(status.reported && status.problems).toEqual(['tunnelUpdate']);
++  });
++});
++
++describe('needs attention counts', () => {
++  const job = (status: string, created: string) => ({ id: created, user_id: 'u', user_email: null, status, completed_at: null, created_at: created, winget_id: 'Example.App', display_name: 'Example', intune_app_url: null }) as unknown as AnalyticsJob;
++
++  it('counts failures from the last 7 days and jobs pending for over 2 hours', () => {
++    const counts = attentionCounts([
++      job('failed', '2026-10-26T12:00:00Z'),
++      job('failed', '2026-10-10T12:00:00Z'),
++      job('packaging', '2026-10-27T09:00:00Z'),
++      job('queued', '2026-10-27T11:30:00Z'),
++      job('uploading', '2026-10-27T08:00:00Z'),
++      job('deployed', '2026-10-27T01:00:00Z'),
++      job('failed', 'not a date'),
++    ], NOW);
++    expect(counts).toEqual({ failedRecent: 1, stuck: 2 });
++  });
++});
+diff --git a/lib/hrm/__tests__/site.test.ts b/lib/hrm/__tests__/site.test.ts
+new file mode 100644
+index 000000000..1c54290be
+--- /dev/null
++++ b/lib/hrm/__tests__/site.test.ts
+@@ -0,0 +1,41 @@
++import { describe, expect, it } from 'vitest';
++import { NextRequest } from 'next/server';
++import { isCrawlerPath, isMarketingPath } from '../site';
++import { proxy } from '@/proxy';
++
++const get = (path: string) => proxy(new NextRequest(`https://intune.example.test${path}`));
++
++describe('no marketing site on the HRM server', () => {
++  it('treats the landing page and every marketing section as marketing', () => {
++    for (const path of ['/', '/about', '/apps', '/apps/Google.Chrome', '/blog/post', '/docs/docker', '/pricing', '/privacy', '/qa', '/roadmap', '/security', '/terms']) {
++      expect(isMarketingPath(path), path).toBe(true);
++    }
++  });
++
++  it('leaves the app, sign-in and API alone', () => {
++    for (const path of ['/dashboard', '/dashboard/apps', '/dashboard/help', '/auth/signin', '/api/health', '/api/apps', '/onboarding', '/redirect', '/applications', '/docsx']) {
++      expect(isMarketingPath(path), path).toBe(false);
++    }
++  });
++
++  it('redirects marketing pages to the dashboard', async () => {
++    for (const path of ['/', '/pricing', '/docs/getting-started']) {
++      const response = await get(path);
++      expect(response.status, path).toBe(307);
++      expect(new URL(response.headers.get('location')!).pathname).toBe('/dashboard');
++    }
++  });
++
++  it('tells crawlers to skip everything and serves no sitemap', async () => {
++    const robots = await get('/robots.txt');
++    expect(await robots.text()).toBe('User-agent: *\nDisallow: /\n');
++    expect((await get('/sitemap.xml')).status).toBe(404);
++    expect((await get('/sitemap/1.xml')).status).toBe(404);
++    expect(isCrawlerPath('/sitemapping')).toBe(false);
++  });
++
++  it('still sends signed-out visitors of the dashboard to sign-in', async () => {
++    const response = await get('/dashboard');
++    expect(new URL(response.headers.get('location')!).pathname).toBe('/auth/signin');
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+new file mode 100644
+index 000000000..6a0428ffa
+--- /dev/null
++++ b/lib/hrm/help-content.ts
+@@ -0,0 +1,78 @@
++/**
++ * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
++ * easy to edit in one place.
++ */
++
++export interface HelpLink { label: string; href: string }
++export interface HelpSection { id: string; title: string; points: string[]; links?: HelpLink[] }
++
++export const HRM_SUPPORT_URL = 'https://support.hruthmd.org';
++export const RUNBOOK_URL = 'https://github.com/House-of-Ruth-Maryland/IntuneGet-Build#readme';
++
++export const HELP_SECTIONS: HelpSection[] = [
++  {
++    id: 'deploying',
++    title: 'Deploying an app',
++    points: [
++      'Find the app in the App catalog, add it to the cart, choose its groups, then press Deploy to Intune.',
++      'Required installs the app without asking. Available lists it in Company Portal for people to install themselves, and only works with user groups.',
++      'Assign to a device group when every computer in the group needs the app, including shared computers and before anyone signs in.',
++      'Assign to a user group when the app follows the person to any computer they use, or when it is offered as Available.',
++      'Follow HRM\'s Entra group naming convention, and make it clear in the name whether a group holds devices or users.',
++      'Supersede previous version on update replaces the older version deployed by IntuneGet. Carry over assignments copies its groups to the new version.',
++    ],
++  },
++  {
++    id: 'esp',
++    title: 'New computers and the Enrollment Status Page',
++    points: [
++      'The Enrollment Status Page (ESP) holds a new computer at setup until the apps on its list are installed.',
++      'Add only apps a person needs before first use, such as security tools. Every app on the list makes setup slower.',
++    ],
++  },
++  {
++    id: 'updates',
++    title: 'App updates',
++    points: [
++      'The server checks for new app versions at 3:30 AM and 3:30 PM, and sends update alerts at 4:00 AM and 4:00 PM (Maryland time).',
++      'Updates waiting for approval show on the Home page and in App updates.',
++    ],
++  },
++  {
++    id: 'discovered',
++    title: 'Discovered apps',
++    points: [
++      'Matched means IntuneGet found the same app in the catalog. Claim it to manage it from here.',
++      'Suggestion means there are close candidates. Check the name and publisher, then use Link package to pick the right one.',
++      'Microsoft Store app means the app comes from the Store and can\'t be deployed through IntuneGet.',
++      'No match means the app isn\'t in the catalog, often because the vendor doesn\'t publish it to WinGet.',
++    ],
++  },
++  {
++    id: 'alerts',
++    title: 'Teams alerts',
++    points: [
++      'Update alerts and deployment results post to the IT Ops team, IT chat channel.',
++      'To check the connection, open Settings, then Notifications, and press Test on the Teams webhook.',
++    ],
++  },
++  {
++    id: 'server',
++    title: 'How the server is updated',
++    points: [
++      'New IntuneGet versions are built with HRM\'s changes and proposed as a Deploy pull request in IntuneGet-Build.',
++      'Merging it updates the server within 5 minutes. The server backs up its data first and goes back to the previous version on its own if the new one doesn\'t start.',
++      'Server status on the Home page shows the running version, the last backup, disk space and the tunnel.',
++    ],
++    links: [{ label: 'IntuneGet-Build runbook', href: RUNBOOK_URL }],
++  },
++  {
++    id: 'support',
++    title: 'When something goes wrong',
++    points: [
++      'A failed deployment shows on the Home page. Open it in Deployments to see the error and the GitHub run.',
++      'For anything else, open a ticket with HRM Support.',
++    ],
++    links: [{ label: 'HRM Support', href: HRM_SUPPORT_URL }],
++  },
++];
+diff --git a/lib/hrm/home.ts b/lib/hrm/home.ts
+new file mode 100644
+index 000000000..cfa2aa9ca
+--- /dev/null
++++ b/lib/hrm/home.ts
+@@ -0,0 +1,89 @@
++/**
++ * HRM patch: data for the Home page's "Needs attention" and "Server status".
++ *
++ * The VM writes hrm-status.json next to the database every 5 minutes
++ * (IntuneGet-Build deploy/intuneget-status.sh). The app only reads it.
++ */
++
++import { readFile } from 'fs/promises';
++import path from 'path';
++import type { AnalyticsJob } from '@/lib/db/types';
++
++export const STATUS_STALE_AFTER_MS = 15 * 60 * 1000;
++export const STUCK_AFTER_MS = 2 * 60 * 60 * 1000;
++export const RECENT_FAILURE_MS = 7 * 24 * 60 * 60 * 1000;
++export const DISK_WARNING_RATIO = 0.85;
++
++interface UnitRun { result: string | null; at: string | null }
++
++export interface ServerStatusFile {
++  generatedAt: string;
++  version: string | null;
++  startedAt: string | null;
++  lastDeploy: { time: string; result: string; from: string; to: string } | null;
++  lastBackup: { at: string | null; sizeKb: number } | null;
++  disk: { totalKb: number; usedKb: number };
++  updateCheck: UnitRun;
++  notifications: UnitRun;
++  tunnel: { version: string | null; running: boolean; lastUpdate: UnitRun };
++}
++
++export type ServerStatus =
++  | { reported: false; reason: 'missing' | 'stale' | 'unreadable'; generatedAt?: string }
++  | ({ reported: true; diskRatio: number; diskWarning: boolean; problems: string[] } & ServerStatusFile);
++
++export function statusFilePath(): string {
++  const dbPath = process.env.DATABASE_PATH || './data/intuneget.db';
++  return path.join(path.dirname(dbPath), 'hrm-status.json');
++}
++
++/** Interprets the status file. Anything old or malformed is "not reported", never guessed. */
++export function interpretServerStatus(raw: string | null, now = new Date()): ServerStatus {
++  if (raw === null) return { reported: false, reason: 'missing' };
++  let file: ServerStatusFile;
++  try {
++    file = JSON.parse(raw);
++    if (!file || typeof file.generatedAt !== 'string' || !file.disk) throw new Error('shape');
++  } catch {
++    return { reported: false, reason: 'unreadable' };
++  }
++  const generated = Date.parse(file.generatedAt);
++  if (!Number.isFinite(generated) || now.getTime() - generated > STATUS_STALE_AFTER_MS) {
++    return { reported: false, reason: 'stale', generatedAt: file.generatedAt };
++  }
++  const diskRatio = file.disk.totalKb > 0 ? file.disk.usedKb / file.disk.totalKb : 0;
++  const problems: string[] = [];
++  if (diskRatio >= DISK_WARNING_RATIO) problems.push('disk');
++  if (file.lastDeploy && !['deployed', 'waiting'].includes(file.lastDeploy.result)) problems.push('deploy');
++  if (file.updateCheck?.result && file.updateCheck.result !== 'success') problems.push('updateCheck');
++  if (file.notifications?.result && file.notifications.result !== 'success') problems.push('notifications');
++  if (!file.tunnel?.running) problems.push('tunnel');
++  else if (file.tunnel.lastUpdate?.result && file.tunnel.lastUpdate.result !== 'success') problems.push('tunnelUpdate');
++  return { ...file, reported: true, diskRatio, diskWarning: diskRatio >= DISK_WARNING_RATIO, problems };
++}
++
++export async function readServerStatus(now = new Date()): Promise<ServerStatus> {
++  let raw: string | null = null;
++  try {
++    raw = await readFile(statusFilePath(), 'utf8');
++  } catch {
++    raw = null;
++  }
++  return interpretServerStatus(raw, now);
++}
++
++const PENDING = new Set(['queued', 'packaging', 'uploading']);
++
++/** Tenant-wide failures in the last 7 days and jobs pending for more than 2 hours. */
++export function attentionCounts(jobs: AnalyticsJob[], now = new Date()) {
++  let failedRecent = 0;
++  let stuck = 0;
++  for (const job of jobs) {
++    const created = Date.parse(job.created_at ?? '');
++    if (!Number.isFinite(created)) continue;
++    const age = now.getTime() - created;
++    if (job.status === 'failed' && age <= RECENT_FAILURE_MS) failedRecent++;
++    else if (PENDING.has(job.status) && age > STUCK_AFTER_MS) stuck++;
++  }
++  return { failedRecent, stuck };
++}
+diff --git a/lib/hrm/site.ts b/lib/hrm/site.ts
+new file mode 100644
+index 000000000..9e04bf53e
+--- /dev/null
++++ b/lib/hrm/site.ts
+@@ -0,0 +1,25 @@
++/**
++ * HRM patch: this server is HRM's internal tool behind Cloudflare Access, so
++ * the public marketing site (home page, pricing, blog, docs...) has no
++ * audience. Its pages stay in the code, unchanged, and the request proxy
++ * sends them to the dashboard instead.
++ */
++
++// Top-level routes of app/(marketing). '/' is the landing page.
++const MARKETING_PREFIXES = [
++  '/about', '/apps', '/blog', '/docs', '/pricing', '/privacy', '/qa', '/roadmap', '/security', '/terms',
++];
++
++export const HOME_PATH = '/dashboard';
++
++export function isMarketingPath(pathname: string): boolean {
++  if (pathname === '/') return true;
++  return MARKETING_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
++}
++
++// Search engines are told to skip everything; the sitemap is never served.
++export function isCrawlerPath(pathname: string): boolean {
++  return pathname === '/robots.txt' || pathname === '/sitemap.xml' || pathname.startsWith('/sitemap/');
++}
++
++export const ROBOTS_TXT = 'User-agent: *\nDisallow: /\n';
+diff --git a/proxy.ts b/proxy.ts
+index 7f19c207b..14b4c8a4f 100644
+--- a/proxy.ts
++++ b/proxy.ts
+@@ -1,5 +1,6 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createNextMiddleware } from 'gt-next/middleware';
++import { HOME_PATH, ROBOTS_TXT, isCrawlerPath, isMarketingPath } from '@/lib/hrm/site';
+ 
+ const PROTECTED_ROUTES = ['/dashboard'];
+ 
+@@ -14,6 +15,15 @@ const gtMiddleware = createNextMiddleware({ localeRouting: false });
+ export function proxy(request: NextRequest) {
+   const { pathname } = request.nextUrl;
+ 
++  // HRM patch: no marketing site on this server.
++  if (isCrawlerPath(pathname)) {
++    if (pathname !== '/robots.txt') return new NextResponse(null, { status: 404 });
++    return new NextResponse(ROBOTS_TXT, { headers: { 'Content-Type': 'text/plain' } });
++  }
++  if (isMarketingPath(pathname)) {
++    return NextResponse.redirect(new URL(HOME_PATH, request.url));
++  }
++
+   // Protect dashboard routes: redirect to sign-in if no auth hint cookie
+   const isProtected = PROTECTED_ROUTES.some((route) => pathname.startsWith(route));
+   if (isProtected) {
+diff --git a/tailwind.config.ts b/tailwind.config.ts
+index 62322b318..00fe2dd04 100644
+--- a/tailwind.config.ts
++++ b/tailwind.config.ts
+@@ -91,19 +91,19 @@ const config: Config = {
+           "50%": { backgroundPosition: "100% 50%" },
+         },
+         "ring-pulse": {
+-          "0%, 100%": { boxShadow: "0 0 0 0px rgba(8, 145, 178, 0.3)" },
+-          "50%": { boxShadow: "0 0 0 6px rgba(8, 145, 178, 0)" },
++          "0%, 100%": { boxShadow: "0 0 0 0px rgba(103, 48, 144, 0.3)" },
++          "50%": { boxShadow: "0 0 0 6px rgba(103, 48, 144, 0)" },
+         },
+       },
+       backgroundImage: {
+         "grid-light":
+           "url(\"data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(0 0 0 / 0.04)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e\")",
+         "dots-light":
+-          "radial-gradient(circle, rgba(8, 145, 178, 0.08) 1px, transparent 1px)",
++          "radial-gradient(circle, rgba(103, 48, 144, 0.08) 1px, transparent 1px)",
+         "gradient-radial-cyan":
+-          "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(8, 145, 178, 0.08), transparent)",
++          "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(103, 48, 144, 0.08), transparent)",
+         "gradient-radial-violet":
+-          "radial-gradient(ellipse 60% 40% at 80% 100%, rgba(124, 58, 237, 0.06), transparent)",
++          "radial-gradient(ellipse 60% 40% at 80% 100%, rgba(90, 131, 140, 0.06), transparent)",
+       },
+       colors: {
+         background: "hsl(var(--background))",
+@@ -155,11 +155,11 @@ const config: Config = {
+         // Inverse surface for Badge dark variant
+         "surface-inverse": "rgb(var(--surface-inverse) / <alpha-value>)",
+         // Electric Cyan accent system (static - same in both themes)
+-        "accent-cyan": "#0891b2",
+-        "accent-cyan-bright": "#06b6d4",
+-        "accent-cyan-dim": "#0e7490",
+-        "accent-violet": "#7c3aed",
+-        "accent-violet-bright": "#8b5cf6",
++        "accent-cyan": "#673090",
++        "accent-cyan-bright": "#855aa6",
++        "accent-cyan-dim": "#412160",
++        "accent-violet": "#5a838c",
++        "accent-violet-bright": "#5dc19d",
+         // Text colors wired to CSS variables (switch light/dark)
+         "text-primary": "rgb(var(--text-primary) / <alpha-value>)",
+         "text-secondary": "rgb(var(--text-secondary) / <alpha-value>)",
+@@ -169,7 +169,7 @@ const config: Config = {
+           success: "#10b981",
+           warning: "#f59e0b",
+           error: "#ef4444",
+-          info: "#0891b2",
++          info: "#673090",
+         },
+       },
+       borderRadius: {
+@@ -186,10 +186,10 @@ const config: Config = {
+         "soft-xl": "0 12px 48px rgba(0, 0, 0, 0.1)",
+         "card": "0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.04)",
+         "card-hover": "0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04)",
+-        "glow-cyan": "0 0 20px rgba(8, 145, 178, 0.15)",
+-        "glow-cyan-lg": "0 0 40px rgba(8, 145, 178, 0.2)",
+-        "glow-violet": "0 0 20px rgba(124, 58, 237, 0.15)",
+-        "glow-violet-lg": "0 0 40px rgba(124, 58, 237, 0.2)",
++        "glow-cyan": "0 0 20px rgba(103, 48, 144, 0.15)",
++        "glow-cyan-lg": "0 0 40px rgba(103, 48, 144, 0.2)",
++        "glow-violet": "0 0 20px rgba(90, 131, 140, 0.15)",
++        "glow-violet-lg": "0 0 40px rgba(90, 131, 140, 0.2)",
+         "glow-success": "0 0 20px rgba(16, 185, 129, 0.15)",
+         "glow-warning": "0 0 20px rgba(245, 158, 11, 0.15)",
+         "glow-error": "0 0 20px rgba(239, 68, 68, 0.15)",

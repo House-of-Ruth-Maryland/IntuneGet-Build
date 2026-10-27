@@ -19,6 +19,7 @@ HRM IT notes.
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
 | `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day. |
 | `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
+| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
 | `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: build `<tag>-hrm.<n>` and open the "Deploy" PR. |
 
@@ -124,6 +125,7 @@ sudo install -m 0755 deploy/intuneget-deploy.sh /usr/local/sbin/intuneget-deploy
 sudo install -m 0644 deploy/systemd/*.service deploy/systemd/*.timer /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/intuneget-deploy.default /etc/default/intuneget-deploy  # first time only; set IMAGE_REPO and APP_URL
 sudo install -m 0755 deploy/cloudflared-apt-update.sh /usr/local/sbin/cloudflared-apt-update
+sudo install -m 0755 deploy/intuneget-status.sh /usr/local/sbin/intuneget-status
 sudo install -D -m 0644 deploy/systemd/cloudflared-update.service.d/apt.conf /etc/systemd/system/cloudflared-update.service.d/apt.conf
 sudo systemctl daemon-reload
 ```
@@ -150,7 +152,7 @@ Check, then enable:
 
 ```bash
 sudo intuneget-deploy run && sudo intuneget-deploy status
-sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer
+sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer
 ```
 
 ## How we work
