@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-28
+
+- A watchdog on the VM posts to IT Ops in Teams when the app is unhealthy, a deploy fails, disk runs
+  low, the update check or alerts fail or run late, or the tunnel stops; it posts again when the
+  problem clears.
+
 ## 2026-10-27
 
 - The server opens on an HRM Home page instead of the public IntuneGet website: what needs attention

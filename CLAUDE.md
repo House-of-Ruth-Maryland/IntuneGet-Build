@@ -20,6 +20,7 @@ HRM IT notes.
 | `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day. |
 | `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
 | `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. |
+| `deploy/intuneget-watchdog.py` | Every 5 minutes (installed as `/usr/local/sbin/intuneget-watchdog`, run by `intuneget-watchdog.timer`): checks the app's health and the status file and posts to IT Ops in Teams when a problem is confirmed, daily while it lasts, and when it clears. `intuneget-watchdog status` lists current problems; `intuneget-watchdog test` sends a test post. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
 | `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: build `<tag>-hrm.<n>` and open the "Deploy" PR. |
 
@@ -91,6 +92,11 @@ HRM IT notes.
   finishes as deployed or failed. That's correct only while the server serves one Intune tenant.
 - Messages carry app names, versions, staff emails, links and error text only; never add device,
   user or client details to them.
+- **Server alerts** come from two places. The VM watchdog (`intuneget-watchdog`) posts through the
+  same signed flow (first URL in `WEBHOOK_MANAGED_IDENTITY_URLS`) when a problem is seen on two
+  checks in a row, daily while it lasts, and when it clears; it is quiet during deploys. It can't
+  report the VM itself being down, so a Cloudflare **Tunnel Health Alert** (Notifications, free on
+  every plan) emails the IT Ops channel's email address when the tunnel goes degraded or down.
 
 ## Deploys and rollback
 
@@ -126,6 +132,7 @@ sudo install -m 0644 deploy/systemd/*.service deploy/systemd/*.timer /etc/system
 sudo install -m 0644 deploy/systemd/intuneget-deploy.default /etc/default/intuneget-deploy  # first time only; set IMAGE_REPO and APP_URL
 sudo install -m 0755 deploy/cloudflared-apt-update.sh /usr/local/sbin/cloudflared-apt-update
 sudo install -m 0755 deploy/intuneget-status.sh /usr/local/sbin/intuneget-status
+sudo install -m 0755 deploy/intuneget-watchdog.py /usr/local/sbin/intuneget-watchdog
 sudo install -D -m 0644 deploy/systemd/cloudflared-update.service.d/apt.conf /etc/systemd/system/cloudflared-update.service.d/apt.conf
 sudo systemctl daemon-reload
 ```
@@ -152,7 +159,7 @@ Check, then enable:
 
 ```bash
 sudo intuneget-deploy run && sudo intuneget-deploy status
-sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer
+sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer intuneget-watchdog.timer
 ```
 
 ## How we work
