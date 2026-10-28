@@ -1,0 +1,9 @@
+[Unit]
+Description=Download upstream's latest signed IntuneGet curated catalog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/intuneget-deploy
+ExecStart=/usr/local/sbin/intuneget-curated-refresh

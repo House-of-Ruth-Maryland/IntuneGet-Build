@@ -1,0 +1,180 @@
+diff --git a/lib/curated-catalog/server.ts b/lib/curated-catalog/server.ts
+index 119ada8d5..4bdb560f2 100644
+--- a/lib/curated-catalog/server.ts
++++ b/lib/curated-catalog/server.ts
+@@ -11,6 +11,7 @@ import { isCuratedPackageId } from './core.mjs';
+ import { extractSilentSwitches } from '@/lib/msp/silent-switches';
+ import { authorizeCuratedExecution } from './custom-config';
+ import { testedCuratedSettings } from './settings';
++import { readRefreshedCatalog } from '@/lib/hrm/curated-refresh';
+ 
+ export function getCuratedCatalog(): { payload: CuratedCatalogEnvelope['payload']; entries: CuratedCatalogEntry[] } {
+   let trustedKeys: Record<string, string>;
+@@ -18,7 +19,19 @@ export function getCuratedCatalog(): { payload: CuratedCatalogEnvelope['payload'
+   catch { throw new CuratedCatalogError('The curated catalog trust configuration is invalid.'); }
+   // Serving tolerates a definitions change that the automation has not
+   // re-signed yet; every release is still revalidated individually.
+-  const { payload } = verifyCatalogReleases(envelope, CURATED_APPS, { ...committedKeys, ...trustedKeys });
++  const keys = { ...committedKeys, ...trustedKeys };
++  // HRM patch: also try the newer signed list the VM downloads daily, and
++  // serve whichever list verifies and was signed most recently.
++  let builtIn: ReturnType<typeof verifyCatalogReleases> | null = null;
++  let builtInError: unknown = null;
++  try { builtIn = verifyCatalogReleases(envelope, CURATED_APPS, keys); } catch (error) { builtInError = error; }
++  let refreshed: ReturnType<typeof verifyCatalogReleases> | null = null;
++  const downloaded = readRefreshedCatalog();
++  if (downloaded) { try { refreshed = verifyCatalogReleases(downloaded, CURATED_APPS, keys); } catch { refreshed = null; } }
++  const signedAt = (result: ReturnType<typeof verifyCatalogReleases> | null) => Date.parse(result?.payload.generatedAt ?? '') || 0;
++  const chosen = refreshed && signedAt(refreshed) >= signedAt(builtIn) ? refreshed : builtIn;
++  if (!chosen) throw builtInError;
++  const { payload } = chosen;
+   // A release whose packaging profile is no longer current is withheld until
+   // the automation verifies it again; other apps stay deployable meanwhile.
+   const entries = catalogEntries(CURATED_APPS, payload).map(entry => {
+diff --git a/lib/hrm/__tests__/curated-refresh.test.ts b/lib/hrm/__tests__/curated-refresh.test.ts
+new file mode 100644
+index 000000000..b1ef75e9b
+--- /dev/null
++++ b/lib/hrm/__tests__/curated-refresh.test.ts
+@@ -0,0 +1,92 @@
++import { mkdtempSync, rmSync, writeFileSync } from 'fs';
++import { tmpdir } from 'os';
++import path from 'path';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { releaseFixture, signedFixture } from '@/lib/curated-catalog/test-fixtures';
++import { resetRefreshedCatalogCache } from '../curated-refresh';
++
++const state = vi.hoisted(() => ({ envelope: {} as Record<string, unknown> }));
++vi.mock('@/catalog/curated/catalog.json', () => ({ default: state.envelope }));
++import { getCuratedCatalog } from '@/lib/curated-catalog/server';
++
++const DAY = 86_400_000;
++let dir: string;
++const setBuiltIn = (envelope: object) => {
++  Object.keys(state.envelope).forEach((key) => delete state.envelope[key]);
++  Object.assign(state.envelope, envelope);
++};
++const download = (content: string) => {
++  writeFileSync(path.join(dir, 'curated-catalog.json'), content);
++  resetRefreshedCatalogCache();
++};
++
++// signedFixture always uses keyId 'unit-test'; rename so two fixtures can both be trusted.
++const withKeyId = (fixture: ReturnType<typeof signedFixture>, keyId: string) => ({
++  envelope: { ...fixture.envelope, keyId },
++  keys: { [keyId]: fixture.keys['unit-test'] },
++});
++
++beforeEach(() => {
++  dir = mkdtempSync(path.join(tmpdir(), 'curated-refresh-'));
++  vi.stubEnv('DATABASE_PATH', path.join(dir, 'intuneget.db'));
++  resetRefreshedCatalogCache();
++  vi.useFakeTimers({ now: new Date('2026-10-20T12:00:00Z'), toFake: ['Date'] });
++});
++afterEach(() => {
++  vi.useRealTimers();
++  vi.unstubAllEnvs();
++  rmSync(dir, { recursive: true, force: true });
++});
++
++describe('curated catalog refreshed by the VM', () => {
++  it('serves the downloaded list once the built-in one has expired', () => {
++    const builtIn = withKeyId(signedFixture(), 'built-in');
++    vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
++    const fresh = withKeyId(signedFixture([releaseFixture(undefined, '121.0.0.0')]), 'fresh');
++    setBuiltIn(builtIn.envelope);
++    vi.stubEnv('CURATED_CATALOG_PUBLIC_KEYS', JSON.stringify({ ...builtIn.keys, ...fresh.keys }));
++    expect(() => getCuratedCatalog()).toThrow();
++    download(JSON.stringify(fresh.envelope));
++    const { payload, entries } = getCuratedCatalog();
++    expect(payload.generatedAt).toBe(fresh.envelope.payload.generatedAt);
++    expect(entries.find((entry) => entry.release)?.release?.candidate.version).toBe('121.0.0.0');
++  });
++
++  it('ignores a downloaded list that is tampered with, signed by an unknown key, or unreadable', () => {
++    const builtIn = withKeyId(signedFixture(), 'built-in');
++    setBuiltIn(builtIn.envelope);
++    vi.setSystemTime(new Date('2026-10-20T13:00:00Z'));
++    const fresh = withKeyId(signedFixture([releaseFixture(undefined, '121.0.0.0')]), 'fresh');
++    vi.stubEnv('CURATED_CATALOG_PUBLIC_KEYS', JSON.stringify({ ...builtIn.keys, ...fresh.keys }));
++
++    const tampered = structuredClone(fresh.envelope) as typeof fresh.envelope;
++    tampered.payload.releases[0].candidate.version = '999.0.0.0';
++    download(JSON.stringify(tampered));
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++
++    download(JSON.stringify({ ...fresh.envelope, keyId: 'someone-else' }));
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++
++    download('{not json');
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++  });
++
++  it('keeps the built-in list when it is newer than the download', () => {
++    const older = withKeyId(signedFixture(), 'older');
++    vi.setSystemTime(new Date('2026-10-20T15:00:00Z'));
++    const builtIn = withKeyId(signedFixture(), 'built-in');
++    setBuiltIn(builtIn.envelope);
++    vi.stubEnv('CURATED_CATALOG_PUBLIC_KEYS', JSON.stringify({ ...builtIn.keys, ...older.keys }));
++    download(JSON.stringify(older.envelope));
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++  });
++
++  it('behaves as before when nothing was downloaded', () => {
++    const builtIn = withKeyId(signedFixture(), 'built-in');
++    setBuiltIn(builtIn.envelope);
++    vi.stubEnv('CURATED_CATALOG_PUBLIC_KEYS', JSON.stringify(builtIn.keys));
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++    vi.setSystemTime(new Date(Date.now() + 2 * DAY));
++    expect(() => getCuratedCatalog()).toThrow(/expired/);
++  });
++});
+diff --git a/lib/hrm/curated-refresh.ts b/lib/hrm/curated-refresh.ts
+new file mode 100644
+index 000000000..1689f5119
+--- /dev/null
++++ b/lib/hrm/curated-refresh.ts
+@@ -0,0 +1,43 @@
++/**
++ * HRM patch: a newer signed curated catalog from the data folder.
++ *
++ * The curated catalog is a signed list built into the image that expires
++ * 7 days after upstream signs it, so a self-hosted image stops serving it a
++ * week after its release. The VM downloads upstream's latest signed list
++ * daily (IntuneGet-Build deploy/intuneget-curated-refresh.sh) next to the
++ * database. This only reads that file; the caller still verifies its
++ * signature against the keys built into the image, and its expiry, and falls
++ * back to the built-in list when it doesn't verify.
++ */
++
++import { readFileSync, statSync } from 'fs';
++import path from 'path';
++
++const MAX_BYTES = 20 * 1024 * 1024;
++
++let cached: { file: string; mtimeMs: number; size: number; envelope: unknown } | null = null;
++
++export function refreshedCatalogPath(): string {
++  const dbPath = process.env.DATABASE_PATH || './data/intuneget.db';
++  return path.join(path.dirname(dbPath), 'curated-catalog.json');
++}
++
++/** The downloaded envelope, or null when there is none or it can't be read. */
++export function readRefreshedCatalog(): unknown | null {
++  const file = refreshedCatalogPath();
++  try {
++    const { mtimeMs, size } = statSync(file);
++    if (size > MAX_BYTES) return null;
++    if (cached && cached.file === file && cached.mtimeMs === mtimeMs && cached.size === size) return cached.envelope;
++    const envelope = JSON.parse(readFileSync(file, 'utf8'));
++    cached = { file, mtimeMs, size, envelope };
++    return envelope;
++  } catch {
++    return null;
++  }
++}
++
++/** Test hook. */
++export function resetRefreshedCatalogCache() {
++  cached = null;
++}
