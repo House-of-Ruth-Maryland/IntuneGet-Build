@@ -1,0 +1,752 @@
+diff --git a/app/api/updates/trigger/route.ts b/app/api/updates/trigger/route.ts
+index a7a6412be..7d547a899 100644
+--- a/app/api/updates/trigger/route.ts
++++ b/app/api/updates/trigger/route.ts
+@@ -6,6 +6,8 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { sanitizeAssignmentsForDispatch } from '@/lib/assignment-intents';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
++import { getDatabase, isSqliteMode } from '@/lib/db';
++import { runSqliteManualUpdates } from '@/lib/hrm/manual-update';
+ import { getCatalogSource } from '@/lib/catalog';
+ import { parseAccessToken } from '@/lib/auth-utils';
+ import {
+@@ -75,6 +77,12 @@ export async function POST(request: NextRequest) {
+       );
+     }
+ 
++    // HRM patch: Update and Update All on the SQLite server.
++    if (isSqliteMode()) {
++      const result = await runSqliteManualUpdates(getDatabase(), user, updateRequests);
++      return NextResponse.json(result);
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       const unavailableError =
+         'Update deployment requires Supabase and is not available on this self-hosted deployment';
+diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
+index df241f609..2dcb0bf63 100644
+--- a/components/dashboard/Sidebar.tsx
++++ b/components/dashboard/Sidebar.tsx
+@@ -118,13 +118,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+   const managementItems = sccmEnabled
+     ? managementNav
+     : managementNav.filter((item) => item.href !== '/dashboard/sccm');
+-  const visibleManagementItems = hostedServices
+-    ? managementItems
+-    : managementItems.filter((item) => item.href !== '/dashboard/updates');
+ 
+   const upstreamGroups: NavGroup[] = [
+     { items: coreNav },
+-    { label: 'Management', items: visibleManagementItems },
++    // HRM patch 0012: App Updates works on SQLite, so it is shown here too.
++    { label: 'Management', items: managementItems },
+     {
+       label: 'Analytics',
+       items: hostedServices
+diff --git a/lib/auto-update/cleanup.ts b/lib/auto-update/cleanup.ts
+index a266e0d18..7a9bf973c 100644
+--- a/lib/auto-update/cleanup.ts
++++ b/lib/auto-update/cleanup.ts
+@@ -9,6 +9,8 @@ import { createClient } from '@supabase/supabase-js';
+ import { DEFAULT_SAFETY_CONFIG } from '@/types/update-policies';
+ import type { AutoUpdateStatus } from '@/types/update-policies';
+ import { isIntuneApprovalFailure } from '@/lib/intune-approval';
++import { getDatabase, isSqliteMode } from '@/lib/db';
++import { completeSqliteUpdateJob } from '@/lib/hrm/update-completion';
+ 
+ type TerminalStatus = 'deployed' | 'duplicate_skipped' | 'failed' | 'cancelled';
+ 
+@@ -39,6 +41,12 @@ export async function handleAutoUpdateJobCompletion(
+   terminalStatus: TerminalStatus,
+   errorMessage?: string
+ ): Promise<void> {
++  // HRM patch: the same tracking through the database adapter on SQLite servers.
++  if (isSqliteMode()) {
++    await completeSqliteUpdateJob(getDatabase(), jobId, terminalStatus, errorMessage);
++    return;
++  }
++
+   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+ 
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index d09e7f116..77b40f275 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -422,8 +422,16 @@ export async function runSqliteUpdateCheck(
+       installerSuccessCodes: resolution.info.installerSuccessCodes,
+     });
+ 
+-    if (result.success) triggered += 1;
+-    else if (result.skipped) {
++    if (result.success) {
++      triggered += 1;
++      // HRM patch: start the GitHub packaging run; a local packager picks queued jobs up itself.
++      if (result.packagingJobId) {
++        const dispatch = await dispatchUpdateJob(db, result.packagingJobId, { batch: true });
++        if (!dispatch.dispatched && dispatch.reason !== 'local-packager') {
++          console.warn(`[auto-update] ${policy.winget_id} not started for tenant ${policy.tenant_id}: ${dispatch.message}`);
++        }
++      }
++    } else if (result.skipped) {
+       skipped += 1;
+       if (result.code) console.warn(`[auto-update] ${policy.winget_id} skipped for tenant ${policy.tenant_id}: ${result.skipReason}`);
+     } else errors += 1;
+@@ -432,3 +440,4 @@ export async function runSqliteUpdateCheck(
+   return { available, triggered, skipped, errors };
+ }
+ import { customDetectionUpdateHold } from '@/lib/custom-detection';
++import { dispatchUpdateJob } from '@/lib/hrm/update-dispatch';
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index c5d4db318..9af5c7780 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -857,6 +857,11 @@ export const sqliteDb: DatabaseAdapter = {
+       return parseHistoryRow(row);
+     },
+ 
++    async getById(id: string): Promise<AutoUpdateHistory | null> {
++      const row = getDb().prepare('SELECT * FROM auto_update_history WHERE id = ?').get(id) as Record<string, unknown> | undefined;
++      return row ? parseHistoryRow(row) : null;
++    },
++
+     async update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null> {
+       const database = getDb();
+       const { clause, values } = buildSetClause(data as Record<string, unknown>);
+diff --git a/lib/db/supabase-adapter.ts b/lib/db/supabase-adapter.ts
+index 590493b95..08214dd96 100644
+--- a/lib/db/supabase-adapter.ts
++++ b/lib/db/supabase-adapter.ts
+@@ -822,6 +822,16 @@ export const supabaseDb: DatabaseAdapter = {
+       return (updated as unknown as AutoUpdateHistory) ?? null;
+     },
+ 
++    async getById(id: string): Promise<AutoUpdateHistory | null> {
++      const { data, error } = await createServerClient()
++        .from('auto_update_history')
++        .select('*')
++        .eq('id', id)
++        .maybeSingle();
++      if (isError(error) && error.code !== 'PGRST116') throw error;
++      return (data as unknown as AutoUpdateHistory) ?? null;
++    },
++
+     async list(userId: string, query: Parameters<DatabaseAdapter['autoUpdateHistory']['list']>[1]): Promise<AutoUpdateHistoryWithPolicy[]> {
+       const supabase = createServerClient();
+ 
+diff --git a/lib/db/types.ts b/lib/db/types.ts
+index 854268262..6142b9d91 100644
+--- a/lib/db/types.ts
++++ b/lib/db/types.ts
+@@ -389,6 +389,11 @@ export interface DatabaseAdapter {
+      */
+     update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null>;
+ 
++    /**
++     * Get one history record (HRM patch: completion tracking on SQLite).
++     */
++    getById(id: string): Promise<AutoUpdateHistory | null>;
++
+     /**
+      * List a user's history with the policy target and deployed app name,
+      * newest first, honoring the optional filters and pagination.
+diff --git a/lib/hrm/__tests__/updates.test.ts b/lib/hrm/__tests__/updates.test.ts
+new file mode 100644
+index 000000000..c228deb28
+--- /dev/null
++++ b/lib/hrm/__tests__/updates.test.ts
+@@ -0,0 +1,227 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++const mocks = vi.hoisted(() => ({
++  trigger: vi.fn(),
++  configured: vi.fn(() => true),
++  localPackager: { value: false },
++  installer: vi.fn(),
++  catalogApps: vi.fn(),
++  qaGate: { value: false },
++}));
++vi.mock('@/lib/github-actions', async (original) => ({
++  ...(await original<object>()),
++  triggerPackagingWorkflow: mocks.trigger,
++  isGitHubActionsConfigured: mocks.configured,
++}));
++vi.mock('@/lib/features', async (original) => {
++  const actual = await original<typeof import('@/lib/features')>();
++  return { ...actual, getFeatureFlags: () => ({ ...actual.getFeatureFlags(), localPackager: mocks.localPackager.value }) };
++});
++vi.mock('@/lib/auto-update/trigger', () => ({ getLatestInstallerInfo: mocks.installer }));
++vi.mock('@/lib/catalog', () => ({
++  getCatalogSource: () => ({ getAppsByWingetIds: mocks.catalogApps, getAppForInstaller: vi.fn() }),
++}));
++vi.mock('@/lib/qa/gate', async (original) => ({
++  ...(await original<object>()),
++  isQaGateError: () => mocks.qaGate.value,
++  describeQaGateError: () => 'Installer flagged by the installation test',
++}));
++vi.mock('@/lib/graph-token', () => ({ acquireGraphToken: vi.fn(() => { throw new Error('no Graph in tests'); }) }));
++
++let dir: string;
++const USER = { userId: 'user-1', tenantId: 'tenant-1' };
++
++beforeEach(() => {
++  vi.resetModules();
++  dir = mkdtempSync(join(tmpdir(), 'hrm-updates-'));
++  process.env.DATABASE_PATH = join(dir, 'app.db');
++  mocks.trigger.mockReset().mockResolvedValue({ runId: 42, runUrl: 'https://github.example.test/run/42' });
++  mocks.configured.mockReturnValue(true);
++  mocks.localPackager.value = false;
++  mocks.qaGate.value = false;
++  mocks.installer.mockReset().mockResolvedValue({
++    ok: true,
++    info: {
++      wingetId: 'Vendor.App', currentVersion: '', latestVersion: '1.1.0', displayName: 'Vendor App',
++      installerUrl: 'https://example.test/app-1.1.0.exe', installerSha256: 'AB'.repeat(32), installerType: 'exe',
++      installCommand: 'app.exe /S', uninstallCommand: 'app.exe /uninstall', installScope: 'machine',
++    },
++  });
++  mocks.catalogApps.mockReset().mockResolvedValue([{ winget_id: 'Vendor.App', latest_version: '1.1.0' }]);
++});
++afterEach(async () => {
++  (await import('@/lib/db/sqlite')).closeSqliteDb();
++  rmSync(dir, { recursive: true, force: true });
++  delete process.env.DATABASE_PATH;
++});
++
++const deploymentConfig = {
++  displayName: 'Vendor App', publisher: 'Vendor', architecture: 'x64', installerType: 'exe',
++  installCommand: 'app.exe /S', uninstallCommand: 'app.exe /uninstall', installScope: 'machine', detectionRules: [],
++  assignments: [{ type: 'group', groupId: 'group-1', intent: 'required' }],
++};
++
++async function load() {
++  const { sqliteDb: db } = await import('@/lib/db/sqlite');
++  return {
++    db,
++    dispatch: await import('../update-dispatch'),
++    manual: await import('../manual-update'),
++    completion: await import('../update-completion'),
++    check: await import('@/lib/auto-update/sqlite'),
++  };
++}
++
++/** A previous IntuneGet deployment of 1.0.0 plus a detected 1.1.0, as the update check leaves them. */
++async function seed(db: Awaited<ReturnType<typeof load>>['db'], wingetId = 'Vendor.App') {
++  const job = await db.jobs.create({
++    user_id: USER.userId, tenant_id: USER.tenantId, winget_id: wingetId, version: '1.0.0',
++    display_name: 'Vendor App', publisher: 'Vendor', architecture: 'x64', installer_type: 'exe',
++    installer_url: 'https://example.test/app-1.0.0.exe', install_command: 'app.exe /S', uninstall_command: 'app.exe /uninstall',
++    install_scope: 'machine', status: 'deployed', package_config: deploymentConfig as never,
++  });
++  await db.uploadHistory.create({
++    id: `history-${wingetId}`, user_id: USER.userId, winget_id: wingetId, version: '1.0.0', display_name: 'Vendor App',
++    intune_app_id: 'intune-app-1', intune_tenant_id: USER.tenantId, packaging_job_id: job.id,
++  });
++  await db.updateCheckResults.upsert({
++    user_id: USER.userId, tenant_id: USER.tenantId, winget_id: wingetId, intune_app_id: 'intune-app-1',
++    display_name: 'Vendor App', current_version: '1.0.0', latest_version: '1.1.0', is_critical: false, is_managed: true,
++  });
++}
++
++describe('update workflow inputs', () => {
++  it('supersede and carry over groups when the update replaces an IntuneGet app', async () => {
++    const { dispatch } = await load();
++    const job = { id: 'job-1', tenant_id: 'tenant-1', winget_id: 'Vendor.App', version: '1.1.0', display_name: 'Vendor App',
++      publisher: 'Vendor', architecture: 'x64', installer_type: 'exe', installer_url: 'https://example.test/a.exe',
++      installer_sha256: 'AB', install_command: 'app.exe /S', uninstall_command: 'app.exe /x', install_scope: 'machine',
++      detection_rules: [], package_config: { sourceIntuneAppId: 'intune-app-1', assignments: deploymentConfig.assignments } } as never;
++    const inputs = dispatch.buildUpdateWorkflowInputs(job, 'https://intune.example.test/api/package/callback');
++    expect(inputs).toMatchObject({
++      jobId: 'job-1', tenantId: 'tenant-1', version: '1.1.0', sourceIntuneAppId: 'intune-app-1',
++      autoSupersede: true, supersedenceType: 'update', carryOverAssignments: true, removeAssignmentsFromPreviousApp: true,
++      callbackUrl: 'https://intune.example.test/api/package/callback', installScope: 'machine',
++    });
++    expect(JSON.parse(inputs.assignments!)).toHaveLength(1);
++    const fresh = dispatch.buildUpdateWorkflowInputs({ ...(job as object), package_config: {} } as never, 'x');
++    expect(fresh).toMatchObject({ autoSupersede: false, carryOverAssignments: false, supersedenceType: undefined });
++  });
++});
++
++describe('Update and Update All on SQLite', () => {
++  it('creates and starts the update, saving the policy as notify-only', async () => {
++    const { db, manual } = await load();
++    await seed(db);
++    const result = await manual.runSqliteManualUpdates(db, USER, [{ winget_id: 'Vendor.App', tenant_id: USER.tenantId }]);
++    expect(result).toMatchObject({ success: true, triggered: 1, failed: 0 });
++    const job = await db.jobs.getById(result.results[0].packaging_job_id!);
++    expect(job).toMatchObject({ version: '1.1.0', status: 'packaging', github_run_url: 'https://github.example.test/run/42' });
++    expect(mocks.trigger).toHaveBeenCalledWith(expect.objectContaining({ jobId: job!.id, autoSupersede: true, carryOverAssignments: true, sourceIntuneAppId: 'intune-app-1' }),
++      undefined, { skipRunCapture: false, requireQaPass: true });
++    const policy = await db.updatePolicies.getByKey(USER.userId, USER.tenantId, 'Vendor.App');
++    expect(policy).toMatchObject({ policy_type: 'notify', original_upload_history_id: 'history-Vendor.App' });
++  });
++
++  it('reports each app in Update All and refuses other tenants, unknown updates and self-updating apps', async () => {
++    const { db, manual } = await load();
++    await seed(db);
++    const result = await manual.runSqliteManualUpdates(db, USER, [
++      { winget_id: 'Vendor.App', tenant_id: USER.tenantId },
++      { winget_id: 'Vendor.App', tenant_id: 'someone-else' },
++      { winget_id: 'Other.App', tenant_id: USER.tenantId },
++      { winget_id: 'Microsoft.Office', tenant_id: USER.tenantId },
++    ]);
++    expect(result).toMatchObject({ success: false, triggered: 1, failed: 3 });
++    expect(result.results.map((r) => r.error ?? 'ok')).toEqual([
++      'ok', 'This update belongs to another tenant.', 'Update not found', expect.stringContaining('keeps itself up to date'),
++    ]);
++    expect(mocks.trigger).toHaveBeenCalledWith(expect.anything(), undefined, { skipRunCapture: true, requireQaPass: true });
++  });
++
++  it('cancels the job when the installation test holds the version', async () => {
++    const { db, manual } = await load();
++    await seed(db);
++    mocks.qaGate.value = true;
++    mocks.trigger.mockRejectedValue(new Error('held'));
++    const result = await manual.runSqliteManualUpdates(db, USER, [{ winget_id: 'Vendor.App', tenant_id: USER.tenantId }]);
++    expect(result.results[0]).toMatchObject({ success: false, skipped: true, error: 'Installer flagged by the installation test' });
++    const [job] = (await db.jobs.getByTenantId(USER.tenantId)).filter((j) => j.version === '1.1.0');
++    expect(job).toMatchObject({ status: 'cancelled', status_message: 'Waiting for the installation test to finish' });
++    const [history] = await db.autoUpdateHistory.list(USER.userId, { limit: 10, offset: 0 });
++    expect(history).toMatchObject({ status: 'cancelled' });
++  });
++
++  it('marks the job failed when GitHub refuses the run, and leaves jobs alone for a local packager', async () => {
++    const { db, manual } = await load();
++    await seed(db);
++    mocks.trigger.mockRejectedValue(new Error('GitHub said no'));
++    const failed = await manual.runSqliteManualUpdates(db, USER, [{ winget_id: 'Vendor.App', tenant_id: USER.tenantId }]);
++    expect(failed.results[0]).toMatchObject({ success: false, error: 'GitHub said no' });
++    expect((await db.jobs.getByTenantId(USER.tenantId)).find((j) => j.version === '1.1.0')?.status).toBe('failed');
++
++    mocks.localPackager.value = true;
++    mocks.trigger.mockClear();
++    await seed(db, 'Vendor.Second');
++    const local = await manual.runSqliteManualUpdates(db, USER, [{ winget_id: 'Vendor.Second', tenant_id: USER.tenantId }]);
++    expect(local.results[0].success).toBe(true);
++    expect(mocks.trigger).not.toHaveBeenCalled();
++    expect((await db.jobs.getById(local.results[0].packaging_job_id!))?.status).toBe('queued');
++  });
++});
++
++describe('auto-update on SQLite', () => {
++  it('the scheduled check starts the GitHub run for jobs it creates', async () => {
++    const { db, check } = await load();
++    await seed(db);
++    await db.updatePolicies.upsert({
++      user_id: USER.userId, tenant_id: USER.tenantId, winget_id: 'Vendor.App', policy_type: 'auto_update',
++      deployment_config: deploymentConfig as never, original_upload_history_id: 'history-Vendor.App', is_enabled: true,
++    });
++    const summary = await check.runSqliteUpdateCheck(db);
++    expect(summary.triggered).toBe(1);
++    expect(mocks.trigger).toHaveBeenCalledWith(expect.objectContaining({ version: '1.1.0', autoSupersede: true }), undefined, { skipRunCapture: true, requireQaPass: true });
++    expect((await db.jobs.getByTenantId(USER.tenantId)).find((j) => j.version === '1.1.0')?.status).toBe('packaging');
++  });
++
++  it('records completion once, counts failures, and turns the policy off after repeated failures', async () => {
++    const { db, check, completion } = await load();
++    await seed(db);
++    const policy = await db.updatePolicies.upsert({
++      user_id: USER.userId, tenant_id: USER.tenantId, winget_id: 'Vendor.App', policy_type: 'auto_update',
++      deployment_config: deploymentConfig as never, original_upload_history_id: 'history-Vendor.App', is_enabled: true,
++    });
++    await check.runSqliteUpdateCheck(db);
++    const job = (await db.jobs.getByTenantId(USER.tenantId)).find((j) => j.version === '1.1.0')!;
++
++    await completion.completeSqliteUpdateJob(db, job.id, 'failed', 'Install failed');
++    await completion.completeSqliteUpdateJob(db, job.id, 'failed', 'Install failed'); // repeated callback
++    let saved = await db.updatePolicies.getById(policy.id, USER.userId);
++    expect(saved).toMatchObject({ consecutive_failures: 1, last_auto_update_version: null, is_enabled: true });
++    const [history] = await db.autoUpdateHistory.list(USER.userId, { limit: 10, offset: 0 });
++    expect(history).toMatchObject({ status: 'failed', error_message: 'Install failed' });
++
++    await db.updatePolicies.update(policy.id, USER.userId, { consecutive_failures: 2 });
++    const second = await db.autoUpdateHistory.create({ policy_id: policy.id, from_version: '1.0.0', to_version: '1.1.0', update_type: 'minor', status: 'packaging' });
++    await db.jobs.update(job.id, { package_config: { ...(job.package_config as object), autoUpdateHistoryId: second.id } as never });
++    await completion.completeSqliteUpdateJob(db, job.id, 'failed');
++    saved = await db.updatePolicies.getById(policy.id, USER.userId);
++    expect(saved).toMatchObject({ consecutive_failures: 3, is_enabled: false });
++
++    const third = await db.autoUpdateHistory.create({ policy_id: policy.id, from_version: '1.0.0', to_version: '1.1.0', update_type: 'minor', status: 'packaging' });
++    await db.jobs.update(job.id, { package_config: { ...(job.package_config as object), autoUpdateHistoryId: third.id } as never });
++    await completion.completeSqliteUpdateJob(db, job.id, 'deployed');
++    expect((await db.updatePolicies.getById(policy.id, USER.userId))?.consecutive_failures).toBe(0);
++    expect((await db.autoUpdateHistory.getById(third.id))?.status).toBe('completed');
++  });
++
++  it('ignores jobs that are not auto-updates', async () => {
++    const { db, completion } = await load();
++    await seed(db);
++    const [job] = await db.jobs.getByTenantId(USER.tenantId);
++    await expect(completion.completeSqliteUpdateJob(db, job.id, 'deployed')).resolves.toBeUndefined();
++  });
++});
+diff --git a/lib/hrm/manual-update.ts b/lib/hrm/manual-update.ts
+new file mode 100644
+index 000000000..dccc46032
+--- /dev/null
++++ b/lib/hrm/manual-update.ts
+@@ -0,0 +1,141 @@
++/**
++ * HRM patch: Update and Update All on a SQLite server.
++ *
++ * Upstream's /api/updates/trigger only has a Supabase implementation. This is
++ * the same flow on the database adapter: find the detected update, use (or
++ * create) the app's update policy with the settings of its last IntuneGet
++ * deployment, create the job with upstream's SQLite trigger (which keeps the
++ * curated, licence, prior-deployment and Intune approval checks), then start
++ * the GitHub packaging run. A manual press skips the rate limits and the
++ * patch/minor/major scope, as upstream's hosted manual trigger does.
++ */
++
++import type { DatabaseAdapter } from '@/lib/db/types';
++import { getLatestInstallerInfo } from '@/lib/auto-update/trigger';
++import { triggerSqliteAutoUpdate } from '@/lib/auto-update/sqlite';
++import { buildDeploymentConfigFromAdapter } from '@/lib/update-policies/build-deployment-config';
++import { isSelfUpdatingApp } from '@/lib/self-updating-apps';
++import type { AppUpdatePolicy, DeploymentConfig, TriggerUpdateResponse } from '@/types/update-policies';
++import { dispatchUpdateJob } from './update-dispatch';
++
++type Result = TriggerUpdateResponse['results'][number];
++
++async function policyWithConfig(
++  db: DatabaseAdapter,
++  userId: string,
++  tenantId: string,
++  wingetId: string,
++  latestVersion: string,
++): Promise<AppUpdatePolicy | string> {
++  const existing = await db.updatePolicies.getByKey(userId, tenantId, wingetId);
++  if (existing?.deployment_config && existing.original_upload_history_id) return existing;
++
++  const built = await buildDeploymentConfigFromAdapter(db, { userId, tenantId, wingetId, latestVersion });
++  if (built.status !== 'ok') {
++    return built.status === 'orphaned_job'
++      ? 'Could not retrieve the saved deployment configuration for this app.'
++      : 'This app needs a prior IntuneGet deployment before it can be updated from here.';
++  }
++  const saved = existing
++    ? await db.updatePolicies.update(existing.id, userId, {
++        deployment_config: built.deploymentConfig,
++        original_upload_history_id: built.originalUploadHistoryId,
++        updated_at: new Date().toISOString(),
++      })
++    : await db.updatePolicies.upsert({
++        user_id: userId,
++        tenant_id: tenantId,
++        winget_id: wingetId,
++        policy_type: 'notify',
++        deployment_config: built.deploymentConfig,
++        original_upload_history_id: built.originalUploadHistoryId,
++        is_enabled: true,
++        updated_at: new Date().toISOString(),
++      });
++  return saved ?? 'Failed to save the update policy.';
++}
++
++async function updateOne(
++  db: DatabaseAdapter,
++  user: { userId: string; tenantId: string },
++  req: { winget_id: string; tenant_id: string },
++  batch: boolean,
++): Promise<Result> {
++  const fail = (error: string, extra: Partial<Result> = {}): Result => ({ winget_id: req.winget_id, tenant_id: req.tenant_id, success: false, error, ...extra });
++
++  // One organisation per server: only the signed-in tenant can be updated.
++  if (req.tenant_id !== user.tenantId) return fail('This update belongs to another tenant.');
++  if (isSelfUpdatingApp(req.winget_id)) {
++    return fail(`${req.winget_id} keeps itself up to date on the device (Click-to-Run); IntuneGet does not deploy updates for it. Refresh the updates list to remove it.`);
++  }
++
++  const detected = (await db.updateCheckResults.list(user.userId, { tenantId: req.tenant_id, includeDismissed: true }))
++    .find((row) => row.winget_id === req.winget_id);
++  if (!detected) return fail('Update not found');
++
++  const policy = await policyWithConfig(db, user.userId, req.tenant_id, req.winget_id, detected.latest_version);
++  if (typeof policy === 'string') return fail(policy);
++  const config = policy.deployment_config as DeploymentConfig;
++
++  const resolution = await getLatestInstallerInfo(null as never, req.winget_id, config?.architecture, config?.installScope);
++  if (!resolution.ok) return fail(resolution.failure.message);
++  const info = resolution.info;
++
++  // The newest deployment holds the Intune app to supersede; the stored check result can be stale.
++  const latestUpload = await db.uploadHistory.getLatest(user.userId, req.tenant_id, req.winget_id);
++
++  // A manual press deploys whatever the policy type is; nothing is written back to the policy type.
++  const manualPolicy: AppUpdatePolicy = { ...policy, policy_type: 'auto_update', is_enabled: true };
++  const triggered = await triggerSqliteAutoUpdate(db, manualPolicy, {
++    sourceType: info.sourceType,
++    curatedReleaseId: info.curatedReleaseId,
++    wingetId: req.winget_id,
++    currentVersion: latestUpload?.version ?? detected.current_version,
++    latestVersion: info.latestVersion,
++    currentIntuneAppId: latestUpload?.intune_app_id ?? detected.intune_app_id ?? null,
++    displayName: info.displayName,
++    installerUrl: info.installerUrl,
++    installerSha256: info.installerSha256,
++    installerType: info.installerType,
++    installCommand: info.installCommand ?? '',
++    uninstallCommand: info.uninstallCommand ?? '',
++    installScope: info.installScope ?? null,
++    nestedInstallerType: info.nestedInstallerType,
++    nestedInstallerPath: info.nestedInstallerPath,
++    installerSuccessCodes: info.installerSuccessCodes,
++  }, { skipRateLimits: true, bypassUpdateScope: true });
++
++  if (!triggered.success || !triggered.packagingJobId) {
++    return fail(triggered.error || triggered.skipReason || 'Unknown error', {
++      skipped: triggered.skipped || undefined,
++      code: triggered.code as Result['code'],
++    });
++  }
++
++  const dispatch = await dispatchUpdateJob(db, triggered.packagingJobId, { batch });
++  if (!dispatch.dispatched && dispatch.reason !== 'local-packager') {
++    return fail(dispatch.message, { skipped: dispatch.reason === 'qa-hold' || undefined });
++  }
++  return { winget_id: req.winget_id, tenant_id: req.tenant_id, success: true, packaging_job_id: triggered.packagingJobId };
++}
++
++export async function runSqliteManualUpdates(
++  db: DatabaseAdapter,
++  user: { userId: string; tenantId: string },
++  requests: { winget_id: string; tenant_id: string }[],
++): Promise<TriggerUpdateResponse> {
++  const response: TriggerUpdateResponse = { success: true, triggered: 0, failed: 0, results: [] };
++  for (const req of requests) {
++    let result: Result;
++    try {
++      result = await updateOne(db, user, req, requests.length > 1);
++    } catch (error) {
++      result = { winget_id: req.winget_id, tenant_id: req.tenant_id, success: false, error: error instanceof Error ? error.message : 'Unknown error' };
++    }
++    if (result.success) response.triggered++;
++    else response.failed++;
++    response.results.push(result);
++  }
++  response.success = response.failed === 0;
++  return response;
++}
+diff --git a/lib/hrm/update-completion.ts b/lib/hrm/update-completion.ts
+new file mode 100644
+index 000000000..e7dd0aca2
+--- /dev/null
++++ b/lib/hrm/update-completion.ts
+@@ -0,0 +1,51 @@
++/**
++ * HRM patch: auto-update tracking when an update job finishes (SQLite).
++ *
++ * Upstream's handleAutoUpdateJobCompletion only talks to Supabase, so on a
++ * SQLite server the history row stayed "packaging" and the policy's failure
++ * counter never moved. Same rules as upstream, through the database adapter:
++ * success marks the history completed and resets the counter; failure marks it
++ * failed or cancelled, clears last_auto_update_version (so the update shows
++ * as available again) and disables the policy after the configured number of
++ * failures in a row. Failed jobs stay on the dashboard so IT can see them.
++ */
++
++import type { DatabaseAdapter } from '@/lib/db/types';
++import { DEFAULT_SAFETY_CONFIG, type AutoUpdateStatus } from '@/types/update-policies';
++
++const TERMINAL: AutoUpdateStatus[] = ['completed', 'failed', 'cancelled'];
++
++export async function completeSqliteUpdateJob(
++  db: DatabaseAdapter,
++  jobId: string,
++  terminalStatus: 'deployed' | 'duplicate_skipped' | 'failed' | 'cancelled',
++  errorMessage?: string,
++): Promise<void> {
++  const job = await db.jobs.getById(jobId);
++  if (!job?.is_auto_update || !job.auto_update_policy_id) return;
++  const historyId = ((job.package_config ?? {}) as { autoUpdateHistoryId?: string }).autoUpdateHistoryId;
++  if (!historyId) return;
++
++  const history = await db.autoUpdateHistory.getById(historyId);
++  if (!history || TERMINAL.includes(history.status)) return; // already handled: never count twice
++
++  const now = new Date().toISOString();
++  const success = terminalStatus === 'deployed' || terminalStatus === 'duplicate_skipped';
++  await db.autoUpdateHistory.update(historyId, success
++    ? { status: 'completed', completed_at: now }
++    : { status: terminalStatus === 'cancelled' ? 'cancelled' : 'failed', error_message: errorMessage || `Job ${terminalStatus}`, completed_at: now });
++
++  const policy = (await db.updatePolicies.listAll()).find((row) => row.id === job.auto_update_policy_id);
++  if (!policy) return;
++  if (success) {
++    await db.updatePolicies.update(policy.id, policy.user_id, { consecutive_failures: 0, updated_at: now });
++    return;
++  }
++  const failures = (policy.consecutive_failures ?? 0) + 1;
++  await db.updatePolicies.update(policy.id, policy.user_id, {
++    last_auto_update_version: null,
++    consecutive_failures: failures,
++    ...(failures >= DEFAULT_SAFETY_CONFIG.maxConsecutiveFailures ? { is_enabled: false } : {}),
++    updated_at: now,
++  });
++}
+diff --git a/lib/hrm/update-dispatch.ts b/lib/hrm/update-dispatch.ts
+new file mode 100644
+index 000000000..315ce0fcf
+--- /dev/null
++++ b/lib/hrm/update-dispatch.ts
+@@ -0,0 +1,156 @@
++/**
++ * HRM patch: start the GitHub packaging run for a queued update job.
++ *
++ * On a SQLite server upstream creates update jobs (manual Update and
++ * auto-update) as 'queued' for a local packager. With PACKAGER_MODE=github
++ * nothing picks them up. This builds the workflow inputs from the job itself,
++ * the same fields the hosted update route sends, and dispatches it through
++ * triggerPackagingWorkflow with the installation-test gate (requireQaPass), as
++ * hosted updates do.
++ */
++
++import type { DatabaseAdapter, PackagingJob } from '@/lib/db/types';
++import { getAppConfig } from '@/lib/config';
++import { getFeatureFlags } from '@/lib/features';
++import { isGitHubActionsConfigured, triggerPackagingWorkflow, type WorkflowInputs } from '@/lib/github-actions';
++import { sanitizeAssignmentsForDispatch } from '@/lib/assignment-intents';
++import { buildIntuneAppDescription } from '@/lib/intune-description';
++import { extractSilentSwitches } from '@/lib/msp/silent-switches';
++import { describeQaGateError, isQaGateError } from '@/lib/qa/gate';
++
++export type UpdateDispatchResult =
++  | { dispatched: true; runUrl?: string }
++  | { dispatched: false; reason: 'local-packager' | 'not-configured' | 'qa-hold' | 'error' | 'missing-job'; message: string };
++
++type PackageConfig = Record<string, unknown> & {
++  assignments?: unknown[];
++  categories?: unknown[];
++  requirementRules?: unknown[];
++  relationships?: unknown[];
++  psadtConfig?: unknown;
++  sourceIntuneAppId?: string | null;
++  forceCreate?: boolean;
++  description?: string;
++  sourceType?: 'winget' | 'custom' | 'curated';
++  curatedReleaseId?: string;
++  nestedInstallerType?: string;
++  nestedInstallerPath?: string;
++  installerSuccessCodes?: WorkflowInputs['installerSuccessCodes'];
++};
++
++const json = (value: unknown) => (value === undefined || value === null ? undefined : JSON.stringify(value));
++
++/** Workflow inputs for an update job. Supersede and carry over its groups whenever it replaces an IntuneGet app. */
++export function buildUpdateWorkflowInputs(job: PackagingJob, callbackUrl: string): WorkflowInputs {
++  const config = (job.package_config ?? {}) as PackageConfig;
++  const installerType = job.installer_type || 'exe';
++  const replacesApp = Boolean(config.sourceIntuneAppId);
++  const requirementRules = Array.isArray(config.requirementRules) ? config.requirementRules : [];
++  return {
++    sourceType: config.sourceType,
++    curatedReleaseId: config.curatedReleaseId,
++    jobId: job.id,
++    tenantId: job.tenant_id ?? '',
++    wingetId: job.winget_id,
++    displayName: job.display_name,
++    description: buildIntuneAppDescription({
++      description: config.description,
++      fallback: `Deployed via IntuneGet from Winget: ${job.winget_id}`,
++    }),
++    publisher: job.publisher || 'Unknown Publisher',
++    version: job.version,
++    architecture: job.architecture || 'x64',
++    installerUrl: job.installer_url || '',
++    installerSha256: job.installer_sha256 || '',
++    installerType,
++    nestedInstallerType: config.nestedInstallerType,
++    nestedInstallerPath: config.nestedInstallerPath,
++    installerSuccessCodes: config.installerSuccessCodes,
++    silentSwitches: extractSilentSwitches(job.install_command || '', installerType, config.nestedInstallerType),
++    uninstallCommand: job.uninstall_command || '',
++    callbackUrl,
++    detectionRules: json(job.detection_rules ?? undefined),
++    psadtConfig: json(config.psadtConfig),
++    assignments: Array.isArray(config.assignments)
++      ? JSON.stringify(sanitizeAssignmentsForDispatch(config.assignments as never, requirementRules.length > 0))
++      : undefined,
++    categories: json(config.categories),
++    requirementRules: requirementRules.length ? JSON.stringify(requirementRules) : undefined,
++    relationships: Array.isArray(config.relationships) && config.relationships.length ? JSON.stringify(config.relationships) : undefined,
++    installScope: job.install_scope === 'user' ? 'user' : 'machine',
++    forceCreate: config.forceCreate !== false,
++    sourceIntuneAppId: config.sourceIntuneAppId || undefined,
++    // HRM default (2026-10-28): updates replace the previous version and keep its groups.
++    carryOverAssignments: replacesApp,
++    removeAssignmentsFromPreviousApp: replacesApp,
++    autoSupersede: replacesApp,
++    supersedenceType: replacesApp ? 'update' : undefined,
++  };
++}
++
++function callbackUrl(): string {
++  const base = getAppConfig().app.url || 'http://localhost:3000';
++  return `${base}/api/package/callback`;
++}
++
++/** Dispatch one queued update job. Never throws; the job records the outcome. */
++export async function dispatchUpdateJob(
++  db: DatabaseAdapter,
++  jobId: string,
++  options: { batch?: boolean } = {}
++): Promise<UpdateDispatchResult> {
++  if (getFeatureFlags().localPackager) {
++    return { dispatched: false, reason: 'local-packager', message: 'Queued for the local packager' };
++  }
++  if (!isGitHubActionsConfigured()) {
++    return { dispatched: false, reason: 'not-configured', message: 'GitHub packaging is not configured on this server' };
++  }
++  const job = await db.jobs.getById(jobId);
++  if (!job) return { dispatched: false, reason: 'missing-job', message: 'The update job no longer exists' };
++
++  const now = () => new Date().toISOString();
++  // Auto-update and manual update jobs carry their history row; a job that never starts closes it.
++  const historyId = ((job.package_config ?? {}) as PackageConfig).autoUpdateHistoryId as string | undefined;
++  const closeHistory = async (status: 'failed' | 'cancelled', message: string) => {
++    if (!historyId) return;
++    await db.autoUpdateHistory.update(historyId, { status, error_message: message, completed_at: now() }).catch(() => null);
++  };
++  try {
++    const result = await triggerPackagingWorkflow(buildUpdateWorkflowInputs(job, callbackUrl()), undefined, {
++      skipRunCapture: Boolean(options.batch),
++      requireQaPass: true,
++    });
++    await db.jobs.update(jobId, {
++      status: 'packaging',
++      status_message: 'Update packaging started',
++      packaging_started_at: now(),
++      ...(result.runId ? { github_run_id: result.runId.toString(), github_run_url: result.runUrl } : {}),
++    });
++    return { dispatched: true, runUrl: result.runUrl };
++  } catch (error) {
++    if (isQaGateError(error)) {
++      // Same as the hosted route: a test or security hold cancels the job with its reason.
++      const message = describeQaGateError(error);
++      await db.jobs.update(jobId, {
++        status: 'cancelled',
++        status_message: 'Waiting for the installation test to finish',
++        error_message: message,
++        cancelled_at: now(),
++        completed_at: now(),
++      });
++      await closeHistory('cancelled', message);
++      return { dispatched: false, reason: 'qa-hold', message };
++    }
++    const message = error instanceof Error ? error.message : 'Unknown error';
++    await db.jobs.update(jobId, {
++      status: 'failed',
++      error_stage: 'authenticate',
++      error_category: 'network',
++      error_code: 'WORKFLOW_DISPATCH_FAILED',
++      error_message: message,
++      completed_at: now(),
++    });
++    await closeHistory('failed', message);
++    return { dispatched: false, reason: 'error', message };
++  }
++}
