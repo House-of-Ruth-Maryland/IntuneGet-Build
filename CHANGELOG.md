@@ -2,6 +2,11 @@
 
 ## 2026-10-27
 
+- The server opens on an HRM Home page instead of the public IntuneGet website: what needs attention
+  (updates waiting, failed or stuck deployments), recent deployments across HRM, server status
+  (version, backup, update checks, disk, tunnel) and shortcuts (patch 0010).
+- New Help page for HRM IT, and HRM Support on the sign-in page. SCCM, MSP and app-request menu items
+  are hidden. HRM purple and teal replace the upstream colours.
 - cloudflared on the VM now updates itself nightly through apt. Its own updater had failed every
   night because it was installed from Cloudflare's package repository. The tunnel restarts only when
   a new version is installed.
