@@ -1,0 +1,7 @@
+[Unit]
+Description=Check IntuneGet health and alert IT Ops in Teams on changes
+After=docker.service intuneget-status.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/intuneget-watchdog
