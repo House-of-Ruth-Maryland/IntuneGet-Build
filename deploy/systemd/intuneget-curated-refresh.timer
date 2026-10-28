@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the IntuneGet curated catalog daily
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 America/New_York
+OnBootSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
