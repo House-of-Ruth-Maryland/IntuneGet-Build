@@ -2,6 +2,9 @@
 
 ## 2026-10-28
 
+- Update and Update All work on the server, and apps with auto-update on are updated by the twice-daily
+  check. Each update replaces the previous Intune version and keeps its groups; held, skipped or
+  failed updates say why. App Updates is back in the menu (patch 0012).
 - The Curated Catalog works again and stays current: the VM downloads upstream's signed list daily and
   the app uses it when its signature checks out (patch 0011). The list built into v0.8.2 expired on
   2026-10-22.
