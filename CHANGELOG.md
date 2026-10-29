@@ -2,6 +2,12 @@
 
 ## 2026-10-29
 
+- The server's database is copied off-site every night at 1:30 AM to a private Azure Storage
+  container in another region and kept for 30 days. The watchdog alerts in Teams if a copy fails or
+  is late.
+- Safer deploys: the server checks each new image against the digest the build recorded, the build
+  refuses an upstream tag that has moved since it was checked, registry tokens are no longer passed as
+  command arguments, and the app's port is open only to the VM itself.
 - New versions of custom apps: Inventory has Deploy new version, which fills in the form from the last
   version and keeps its groups and supersedence. IntuneGet warns before deploying an app with no
   groups, and a newer version found as a "duplicate" offers a clear Deploy and replace (patch 0015).

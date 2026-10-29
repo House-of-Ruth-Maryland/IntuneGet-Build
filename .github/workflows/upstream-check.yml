@@ -29,6 +29,7 @@ jobs:
       new: ${{ steps.latest.outputs.new }}
       current: ${{ steps.latest.outputs.current }}
       latest: ${{ steps.latest.outputs.latest }}
+      commit: ${{ steps.commit.outputs.commit }}
       patches: ${{ steps.patches.outputs.result }}
       failed_patches: ${{ steps.patches.outputs.failed }}
       migrations: ${{ steps.migrations.outputs.result }}
@@ -48,7 +49,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          current=$(tr -d '[:space:]' < hrm/upstream-ref)
+          current=$(sed -n 1p hrm/upstream-ref | tr -d '[:space:]')
           latest=$(gh release view --repo "$UPSTREAM" --json tagName --jq .tagName)
           [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Unexpected upstream tag '$latest'"; exit 1; }
           new=false
@@ -72,6 +73,12 @@ jobs:
           ref: ${{ steps.latest.outputs.latest }}
           path: upstream
           persist-credentials: false
+
+      - name: Record the tested commit
+        id: commit
+        if: steps.latest.outputs.new == 'true'
+        working-directory: upstream
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Check HRM migration numbers
         # HRM patches add numbered SQLite migrations. If upstream now uses the
@@ -184,6 +191,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       CURRENT: ${{ needs.test.outputs.current }}
       LATEST: ${{ needs.test.outputs.latest }}
+      COMMIT: ${{ needs.test.outputs.commit }}
       PATCHES: ${{ needs.test.outputs.patches }}
       FAILED_PATCHES: ${{ needs.test.outputs.failed_patches }}
       MIGRATIONS: ${{ needs.test.outputs.migrations }}
@@ -217,7 +225,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          echo "$LATEST" > upstream-ref
+          # The tag and the commit these checks ran on; the build refuses the tag if it moves.
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No tested commit for $LATEST"; exit 1; }
+          printf '%s\n%s\n' "$LATEST" "$COMMIT" > upstream-ref
           git commit -am "Build upstream $LATEST"
           git push origin "$branch"
           cat > body.md <<EOF

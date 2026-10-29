@@ -34,6 +34,7 @@ IMDS_URL = 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=20
 STATUS_STALE_MIN = 15
 DISK_WARNING = 0.85
 TIMER_LATE_HOURS = 13  # the update check and alerts run every 12 hours
+OFFSITE_LATE_HOURS = 36  # the backup runs nightly
 CONFIRM_RUNS = 2
 REMIND_HOURS = 24
 
@@ -46,6 +47,7 @@ LABELS = {
     'notifications': 'The scheduled update alerts failed or are late',
     'tunnel': 'The Cloudflare tunnel is not running',
     'tunnelUpdate': 'The nightly cloudflared update failed',
+    'offsiteBackup': 'The nightly off-site backup failed or is late',
 }
 
 
@@ -125,6 +127,11 @@ def find_problems(at_now):
         problems['updateCheck'] = f"Last run {status['updateCheck'].get('at')}, result {status['updateCheck'].get('result')}."
     if late_or_failed(status.get('notifications'), at_now):
         problems['notifications'] = f"Last run {status['notifications'].get('at')}, result {status['notifications'].get('result')}."
+    offsite = status.get('offsiteBackup')
+    if offsite:  # only once backups are set up
+        at = parse_time(offsite.get('at'))
+        if offsite.get('result') != 'success' or at is None or (at_now - at).total_seconds() > OFFSITE_LATE_HOURS * 3600:
+            problems['offsiteBackup'] = f"Last result {offsite.get('result')} at {offsite.get('at')}."
     tunnel = status.get('tunnel') or {}
     if not tunnel.get('running'):
         problems['tunnel'] = 'cloudflared is not active on the VM.'

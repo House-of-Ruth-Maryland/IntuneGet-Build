@@ -38,6 +38,7 @@ jobs:
       id-token: write # OIDC sign-in to Azure; no stored secret
     outputs:
       tag: ${{ steps.rev.outputs.tag }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Check out HRM patches
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -46,13 +47,20 @@ jobs:
           persist-credentials: false
 
       - name: Choose the upstream tag
+        # upstream-ref: the tag on the first line, the commit it pointed at when
+        # it was reviewed on the second. A tag moved since then fails the build.
         id: ref
         env:
           INPUT_REF: ${{ inputs.upstream_ref }}
         run: |
-          ref="${INPUT_REF:-$(tr -d '[:space:]' < hrm/upstream-ref)}"
+          pinned=$(sed -n 1p hrm/upstream-ref | tr -d '[:space:]')
+          ref="${INPUT_REF:-$pinned}"
           [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Not an upstream tag: '$ref'"; exit 1; }
+          commit=""
+          [ "$ref" != "$pinned" ] || commit=$(sed -n 2p hrm/upstream-ref | tr -d '[:space:]')
+          [ -z "$commit" ] || [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Not a commit in upstream-ref: '$commit'"; exit 1; }
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
       - name: Check out upstream
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -61,6 +69,16 @@ jobs:
           ref: ${{ steps.ref.outputs.ref }}
           path: upstream
           persist-credentials: false
+
+      - name: Check the upstream tag hasn't moved
+        if: steps.ref.outputs.commit != ''
+        working-directory: upstream
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+          COMMIT: ${{ steps.ref.outputs.commit }}
+        run: |
+          head=$(git rev-parse HEAD)
+          [ "$head" = "$COMMIT" ] || { echo "::error::Upstream $REF now points at $head, not the reviewed $COMMIT. Review the change before building."; exit 1; }
 
       - name: Apply patches
         working-directory: upstream
@@ -92,14 +110,15 @@ jobs:
         # An Entra app with a federated credential for this repo's main branch
         # (AcrPush on the registry only); no stored secret. Uses the runner's
         # Azure CLI; the registry token is masked and lives only in this job.
+        # Tokens go to curl on stdin, not as arguments.
         env:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
         run: |
-          oidc=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r .value)
+          oidc=$(printf 'Authorization: Bearer %s\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" | curl -fsS -H @- "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r .value)
           az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID" --federated-token "$oidc" --allow-no-subscriptions -o none
           aad=$(az account get-access-token --resource https://management.azure.com/ --query accessToken -o tsv)
-          refresh=$(curl -fsS -X POST --data-urlencode grant_type=access_token --data-urlencode "service=$REGISTRY" --data-urlencode "tenant=$AZURE_TENANT_ID" --data-urlencode "access_token=$aad" "https://$REGISTRY/oauth2/exchange" | jq -r .refresh_token)
+          refresh=$(printf '%s' "$aad" | curl -fsS -X POST --data-urlencode grant_type=access_token --data-urlencode "service=$REGISTRY" --data-urlencode "tenant=$AZURE_TENANT_ID" --data-urlencode "access_token@-" "https://$REGISTRY/oauth2/exchange" | jq -r .refresh_token)
           echo "::add-mask::$refresh"
           printf '%s' "$refresh" | docker login "$REGISTRY" -u 00000000-0000-0000-0000-000000000000 --password-stdin
           echo "ACR_REFRESH_TOKEN=$refresh" >> "$GITHUB_ENV"
@@ -111,11 +130,11 @@ jobs:
         env:
           REF: ${{ steps.ref.outputs.ref }}
         run: |
-          access=$(curl -fsS -X POST --data-urlencode grant_type=refresh_token --data-urlencode "service=$REGISTRY" \
-            --data-urlencode "scope=repository:intuneget:pull" --data-urlencode "refresh_token=$ACR_REFRESH_TOKEN" \
+          access=$(printf '%s' "$ACR_REFRESH_TOKEN" | curl -fsS -X POST --data-urlencode grant_type=refresh_token --data-urlencode "service=$REGISTRY" \
+            --data-urlencode "scope=repository:intuneget:pull" --data-urlencode "refresh_token@-" \
             "https://$REGISTRY/oauth2/token" | jq -r .access_token)
           echo "::add-mask::$access"
-          code=$(curl -sS -o tags.json -w '%{http_code}' -H "Authorization: Bearer $access" "https://$REGISTRY/v2/intuneget/tags/list?n=1000")
+          code=$(printf 'Authorization: Bearer %s\n' "$access" | curl -sS -o tags.json -w '%{http_code}' -H @- "https://$REGISTRY/v2/intuneget/tags/list?n=1000")
           case "$code" in
             200) ;;
             404) echo '{"tags":[]}' > tags.json ;; # first image for this app
@@ -127,6 +146,7 @@ jobs:
           echo "Building $IMAGE:$REF-hrm.$n"
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: upstream
@@ -155,6 +175,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ needs.build.outputs.tag }}
+      DIGEST: ${{ needs.build.outputs.digest }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Check out
@@ -162,16 +183,18 @@ jobs:
 
       - name: Open the Deploy PR
         run: |
-          current=$(tr -d '[:space:]' < deploy/version)
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::The build gave no image digest: '$DIGEST'"; exit 1; }
+          current=$(sed -n 1p deploy/version | tr -d '[:space:]')
           branch="deploy/$TAG"
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          echo "$TAG" > deploy/version
+          # The tag, then the digest: the VM refuses the tag if it no longer points at this image.
+          printf '%s\n%s\n' "$TAG" "$DIGEST" > deploy/version
           git commit -am "Deploy $TAG"
           git push origin "$branch"
           cat > body.md <<EOF
-          Moves the IntuneGet server from \`$current\` to \`$TAG\` (built in $RUN_URL).
+          Moves the IntuneGet server from \`$current\` to \`$TAG\` (built in $RUN_URL). Image digest \`$DIGEST\`.
 
           **Merging this deploys to production.** Within about 5 minutes the VM backs up its data, switches the image and waits for it to report healthy. If it doesn't, the VM restores the backup and goes back to \`$current\`.
 

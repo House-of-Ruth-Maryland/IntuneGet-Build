@@ -1,0 +1,9 @@
+[Unit]
+Description=Back up the IntuneGet database to Azure Storage
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/intuneget-deploy
+ExecStart=/usr/local/sbin/intuneget-backup

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Pull-based deploy for HRM's IntuneGet VM. Run by intuneget-deploy.timer.
 #
-# Reads deploy/version from GitHub. When it differs from the image in the
-# compose override: back up the data volume, switch the image, wait for the
-# container to report healthy, and restore the backup and the old image if it
+# Reads deploy/version from GitHub: the image tag on the first line and, for
+# builds since the digest change, the image digest on the second. A tag that
+# no longer points at that digest is refused. When the tag differs from the
+# image in the compose override: back up the data volume, switch the image,
+# wait for the container to report healthy, and restore the backup and the old image if it
 # does not. Going back to an older version restores the backup taken when the
 # server last moved off that version, since newer database migrations can't be
 # undone in place.
@@ -39,6 +41,7 @@ STATE_DIR=${STATE_DIR:-/var/lib/intuneget-deploy}
 LOCK_FILE=${LOCK_FILE:-/run/intuneget-deploy.lock}
 
 TAG_PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+-hrm\.[0-9]+$'
+DIGEST_PATTERN='^sha256:[0-9a-f]{64}$'
 
 log() { echo "intuneget-deploy: $*"; }
 
@@ -69,14 +72,15 @@ is_older() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | he
 
 # Pulls an image tag. For Azure Container Registry, signs in with the VM's
 # managed identity (AcrPull): a short-lived registry token, kept in a temporary
-# Docker config that is removed after the pull.
+# Docker config that is removed after the pull. Tokens go to curl and docker on
+# stdin, never as arguments, so they don't show in the process list.
 pull_image() { # tag
   local cfg rc aad refresh
   case "$REGISTRY" in *.azurecr.io) ;; *) docker pull -q "$IMAGE_REPO:$1" >/dev/null; return ;; esac
   aad=$(curl -fsS --max-time 20 -H Metadata:true \
     "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" | jq -r .access_token) || return 1
-  refresh=$(curl -fsS --max-time 20 -X POST --data-urlencode grant_type=access_token \
-    --data-urlencode "service=$REGISTRY" --data-urlencode "access_token=$aad" \
+  refresh=$(printf '%s' "$aad" | curl -fsS --max-time 20 -X POST --data-urlencode grant_type=access_token \
+    --data-urlencode "service=$REGISTRY" --data-urlencode "access_token@-" \
     "https://$REGISTRY/oauth2/exchange" | jq -r .refresh_token) || return 1
   [ -n "$refresh" ] && [ "$refresh" != null ] || { log "no registry token for $REGISTRY"; return 1; }
   cfg=$(mktemp -d)
@@ -85,6 +89,12 @@ pull_image() { # tag
     DOCKER_CONFIG=$cfg docker pull -q "$IMAGE_REPO:$1" >/dev/null || rc=1
   rm -rf "$cfg"
   return "$rc"
+}
+
+# True when the pulled tag is the image the build recorded (its registry digest).
+has_digest() { # tag digest
+  docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE_REPO:$1" 2>/dev/null |
+    grep -qxF "$IMAGE_REPO@$2"
 }
 
 wait_healthy() {
@@ -152,10 +162,16 @@ prune_images() { # keep these tags
 }
 
 deploy() {
-  local desired current target_backup="" dest
-  desired=$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github.raw' "$VERSION_URL" | tr -d '[:space:]')
+  local desired digest version current target_backup="" dest
+  version=$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github.raw' "$VERSION_URL")
+  desired=$(printf '%s\n' "$version" | sed -n 1p | tr -d '[:space:]')
+  digest=$(printf '%s\n' "$version" | sed -n 2p | tr -d '[:space:]')
   if ! [[ "$desired" =~ $TAG_PATTERN ]]; then
     log "deploy/version is not a valid tag: '$desired'"
+    return 1
+  fi
+  if [ -n "$digest" ] && ! [[ "$digest" =~ $DIGEST_PATTERN ]]; then
+    log "deploy/version has an invalid digest: '$digest'"
     return 1
   fi
   current=$(current_tag)
@@ -182,6 +198,12 @@ deploy() {
     log "$IMAGE_REPO:$desired is not available yet; will try again"
     write_status waiting "$current" "$desired" "image not available yet"
     return 0
+  fi
+  if [ -n "$digest" ] && ! has_digest "$desired" "$digest"; then
+    log "$IMAGE_REPO:$desired is not the image the build recorded ($digest); not deploying"
+    write_status refused "$current" "$desired" "image digest does not match deploy/version"
+    echo "$desired" > "$STATE_DIR/failed"
+    return 1
   fi
 
   if ! has_backup_space; then
