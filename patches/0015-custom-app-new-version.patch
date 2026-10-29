@@ -1,0 +1,681 @@
+diff --git a/app/(app)/dashboard/apps/page.tsx b/app/(app)/dashboard/apps/page.tsx
+index f818738c1..426bee2b2 100644
+--- a/app/(app)/dashboard/apps/page.tsx
++++ b/app/(app)/dashboard/apps/page.tsx
+@@ -3,6 +3,7 @@
+ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+ import { T, Var } from "gt-next";
+ import { useSearchParams } from 'next/navigation';
++import { useNewVersionPrefill } from '@/hooks/useNewVersionPrefill';
+ import Link from 'next/link';
+ import {
+   Package,
+@@ -107,6 +108,12 @@ export default function AppCatalogPage() {
+ 
+   // Custom app modal state
+   const [isCustomAppModalOpen, setIsCustomAppModalOpen] = useState(false);
++  // HRM patch 0015: /dashboard/apps?newVersionOf=<job> opens the custom app form for its next version.
++  const [newVersionOf] = useState(() => searchParams.get('newVersionOf'));
++  const { data: newVersionPrefill } = useNewVersionPrefill(newVersionOf);
++  useEffect(() => {
++    if (newVersionPrefill) setIsCustomAppModalOpen(true);
++  }, [newVersionPrefill]);
+ 
+   // Bulk selection state
+   const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
+@@ -993,7 +1000,7 @@ export default function AppCatalogPage() {
+       )}
+ 
+       {isCustomAppModalOpen && (
+-        <CustomAppModal onClose={() => setIsCustomAppModalOpen(false)} />
++        <CustomAppModal onClose={() => setIsCustomAppModalOpen(false)} prefill={newVersionPrefill ?? undefined} />
+       )}
+ 
+       {deploymentIntentId &&
+diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
+index bb2ea7fb3..5a8117bb9 100644
+--- a/app/(app)/dashboard/uploads/page.tsx
++++ b/app/(app)/dashboard/uploads/page.tsx
+@@ -1,5 +1,6 @@
+ 'use client';
+ 
++import { isNewerVersion } from '@/lib/hrm/new-version';
+ import { useState, useEffect, useCallback, useRef } from 'react';
+ import { isIntuneApprovalFailure } from '@/lib/intune-approval';
+ import { T, Var } from "gt-next";
+@@ -1020,6 +1021,46 @@ function UploadJobCard({
+           {job.status === 'duplicate_skipped' && (() => {
+             const details = job.error_details as Record<string, unknown> | undefined;
+             const existingVersion = details?.existingVersion ? String(details.existingVersion) : null;
++            // HRM patch 0015: a newer version of an app already in Intune is the normal update path.
++            const config = (job.package_config ?? {}) as { assignments?: Array<{ groupName?: string; type?: string; intent?: string }>; relationships?: Array<{ relationshipType?: string; targetId?: string; targetVersion?: string; supersedenceType?: string }> };
++            const supersedes = (config.relationships ?? []).find((r) => r.relationshipType === 'supersedence');
++            const replacesExisting = Boolean(supersedes?.targetId && supersedes.targetId === details?.existingAppId);
++            const shownExistingVersion = existingVersion ?? (replacesExisting ? supersedes?.targetVersion ?? null : null);
++            if (replacesExisting || isNewerVersion(existingVersion, job.version)) {
++              const groups = (config.assignments ?? []).map((a) => `${a.groupName || (a.type === 'allDevices' ? 'All devices' : a.type === 'allUsers' ? 'All users' : 'Group')} (${a.intent})`);
++              const oldLabel = shownExistingVersion ?? 'the current version';
++              return (
++                <div className="mt-4 p-4 bg-accent-cyan/5 border border-accent-cyan/20 rounded-lg">
++                  <p className="text-text-primary font-medium text-sm">
++                    {job.display_name} {oldLabel} is already in Intune. Deploy {job.version} as its replacement?
++                  </p>
++                  <ul className="mt-2 space-y-1 text-xs text-text-secondary">
++                    <li>
++                      Goes to: {groups.length ? groups.join(', ') : <span className="text-status-warning font-medium">no groups, so it won&apos;t install anywhere</span>}
++                    </li>
++                    <li>
++                      {supersedes
++                        ? `Supersedes ${job.display_name} ${oldLabel} (${supersedes.supersedenceType === 'replace' ? 'uninstall first' : 'update in place'})`
++                        : <span className="text-status-warning font-medium">Doesn&apos;t supersede {oldLabel}: both versions stay in Intune</span>}
++                    </li>
++                  </ul>
++                  <div className="flex flex-wrap items-center gap-3 mt-3">
++                    <Button size="sm" onClick={() => onRedeploy(job, true)} disabled={isRedeploying}
++                      className="bg-accent-cyan hover:bg-accent-cyan-dim text-white text-xs">
++                      {isRedeploying ? <Loader2 className="w-3 h-3 animate-spin mr-1.5" /> : <Play className="w-3 h-3 mr-1.5" />}
++                      Deploy {job.version} and replace {oldLabel}
++                    </Button>
++                    {job.intune_app_url && (
++                      <a href={job.intune_app_url} target="_blank" rel="noopener noreferrer"
++                        className="inline-flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:underline">
++                        <ExternalLink className="w-3 h-3" />
++                        View existing app
++                      </a>
++                    )}
++                  </div>
++                </div>
++              );
++            }
+             return (
+             <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
+               <div className="flex items-start gap-2">
+diff --git a/app/api/hrm/new-version/route.test.ts b/app/api/hrm/new-version/route.test.ts
+new file mode 100644
+index 000000000..3dff265dd
+--- /dev/null
++++ b/app/api/hrm/new-version/route.test.ts
+@@ -0,0 +1,42 @@
++import { NextRequest } from 'next/server';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), job: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getById: mocks.job } }) }));
++import { GET } from './route';
++
++const JOB_ID = '46f79300-d116-40c4-9650-a288efb35f42';
++const request = (jobId = JOB_ID) => new NextRequest(`http://localhost/api/hrm/new-version?jobId=${jobId}`);
++const job = (over = {}) => ({ id: JOB_ID, tenant_id: 'tenant-1', status: 'deployed', winget_id: 'Custom.ContosoLtd.ContosoEditor',
++  display_name: 'Contoso Editor', version: '1.2.0', installer_type: 'msi', intune_app_id: 'intune-app-1', package_config: {}, ...over });
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.auth.mockResolvedValue({ userId: 'user-1', tenantId: 'tenant-1' });
++  mocks.job.mockResolvedValue(job());
++});
++
++describe('new-version route', () => {
++  it('requires sign-in and a valid job id', async () => {
++    mocks.auth.mockResolvedValue(null);
++    expect((await GET(request())).status).toBe(401);
++    mocks.auth.mockResolvedValue({ userId: 'user-1', tenantId: 'tenant-1' });
++    expect((await GET(request('not-a-job'))).status).toBe(400);
++  });
++
++  it("returns this tenant's deployed custom app and is never cached", async () => {
++    const response = await GET(request());
++    expect(response.status).toBe(200);
++    expect(response.headers.get('cache-control')).toBe('private, no-store');
++    expect(await response.json()).toMatchObject({ jobId: JOB_ID, previousVersion: '1.2.0' });
++  });
++
++  it.each([
++    ['another tenant', { tenant_id: 'tenant-2' }],
++    ['a WinGet app', { winget_id: 'Google.Chrome' }],
++    ['a job that never deployed', { status: 'failed' }],
++  ])('treats %s as not found', async (_label, over) => {
++    mocks.job.mockResolvedValue(job(over));
++    expect((await GET(request())).status).toBe(404);
++  });
++});
+diff --git a/app/api/hrm/new-version/route.ts b/app/api/hrm/new-version/route.ts
+new file mode 100644
+index 000000000..ca83c1890
+--- /dev/null
++++ b/app/api/hrm/new-version/route.ts
+@@ -0,0 +1,21 @@
++// HRM patch 0015: settings for the next version of a custom app, from the job that deployed it.
++
++import { NextRequest, NextResponse } from 'next/server';
++import { getDatabase } from '@/lib/db';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { isCustomAppId, newVersionPrefill } from '@/lib/hrm/new-version';
++
++export async function GET(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
++
++  const jobId = new URL(request.url).searchParams.get('jobId') ?? '';
++  if (!/^[0-9a-f-]{36}$/i.test(jobId)) return NextResponse.json({ error: 'Invalid job' }, { status: 400 });
++
++  const job = await getDatabase().jobs.getById(jobId);
++  // Only this tenant's deployed custom apps; anything else looks like "not found".
++  if (!job || job.tenant_id !== user.tenantId || job.status !== 'deployed' || !isCustomAppId(job.winget_id)) {
++    return NextResponse.json({ error: 'Not a custom app deployed from IntuneGet' }, { status: 404 });
++  }
++  return NextResponse.json(newVersionPrefill(job), { headers: { 'Cache-Control': 'private, no-store' } });
++}
+diff --git a/components/CustomAppModal.tsx b/components/CustomAppModal.tsx
+index 9957a5ab1..3d018d0a5 100644
+--- a/components/CustomAppModal.tsx
++++ b/components/CustomAppModal.tsx
+@@ -20,10 +20,13 @@ import {
+ import type { WingetArchitecture, WingetScope } from '@/types/winget';
+ import { buildCartItemRequirementRules } from '@/lib/requirement-rules';
+ import { SavedCustomApps } from '@/components/SavedCustomApps';
++import type { NewVersionPrefill } from '@/lib/hrm/new-version';
+ import { customAppVersionInput, parseCustomAppDefinition } from '@/lib/custom-app-definitions';
+ 
+ interface CustomAppModalProps {
+   onClose: () => void;
++  /** HRM patch 0015: start from the previous version of a custom app. */
++  prefill?: NewVersionPrefill;
+ }
+ 
+ const INSTALLER_TYPE_OPTIONS: { value: CustomInstallerType; label: string }[] = [
+@@ -39,22 +42,23 @@ const INSTALLER_TYPE_OPTIONS: { value: CustomInstallerType; label: string }[] =
+ const inputClassName =
+   'flex h-auto w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm placeholder:text-text-muted shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan';
+ 
+-export function CustomAppModal({ onClose }: CustomAppModalProps) {
++export function CustomAppModal({ onClose, prefill }: CustomAppModalProps) {
++  const start = prefill?.input;
+   // Required fields
+-  const [displayName, setDisplayName] = useState('');
+-  const [publisher, setPublisher] = useState('');
++  const [displayName, setDisplayName] = useState(start?.displayName ?? '');
++  const [publisher, setPublisher] = useState(start?.publisher ?? '');
+   const [version, setVersion] = useState('');
+   const [installerUrl, setInstallerUrl] = useState('');
+-  const [installerType, setInstallerType] = useState<CustomInstallerType>('exe');
+-  const [architecture, setArchitecture] = useState<WingetArchitecture>('x64');
+-  const [installScope, setInstallScope] = useState<WingetScope>('machine');
++  const [installerType, setInstallerType] = useState<CustomInstallerType>(start?.installerType ?? 'exe');
++  const [architecture, setArchitecture] = useState<WingetArchitecture>(start?.architecture ?? 'x64');
++  const [installScope, setInstallScope] = useState<WingetScope>(start?.installScope ?? 'machine');
+   const [sha256, setSha256] = useState('');
+ 
+   // Optional fields
+-  const [silentSwitches, setSilentSwitches] = useState(CUSTOM_SILENT_SWITCH_DEFAULTS.exe);
+-  const [uninstallCommand, setUninstallCommand] = useState('');
+-  const [description, setDescription] = useState('');
+-  const [iconUrl, setIconUrl] = useState('');
++  const [silentSwitches, setSilentSwitches] = useState(start?.silentSwitches ?? CUSTOM_SILENT_SWITCH_DEFAULTS.exe);
++  const [uninstallCommand, setUninstallCommand] = useState(start?.uninstallCommand ?? '');
++  const [description, setDescription] = useState(start?.description ?? '');
++  const [iconUrl, setIconUrl] = useState(start?.iconUrl ?? '');
+ 
+   const [errors, setErrors] = useState<Record<string, string>>({});
+   const [isAdding, setIsAdding] = useState(false);
+@@ -153,13 +157,18 @@ export function CustomAppModal({ onClose }: CustomAppModalProps) {
+         iconUrl,
+       });
+ 
++      // A new version keeps the previous version's groups and supersedes it (Update).
++      const assignments = prefill?.assignments.length ? prefill.assignments : item.assignments;
+       addItem({
+         ...item,
++        assignments,
++        // The previous version is meant to exist in Intune; don't stop at "duplicate found".
++        ...(prefill?.supersede ? { relationships: [prefill.supersede], forceCreate: true } : {}),
+         requirementRules: buildCartItemRequirementRules(
+           item.displayName,
+           item.installerType,
+           undefined,
+-          item.assignments
++          assignments
+         ),
+       });
+       toast.success(`${item.displayName} added`, {
+@@ -191,8 +200,10 @@ export function CustomAppModal({ onClose }: CustomAppModalProps) {
+                 <FilePlus2 className="w-6 h-6 text-accent-cyan" />
+               </div>
+               <div>
+-                <h2 id="custom-app-title" className="text-xl font-bold text-text-primary">Add Custom App</h2>
+-                <p className="text-text-muted text-sm">Deploy an app from a direct installer URL</p>
++                <h2 id="custom-app-title" className="text-xl font-bold text-text-primary">{prefill ? `New version of ${prefill.input.displayName}` : 'Add Custom App'}</h2>
++                <p className="text-text-muted text-sm">{prefill
++                  ? `Enter the new version and download link. It replaces v${prefill.previousVersion} and keeps its ${prefill.assignments.length === 1 ? 'group' : 'groups'}.`
++                  : 'Deploy an app from a direct installer URL'}</p>
+                 {syntheticId && (
+                   <p className="text-text-muted text-xs font-mono mt-1">{syntheticId}</p>
+                 )}
+diff --git a/components/UploadCart.deployment-errors.test.ts b/components/UploadCart.deployment-errors.test.ts
+index ddf00bb07..d18ae26cc 100644
+--- a/components/UploadCart.deployment-errors.test.ts
++++ b/components/UploadCart.deployment-errors.test.ts
+@@ -32,7 +32,7 @@ const item: Win32CartItem = {
+   id: 'test-app', addedAt: '2026-10-08', appSource: 'win32', wingetId: 'Example.App',
+   displayName: 'Example App', publisher: 'Example', version: '1.0', architecture: 'x64', installScope: 'machine',
+   installerType: 'msi', installerUrl: 'https://example.test/app.msi', installerSha256: 'a'.repeat(64),
+-  installCommand: 'install', uninstallCommand: 'uninstall', detectionRules: [], psadtConfig: DEFAULT_PSADT_CONFIG,
++  installCommand: 'install', uninstallCommand: 'uninstall', detectionRules: [], assignments: [{ type: 'allDevices', intent: 'required' }], psadtConfig: DEFAULT_PSADT_CONFIG,
+ };
+ let root: Root | undefined;
+ let client: QueryClient | undefined;
+@@ -46,14 +46,14 @@ afterEach(async () => {
+   vi.clearAllMocks();
+ });
+ 
+-async function deploy(response: Response) {
++async function deploy(response: Response, cartItem: Win32CartItem = item) {
+   vi.spyOn(console, 'error').mockImplementation(() => {});
+   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+     if (url === '/api/package') return response;
+     if (url.startsWith('/api/auth/verify-consent')) return Response.json({ verified: true, tenantId: 'test-tenant' });
+     return Response.json({ statuses: {}, tenantDeployments: [] });
+   }));
+-  useCartStore.setState({ isOpen: true, items: [item] });
++  useCartStore.setState({ isOpen: true, items: [cartItem] });
+   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+   const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
+   await act(async () => root!.render(createElement(QueryClientProvider, { client: client! }, createElement(UploadCart))));
+@@ -93,4 +93,16 @@ describe('deployment result presentation', () => {
+     expect(document.querySelector('[role="alert"]')?.textContent).toContain('Deployment failed (500)');
+     expect(useCartStore.getState().items).toHaveLength(1);
+   });
++
++  // HRM patch 0015
++  it('warns before deploying an app with no assignments, and deploys only when told to', async () => {
++    const unassigned = { ...item, assignments: [] };
++    await deploy(Response.json({ success: true, jobs: [{ id: 'job-1' }] }), unassigned);
++    expect(document.body.textContent).toContain("Example App 1.0 has no assignments");
++    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/package')).toBe(false);
++    const go = [...document.querySelectorAll('button')].find(value => value.textContent?.trim() === 'Deploy without assignments')!;
++    await act(async () => go.click());
++    for (let i = 0; i < 4; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
++    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/package')).toBe(true);
++  });
+ });
+diff --git a/components/UploadCart.performance.test.ts b/components/UploadCart.performance.test.ts
+index 7a6edf5c0..d95f8c1e0 100644
+--- a/components/UploadCart.performance.test.ts
++++ b/components/UploadCart.performance.test.ts
+@@ -104,7 +104,7 @@ describe('cart permission verification', () => {
+       id: 'old-chrome', addedAt: '2026-07-09', appSource: 'win32', wingetId: 'Google.Chrome',
+       displayName: 'Google Chrome', publisher: 'Google', version: '150.0.7871.115', architecture: 'x64', installScope: 'machine',
+       installerType: 'msi', installerUrl: 'https://example.test/chrome.msi', installerSha256: 'A'.repeat(64),
+-      installCommand: 'install', uninstallCommand: 'uninstall', detectionRules: [], psadtConfig: DEFAULT_PSADT_CONFIG,
++      installCommand: 'install', uninstallCommand: 'uninstall', detectionRules: [], assignments: [{ type: 'allDevices', intent: 'required' }], psadtConfig: DEFAULT_PSADT_CONFIG,
+     };
+     const fetchMock = vi.fn(async (url: string) => {
+       if (url === '/api/package') return Response.json({
+diff --git a/components/UploadCart.tsx b/components/UploadCart.tsx
+index 91ecf4da8..61896e986 100644
+--- a/components/UploadCart.tsx
++++ b/components/UploadCart.tsx
+@@ -108,6 +108,8 @@ export function UploadCart() {
+   const clearCart = useCartStore((state) => state.clearCart);
+   const [isDeploying, setIsDeploying] = useState(false);
+   const [showLargeDeployConfirm, setShowLargeDeployConfirm] = useState(false);
++  // HRM patch 0015: warn before deploying apps that are assigned to nobody.
++  const [showNoGroupsConfirm, setShowNoGroupsConfirm] = useState(false);
+   const [error, setError] = useState<DeploymentError | null>(null);
+   const [editingItem, setEditingItem] = useState<CartItem | null>(null);
+   const [isRefreshing, setIsRefreshing] = useState(false);
+@@ -328,7 +330,12 @@ export function UploadCart() {
+ 
+   // Large batches get an explicit review step; small carts stay one-click.
+   const LARGE_DEPLOY_THRESHOLD = 10;
+-  const handleDeployClick = () => {
++  const unassignedItems = items.filter((item) => !('assignments' in item) || !item.assignments?.length);
++  const handleDeployClick = (skipNoGroupsCheck = false) => {
++    if (!skipNoGroupsCheck && unassignedItems.length > 0) {
++      setShowNoGroupsConfirm(true);
++      return;
++    }
+     if (items.length >= LARGE_DEPLOY_THRESHOLD) {
+       setShowLargeDeployConfirm(true);
+     } else {
+@@ -656,7 +663,7 @@ export function UploadCart() {
+                     </AlertDialogContent>
+                   </AlertDialog>
+                   <Button
+-                    onClick={needsPermissions ? handleFixPermissions : handleDeployClick}
++                    onClick={needsPermissions ? handleFixPermissions : () => handleDeployClick()}
+                     disabled={isDeploying || isRefreshing || needsVersionReview || (awaitingCuratedSettings && !needsPermissions) || (isAuthenticated && permissionStatus === 'checking')}
+                     className={`flex-1 text-white border-0 disabled:opacity-50 ${
+                       isAuthenticated && !canDeploy && permissionStatus !== 'checking'
+@@ -723,6 +730,41 @@ export function UploadCart() {
+             />
+           )}
+ 
++          {/* HRM patch 0015: apps with no assignments */}
++          <AlertDialog open={showNoGroupsConfirm} onOpenChange={setShowNoGroupsConfirm}>
++            <AlertDialogContent>
++              <AlertDialogHeader>
++                <AlertDialogTitle>
++                  {unassignedItems.length === 1
++                    ? `${unassignedItems[0].displayName} ${'version' in unassignedItems[0] ? unassignedItems[0].version : ''} has no assignments`
++                    : `${unassignedItems.length} apps have no assignments`}
++                </AlertDialogTitle>
++                <AlertDialogDescription>
++                  {unassignedItems.length === 1 ? 'It' : 'They'} will be added to Intune but won&apos;t install anywhere until a group is assigned.
++                  {unassignedItems.length > 1 && ` (${unassignedItems.map((item) => item.displayName).join(', ')})`}
++                </AlertDialogDescription>
++              </AlertDialogHeader>
++              <AlertDialogFooter>
++                <AlertDialogCancel
++                  onClick={() => {
++                    setShowNoGroupsConfirm(false);
++                    setEditingItem(unassignedItems[0] ?? null);
++                  }}
++                >
++                  Add assignments
++                </AlertDialogCancel>
++                <AlertDialogAction
++                  onClick={() => {
++                    setShowNoGroupsConfirm(false);
++                    handleDeployClick(true);
++                  }}
++                >
++                  Deploy without assignments
++                </AlertDialogAction>
++              </AlertDialogFooter>
++            </AlertDialogContent>
++          </AlertDialog>
++
+           {/* Large deployment confirmation */}
+           <AlertDialog open={showLargeDeployConfirm} onOpenChange={setShowLargeDeployConfirm}>
+             <AlertDialogContent>
+diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
+index 00fa96f45..26e12a43c 100644
+--- a/components/inventory/InventoryAppDetails.tsx
++++ b/components/inventory/InventoryAppDetails.tsx
+@@ -1,6 +1,9 @@
+ 'use client';
+ 
+-import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users } from 'lucide-react';
++import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users, FilePlus2 } from 'lucide-react';
++import Link from 'next/link';
++import { useNewVersionPrefill } from '@/hooks/useNewVersionPrefill';
++import { jobIdFromNotes } from '@/lib/hrm/new-version';
+ import { CopyableCommand } from './CopyableCommand';
+ import { Button } from '@/components/ui/button';
+ import { SlidePanel } from '@/components/dashboard/animations/SlidePanel';
+@@ -17,6 +20,8 @@ interface InventoryAppDetailsProps {
+ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDetailsProps) {
+   const { data, isLoading, error, refetch } = useAppDetails(appId);
+   const app = data?.app;
++  // HRM patch 0015: custom apps deployed by IntuneGet get "Deploy new version".
++  const { data: prefill } = useNewVersionPrefill(jobIdFromNotes(app?.notes));
+ 
+   const formatDate = (dateString: string) => {
+     return new Date(dateString).toLocaleDateString('en-US', {
+@@ -80,7 +85,19 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+     </div>
+   ) : undefined;
+ 
+-  const footerContent = app && onUpdate ? (
++  const footerContent = app && prefill ? (
++    <div className="space-y-2">
++      <Button asChild className="w-full bg-accent-cyan hover:bg-accent-cyan-bright text-white">
++        <Link href={`/dashboard/apps?newVersionOf=${prefill.jobId}`}>
++          <FilePlus2 className="w-4 h-4 mr-2" />
++          Deploy new version
++        </Link>
++      </Button>
++      <p className="text-xs text-text-muted text-center">
++        Custom app: enter the new version and download link. Groups and supersedence of v{prefill.previousVersion} come along.
++      </p>
++    </div>
++  ) : app && onUpdate ? (
+     <Button
+       onClick={() => onUpdate(app.displayName)}
+       className="w-full bg-accent-cyan hover:bg-accent-cyan-bright text-white"
+diff --git a/components/inventory/assignment-group-labels.test.ts b/components/inventory/assignment-group-labels.test.ts
+index b19c39912..8e2d13051 100644
+--- a/components/inventory/assignment-group-labels.test.ts
++++ b/components/inventory/assignment-group-labels.test.ts
+@@ -4,6 +4,7 @@ import {createRoot,type Root} from 'react-dom/client';
+ import {afterEach,describe,expect,it,vi} from 'vitest';
+ const state=vi.hoisted(()=>({app:null as unknown}));
+ vi.mock('@/hooks/use-inventory',()=>({useAppDetails:()=>({data:{app:state.app},isLoading:false,error:null,refetch:vi.fn()})}));
++vi.mock('@/hooks/useNewVersionPrefill',()=>({useNewVersionPrefill:()=>({data:null})}));
+ vi.mock('@/components/dashboard/animations/SlidePanel',()=>({SlidePanel:({children}:{children:React.ReactNode})=>children}));
+ import {InventoryAppDetails} from './InventoryAppDetails';
+ let root:Root;
+diff --git a/hooks/useNewVersionPrefill.ts b/hooks/useNewVersionPrefill.ts
+new file mode 100644
+index 000000000..53b81859b
+--- /dev/null
++++ b/hooks/useNewVersionPrefill.ts
+@@ -0,0 +1,27 @@
++'use client';
++
++// HRM patch 0015: settings for the next version of a custom app.
++
++import { useQuery } from '@tanstack/react-query';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++import type { NewVersionPrefill } from '@/lib/hrm/new-version';
++
++export function useNewVersionPrefill(jobId: string | null) {
++  const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
++  return useQuery<NewVersionPrefill | null>({
++    queryKey: ['hrm', 'new-version', jobId],
++    queryFn: async () => {
++      const token = await getAccessToken();
++      if (!token || !jobId) return null;
++      const response = await fetch(`/api/hrm/new-version?jobId=${encodeURIComponent(jobId)}`, {
++        headers: { Authorization: `Bearer ${token}` },
++      });
++      // Not a custom app (or not ours): no "Deploy new version" offer.
++      if (response.status === 404) return null;
++      if (!response.ok) throw new Error('Could not load the previous version');
++      return response.json();
++    },
++    enabled: isAuthenticated && Boolean(jobId),
++    staleTime: 60_000,
++  });
++}
+diff --git a/lib/hrm/__tests__/new-version.test.ts b/lib/hrm/__tests__/new-version.test.ts
+new file mode 100644
+index 000000000..77df15d4c
+--- /dev/null
++++ b/lib/hrm/__tests__/new-version.test.ts
+@@ -0,0 +1,63 @@
++import { describe, expect, it } from 'vitest';
++import { buildIntuneAppDescription } from '@/lib/intune-description';
++import { isCustomAppId, isNewerVersion, jobIdFromNotes, newVersionPrefill, switchesFromInstallCommand } from '../new-version';
++
++const JOB_ID = '46f79300-d116-40c4-9650-a288efb35f42';
++const job = (over: Record<string, unknown> = {}) => ({
++  id: JOB_ID, tenant_id: 'tenant-1', winget_id: 'Custom.ContosoLtd.ContosoEditor', status: 'deployed',
++  display_name: 'Contoso Editor', publisher: 'Contoso Ltd', version: '1.2.0', architecture: 'x64',
++  installer_type: 'msi', install_scope: 'machine', intune_app_id: 'intune-app-1',
++  install_command: 'msiexec /i "contoso-editor-1.2.0-x64.msi" /qn /norestart DESKTOPSHORTCUT=0 ALLUSERS=1',
++  uninstall_command: 'REGISTRY_UNINSTALL:Contoso Editor',
++  package_config: {
++    description: 'Editor for example files.', iconPath: 'https://example.test/icon.png',
++    assignments: [{ type: 'group', groupId: 'group-1', groupName: 'USR-Example', intent: 'required' }],
++  },
++  ...over,
++}) as never;
++
++describe('new version of a custom app', () => {
++  it('reads the deploying job from the Intune app notes', () => {
++    expect(jobIdFromNotes(`IntuneGet deployment job: ${JOB_ID}`)).toBe(JOB_ID);
++    expect(jobIdFromNotes('Deployed by hand')).toBeNull();
++    expect(jobIdFromNotes(null)).toBeNull();
++  });
++
++  it('recovers the installer switches from the install command', () => {
++    expect(switchesFromInstallCommand('msiexec /i "app.msi" /qn /norestart X=0')).toBe('/qn /norestart X=0');
++    expect(switchesFromInstallCommand('"setup 1.0.exe" /S /D=C:\\Apps')).toBe('/S /D=C:\\Apps');
++    expect(switchesFromInstallCommand('setup.exe')).toBe('');
++    expect(switchesFromInstallCommand(null)).toBe('');
++  });
++
++  it('prefills everything but the version and link, and keeps the groups and supersedence', () => {
++    const prefill = newVersionPrefill(job());
++    expect(prefill).toMatchObject({
++      jobId: JOB_ID, previousVersion: '1.2.0',
++      input: { displayName: 'Contoso Editor', publisher: 'Contoso Ltd', installerType: 'msi', architecture: 'x64', installScope: 'machine',
++        silentSwitches: '/qn /norestart DESKTOPSHORTCUT=0 ALLUSERS=1', uninstallCommand: '', description: 'Editor for example files.',
++        iconUrl: 'https://example.test/icon.png' },
++      assignments: [{ groupName: 'USR-Example', intent: 'required' }],
++      supersede: { relationshipType: 'supersedence', supersedenceType: 'update', targetId: 'intune-app-1', targetVersion: '1.2.0' },
++    });
++    expect(prefill.input).not.toHaveProperty('version');
++    expect(newVersionPrefill(job({ uninstall_command: 'contoso.exe --remove' })).input.uninstallCommand).toBe('contoso.exe --remove');
++    expect(newVersionPrefill(job({ intune_app_id: null })).supersede).toBeNull();
++  });
++
++  it('tells a newer version from a real duplicate', () => {
++    expect(isNewerVersion('0.10.1', '0.15.0')).toBe(true);
++    expect(isNewerVersion('0.15.0', '0.15.0')).toBe(false);
++    expect(isNewerVersion('2.0', '1.9')).toBe(false);
++    expect(isNewerVersion(null, '1.0')).toBe(false);
++    expect(isCustomAppId('Custom.ContosoLtd.ContosoEditor')).toBe(true);
++    expect(isCustomAppId('Google.Chrome')).toBe(false);
++  });
++
++  it('describes custom apps as custom installers, not WinGet', () => {
++    expect(buildIntuneAppDescription({ fallback: 'Deployed via IntuneGet from Winget: Custom.ContosoLtd.ContosoEditor' }))
++      .toBe('Deployed via IntuneGet (custom installer): Custom.ContosoLtd.ContosoEditor\nSource: IntuneGet.com');
++    expect(buildIntuneAppDescription({ fallback: 'Deployed via IntuneGet from Winget: Google.Chrome' }))
++      .toBe('Deployed via IntuneGet from Winget: Google.Chrome\nSource: IntuneGet.com');
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 86e155d3f..f8ef5993a 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -45,9 +45,11 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'WinGet and curated apps: open App updates and press Update on the app, or Update all. The new version replaces the previous one in Intune and keeps its groups. The result posts to Teams.',
+       'Apps with auto-update on are updated by the 3:30 AM and 3:30 PM check, with the same safety checks.',
+       'If Update says the catalog has not synced the installer yet, wait for the next catalog sync (every 6 hours), or deploy the new version from the App catalog with Supersede previous version on update and Carry over assignments turned on.',
+-      'Custom apps (installers that are not in WinGet, such as PdfCraft or UniFi Endpoint): in the App catalog press Custom app; Saved custom apps is at the top of that window. Press Deploy new version on the app. Enter the new version and installer URL, turn on Supersede previous version on update and Carry over assignments, then deploy.',
+-      'A custom app\'s first version is added with Custom app in the App catalog, using a direct https download link to the installer. Save it there so later versions only need a new version and link. IntuneGet can\'t tell you when a custom app has a new version, so watch the vendor\'s releases.',
+-      'From Inventory, Find in App catalog opens the app so you can deploy a newer version.',
++      'Custom apps (installers that are not in WinGet, such as PdfCraft or UniFi Endpoint): open the app in Inventory and press Deploy new version. The form is filled in from the last version; enter the new version and its https download link. The new version keeps the same groups and supersedes the old one (Update), so devices upgrade in place.',
++      'A custom app\'s first version is added with Custom app in the App catalog. IntuneGet can\'t tell you when a custom app has a new version, so watch the vendor\'s releases.',
++      'Before deploying, IntuneGet warns if an app has no groups: it would be added to Intune but install nowhere.',
++      'If Deployments shows that the app is already in Intune and offers to deploy the new version as its replacement, that is the normal step for a new version. Check the groups and supersedence it lists, then press Deploy and replace.',
++      'For WinGet and curated apps, Find in App catalog in Inventory opens the app so you can deploy a newer version.',
+     ],
+   },
+   {
+diff --git a/lib/hrm/new-version.ts b/lib/hrm/new-version.ts
+new file mode 100644
+index 000000000..f0ad3f0a5
+--- /dev/null
++++ b/lib/hrm/new-version.ts
+@@ -0,0 +1,81 @@
++/**
++ * HRM patch 0015: deploying a new version of a custom app.
++ *
++ * A custom app (an installer that isn't in WinGet) has no catalog entry to
++ * update from. Its last IntuneGet deployment has everything a new version
++ * needs except the version and download link: the installer settings, the
++ * groups, and the Intune app the new version should supersede.
++ */
++
++import type { PackagingJob } from '@/lib/db/types';
++import type { CustomAppInput, CustomInstallerType } from '@/lib/custom-app';
++import type { PackageAssignment } from '@/types/upload';
++import type { AppRelationship } from '@/types/intune';
++import { compareVersions } from '@/lib/version-compare';
++
++export interface NewVersionPrefill {
++  jobId: string;
++  previousVersion: string;
++  input: Omit<CustomAppInput, 'version' | 'installerUrl' | 'sha256'>;
++  assignments: PackageAssignment[];
++  supersede: AppRelationship | null;
++}
++
++const INSTALLER_TYPES: CustomInstallerType[] = ['exe', 'msi', 'inno', 'nullsoft', 'burn'];
++
++export function isCustomAppId(wingetId: string | null | undefined): boolean {
++  return /^Custom\./.test(wingetId ?? '');
++}
++
++/** The IntuneGet job an Intune app was deployed by, from the app's notes. */
++export function jobIdFromNotes(notes: string | null | undefined): string | null {
++  return /IntuneGet deployment job:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(notes ?? '')?.[1] ?? null;
++}
++
++/** The switches after the installer itself: `msiexec /i "x.msi" /qn` -> `/qn`, `"setup.exe" /S` -> `/S`. */
++export function switchesFromInstallCommand(command: string | null | undefined): string {
++  const text = (command ?? '').trim();
++  const msi = /^msiexec(?:\.exe)?\s+\/i\s+(?:"[^"]*"|\S+)\s*(.*)$/i.exec(text);
++  if (msi) return msi[1].trim();
++  const exe = /^(?:"[^"]*"|\S+)\s*(.*)$/.exec(text);
++  return exe ? exe[1].trim() : '';
++}
++
++/** IntuneGet's generated uninstall commands are left out so they are generated again for the new installer. */
++function customUninstall(command: string | null | undefined): string {
++  const text = (command ?? '').trim();
++  if (!text || /^REGISTRY_UNINSTALL:/i.test(text) || /^msiexec(?:\.exe)?\s+\/x\b/i.test(text)) return '';
++  return text;
++}
++
++export function newVersionPrefill(job: PackagingJob): NewVersionPrefill {
++  const config = (job.package_config ?? {}) as Record<string, unknown>;
++  const type = (job.installer_type ?? 'exe') as CustomInstallerType;
++  const assignments = Array.isArray(config.assignments) ? (config.assignments as PackageAssignment[]) : [];
++  return {
++    jobId: job.id,
++    previousVersion: job.version,
++    input: {
++      displayName: job.display_name,
++      publisher: job.publisher || '',
++      installerType: INSTALLER_TYPES.includes(type) ? type : 'exe',
++      architecture: (job.architecture || 'x64') as CustomAppInput['architecture'],
++      installScope: job.install_scope === 'user' ? 'user' : 'machine',
++      silentSwitches: switchesFromInstallCommand(job.install_command),
++      uninstallCommand: customUninstall(job.uninstall_command),
++      description: typeof config.description === 'string' ? config.description : '',
++      iconUrl: typeof config.iconPath === 'string' ? config.iconPath : '',
++    },
++    assignments,
++    supersede: job.intune_app_id
++      ? { relationshipType: 'supersedence', supersedenceType: 'update', targetId: job.intune_app_id,
++          targetDisplayName: job.display_name, targetVersion: job.version }
++      : null,
++  };
++}
++
++/** Whether a "duplicate" is really a newer version of the app already in Intune. */
++export function isNewerVersion(existingVersion: string | null | undefined, version: string | null | undefined): boolean {
++  if (!existingVersion || !version) return false;
++  return compareVersions(version, existingVersion) > 0;
++}
+diff --git a/lib/intune-description.ts b/lib/intune-description.ts
+index a02a73155..b63213afd 100644
+--- a/lib/intune-description.ts
++++ b/lib/intune-description.ts
+@@ -10,13 +10,20 @@ export interface IntuneDescriptionParams {
+   sourceMarker?: string;
+ }
+ 
++// HRM patch 0015: custom installers aren't from WinGet; say what they are.
++const WINGET_FALLBACK = /^Deployed via IntuneGet from Winget: (Custom\.\S+)$/;
++function customAppFallback(fallback: string): string {
++  const match = WINGET_FALLBACK.exec(fallback);
++  return match ? `Deployed via IntuneGet (custom installer): ${match[1]}` : fallback;
++}
++
+ export function buildIntuneAppDescription({
+   description,
+   fallback,
+   sourceMarker = INTUNE_APP_SOURCE_MARKER,
+ }: IntuneDescriptionParams): string {
+   const trimmedDescription = description?.trim();
+-  const baseDescription = trimmedDescription || fallback.trim();
++  const baseDescription = trimmedDescription || customAppFallback(fallback.trim());
+   const hasSourceMarker = baseDescription
+     .toLowerCase()
+     .includes(sourceMarker.toLowerCase());
