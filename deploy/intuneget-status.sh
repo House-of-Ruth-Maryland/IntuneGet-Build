@@ -35,7 +35,8 @@ export IMAGE="$image" STARTED="$started" BACKUP="${backup##*/}" BACKUP_KB="$back
   NOTIFY_RUN="$(unit_run intuneget-cron@send-notifications.service)" \
   CF_VERSION="$(cloudflared --version 2>/dev/null | awk '{print $3}' || true)" \
   CF_ACTIVE="$(systemctl is-active cloudflared 2>/dev/null || true)" \
-  CF_UPDATE_RUN="$(unit_run cloudflared-update.service)"
+  CF_UPDATE_RUN="$(unit_run cloudflared-update.service)" \
+  OFFSITE_JSON="$(cat /var/lib/intuneget-backup/last.json 2>/dev/null || true)"
 
 tmp=$(mktemp "$(dirname "$OUT")/.hrm-status.XXXXXX")
 python3 -I - > "$tmp" <<'PY'
@@ -70,6 +71,7 @@ print(json.dumps({
     'disk': {'totalKb': total_kb, 'usedKb': used_kb},
     'updateCheck': run(os.environ['CHECK_RUN']),
     'notifications': run(os.environ['NOTIFY_RUN']),
+    'offsiteBackup': (lambda raw: {k: v for k, v in json.loads(raw).items() if k in ('result', 'at', 'compressedBytes')} if raw.strip() else None)(os.environ['OFFSITE_JSON']),
     'tunnel': {'version': os.environ['CF_VERSION'] or None, 'running': os.environ['CF_ACTIVE'] == 'active',
                'lastUpdate': run(os.environ['CF_UPDATE_RUN'])},
 }, indent=2))

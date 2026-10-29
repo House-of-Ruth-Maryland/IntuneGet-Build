@@ -13,15 +13,16 @@ HRM IT notes.
 
 | Path | What it is |
 |---|---|
-| `upstream-ref` | Upstream release tag the build uses (for example `v0.8.2`). |
+| `upstream-ref` | Upstream release tag the build uses (for example `v0.8.2`) and, on the second line, the commit it pointed at when it was checked. The build fails if the tag has moved since. |
 | `patches/*.patch` | HRM changes, applied in name order with `git apply`. Why each exists: README. |
-| `deploy/version` | Image tag the server should run (for example `v0.8.2-hrm.1`). **Changing it on `main` deploys to production.** |
+| `deploy/version` | Image tag the server should run (for example `v0.8.2-hrm.1`) and, on the second line, the image digest the build recorded. The VM refuses the tag if it no longer points at that digest. **Changing it on `main` deploys to production.** |
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
 | `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day. |
 | `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
 | `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. |
 | `deploy/intuneget-watchdog.py` | Every 5 minutes (installed as `/usr/local/sbin/intuneget-watchdog`, run by `intuneget-watchdog.timer`): checks the app's health and the status file and posts to IT Ops in Teams when a problem is confirmed, daily while it lasts, and when it clears. `intuneget-watchdog status` lists current problems; `intuneget-watchdog test` sends a test post. |
 | `deploy/intuneget-curated-refresh.sh` | Daily at 2:15 AM New York (installed as `/usr/local/sbin/intuneget-curated-refresh`, run by `intuneget-curated-refresh.timer`): downloads upstream's latest signed curated catalog into the app's data volume for patch 0011. |
+| `deploy/intuneget-backup.py` | Nightly at 1:30 AM New York (installed as `/usr/local/sbin/intuneget-backup`, run by `intuneget-backup.timer`): copies the SQLite database while the app runs, checks it, compresses it and uploads it to the Azure Storage container in `BACKUP_CONTAINER_URL` as the VM's managed identity. `intuneget-backup status` shows the last result. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
 | `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: build `<tag>-hrm.<n>` and open the "Deploy" PR. |
 
@@ -35,6 +36,8 @@ HRM IT notes.
   registry only. No client secret exists.
 - **VM:** its system-assigned managed identity holds AcrPull on the registry only. The deploy script
   swaps it for a short-lived registry token per pull and deletes it afterwards.
+- Tokens are passed to `curl` and `docker` on stdin, never as command arguments, so they don't show
+  in the process list. Keep it that way in new scripts and workflow steps.
 - **Cleanup:** an ACR task runs every Sunday at 07:00 UTC and keeps the 5 newest tags of each app (plus
   removes untagged manifests). It goes by build date, not by what's deployed.
 - Other HRM apps can use the same registry: give each repo its own app registration and federated
@@ -121,6 +124,29 @@ sudo docker compose --env-file .env.local up -d web
 
 Then make `deploy/version` match the restored tag, or the next timer run will deploy again.
 
+## Off-site database backups
+
+- Every night at 1:30 AM New York the VM uploads a checked, compressed copy of the database to a
+  private Azure Storage container in another region (cool tier, no public access, no shared keys).
+  The VM's managed identity has Storage Blob Data Contributor on that container only. A lifecycle
+  rule deletes copies after 31 days. Secrets (`.env.local`) are not in the backup.
+- The container's address goes in `BACKUP_CONTAINER_URL` in `/etc/default/intuneget-deploy` (kept
+  out of this repo). The status file records the last off-site backup, and the watchdog posts in
+  Teams if it failed or is more than 36 hours old.
+
+Restore from an off-site copy, with an Azure CLI signed in as someone with Storage Blob Data Reader
+on the container:
+
+```bash
+az storage blob list --auth-mode login --account-name <account> -c <container> --prefix intuneget/YYYY/MM/ -o table
+az storage blob download --auth-mode login --account-name <account> -c <container> -n <blob> -f intuneget.db.gz
+gunzip intuneget.db.gz && python3 -c "import sqlite3; print(sqlite3.connect('intuneget.db').execute('PRAGMA integrity_check').fetchone()[0])"
+```
+
+Then copy it to the VM, stop the app, replace `intuneget.db` in the data volume (keep the old one
+aside), and start it again, as in the manual restore above. Try a restore against a copy first,
+never the live database.
+
 ## VM setup (one time, and when the script or timers change)
 
 Updates to `deploy/intuneget-deploy.sh` or `deploy/systemd/` don't reach the VM by themselves.
@@ -135,6 +161,7 @@ sudo install -m 0755 deploy/cloudflared-apt-update.sh /usr/local/sbin/cloudflare
 sudo install -m 0755 deploy/intuneget-status.sh /usr/local/sbin/intuneget-status
 sudo install -m 0755 deploy/intuneget-watchdog.py /usr/local/sbin/intuneget-watchdog
 sudo install -m 0755 deploy/intuneget-curated-refresh.sh /usr/local/sbin/intuneget-curated-refresh
+sudo install -m 0755 deploy/intuneget-backup.py /usr/local/sbin/intuneget-backup
 sudo install -D -m 0644 deploy/systemd/cloudflared-update.service.d/apt.conf /etc/systemd/system/cloudflared-update.service.d/apt.conf
 sudo systemctl daemon-reload
 ```
@@ -161,8 +188,15 @@ Check, then enable:
 
 ```bash
 sudo intuneget-deploy run && sudo intuneget-deploy status
-sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer intuneget-watchdog.timer intuneget-curated-refresh.timer
+sudo intuneget-backup && sudo intuneget-backup status
+sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer intuneget-watchdog.timer intuneget-curated-refresh.timer intuneget-backup.timer
 ```
+
+The app's port is published only on the VM itself (`127.0.0.1:3000:3000` in
+`/opt/intuneget/docker-compose.yml`); the tunnel reaches it at `http://localhost:3000`.
+
+Install the deploy script before merging the first Deploy PR whose `deploy/version` has a digest
+line: older copies of the script can't read the two-line file and stop deploying until updated.
 
 ## How we work
 
