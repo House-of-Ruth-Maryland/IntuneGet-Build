@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-29
+
+- New versions of custom apps: Inventory has Deploy new version, which fills in the form from the last
+  version and keeps its groups and supersedence. IntuneGet warns before deploying an app with no
+  groups, and a newer version found as a "duplicate" offers a clear Deploy and replace (patch 0015).
+
 ## 2026-10-28
 
 - Help explains how to update WinGet, curated and custom apps. Discovered Apps pills no longer break
