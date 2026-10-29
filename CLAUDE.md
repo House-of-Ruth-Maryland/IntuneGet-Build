@@ -205,6 +205,10 @@ line: older copies of the script can't read the two-line file and stop deploying
 - Never merge a Deploy PR or change `deploy/version` without David saying so in that conversation.
 - Third-party services stay in test mode; secrets only in GitHub secrets or root-only files on the VM.
 - Update CHANGELOG.md for every change to what the server runs or how it deploys.
+- Run the `help-writer` agent (`.claude/agents/help-writer.md`) before committing any change to a
+  patch, a deploy script or a VM timer that staff would notice. It keeps the in-app Help page current,
+  in the shared word list, with step diagrams and links where they help. Fold its Help edits into the
+  patch being built and report what it changed.
 
 ## Retire
 
