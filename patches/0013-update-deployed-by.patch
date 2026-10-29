@@ -1,0 +1,96 @@
+diff --git a/lib/hrm/__tests__/updates.test.ts b/lib/hrm/__tests__/updates.test.ts
+index c228deb28..11a4ecb40 100644
+--- a/lib/hrm/__tests__/updates.test.ts
++++ b/lib/hrm/__tests__/updates.test.ts
+@@ -32,7 +32,7 @@ vi.mock('@/lib/qa/gate', async (original) => ({
+ vi.mock('@/lib/graph-token', () => ({ acquireGraphToken: vi.fn(() => { throw new Error('no Graph in tests'); }) }));
+ 
+ let dir: string;
+-const USER = { userId: 'user-1', tenantId: 'tenant-1' };
++const USER = { userId: 'user-1', tenantId: 'tenant-1', userEmail: 'admin.one@example.test' };
+ 
+ beforeEach(() => {
+   vi.resetModules();
+@@ -119,7 +119,7 @@ describe('Update and Update All on SQLite', () => {
+     const result = await manual.runSqliteManualUpdates(db, USER, [{ winget_id: 'Vendor.App', tenant_id: USER.tenantId }]);
+     expect(result).toMatchObject({ success: true, triggered: 1, failed: 0 });
+     const job = await db.jobs.getById(result.results[0].packaging_job_id!);
+-    expect(job).toMatchObject({ version: '1.1.0', status: 'packaging', github_run_url: 'https://github.example.test/run/42' });
++    expect(job).toMatchObject({ version: '1.1.0', status: 'packaging', github_run_url: 'https://github.example.test/run/42', user_email: 'admin.one@example.test' });
+     expect(mocks.trigger).toHaveBeenCalledWith(expect.objectContaining({ jobId: job!.id, autoSupersede: true, carryOverAssignments: true, sourceIntuneAppId: 'intune-app-1' }),
+       undefined, { skipRunCapture: false, requireQaPass: true });
+     const policy = await db.updatePolicies.getByKey(USER.userId, USER.tenantId, 'Vendor.App');
+@@ -225,3 +225,27 @@ describe('auto-update on SQLite', () => {
+     await expect(completion.completeSqliteUpdateJob(db, job.id, 'deployed')).resolves.toBeUndefined();
+   });
+ });
++
++describe('who deployed it, on the Teams card', () => {
++  it('names the person who pressed Update, says Auto-update for scheduled ones, and leaves others alone', async () => {
++    const { buildDeploymentData } = await import('@/lib/webhooks/deployment-formatters');
++    const job = (over: Record<string, unknown>) => ({ id: 'j', status: 'deployed', winget_id: 'Vendor.App', display_name: 'Vendor App',
++      version: '1.1.0', architecture: 'x64', publisher: 'Vendor', tenant_id: 't', intune_app_url: null, github_run_url: null,
++      completed_at: '2026-10-29T00:01:00Z', user_email: null, is_auto_update: false, ...over }) as never;
++    expect(buildDeploymentData(job({ is_auto_update: true, user_email: 'admin.one@example.test' })).data.deployed_by).toBe('admin.one@example.test');
++    expect(buildDeploymentData(job({ is_auto_update: true })).data.deployed_by).toBe('Auto-update');
++    expect(buildDeploymentData(job({})).data.deployed_by).toBeNull();
++  });
++
++  it('scheduled auto-update jobs carry no person', async () => {
++    const { db, check } = await load();
++    await seed(db);
++    await db.updatePolicies.upsert({
++      user_id: USER.userId, tenant_id: USER.tenantId, winget_id: 'Vendor.App', policy_type: 'auto_update',
++      deployment_config: deploymentConfig as never, original_upload_history_id: 'history-Vendor.App', is_enabled: true,
++    });
++    await check.runSqliteUpdateCheck(db);
++    const job = (await db.jobs.getByTenantId(USER.tenantId)).find((j) => j.version === '1.1.0');
++    expect(job?.user_email ?? null).toBeNull();
++  });
++});
+diff --git a/lib/hrm/manual-update.ts b/lib/hrm/manual-update.ts
+index dccc46032..ee44f205b 100644
+--- a/lib/hrm/manual-update.ts
++++ b/lib/hrm/manual-update.ts
+@@ -57,7 +57,7 @@ async function policyWithConfig(
+ 
+ async function updateOne(
+   db: DatabaseAdapter,
+-  user: { userId: string; tenantId: string },
++  user: { userId: string; tenantId: string; userEmail?: string | null },
+   req: { winget_id: string; tenant_id: string },
+   batch: boolean,
+ ): Promise<Result> {
+@@ -112,6 +112,9 @@ async function updateOne(
+     });
+   }
+ 
++  // Record who pressed Update: the job (and the Teams card, Recent deployments) shows it.
++  if (user.userEmail) await db.jobs.update(triggered.packagingJobId, { user_email: user.userEmail });
++
+   const dispatch = await dispatchUpdateJob(db, triggered.packagingJobId, { batch });
+   if (!dispatch.dispatched && dispatch.reason !== 'local-packager') {
+     return fail(dispatch.message, { skipped: dispatch.reason === 'qa-hold' || undefined });
+@@ -121,7 +124,7 @@ async function updateOne(
+ 
+ export async function runSqliteManualUpdates(
+   db: DatabaseAdapter,
+-  user: { userId: string; tenantId: string },
++  user: { userId: string; tenantId: string; userEmail?: string | null },
+   requests: { winget_id: string; tenant_id: string }[],
+ ): Promise<TriggerUpdateResponse> {
+   const response: TriggerUpdateResponse = { success: true, triggered: 0, failed: 0, results: [] };
+diff --git a/lib/webhooks/deployment-formatters.ts b/lib/webhooks/deployment-formatters.ts
+index 03477b6eb..18b07643b 100644
+--- a/lib/webhooks/deployment-formatters.ts
++++ b/lib/webhooks/deployment-formatters.ts
+@@ -60,7 +60,8 @@ export function buildDeploymentData(job: PackagingJob): DeploymentWebhookData {
+       version: job.version,
+       architecture: job.architecture,
+       publisher: job.publisher,
+-      deployed_by: job.user_email,
++      // HRM patch: scheduled updates have no person behind them.
++      deployed_by: job.user_email || (job.is_auto_update ? 'Auto-update' : null),
+       tenant_id: job.tenant_id,
+       intune_app_url: failed ? null : job.intune_app_url,
+       github_run_url: job.github_run_url,
