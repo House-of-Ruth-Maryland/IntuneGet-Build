@@ -1,0 +1,143 @@
+diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
+index 2dcb0bf63..d1e8f0116 100644
+--- a/components/dashboard/Sidebar.tsx
++++ b/components/dashboard/Sidebar.tsx
+@@ -208,7 +208,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+                         animate={{ opacity: 1 }}
+                         exit={{ opacity: 0 }}
+                         transition={{ duration: 0.15 }}
+-                        className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-muted"
++                        className="text-xs font-semibold text-text-muted"
+                       >
+                         <T>{group.label}</T>
+                       </motion.span>
+diff --git a/components/inventory/CopyableCommand.tsx b/components/inventory/CopyableCommand.tsx
+index 3d41c1b63..51ce2e5e5 100644
+--- a/components/inventory/CopyableCommand.tsx
++++ b/components/inventory/CopyableCommand.tsx
+@@ -32,7 +32,7 @@ export function CopyableCommand({ command, label }: CopyableCommandProps) {
+ 
+   return (
+     <div>
+-      <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">
++      <h4 className="text-sm font-semibold text-text-secondary mb-2 flex items-center gap-2">
+         <Terminal className="w-3.5 h-3.5" />
+         {label}
+       </h4>
+diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
+index 5e9631f0e..00fa96f45 100644
+--- a/components/inventory/InventoryAppDetails.tsx
++++ b/components/inventory/InventoryAppDetails.tsx
+@@ -128,7 +128,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+           {/* Description */}
+           {app.description && (
+             <div>
+-              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-2">
++              <h4 className="text-sm font-semibold text-text-secondary mb-2">
+                 Description
+               </h4>
+               <p className="text-sm text-text-secondary leading-relaxed">{app.description}</p>
+@@ -138,17 +138,17 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+           {/* Commands */}
+           <div className="space-y-4">
+             {app.installCommandLine && (
+-              <CopyableCommand command={app.installCommandLine} label="Install Command" />
++              <CopyableCommand command={app.installCommandLine} label="Install command" />
+             )}
+             {app.uninstallCommandLine && (
+-              <CopyableCommand command={app.uninstallCommandLine} label="Uninstall Command" />
++              <CopyableCommand command={app.uninstallCommandLine} label="Uninstall command" />
+             )}
+           </div>
+ 
+           {/* Assignments */}
+           {app.assignments && app.assignments.length > 0 && (
+             <div>
+-              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
++              <h4 className="text-sm font-semibold text-text-secondary mb-3 flex items-center gap-2">
+                 <Users className="w-3.5 h-3.5" />
+                 Assignments ({app.assignments.length})
+               </h4>
+@@ -189,7 +189,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+ 
+           {/* Metadata Grid */}
+           <div>
+-            <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
++            <h4 className="text-sm font-semibold text-text-secondary mb-3">
+               Details
+             </h4>
+             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+@@ -210,7 +210,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+               />
+               <MetadataItem
+                 icon={User}
+-                label="Run As"
++                label="Run as"
+                 value={app.installExperience?.runAsAccount || 'System'}
+               />
+             </div>
+diff --git a/components/ui/status-badge.tsx b/components/ui/status-badge.tsx
+index bc17915cb..16688775d 100644
+--- a/components/ui/status-badge.tsx
++++ b/components/ui/status-badge.tsx
+@@ -46,7 +46,7 @@ export function StatusBadge({ tone = 'neutral', icon: Icon, iconClassName, child
+   return (
+     <span
+       className={cn(
+-        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border',
++        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap flex-shrink-0',
+         toneClasses[tone],
+         className
+       )}
+diff --git a/components/unmanaged/UnmanagedAppCard.tsx b/components/unmanaged/UnmanagedAppCard.tsx
+index 2a8c89b19..7af0d3e66 100644
+--- a/components/unmanaged/UnmanagedAppCard.tsx
++++ b/components/unmanaged/UnmanagedAppCard.tsx
+@@ -78,13 +78,13 @@ function UnmanagedAppCardComponent({
+           </div>
+ 
+           {/* Device count + status */}
+-          <div className="flex items-center gap-4 mt-3">
++          <div className="flex flex-wrap items-center gap-2 mt-3">
+             {onDeviceCountClick ? (
+               <button
+                 type="button"
+                 onClick={onDeviceCountClick}
+                 aria-label={`View ${app.deviceCount.toLocaleString()} ${app.deviceCount === 1 ? 'device' : 'devices'} for ${app.displayName}`}
+-                className="flex items-center gap-1.5 bg-bg-elevated/80 px-2.5 py-1 rounded-lg border border-overlay/5 transition-colors hover:border-accent-cyan/40 hover:bg-bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
++                className="flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 bg-bg-elevated/80 px-2.5 py-1 rounded-lg border border-overlay/5 transition-colors hover:border-accent-cyan/40 hover:bg-bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
+               >
+                 <Monitor className="w-4 h-4 text-accent-cyan" />
+                 <span className="text-sm font-semibold text-text-primary tabular-nums">
+@@ -95,7 +95,7 @@ function UnmanagedAppCardComponent({
+                 </span>
+               </button>
+             ) : (
+-              <div className="flex items-center gap-1.5 bg-bg-elevated/80 px-2.5 py-1 rounded-lg border border-overlay/5">
++              <div className="flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 bg-bg-elevated/80 px-2.5 py-1 rounded-lg border border-overlay/5">
+                 <Monitor className="w-4 h-4 text-accent-cyan" />
+                 <span className="text-sm font-semibold text-text-primary tabular-nums">
+                   {app.deviceCount.toLocaleString()}
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 6a0428ffa..86e155d3f 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -38,6 +38,18 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Updates waiting for approval show on the Home page and in App updates.',
+     ],
+   },
++  {
++    id: 'updating',
++    title: 'Updating an app',
++    points: [
++      'WinGet and curated apps: open App updates and press Update on the app, or Update all. The new version replaces the previous one in Intune and keeps its groups. The result posts to Teams.',
++      'Apps with auto-update on are updated by the 3:30 AM and 3:30 PM check, with the same safety checks.',
++      'If Update says the catalog has not synced the installer yet, wait for the next catalog sync (every 6 hours), or deploy the new version from the App catalog with Supersede previous version on update and Carry over assignments turned on.',
++      'Custom apps (installers that are not in WinGet, such as PdfCraft or UniFi Endpoint): in the App catalog press Custom app; Saved custom apps is at the top of that window. Press Deploy new version on the app. Enter the new version and installer URL, turn on Supersede previous version on update and Carry over assignments, then deploy.',
++      'A custom app\'s first version is added with Custom app in the App catalog, using a direct https download link to the installer. Save it there so later versions only need a new version and link. IntuneGet can\'t tell you when a custom app has a new version, so watch the vendor\'s releases.',
++      'From Inventory, Find in App catalog opens the app so you can deploy a newer version.',
++    ],
++  },
+   {
+     id: 'discovered',
+     title: 'Discovered apps',
