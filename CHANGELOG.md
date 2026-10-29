@@ -2,6 +2,8 @@
 
 ## 2026-10-28
 
+- Help explains how to update WinGet, curated and custom apps. Discovered Apps pills no longer break
+  mid-word, and sidebar and Inventory labels are sentence case (patch 0014).
 - Teams deployment cards for updates name the person who pressed Update, or say "Auto-update" for
   scheduled updates, instead of "Unknown" (patch 0013).
 - Update and Update All work on the server, and apps with auto-update on are updated by the twice-daily
