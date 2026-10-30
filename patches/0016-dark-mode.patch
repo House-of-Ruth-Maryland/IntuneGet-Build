@@ -1,0 +1,488 @@
+diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
+index 8813d782f..a6338cb29 100644
+--- a/app/(app)/dashboard/layout.tsx
++++ b/app/(app)/dashboard/layout.tsx
+@@ -12,6 +12,7 @@ import {
+ import { T } from 'gt-next';
+ import { Button } from '@/components/ui/button';
+ import { Toaster } from 'sonner';
++import { useTheme } from '@/components/providers/theme-context';
+ import { useCartStore } from '@/stores/cart-store';
+ import { useSidebarStore } from '@/stores/sidebar-store';
+ import { useProfileStore } from '@/stores/profile-store';
+@@ -34,6 +35,7 @@ export default function DashboardLayout({
+   children: React.ReactNode;
+ }) {
+   const { isAuthenticated, isInitializing, isSigningOut, user, signOut, getAccessToken } = useMicrosoftAuth();
++  const { theme } = useTheme();
+   const {
+     isOnboardingComplete,
+     isChecking: isCheckingOnboarding,
+@@ -286,7 +288,7 @@ export default function DashboardLayout({
+ 
+       {/* Toast notifications */}
+       <Toaster
+-        theme="dark"
++        theme={theme}
+         position="bottom-right"
+         toastOptions={{
+           className: 'bg-bg-surface border border-overlay/10 text-text-primary',
+diff --git a/app/api/user/settings/route.ts b/app/api/user/settings/route.ts
+index 8b7cfe81a..18839a80a 100644
+--- a/app/api/user/settings/route.ts
++++ b/app/api/user/settings/route.ts
+@@ -9,7 +9,7 @@ function isBoolean(value: unknown): value is boolean {
+ }
+ 
+ function isThemeMode(value: unknown): value is UserSettings['theme'] {
+-  return value === 'light' || value === 'dark';
++  return value === 'light' || value === 'dark' || value === 'system';
+ }
+ 
+ function isStoredSettings(value: unknown): value is Record<string, unknown> {
+diff --git a/app/globals.css b/app/globals.css
+index 5f2a7be95..18a5bc2fb 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -135,6 +135,13 @@ pre {
+ .dark {
+   color-scheme: dark;
+ 
++  /* HRM patch: HRM purple and teal, lightened to read on dark surfaces (AA). */
++  --accent-cyan: #a77fd0;
++  --accent-cyan-bright: #c4a3e3;
++  --accent-cyan-dim: #6f3d9b;
++  --accent-violet: #7fb3bd;
++  --accent-violet-bright: #6fd3ae;
++
+   --bg-deepest: 8 15 29;
+   --bg-surface: 15 26 46;
+   --bg-elevated: 21 35 58;
+@@ -652,3 +659,26 @@ pre {
+   outline: 2px solid var(--focus-ring);
+   outline-offset: 2px;
+ }
++
++/* HRM patch: solid purple buttons keep white text readable in dark mode. The
++   lighter accent above is for text and borders; a filled button uses a deeper
++   purple, and one shade darker on hover. Unlayered, so it wins over utilities. */
++.dark .bg-accent-cyan {
++  background-color: #7d4aa8;
++}
++.dark .bg-accent-cyan:is(:hover, :focus-visible)[class*="hover:bg-"] {
++  background-color: #6f3d9b;
++}
++.dark .bg-accent-violet {
++  background-color: #4f7880;
++}
++
++/* HRM patch: upstream screens use deep text shades (600 to 900) picked for the
++   light theme; on dark surfaces they fall below AA. Lighten them in dark mode. */
++.dark :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-amber-900) { color: #fcd34d; }
++.dark :is(.text-blue-600, .text-blue-700) { color: #93c5fd; }
++.dark :is(.text-purple-600, .text-violet-600) { color: #d8b4fe; }
++.dark :is(.text-emerald-600, .text-emerald-700, .text-green-600, .text-green-700) { color: #6ee7b7; }
++.dark :is(.text-red-600, .text-red-700) { color: #fca5a5; }
++.dark .text-cyan-700 { color: #67e8f9; }
++.dark :is(.text-slate-600, .text-zinc-600) { color: #cbd5e1; }
+diff --git a/app/layout.tsx b/app/layout.tsx
+index f2e8ef396..249270237 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -219,15 +219,11 @@ export default async function RootLayout({
+           dangerouslySetInnerHTML={{
+             __html: `(() => {
+   try {
+-    const storedTheme = localStorage.getItem("intuneget-theme");
+-    if (storedTheme === "light" || storedTheme === "dark") {
+-      document.documentElement.classList.toggle("dark", storedTheme === "dark");
+-      return;
+-    }
+-
+-    // First-time visitors always start in light mode. Explicit local or
+-    // account preferences still take precedence on later visits.
+-    document.documentElement.classList.remove("dark");
++    // HRM patch: light, dark, or (the default) the computer's setting.
++    const storedTheme = localStorage.getItem("intuneget-theme-mode");
++    const dark = storedTheme === "dark" ||
++      (storedTheme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
++    document.documentElement.classList.toggle("dark", dark);
+   } catch (error) {
+     if (typeof console !== "undefined" && console.warn) {
+       console.warn("Failed to initialize theme preference:", error);
+diff --git a/components/dashboard/SidebarUserSection.tsx b/components/dashboard/SidebarUserSection.tsx
+index d834efe1b..fb18e624f 100644
+--- a/components/dashboard/SidebarUserSection.tsx
++++ b/components/dashboard/SidebarUserSection.tsx
+@@ -20,6 +20,7 @@ import {
+   TooltipTrigger,
+   TooltipContent,
+ } from '@/components/ui/tooltip';
++import { ThemeMenuItems } from '@/components/hrm/ThemeMenuItems';
+ 
+ interface SidebarUserSectionProps {
+   user: { id?: string; name?: string | null; email?: string | null } | null;
+@@ -101,6 +102,8 @@ export function SidebarUserSection({
+               </Link>
+             </DropdownMenuItem>
+             <DropdownMenuSeparator />
++            <ThemeMenuItems />
++            <DropdownMenuSeparator />
+             <DropdownMenuItem onClick={onSignOut}>
+               <LogOut className="w-4 h-4 mr-2" />
+               <T>Sign out</T>
+@@ -183,6 +186,8 @@ export function SidebarUserSection({
+             </Link>
+           </DropdownMenuItem>
+           <DropdownMenuSeparator />
++          <ThemeMenuItems />
++          <DropdownMenuSeparator />
+           <DropdownMenuItem onClick={onSignOut}>
+             <LogOut className="w-4 h-4 mr-2" />
+             <T>Sign out</T>
+diff --git a/components/hrm/ThemeMenuItems.tsx b/components/hrm/ThemeMenuItems.tsx
+new file mode 100644
+index 000000000..16fabb803
+--- /dev/null
++++ b/components/hrm/ThemeMenuItems.tsx
+@@ -0,0 +1,40 @@
++'use client';
++
++// HRM patch: Light, Dark or System (follow the computer) in the account menu.
++
++import { Monitor, Moon, Sun } from 'lucide-react';
++import {
++  DropdownMenuLabel,
++  DropdownMenuRadioGroup,
++  DropdownMenuRadioItem,
++} from '@/components/ui/dropdown-menu';
++import { isThemeMode, useTheme } from '@/components/providers/theme-context';
++
++const OPTIONS = [
++  { value: 'light', label: 'Light', icon: Sun },
++  { value: 'dark', label: 'Dark', icon: Moon },
++  { value: 'system', label: 'Same as computer', icon: Monitor },
++] as const;
++
++export function ThemeMenuItems() {
++  const { theme, setTheme } = useTheme();
++
++  return (
++    <>
++      <DropdownMenuLabel className="text-xs font-normal text-text-muted">Theme</DropdownMenuLabel>
++      <DropdownMenuRadioGroup
++        value={theme}
++        onValueChange={(value) => {
++          if (isThemeMode(value)) void setTheme(value);
++        }}
++      >
++        {OPTIONS.map(({ value, label, icon: Icon }) => (
++          <DropdownMenuRadioItem key={value} value={value} onSelect={(event) => event.preventDefault()}>
++            <Icon className="w-4 h-4 mr-2" aria-hidden="true" />
++            {label}
++          </DropdownMenuRadioItem>
++        ))}
++      </DropdownMenuRadioGroup>
++    </>
++  );
++}
+diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
+index 26e12a43c..0d4497940 100644
+--- a/components/inventory/InventoryAppDetails.tsx
++++ b/components/inventory/InventoryAppDetails.tsx
+@@ -43,10 +43,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+ 
+   const getAssignmentIntent = (intent: IntuneAppAssignment['intent']) => {
+     const intents: Record<string, { label: string; className: string }> = {
+-      required: { label: 'Required', className: 'bg-blue-50 text-blue-700' },
+-      available: { label: 'Available', className: 'bg-emerald-50 text-emerald-700' },
+-      uninstall: { label: 'Uninstall', className: 'bg-red-50 text-red-700' },
+-      availableWithoutEnrollment: { label: 'Available (Unenrolled)', className: 'bg-amber-50 text-amber-700' },
++      required: { label: 'Required', className: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300' },
++      available: { label: 'Available', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' },
++      uninstall: { label: 'Uninstall', className: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300' },
++      availableWithoutEnrollment: { label: 'Available (Unenrolled)', className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' },
+     };
+     return intents[intent] || { label: intent, className: 'bg-overlay/5 text-text-muted' };
+   };
+diff --git a/components/providers/ThemeProvider.tsx b/components/providers/ThemeProvider.tsx
+index e874e16b5..2fe9ed245 100644
+--- a/components/providers/ThemeProvider.tsx
++++ b/components/providers/ThemeProvider.tsx
+@@ -5,6 +5,7 @@ import { useUserSettings } from "@/components/providers/UserSettingsProvider";
+ import {
+   ThemeContext,
+   applyThemeClass,
++  useFollowSystemTheme,
+ } from "@/components/providers/theme-context";
+ import type { ThemeMode } from "@/types/user-settings";
+ 
+@@ -24,6 +25,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
+     applyThemeClass(settings.theme);
+   }, [settings.theme]);
+ 
++  // HRM patch: follow the computer when it switches between light and dark.
++  useFollowSystemTheme(theme);
++
+   const setTheme = async (nextTheme: ThemeMode) => {
+     setThemeState(nextTheme);
+     applyThemeClass(nextTheme);
+diff --git a/components/providers/UserSettingsProvider.tsx b/components/providers/UserSettingsProvider.tsx
+index 05667de09..2afb407a5 100644
+--- a/components/providers/UserSettingsProvider.tsx
++++ b/components/providers/UserSettingsProvider.tsx
+@@ -40,7 +40,9 @@ type UserSettingsContextValue = {
+ 
+ const UserSettingsContext = createContext<UserSettingsContextValue | null>(null);
+ 
+-const THEME_KEY = "intuneget-theme";
++// HRM patch: a new key, so the "light" that every page load used to save (no
++// one chose it) doesn't stop new users following the computer's setting.
++const THEME_KEY = "intuneget-theme-mode";
+ const SIDEBAR_COLLAPSE_KEY = "intuneget-sidebar-collapsed";
+ const CART_KEY = "intuneget-cart";
+ const SELECTED_TENANT_KEY = "msp_selected_tenant_id";
+@@ -51,7 +53,7 @@ const CARRY_OVER_ASSIGNMENTS_KEY = "intuneget-carry-over-assignments";
+ const SUPERSEDE_PREVIOUS_APP_KEY = "intuneget-supersede-previous-app";
+ 
+ function isThemeMode(value: unknown): value is ThemeMode {
+-  return value === "light" || value === "dark";
++  return value === "light" || value === "dark" || value === "system";
+ }
+ 
+ function readBooleanStorageValue(key: string): boolean | null {
+@@ -351,7 +353,11 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
+       const legacy = readLegacyUserSettings();
+       const response = await getUserSettings(token);
+ 
+-      applySettings(response.settings);
++      // HRM patch: a server with nothing stored (always, on SQLite) answers with
++      // the defaults; applying them overwrote this browser's settings on every load.
++      if (response.hasStoredSettings) {
++        applySettings(response.settings);
++      }
+       setHasStoredSettings(Boolean(response.hasStoredSettings));
+ 
+       if (!response.hasStoredSettings && hasAnyLegacySetting(legacy)) {
+diff --git a/components/providers/__tests__/theme-context.test.ts b/components/providers/__tests__/theme-context.test.ts
+new file mode 100644
+index 000000000..ceca2c164
+--- /dev/null
++++ b/components/providers/__tests__/theme-context.test.ts
+@@ -0,0 +1,53 @@
++// @vitest-environment happy-dom
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { applyThemeClass, isThemeMode, resolveTheme } from '../theme-context';
++
++function mockSystem(dark: boolean) {
++  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
++    matches: dark,
++    addEventListener: vi.fn(),
++    removeEventListener: vi.fn(),
++  }));
++}
++
++describe('theme (HRM patch: dark mode)', () => {
++  afterEach(() => {
++    vi.unstubAllGlobals();
++    document.documentElement.classList.remove('dark');
++  });
++
++  it('accepts light, dark and system only', () => {
++    expect(['light', 'dark', 'system'].every(isThemeMode)).toBe(true);
++    expect(isThemeMode('blue')).toBe(false);
++    expect(isThemeMode(undefined)).toBe(false);
++  });
++
++  it('follows the computer when the theme is system', () => {
++    mockSystem(true);
++    expect(resolveTheme('system')).toBe('dark');
++    mockSystem(false);
++    expect(resolveTheme('system')).toBe('light');
++  });
++
++  it('keeps an explicit choice whatever the computer says', () => {
++    mockSystem(true);
++    expect(resolveTheme('light')).toBe('light');
++    mockSystem(false);
++    expect(resolveTheme('dark')).toBe('dark');
++  });
++
++  it('sets the dark class on the page and tells the other provider', () => {
++    mockSystem(false);
++    const heard: unknown[] = [];
++    const listener = (event: Event) => heard.push((event as CustomEvent).detail);
++    window.addEventListener('intuneget:theme-change', listener);
++
++    applyThemeClass('dark');
++    expect(document.documentElement.classList.contains('dark')).toBe(true);
++    applyThemeClass('system');
++    expect(document.documentElement.classList.contains('dark')).toBe(false);
++
++    window.removeEventListener('intuneget:theme-change', listener);
++    expect(heard).toEqual(['dark', 'system']);
++  });
++});
+diff --git a/components/providers/theme-context.tsx b/components/providers/theme-context.tsx
+index 9bba5755c..c87c46397 100644
+--- a/components/providers/theme-context.tsx
++++ b/components/providers/theme-context.tsx
+@@ -20,6 +20,7 @@ export const ThemeContext = createContext<ThemeContextValue | undefined>(
+ );
+ 
+ const THEME_CLASS = "dark";
++const DARK_QUERY = "(prefers-color-scheme: dark)";
+ 
+ // Fired whenever a provider applies a theme, so the other provider instance
+ // stays in sync. PublicThemeProvider lives in the persistent root layout
+@@ -28,16 +29,46 @@ const THEME_CLASS = "dark";
+ // theme change in the app and its toggle stops working until a full reload.
+ const THEME_CHANGE_EVENT = "intuneget:theme-change";
+ 
+-export function applyThemeClass(_theme: ThemeMode) {
++// HRM patch: dark mode is back. "system" follows the computer's setting.
++export function isThemeMode(value: unknown): value is ThemeMode {
++  return value === "light" || value === "dark" || value === "system";
++}
++
++export function resolveTheme(theme: ThemeMode): "light" | "dark" {
++  if (theme !== "system") return theme;
++  if (typeof window === "undefined" || !window.matchMedia) return "light";
++  return window.matchMedia(DARK_QUERY).matches ? "dark" : "light";
++}
++
++export function applyThemeClass(theme: ThemeMode) {
+   if (typeof document === "undefined") return;
+ 
+-  // The site is light-only: the dark class is never applied, regardless of
+-  // any stored preference from when a theme toggle existed.
+-  document.documentElement.classList.remove(THEME_CLASS);
+-  window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
++  document.documentElement.classList.toggle(THEME_CLASS, resolveTheme(theme) === "dark");
++  window.dispatchEvent(new CustomEvent<ThemeMode>(THEME_CHANGE_EVENT, { detail: theme }));
++}
++
++/** While the theme is "system", re-apply it when the computer switches. */
++export function useFollowSystemTheme(theme: ThemeMode) {
++  useEffect(() => {
++    if (theme !== "system" || typeof window === "undefined" || !window.matchMedia) return;
++    const query = window.matchMedia(DARK_QUERY);
++    const onChange = () => applyThemeClass("system");
++    query.addEventListener("change", onChange);
++    return () => query.removeEventListener("change", onChange);
++  }, [theme]);
+ }
+ 
+-const PUBLIC_THEME_KEY = "intuneget-theme";
++// Same key as UserSettingsProvider and the boot script in app/layout.tsx.
++const PUBLIC_THEME_KEY = "intuneget-theme-mode";
++
++function readStoredTheme(): ThemeMode {
++  try {
++    const stored = window.localStorage.getItem(PUBLIC_THEME_KEY);
++    return isThemeMode(stored) ? stored : "system";
++  } catch {
++    return "system";
++  }
++}
+ 
+ /**
+  * Theme provider for pages rendered without UserSettingsProvider (marketing,
+@@ -48,24 +79,23 @@ const PUBLIC_THEME_KEY = "intuneget-theme";
+  * the nearest (synced) context.
+  */
+ export function PublicThemeProvider({ children }: { children: ReactNode }) {
+-  const [theme, setThemeState] = useState<ThemeMode>("light");
++  const [theme, setThemeState] = useState<ThemeMode>("system");
+ 
+   useEffect(() => {
+-    const syncFromDocument = () => {
+-      setThemeState(
+-        document.documentElement.classList.contains(THEME_CLASS)
+-          ? "dark"
+-          : "light",
+-      );
+-    };
++    setThemeState(readStoredTheme());
+ 
+     // Track theme changes made by the settings-synced ThemeProvider while
+     // the visitor was inside the app surface.
+-    window.addEventListener(THEME_CHANGE_EVENT, syncFromDocument);
+-    return () =>
+-      window.removeEventListener(THEME_CHANGE_EVENT, syncFromDocument);
++    const onThemeChange = (event: Event) => {
++      const next = (event as CustomEvent<ThemeMode>).detail;
++      if (isThemeMode(next)) setThemeState(next);
++    };
++    window.addEventListener(THEME_CHANGE_EVENT, onThemeChange);
++    return () => window.removeEventListener(THEME_CHANGE_EVENT, onThemeChange);
+   }, []);
+ 
++  useFollowSystemTheme(theme);
++
+   const setTheme = async (nextTheme: ThemeMode) => {
+     setThemeState(nextTheme);
+     applyThemeClass(nextTheme);
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index f8ef5993a..3ac27f79c 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -80,6 +80,14 @@ export const HELP_SECTIONS: HelpSection[] = [
+     ],
+     links: [{ label: 'IntuneGet-Build runbook', href: RUNBOOK_URL }],
+   },
++  {
++    id: 'your-settings',
++    title: 'Theme and your settings',
++    points: [
++      'IntuneGet follows your computer\'s light or dark setting. To choose, press your name at the bottom of the sidebar, then pick Light, Dark or Same as computer under Theme.',
++      'Your theme, the collapsed sidebar, and Supersede previous version on update and Carry over assignments are remembered in this browser. Another browser or computer starts with the defaults.',
++    ],
++  },
+   {
+     id: 'support',
+     title: 'When something goes wrong',
+diff --git a/tailwind.config.ts b/tailwind.config.ts
+index 00fe2dd04..0d8eefae6 100644
+--- a/tailwind.config.ts
++++ b/tailwind.config.ts
+@@ -154,12 +154,13 @@ const config: Config = {
+         "overlay": "rgb(var(--overlay) / <alpha-value>)",
+         // Inverse surface for Badge dark variant
+         "surface-inverse": "rgb(var(--surface-inverse) / <alpha-value>)",
+-        // Electric Cyan accent system (static - same in both themes)
+-        "accent-cyan": "#673090",
+-        "accent-cyan-bright": "#855aa6",
+-        "accent-cyan-dim": "#412160",
+-        "accent-violet": "#5a838c",
+-        "accent-violet-bright": "#5dc19d",
++        // HRM patch: accents follow the theme (lighter purple and teal in dark
++        // mode, so text and borders stay readable); values in app/globals.css.
++        "accent-cyan": "var(--accent-cyan)",
++        "accent-cyan-bright": "var(--accent-cyan-bright)",
++        "accent-cyan-dim": "var(--accent-cyan-dim)",
++        "accent-violet": "var(--accent-violet)",
++        "accent-violet-bright": "var(--accent-violet-bright)",
+         // Text colors wired to CSS variables (switch light/dark)
+         "text-primary": "rgb(var(--text-primary) / <alpha-value>)",
+         "text-secondary": "rgb(var(--text-secondary) / <alpha-value>)",
+diff --git a/types/user-settings.ts b/types/user-settings.ts
+index a566983e7..9234b5592 100644
+--- a/types/user-settings.ts
++++ b/types/user-settings.ts
+@@ -1,4 +1,5 @@
+-export type ThemeMode = "light" | "dark";
++// HRM patch: "system" follows the computer's light or dark setting.
++export type ThemeMode = "light" | "dark" | "system";
+ export type ViewMode = "grid" | "list";
+ 
+ export interface UserSettings {
+@@ -16,7 +17,7 @@ export interface UserSettings {
+ export type UserSettingsUpdate = Partial<UserSettings>;
+ 
+ export const DEFAULT_USER_SETTINGS: UserSettings = {
+-  theme: "light",
++  theme: "system",
+   sidebarCollapsed: false,
+   selectedTenantId: null,
+   cartAutoOpenOnAdd: true,
