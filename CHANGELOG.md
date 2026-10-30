@@ -2,6 +2,9 @@
 
 ## 2026-10-29
 
+- Dark mode is back: IntuneGet follows the computer's light or dark setting, and the account menu has
+  a Theme choice (Light, Dark, Same as computer). Settings such as the theme are no longer reset on
+  every page load (patch 0016).
 - The server's database is copied off-site every night at 1:30 AM to a private Azure Storage
   container in another region and kept for 30 days. The watchdog alerts in Teams if a copy fails or
   is late.
