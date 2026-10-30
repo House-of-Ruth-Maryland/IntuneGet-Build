@@ -189,7 +189,7 @@ Check, then enable:
 ```bash
 sudo intuneget-deploy run && sudo intuneget-deploy status
 sudo intuneget-backup && sudo intuneget-backup status
-sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer intuneget-watchdog.timer intuneget-curated-refresh.timer intuneget-backup.timer
+sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer intuneget-watchdog.timer intuneget-curated-refresh.timer intuneget-backup.timer cloudflared-update.timer
 ```
 
 The app's port is published only on the VM itself (`127.0.0.1:3000:3000` in
