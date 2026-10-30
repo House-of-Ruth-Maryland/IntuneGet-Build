@@ -1,0 +1,232 @@
+diff --git a/app/globals.css b/app/globals.css
+index 18a5bc2fb..c1545fc5e 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -682,3 +682,10 @@ pre {
+ .dark :is(.text-red-600, .text-red-700) { color: #fca5a5; }
+ .dark .text-cyan-700 { color: #67e8f9; }
+ .dark :is(.text-slate-600, .text-zinc-600) { color: #cbd5e1; }
++
++/* HRM patch: the command palette's search box has the cursor whenever the
++   palette is open, so the page-wide focus outline (clipped at the box's edge)
++   isn't needed there. */
++[cmdk-input]:focus-visible {
++  outline: none;
++}
+diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
+index 33d0890cc..551f2e5a7 100644
+--- a/components/dashboard/CommandPalette.tsx
++++ b/components/dashboard/CommandPalette.tsx
+@@ -4,6 +4,7 @@ import { T } from 'gt-next';
+ import { useState, useEffect, useCallback } from 'react';
+ import { useRouter } from 'next/navigation';
+ import { Command } from 'cmdk';
++import { Title as DialogTitle } from '@radix-ui/react-dialog';
+ import {
+   LayoutDashboard,
+   Package,
+@@ -13,24 +14,23 @@ import {
+   ArrowUpCircle,
+   BarChart3,
+   Settings,
+-  FolderSync,
+-  Lightbulb,
++  LifeBuoy,
+   Search,
+   Keyboard,
+ } from 'lucide-react';
+ import { SHORTCUT_HINTS } from '@/hooks/useKeyboardShortcuts';
+ 
++// HRM patch: the same pages as HRM's sidebar (Home, no SCCM or app requests, Help).
+ const NAVIGATION_ITEMS = [
+-  { name: 'Overview', href: '/dashboard', icon: LayoutDashboard, keywords: 'home dashboard overview' },
++  { name: 'Home', href: '/dashboard', icon: LayoutDashboard, keywords: 'home dashboard overview' },
+   { name: 'App Catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget' },
+   { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'uploads deploy jobs status' },
+   { name: 'Discovered Apps', href: '/dashboard/unmanaged', icon: Radar, keywords: 'unmanaged discovered scan' },
+   { name: 'Inventory', href: '/dashboard/inventory', icon: Server, keywords: 'deployed inventory intune' },
+   { name: 'App Updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions' },
+   { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts' },
+-  { name: 'SCCM Migration', href: '/dashboard/sccm', icon: FolderSync, keywords: 'sccm migration configmgr' },
+-  { name: 'App Requests', href: '/dashboard/app-requests', icon: Lightbulb, keywords: 'suggestions requests vote' },
+   { name: 'Settings', href: '/dashboard/settings', icon: Settings, keywords: 'settings preferences permissions' },
++  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy, keywords: 'help support how' },
+ ];
+ 
+ interface CommandPaletteProps {
+@@ -43,20 +43,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+   const [search, setSearch] = useState('');
+ 
+   useEffect(() => {
+-    if (!open) {
+-      setSearch('');
+-      return;
+-    }
+-
+-    const handleEscape = (e: KeyboardEvent) => {
+-      if (e.key === 'Escape') {
+-        e.preventDefault();
+-        onOpenChange(false);
+-      }
+-    };
+-    document.addEventListener('keydown', handleEscape);
+-    return () => document.removeEventListener('keydown', handleEscape);
+-  }, [open, onOpenChange]);
++    if (!open) setSearch('');
++  }, [open]);
+ 
+   const handleSelect = useCallback(
+     (href: string) => {
+@@ -66,26 +54,27 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+     [onOpenChange, router]
+   );
+ 
+-  if (!open) return null;
+-
++  // HRM patch: a real dialog (cmdk's Radix Dialog), so the search box has the
++  // cursor when it opens, the arrow keys and Enter work straight away, focus
++  // stays in the palette (typing no longer triggers page shortcuts such as C
++  // for the cart), Escape and clicking outside close it, and focus goes back
++  // to where it was.
+   return (
+-    <div className="fixed inset-0 z-[60]">
+-      {/* Backdrop */}
+-      <div
+-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+-        onClick={() => onOpenChange(false)}
+-      />
+-
+-      {/* Command dialog */}
+-      <div className="absolute inset-0 flex items-start justify-center pt-[20vh] px-4">
+-        <Command
+-          className="w-full max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden"
+-          loop
+-        >
++    <Command.Dialog
++      open={open}
++      onOpenChange={onOpenChange}
++      label="Command menu"
++      loop
++      overlayClassName="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
++      contentClassName="fixed inset-x-4 top-[20vh] z-[60] mx-auto max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden focus:outline-none"
++      aria-describedby={undefined}
++    >
++      <DialogTitle className="sr-only">Command menu</DialogTitle>
+           {/* Search input */}
+           <div className="flex items-center gap-3 px-4 border-b border-overlay/5">
+             <Search className="w-4 h-4 text-text-muted flex-shrink-0" />
+             <Command.Input
++              autoFocus
+               value={search}
+               onValueChange={setSearch}
+               placeholder="Type a command or search..."
+@@ -151,8 +140,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+               </Command.Group>
+             )}
+           </Command.List>
+-        </Command>
+-      </div>
+-    </div>
++    </Command.Dialog>
+   );
+ }
+diff --git a/components/dashboard/__tests__/CommandPalette.test.ts b/components/dashboard/__tests__/CommandPalette.test.ts
+new file mode 100644
+index 000000000..0ba8b21f2
+--- /dev/null
++++ b/components/dashboard/__tests__/CommandPalette.test.ts
+@@ -0,0 +1,65 @@
++// @vitest-environment happy-dom
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++
++const push = vi.fn();
++vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
++vi.mock('gt-next', () => ({ T: ({ children }: { children: unknown }) => children }));
++
++import { CommandPalette } from '../CommandPalette';
++
++// HRM patch: the palette must take the keyboard as soon as it opens.
++describe('CommandPalette keyboard', () => {
++  let container: HTMLDivElement;
++  let root: Root;
++  const onOpenChange = vi.fn();
++
++  beforeEach(async () => {
++    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++    Element.prototype.scrollIntoView = vi.fn();
++    push.mockReset();
++    onOpenChange.mockReset();
++    container = document.createElement('div');
++    document.body.appendChild(container);
++    root = createRoot(container);
++    await act(async () => {
++      root.render(createElement(CommandPalette, { open: true, onOpenChange }));
++    });
++  });
++
++  afterEach(async () => {
++    await act(async () => root.unmount());
++    container.remove();
++  });
++
++  const input = () => document.querySelector<HTMLInputElement>('[cmdk-input]')!;
++  const selected = () => document.querySelector('[cmdk-item][data-selected="true"]')?.textContent;
++  const key = async (k: string) => {
++    await act(async () => {
++      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
++    });
++  };
++
++  it('opens as a labelled dialog with the cursor in the search box', () => {
++    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
++    expect(document.activeElement).toBe(input());
++  });
++
++  it('moves through the commands with the arrow keys and opens one with Enter', async () => {
++    expect(selected()).toBe('Home');
++    await key('ArrowDown');
++    expect(selected()).toBe('App Catalog');
++    await key('ArrowUp');
++    expect(selected()).toBe('Home');
++    await key('ArrowDown');
++    await key('Enter');
++    expect(push).toHaveBeenCalledWith('/dashboard/apps');
++    expect(onOpenChange).toHaveBeenCalledWith(false);
++  });
++
++  it('closes with Escape', async () => {
++    await key('Escape');
++    expect(onOpenChange).toHaveBeenCalledWith(false);
++  });
++});
+diff --git a/hooks/useKeyboardShortcuts.ts b/hooks/useKeyboardShortcuts.ts
+index e2cbffe3d..4136e88c8 100644
+--- a/hooks/useKeyboardShortcuts.ts
++++ b/hooks/useKeyboardShortcuts.ts
+@@ -119,7 +119,7 @@ export const SHORTCUT_HINTS = [
+   { keys: ['Cmd', 'K'], description: 'Command palette' },
+   { keys: ['/'], description: 'Focus search' },
+   { keys: ['C'], description: 'Toggle cart' },
+-  { keys: ['G', 'D'], description: 'Go to Dashboard' },
++  { keys: ['G', 'D'], description: 'Go to Home' },
+   { keys: ['G', 'A'], description: 'Go to App Catalog' },
+   { keys: ['G', 'U'], description: 'Go to Deployments' },
+   { keys: ['G', 'I'], description: 'Go to Inventory' },
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 3ac27f79c..ea4f1dd7c 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -82,8 +82,10 @@ export const HELP_SECTIONS: HelpSection[] = [
+   },
+   {
+     id: 'your-settings',
+-    title: 'Theme and your settings',
++    title: 'Theme, shortcuts and your settings',
+     points: [
++      'To jump to any page, press Cmd+K (Ctrl+K on Windows) or the Search box at the top. Type to filter, use the Up and Down arrows to move, Enter to open, and Esc to close.',
++      'Shortcuts: press G, then D for Home, A for App catalog, U for Deployments, I for Inventory, R for Reports or S for Settings. The full list is under Keyboard shortcuts in the search box.',
+       'IntuneGet follows your computer\'s light or dark setting. To choose, press your name at the bottom of the sidebar, then pick Light, Dark or Same as computer under Theme.',
+       'Your theme, the collapsed sidebar, and Supersede previous version on update and Carry over assignments are remembered in this browser. Another browser or computer starts with the defaults.',
+     ],

@@ -2,6 +2,8 @@
 
 ## 2026-10-29
 
+- The Cmd+K command palette works from the keyboard: the cursor is in its search box when it opens,
+  and the arrow keys, Enter and Escape work. Its list matches the sidebar and includes Help (patch 0017).
 - Dark mode is back: IntuneGet follows the computer's light or dark setting, and the account menu has
   a Theme choice (Light, Dark, Same as computer). Settings such as the theme are no longer reset on
   every page load (patch 0016).
