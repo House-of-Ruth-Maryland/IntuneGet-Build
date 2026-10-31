@@ -1,18 +1,18 @@
 diff --git a/lib/qa/gate.test.ts b/lib/qa/gate.test.ts
-index 3ed95dfdc..7d81705c1 100644
+index fda5dc4c9..ebdc02eef 100644
 --- a/lib/qa/gate.test.ts
 +++ b/lib/qa/gate.test.ts
-@@ -6,7 +6,9 @@ const {
-   getPackageCompatibilityBlockMock,
-   getPackageResultMock,
+@@ -8,7 +8,9 @@ const {
    packageEqMock,
+   dependencyCoverageMock,
+   resolveDependenciesMock,
 +  supabaseConfiguredMock,
  } = vi.hoisted(() => ({
 +  supabaseConfiguredMock: vi.fn(() => true),
    getQaResultMock: vi.fn(),
    getPackageCompatibilityBlockMock: vi.fn(),
    getPackageResultMock: vi.fn(),
-@@ -16,6 +18,7 @@ vi.mock('@/lib/catalog', () => ({
+@@ -25,6 +27,7 @@ vi.mock('@/lib/catalog', () => ({
    getCatalogSource: () => ({ getQaResult: getQaResultMock }),
  }));
  vi.mock('@/lib/supabase', () => ({
@@ -20,17 +20,17 @@ index 3ed95dfdc..7d81705c1 100644
    createServerClient: () => ({
      from: () => {
        const builder: Record<string, unknown> = {};
-@@ -94,6 +97,7 @@ const failedRow = {
- 
- describe('enforceQaGate', () => {
-   beforeEach(() => {
+@@ -110,6 +113,7 @@ describe('enforceQaGate', () => {
+     dependencyCoverageMock.mockResolvedValue(true);
+     resolveDependenciesMock.mockReset();
+     resolveDependenciesMock.mockResolvedValue([]);
 +    supabaseConfiguredMock.mockReturnValue(true);
      getQaResultMock.mockReset();
      getPackageCompatibilityBlockMock.mockReset();
      getPackageCompatibilityBlockMock.mockResolvedValue(null);
-@@ -935,3 +939,40 @@ describe('enforceQaGate', () => {
-     ).rejects.toBeInstanceOf(QaGateNotPassedError);
+@@ -1002,3 +1006,40 @@ describe('enforceQaGate', () => {
    });
+ 
  });
 +
 +describe('enforceQaGate without Supabase (HRM self-hosted SQLite)', () => {
@@ -70,10 +70,10 @@ index 3ed95dfdc..7d81705c1 100644
 +  });
 +});
 diff --git a/lib/qa/gate.ts b/lib/qa/gate.ts
-index b1e23e910..185f88701 100644
+index a29661a41..9d865b528 100644
 --- a/lib/qa/gate.ts
 +++ b/lib/qa/gate.ts
-@@ -2,7 +2,7 @@ import { getCatalogSource } from '@/lib/catalog';
+@@ -5,7 +5,7 @@ import { getCatalogSource } from '@/lib/catalog';
  import { CuratedEvidenceMismatchError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
  import { getApprovedCuratedRelease } from '@/lib/curated-catalog/server';
  import { classifyQaFailure } from '@/lib/qa/classify';
@@ -82,7 +82,7 @@ index b1e23e910..185f88701 100644
  import {
    getPackageCompatibilityBlock,
    type PackageCompatibilityBlockCode,
-@@ -157,6 +157,15 @@ export async function enforceQaGate(input: {
+@@ -198,6 +198,15 @@ export async function enforceQaGate(input: {
    }
    if (input.sourceType === 'custom') return;
  
@@ -98,7 +98,7 @@ index b1e23e910..185f88701 100644
    const architecture = (input.architecture || 'x64').toLowerCase();
    const installerSha256 = input.installerSha256?.trim().toUpperCase() || '';
    const packageProfileSha256 = input.packageProfileSha256?.trim().toUpperCase() || '';
-@@ -285,6 +294,17 @@ export async function enforceQaGate(input: {
+@@ -314,6 +323,17 @@ export async function enforceQaGate(input: {
      });
    }
  
@@ -116,7 +116,7 @@ index b1e23e910..185f88701 100644
    const row = await getCatalogSource().getQaResult(input.wingetId);
  
    if (
-@@ -306,7 +326,7 @@ export async function enforceQaGate(input: {
+@@ -335,7 +355,7 @@ export async function enforceQaGate(input: {
      });
    }
  

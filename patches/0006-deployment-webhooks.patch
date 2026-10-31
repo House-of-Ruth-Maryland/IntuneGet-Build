@@ -98,10 +98,10 @@ index 000000000..a5f117723
 +  });
 +});
 diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
-index 222c4b0ea..c5d4db318 100644
+index 2822ad98a..fc3548477 100644
 --- a/lib/db/sqlite.ts
 +++ b/lib/db/sqlite.ts
-@@ -239,6 +239,10 @@ export const sqliteWebhooks = {
+@@ -257,6 +257,10 @@ export const sqliteWebhooks = {
    async listEnabled(userId: string): Promise<WebhookConfiguration[]> {
      return getDb().prepare('SELECT * FROM webhook_configurations WHERE user_id = ? AND is_enabled = 1 ORDER BY created_at, id').all(userId).map(webhookRow);
    },

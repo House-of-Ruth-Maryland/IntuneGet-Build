@@ -1,5 +1,5 @@
 diff --git a/lib/hrm/__tests__/updates.test.ts b/lib/hrm/__tests__/updates.test.ts
-index c228deb28..11a4ecb40 100644
+index ad611c2a4..aa8626f93 100644
 --- a/lib/hrm/__tests__/updates.test.ts
 +++ b/lib/hrm/__tests__/updates.test.ts
 @@ -32,7 +32,7 @@ vi.mock('@/lib/qa/gate', async (original) => ({
@@ -11,7 +11,7 @@ index c228deb28..11a4ecb40 100644
  
  beforeEach(() => {
    vi.resetModules();
-@@ -119,7 +119,7 @@ describe('Update and Update All on SQLite', () => {
+@@ -118,7 +118,7 @@ describe('Update and Update All on SQLite', () => {
      const result = await manual.runSqliteManualUpdates(db, USER, [{ winget_id: 'Vendor.App', tenant_id: USER.tenantId }]);
      expect(result).toMatchObject({ success: true, triggered: 1, failed: 0 });
      const job = await db.jobs.getById(result.results[0].packaging_job_id!);
@@ -20,8 +20,8 @@ index c228deb28..11a4ecb40 100644
      expect(mocks.trigger).toHaveBeenCalledWith(expect.objectContaining({ jobId: job!.id, autoSupersede: true, carryOverAssignments: true, sourceIntuneAppId: 'intune-app-1' }),
        undefined, { skipRunCapture: false, requireQaPass: true });
      const policy = await db.updatePolicies.getByKey(USER.userId, USER.tenantId, 'Vendor.App');
-@@ -225,3 +225,27 @@ describe('auto-update on SQLite', () => {
-     await expect(completion.completeSqliteUpdateJob(db, job.id, 'deployed')).resolves.toBeUndefined();
+@@ -212,3 +212,27 @@ describe('auto-update on SQLite', () => {
+     await expect(handleAutoUpdateJobCompletion(job.id, 'deployed')).resolves.toBeUndefined();
    });
  });
 +

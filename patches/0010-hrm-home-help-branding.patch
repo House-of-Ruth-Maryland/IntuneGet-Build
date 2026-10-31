@@ -783,10 +783,10 @@ index 24e1de8db..5de7ae816 100644
 -  return content;
 -}
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index 7495a8ad5..bb2ea7fb3 100644
+index 28bebf581..867e911c2 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
-@@ -806,9 +806,9 @@ function UploadJobCard({
+@@ -812,9 +812,9 @@ function UploadJobCard({
                className="absolute inset-0 rounded-xl"
                animate={{
                  boxShadow: [
