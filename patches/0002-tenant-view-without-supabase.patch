@@ -1,6 +1,8 @@
+diff --git a/app/api/package/route.ts b/app/api/package/route.ts
+index 5d28e8116..4c834c4ba 100644
 --- a/app/api/package/route.ts
 +++ b/app/api/package/route.ts
-@@ -1027,12 +1027,16 @@
+@@ -1090,12 +1090,16 @@ export async function GET(request: NextRequest) {
      const scope = searchParams.get('scope');
      if (scope === 'tenant') {
        const mspTenantId = request.headers.get('X-MSP-Tenant-Id');

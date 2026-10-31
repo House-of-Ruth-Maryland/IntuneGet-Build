@@ -33,7 +33,7 @@ index f818738c1..426bee2b2 100644
  
        {deploymentIntentId &&
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index bb2ea7fb3..5a8117bb9 100644
+index 867e911c2..4b4366995 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
 @@ -1,5 +1,6 @@
@@ -43,7 +43,7 @@ index bb2ea7fb3..5a8117bb9 100644
  import { useState, useEffect, useCallback, useRef } from 'react';
  import { isIntuneApprovalFailure } from '@/lib/intune-approval';
  import { T, Var } from "gt-next";
-@@ -1020,6 +1021,46 @@ function UploadJobCard({
+@@ -1036,6 +1037,46 @@ function UploadJobCard({
            {job.status === 'duplicate_skipped' && (() => {
              const details = job.error_details as Record<string, unknown> | undefined;
              const existingVersion = details?.existingVersion ? String(details.existingVersion) : null;

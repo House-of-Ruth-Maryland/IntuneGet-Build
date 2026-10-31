@@ -45,27 +45,25 @@ index df241f609..2dcb0bf63 100644
        label: 'Analytics',
        items: hostedServices
 diff --git a/lib/auto-update/cleanup.ts b/lib/auto-update/cleanup.ts
-index a266e0d18..7a9bf973c 100644
+index a266e0d18..24fde1240 100644
 --- a/lib/auto-update/cleanup.ts
 +++ b/lib/auto-update/cleanup.ts
-@@ -9,6 +9,8 @@ import { createClient } from '@supabase/supabase-js';
+@@ -9,6 +9,7 @@ import { createClient } from '@supabase/supabase-js';
  import { DEFAULT_SAFETY_CONFIG } from '@/types/update-policies';
  import type { AutoUpdateStatus } from '@/types/update-policies';
  import { isIntuneApprovalFailure } from '@/lib/intune-approval';
-+import { getDatabase, isSqliteMode } from '@/lib/db';
-+import { completeSqliteUpdateJob } from '@/lib/hrm/update-completion';
++import { isSqliteMode } from '@/lib/db';
  
  type TerminalStatus = 'deployed' | 'duplicate_skipped' | 'failed' | 'cancelled';
  
-@@ -39,6 +41,12 @@ export async function handleAutoUpdateJobCompletion(
+@@ -39,6 +40,11 @@ export async function handleAutoUpdateJobCompletion(
    terminalStatus: TerminalStatus,
    errorMessage?: string
  ): Promise<void> {
-+  // HRM patch: the same tracking through the database adapter on SQLite servers.
-+  if (isSqliteMode()) {
-+    await completeSqliteUpdateJob(getDatabase(), jobId, terminalStatus, errorMessage);
-+    return;
-+  }
++  // HRM patch: on SQLite servers the job write itself records this (upstream's
++  // syncSqliteAutoUpdate in lib/db/sqlite.ts); the Supabase path below would
++  // only log a configuration error.
++  if (isSqliteMode()) return;
 +
    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -99,10 +97,10 @@ index d09e7f116..77b40f275 100644
  import { customDetectionUpdateHold } from '@/lib/custom-detection';
 +import { dispatchUpdateJob } from '@/lib/hrm/update-dispatch';
 diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
-index c5d4db318..9af5c7780 100644
+index fc3548477..046655265 100644
 --- a/lib/db/sqlite.ts
 +++ b/lib/db/sqlite.ts
-@@ -857,6 +857,11 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -884,6 +884,11 @@ export const sqliteDb: DatabaseAdapter = {
        return parseHistoryRow(row);
      },
  
@@ -136,10 +134,10 @@ index 590493b95..08214dd96 100644
        const supabase = createServerClient();
  
 diff --git a/lib/db/types.ts b/lib/db/types.ts
-index 854268262..6142b9d91 100644
+index adaa21bf6..1a637a16d 100644
 --- a/lib/db/types.ts
 +++ b/lib/db/types.ts
-@@ -389,6 +389,11 @@ export interface DatabaseAdapter {
+@@ -391,6 +391,11 @@ export interface DatabaseAdapter {
       */
      update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null>;
  
@@ -153,10 +151,10 @@ index 854268262..6142b9d91 100644
       * newest first, honoring the optional filters and pagination.
 diff --git a/lib/hrm/__tests__/updates.test.ts b/lib/hrm/__tests__/updates.test.ts
 new file mode 100644
-index 000000000..c228deb28
+index 000000000..ad611c2a4
 --- /dev/null
 +++ b/lib/hrm/__tests__/updates.test.ts
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,214 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { mkdtempSync, rmSync } from 'node:fs';
 +import { tmpdir } from 'node:os';
@@ -229,7 +227,6 @@ index 000000000..c228deb28
 +    db,
 +    dispatch: await import('../update-dispatch'),
 +    manual: await import('../manual-update'),
-+    completion: await import('../update-completion'),
 +    check: await import('@/lib/auto-update/sqlite'),
 +  };
 +}
@@ -346,8 +343,8 @@ index 000000000..c228deb28
 +    expect((await db.jobs.getByTenantId(USER.tenantId)).find((j) => j.version === '1.1.0')?.status).toBe('packaging');
 +  });
 +
-+  it('records completion once, counts failures, and turns the policy off after repeated failures', async () => {
-+    const { db, check, completion } = await load();
++  it('records completion of an update it started once, through the job write (upstream v0.8.5)', async () => {
++    const { db, check } = await load();
 +    await seed(db);
 +    const policy = await db.updatePolicies.upsert({
 +      user_id: USER.userId, tenant_id: USER.tenantId, winget_id: 'Vendor.App', policy_type: 'auto_update',
@@ -356,32 +353,20 @@ index 000000000..c228deb28
 +    await check.runSqliteUpdateCheck(db);
 +    const job = (await db.jobs.getByTenantId(USER.tenantId)).find((j) => j.version === '1.1.0')!;
 +
-+    await completion.completeSqliteUpdateJob(db, job.id, 'failed', 'Install failed');
-+    await completion.completeSqliteUpdateJob(db, job.id, 'failed', 'Install failed'); // repeated callback
-+    let saved = await db.updatePolicies.getById(policy.id, USER.userId);
++    await db.jobs.update(job.id, { status: 'failed', error_message: 'Install failed' });
++    await db.jobs.update(job.id, { status: 'failed', error_message: 'Install failed' }); // repeated callback
++    const saved = await db.updatePolicies.getById(policy.id, USER.userId);
 +    expect(saved).toMatchObject({ consecutive_failures: 1, last_auto_update_version: null, is_enabled: true });
 +    const [history] = await db.autoUpdateHistory.list(USER.userId, { limit: 10, offset: 0 });
 +    expect(history).toMatchObject({ status: 'failed', error_message: 'Install failed' });
-+
-+    await db.updatePolicies.update(policy.id, USER.userId, { consecutive_failures: 2 });
-+    const second = await db.autoUpdateHistory.create({ policy_id: policy.id, from_version: '1.0.0', to_version: '1.1.0', update_type: 'minor', status: 'packaging' });
-+    await db.jobs.update(job.id, { package_config: { ...(job.package_config as object), autoUpdateHistoryId: second.id } as never });
-+    await completion.completeSqliteUpdateJob(db, job.id, 'failed');
-+    saved = await db.updatePolicies.getById(policy.id, USER.userId);
-+    expect(saved).toMatchObject({ consecutive_failures: 3, is_enabled: false });
-+
-+    const third = await db.autoUpdateHistory.create({ policy_id: policy.id, from_version: '1.0.0', to_version: '1.1.0', update_type: 'minor', status: 'packaging' });
-+    await db.jobs.update(job.id, { package_config: { ...(job.package_config as object), autoUpdateHistoryId: third.id } as never });
-+    await completion.completeSqliteUpdateJob(db, job.id, 'deployed');
-+    expect((await db.updatePolicies.getById(policy.id, USER.userId))?.consecutive_failures).toBe(0);
-+    expect((await db.autoUpdateHistory.getById(third.id))?.status).toBe('completed');
 +  });
 +
-+  it('ignores jobs that are not auto-updates', async () => {
-+    const { db, completion } = await load();
++  it('leaves the old completion hook quiet on SQLite', async () => {
++    const { db } = await load();
 +    await seed(db);
 +    const [job] = await db.jobs.getByTenantId(USER.tenantId);
-+    await expect(completion.completeSqliteUpdateJob(db, job.id, 'deployed')).resolves.toBeUndefined();
++    const { handleAutoUpdateJobCompletion } = await import('@/lib/auto-update/cleanup');
++    await expect(handleAutoUpdateJobCompletion(job.id, 'deployed')).resolves.toBeUndefined();
 +  });
 +});
 diff --git a/lib/hrm/manual-update.ts b/lib/hrm/manual-update.ts
@@ -530,63 +515,6 @@ index 000000000..dccc46032
 +  }
 +  response.success = response.failed === 0;
 +  return response;
-+}
-diff --git a/lib/hrm/update-completion.ts b/lib/hrm/update-completion.ts
-new file mode 100644
-index 000000000..e7dd0aca2
---- /dev/null
-+++ b/lib/hrm/update-completion.ts
-@@ -0,0 +1,51 @@
-+/**
-+ * HRM patch: auto-update tracking when an update job finishes (SQLite).
-+ *
-+ * Upstream's handleAutoUpdateJobCompletion only talks to Supabase, so on a
-+ * SQLite server the history row stayed "packaging" and the policy's failure
-+ * counter never moved. Same rules as upstream, through the database adapter:
-+ * success marks the history completed and resets the counter; failure marks it
-+ * failed or cancelled, clears last_auto_update_version (so the update shows
-+ * as available again) and disables the policy after the configured number of
-+ * failures in a row. Failed jobs stay on the dashboard so IT can see them.
-+ */
-+
-+import type { DatabaseAdapter } from '@/lib/db/types';
-+import { DEFAULT_SAFETY_CONFIG, type AutoUpdateStatus } from '@/types/update-policies';
-+
-+const TERMINAL: AutoUpdateStatus[] = ['completed', 'failed', 'cancelled'];
-+
-+export async function completeSqliteUpdateJob(
-+  db: DatabaseAdapter,
-+  jobId: string,
-+  terminalStatus: 'deployed' | 'duplicate_skipped' | 'failed' | 'cancelled',
-+  errorMessage?: string,
-+): Promise<void> {
-+  const job = await db.jobs.getById(jobId);
-+  if (!job?.is_auto_update || !job.auto_update_policy_id) return;
-+  const historyId = ((job.package_config ?? {}) as { autoUpdateHistoryId?: string }).autoUpdateHistoryId;
-+  if (!historyId) return;
-+
-+  const history = await db.autoUpdateHistory.getById(historyId);
-+  if (!history || TERMINAL.includes(history.status)) return; // already handled: never count twice
-+
-+  const now = new Date().toISOString();
-+  const success = terminalStatus === 'deployed' || terminalStatus === 'duplicate_skipped';
-+  await db.autoUpdateHistory.update(historyId, success
-+    ? { status: 'completed', completed_at: now }
-+    : { status: terminalStatus === 'cancelled' ? 'cancelled' : 'failed', error_message: errorMessage || `Job ${terminalStatus}`, completed_at: now });
-+
-+  const policy = (await db.updatePolicies.listAll()).find((row) => row.id === job.auto_update_policy_id);
-+  if (!policy) return;
-+  if (success) {
-+    await db.updatePolicies.update(policy.id, policy.user_id, { consecutive_failures: 0, updated_at: now });
-+    return;
-+  }
-+  const failures = (policy.consecutive_failures ?? 0) + 1;
-+  await db.updatePolicies.update(policy.id, policy.user_id, {
-+    last_auto_update_version: null,
-+    consecutive_failures: failures,
-+    ...(failures >= DEFAULT_SAFETY_CONFIG.maxConsecutiveFailures ? { is_enabled: false } : {}),
-+    updated_at: now,
-+  });
 +}
 diff --git a/lib/hrm/update-dispatch.ts b/lib/hrm/update-dispatch.ts
 new file mode 100644

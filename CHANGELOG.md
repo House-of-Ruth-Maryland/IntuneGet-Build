@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-31
+
+- Moved to upstream IntuneGet v0.8.5 (from v0.8.2), which brings upstream's fixes since v0.8.2,
+  including automatic-update history that completes reliably on SQLite servers. HRM's own version of
+  that (in patch 0012) is dropped in favour of upstream's. All other HRM changes carry over.
+
 ## 2026-10-29
 
 - The Cmd+K command palette works from the keyboard: the cursor is in its search box when it opens,

@@ -509,10 +509,10 @@ index 228492fe3..d7a273665 100644
  
  export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
 diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
-index 443b2e5cd..222c4b0ea 100644
+index 5f548532d..2822ad98a 100644
 --- a/lib/db/sqlite.ts
 +++ b/lib/db/sqlite.ts
-@@ -31,6 +31,7 @@ import type {
+@@ -32,6 +32,7 @@ import type {
    AutoUpdateHistoryWithPolicy,
    AutoUpdateStatus,
  } from '@/types/update-policies';
@@ -520,7 +520,7 @@ index 443b2e5cd..222c4b0ea 100644
  import { runSqliteMigrations } from './sqlite-migrations';
  import { INTUNE_APPROVAL_CHECKPOINT_STATUSES } from '@/lib/intune-approval';
  
-@@ -179,6 +180,80 @@ export const sqliteManualMappings = {
+@@ -197,6 +198,80 @@ export const sqliteManualMappings = {
    },
  };
  
@@ -601,7 +601,7 @@ index 443b2e5cd..222c4b0ea 100644
  /** SQLite implementation of the database adapter. */
  export const sqliteDb: DatabaseAdapter = {
    customAppDefinitions: {
-@@ -914,6 +989,11 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -941,6 +1016,11 @@ export const sqliteDb: DatabaseAdapter = {
               latest_version = excluded.latest_version,
               is_critical = excluded.is_critical,
               is_managed = excluded.is_managed,
