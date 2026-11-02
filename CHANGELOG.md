@@ -2,6 +2,12 @@
 
 ## 2026-11-02
 
+- Cleaner deploy panel: the main choices (who it installs for, which groups get it, what happens with
+  new versions) are always shown, and every other option sits in two short lists, More settings and
+  What staff see during install, each row showing its current setting. Labels and buttons are plain
+  (Add to deployment, Save to Intune, Deploy again). All options are still there. Fixed: a New
+  computer setup change on a deployed app was dropped by Update Settings; it now needs Deploy again
+  (patch 0022).
 - Fixed: an older copy of a custom app still in Intune (for example PdfCraft 0.10.1) also showed a new
   GitHub release in App updates. Only the newest copy is checked now, and custom apps are left out of
   Update All, since they are updated with Deploy new version (patch 0020).
