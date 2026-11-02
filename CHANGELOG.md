@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-02
+
+- Fixed: an older copy of a custom app still in Intune (for example PdfCraft 0.10.1) also showed a new
+  GitHub release in App updates. Only the newest copy is checked now, and custom apps are left out of
+  Update All, since they are updated with Deploy new version (patch 0020).
+
 ## 2026-11-01
 
 - Install results per app: twice a day, with the update check, IntuneGet reads how every app it

@@ -13,6 +13,27 @@ index 426bee2b2..292d89107 100644
    useEffect(() => {
      if (newVersionPrefill) setIsCustomAppModalOpen(true);
    }, [newVersionPrefill]);
+diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
+index b5d2996a2..a32aa97ef 100644
+--- a/app/(app)/dashboard/updates/page.tsx
++++ b/app/(app)/dashboard/updates/page.tsx
+@@ -1,6 +1,7 @@
+ 'use client';
+ 
+ import type { AutoUpdateScope } from '@/types/update-policies';
++import { isCustomAppId } from '@/lib/hrm/new-version';
+ 
+ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+ import { T, Var } from "gt-next";
+@@ -199,6 +200,8 @@ export default function UpdatesPage() {
+   const eligibleForBulkUpdate = filteredUpdates.filter(
+     (u) =>
+       u.is_managed &&
++      // HRM patch 0020: custom apps are updated with Deploy new version, never in bulk
++      !isCustomAppId(u.winget_id) &&
+       u.policy?.policy_type !== 'ignore' &&
+       u.policy?.policy_type !== 'pin_version'
+   );
 diff --git a/app/api/cron/check-updates/route.ts b/app/api/cron/check-updates/route.ts
 index 8c8af885f..bce33961f 100644
 --- a/app/api/cron/check-updates/route.ts
@@ -339,10 +360,10 @@ index 53b81859b..aa092588b 100644
    });
  }
 diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
-index a74977001..5d0918491 100644
+index a74977001..69241abf6 100644
 --- a/lib/auto-update/__tests__/sqlite.test.ts
 +++ b/lib/auto-update/__tests__/sqlite.test.ts
-@@ -315,3 +315,50 @@ it.each(['minor', 'major'] as const)('SQLite scope %s holds before history, jobs
+@@ -315,3 +315,65 @@ it.each(['minor', 'major'] as const)('SQLite scope %s holds before history, jobs
    expect(history).not.toHaveBeenCalled();
    expect(acquireGraphTokenMock).not.toHaveBeenCalled();
  });
@@ -392,9 +413,24 @@ index a74977001..5d0918491 100644
 +    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toHaveLength(0);
 +    expect(await sqliteCustomReleases.get('t1', 'custom-app-1')).toBeNull();
 +  });
++
++  it('checks only the newest copy of a custom app, not older ones still in Intune', async () => {
++    const { db, runSqliteUpdateCheck } = await load();
++    const { sqliteCustomReleases } = await import('@/lib/db/sqlite');
++    const old = await db.jobs.create({ user_id: 'u1', tenant_id: 't1', winget_id: 'Custom.ExampleOrg.ExampleApp', version: '0.9.0',
++      display_name: 'Example App', installer_type: 'msi', installer_url: OLD.replace(/1\.0\.0/g, '0.9.0'), installer_sha256: 'A'.repeat(64), status: 'queued' });
++    await db.uploadHistory.create({ id: 'custom-old', user_id: 'u1', winget_id: 'Custom.ExampleOrg.ExampleApp', version: '0.9.0',
++      display_name: 'Example App', intune_app_id: 'custom-app-old', intune_tenant_id: 't1', packaging_job_id: old.id,
++      deployed_at: '2026-09-01T00:00:00Z' });
++    await seedCustom(db);
++    getAppsByWingetIdsMock.mockResolvedValue([]);
++    const summary = await runSqliteUpdateCheck(db, { customReleases: { store: sqliteCustomReleases, fetchImpl: githubFetch('v1.1.0') } });
++    expect(summary.available).toBe(1);
++    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ intune_app_id: 'custom-app-1' }]);
++  });
 +});
 diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
-index 77b40f275..95531cf0e 100644
+index 77b40f275..53e59bb8d 100644
 --- a/lib/auto-update/sqlite.ts
 +++ b/lib/auto-update/sqlite.ts
 @@ -300,7 +300,12 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
@@ -411,12 +447,19 @@ index 77b40f275..95531cf0e 100644
  ): Promise<SqliteUpdateCheckSummary> {
    const catalog = getCatalogSource();
    const deployments = await db.uploadHistory.listAll(2000);
-@@ -362,6 +367,46 @@ export async function runSqliteUpdateCheck(
+@@ -362,6 +367,53 @@ export async function runSqliteUpdateCheck(
      keepByScope.set(scopeKey, keep);
    }
  
 +  // HRM patch 0020: custom apps have no catalog entry; a newer GitHub release is their update.
-+  const customDeployments = [...newest.values()].filter((deployment) => isCustomAppId(deployment.winget_id));
++  // Only the newest deployment of each custom app: older copies still in Intune were superseded by it.
++  const newestCustom = new Map<string, UploadHistoryRecord>();
++  for (const deployment of newest.values()) {
++    if (!isCustomAppId(deployment.winget_id)) continue;
++    const appKey = `${deployment.user_id}|${deployment.intune_tenant_id ?? ''}|${deployment.winget_id}`;
++    if (!newestCustom.has(appKey)) newestCustom.set(appKey, deployment);
++  }
++  const customDeployments = [...newestCustom.values()];
 +  if (options?.customReleases) {
 +    const { store, fetchImpl } = options.customReleases;
 +    const findings = await findCustomAppReleases(customDeployments, (id) => db.jobs.getById(id), { fetchImpl, now });
@@ -458,7 +501,7 @@ index 77b40f275..95531cf0e 100644
    // Clean every known scope. A scope whose apps are all up to date gets an empty
    // keep list, so its previously detected updates are removed.
    for (const scopeKey of allScopes) {
-@@ -441,3 +486,5 @@ export async function runSqliteUpdateCheck(
+@@ -441,3 +493,5 @@ export async function runSqliteUpdateCheck(
  }
  import { customDetectionUpdateHold } from '@/lib/custom-detection';
  import { dispatchUpdateJob } from '@/lib/hrm/update-dispatch';
