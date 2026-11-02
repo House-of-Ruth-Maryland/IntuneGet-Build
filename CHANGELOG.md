@@ -2,6 +2,12 @@
 
 ## 2026-11-02
 
+- Deploy to Intune now shows a review first: one line per app saying what happens in Intune, which
+  groups get it and how it installs, with warnings for an app with no groups or a second copy. Press
+  Deploy now to send it, or Change to fix an app (patch 0025).
+- Inventory lists apps with more than one copy in Intune. Keep this copy moves every group onto it and
+  leaves the others with none (nothing is uninstalled); Delete from Intune then removes an emptied
+  copy, after a confirmation (patch 0025).
 - Safer updates (patch 0024, from a full logic review):
   - Updates keep the groups the app has in Intune right now. Before, groups added after the first
     deployment were lost at the next update.
