@@ -2,15 +2,38 @@
 
 ## 2026-11-02
 
+- Links can open one app in Inventory: `/dashboard/inventory?app=<Intune app id>` opens that app's
+  details. Closing the details goes back to the plain Inventory address. A link to an app that isn't
+  a Win32 app, or no longer exists, shows "App not found" (patch 0025).
+- Safer updates (patch 0024, from a full logic review):
+  - Updates keep the groups the app has in Intune right now. Before, groups added after the first
+    deployment were lost at the next update.
+  - Only the newest copy of each app is updated, and one update runs at a time, so Update All can't
+    create duplicate apps.
+  - Updates keep the app's New computer setup, categories and dependencies.
+  - Deploy again replaces the current copy instead of adding a second app.
+  - Save to Intune also saves the new-version choice; dependency changes ask for Deploy again.
+  - A short catalog or GitHub outage no longer empties App updates or repeats alerts.
+  - Update works even after automatic updates failed three times.
+  - Install-failure alerts are only marked as sent once Teams accepted them, and a rise later in the
+    day is reported the next day.
+  - An update that can't start posts a failed-deployment alert.
+- App updates only lists copies that still exist in Intune, and auto-update never acts on a copy that
+  was deleted there (the extra Google Chrome and Zoom cards go away at the next check). Each card shows
+  the groups that copy is assigned to. Inventory always shows Groups and warns when an app has none,
+  because then it installs nowhere (patch 0023).
+- Cleaner deploy panel: the main choices (who it installs for, which groups get it, what happens with
+  new versions) are always shown, and every other option sits in two short lists, More settings and
+  What staff see during install, each row showing its current setting. Labels and buttons are plain
+  (Add to deployment, Save to Intune, Deploy again). All options are still there. Fixed: a New
+  computer setup change on a deployed app was dropped by Update Settings; it now needs Deploy again
+  (patch 0022).
 - Fixed: an older copy of a custom app still in Intune (for example PdfCraft 0.10.1) also showed a new
   GitHub release in App updates. Only the newest copy is checked now, and custom apps are left out of
   Update All, since they are updated with Deploy new version (patch 0020).
 
 ## 2026-11-01
 
-- Links can open one app in Inventory: `/dashboard/inventory?app=<Intune app id>` opens that app's
-  details. Closing the details goes back to the plain Inventory address. A link to an app that isn't
-  a Win32 app, or no longer exists, shows "App not found" (patch 0022).
 - Install results per app: twice a day, with the update check, IntuneGet reads how every app it
   deployed is installing (counts only, never device or user names). Inventory shows installed, failed, pending and not applicable with
   the most common reasons; Home lists apps with failures; an alert posts when an app's failures go up,

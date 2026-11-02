@@ -1,0 +1,2426 @@
+diff --git a/components/AssignmentConfig.tsx b/components/AssignmentConfig.tsx
+index f1120662d..e92a8df0a 100644
+--- a/components/AssignmentConfig.tsx
++++ b/components/AssignmentConfig.tsx
+@@ -323,12 +323,12 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+           )}
+           <div className="flex-1 text-left">
+             <p className={cn('text-sm font-medium', enabled ? 'text-text-primary' : 'text-text-muted')}>
+-              Configure Assignments
++              Choose groups now
+             </p>
+             <p className="text-xs text-text-muted">
+               {enabled
+-                ? 'Assignments will be applied when deployed'
+-                : 'Deploy without assignments - configure later in Intune'}
++                ? 'These groups get the app when it deploys'
++                : 'Deploy without groups and add them later in Intune'}
+             </p>
+           </div>
+         </button>
+@@ -340,7 +340,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+           {/* Quick Assignment Buttons */}
+           <div>
+             <label className="block text-sm font-medium text-text-secondary mb-2">
+-              Quick Assignment
++              Quick picks
+             </label>
+             <div className="grid grid-cols-2 gap-2">
+               <button
+@@ -381,7 +381,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+           {/* Group Search */}
+           <div>
+             <label className="block text-sm font-medium text-text-secondary mb-2">
+-              Add Group Assignment
++              Add groups
+             </label>
+ 
+             {/* Include/Exclude Mode Toggle */}
+@@ -761,7 +761,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                               )}
+                               <div className="space-y-1.5">
+                                 <label className="block text-xs font-medium text-text-secondary">
+-                                  End user notifications
++                                  Notifications on the device
+                                 </label>
+                                 <select
+                                   value={assignment.notifications || 'showAll'}
+@@ -781,7 +781,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+ 
+                               <div className="space-y-1.5">
+                                 <label className="block text-xs font-medium text-text-secondary">
+-                                  Delivery optimization priority
++                                  Download priority
+                                 </label>
+                                 <select
+                                   value={assignment.deliveryOptimizationPriority || 'notConfigured'}
+diff --git a/components/CartItemConfig.advanced.test.ts b/components/CartItemConfig.advanced.test.ts
+index 67179d7a2..5aa4301a2 100644
+--- a/components/CartItemConfig.advanced.test.ts
++++ b/components/CartItemConfig.advanced.test.ts
+@@ -36,7 +36,7 @@ async function render(cart: Win32CartItem) {
+   await act(async () => root.render(createElement(CartItemConfig, { item: cart, onClose: vi.fn() })));
+ }
+ const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.includes(label) || b.getAttribute('aria-label') === label)!;
+-const openAdvanced = () => act(async () => button('Advanced Options').click());
++const openAdvanced = () => act(async () => button('Commands and description').click());
+ const save = () => act(async () => button('Save Changes').click());
+ const type = (el: HTMLInputElement | HTMLTextAreaElement, value: string) => act(async () => {
+   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+diff --git a/components/CartItemConfig.curated.test.ts b/components/CartItemConfig.curated.test.ts
+index cfc35553c..46579b020 100644
+--- a/components/CartItemConfig.curated.test.ts
++++ b/components/CartItemConfig.curated.test.ts
+@@ -37,9 +37,9 @@ describe('curated deployment settings choice', () => {
+   it('selects tested defaults initially and makes custom behaviour an explicit opt-in', async () => {
+     await render(item());
+     expect(radios()[0].checked).toBe(true);
+-    expect(document.body.textContent).not.toContain('Installation Behavior');
++    expect(document.body.textContent).not.toContain('Install behaviour');
+     await act(async () => radios()[1].click());
+-    expect(document.body.textContent).toContain('Installation Behavior');
++    expect(document.body.textContent).toContain('Install behaviour');
+     await act(async () => save());
+     expect(useCartStore.getState().items[0]).toMatchObject({ curatedSettingsMode: 'custom' });
+   });
+@@ -68,7 +68,7 @@ describe('curated deployment settings choice', () => {
+     await act(async () => appearance.click());
+     expect(document.querySelector('#curated-progress-message')).not.toBeNull();
+     expect(document.body.textContent).not.toContain('Show progress dialog');
+-    expect(document.body.textContent).not.toContain('Installation Behavior');
++    expect(document.body.textContent).not.toContain('Install behaviour');
+     await act(async () => {
+       const dialog = document.querySelector<HTMLSelectElement>('#curated-dialog-position')!;
+       dialog.value = 'BottomRight'; dialog.dispatchEvent(new Event('change', { bubbles: true }));
+diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
+index 68bc640bf..eb4b973b0 100644
+--- a/components/CartItemConfig.tsx
++++ b/components/CartItemConfig.tsx
+@@ -135,8 +135,25 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+   );
+ 
+   // UI state
+-  const [expandedSection, setExpandedSection] = useState<ConfigSection | null>(isStore || isCurated ? 'assignment' : 'behavior');
++  const [expandedSection, setExpandedSection] = useState<ConfigSection | null>(null);
+   const [isSaving, setIsSaving] = useState(false);
++
++  // HRM patch 0022: the current setting of each row under More settings, in a few words
++  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
++  const summaries = {
++    esp: espProfiles.length ? `Required on ${plural(espProfiles.length, 'setup profile', 'setup profiles')}` : 'Not required',
++    dependencies: relationships.length ? plural(relationships.length, 'linked app', 'linked apps') : 'None',
++    category: categories.map((c) => c.displayName).join(', ') || 'None',
++    behavior: `${{ Silent: 'Silent', NonInteractive: 'Progress only', Auto: 'Installer decides' }[config.deployMode || 'Silent'] ?? 'Silent'}, ${
++      { Suppress: 'no restart', Prompt: 'asks to restart', Force: 'restarts' }[config.restartBehavior] ?? 'no restart'}`,
++    advanced: description !== initialDescription || config.postInstallCommands?.length || config.postUninstallCommands?.length ? 'Changed' : 'Default',
++    deferral: config.allowDefer ? `Up to ${plural(config.deferTimes, 'time', 'times')}` : 'Off',
++    progress: config.progressDialog?.enabled || config.balloonTips?.length ? 'On' : 'Off',
++    prompts: config.customPrompts?.length ? plural(config.customPrompts.length, 'message', 'messages') : 'None',
++    restart: config.restartPrompt?.enabled ? 'On' : 'Off',
++    diskspace: config.checkDiskSpace ? (config.requiredDiskSpace ? `${config.requiredDiskSpace} MB` : 'On') : 'Off',
++    branding: config.brandingCompanyName || config.brandingWelcomeTitle || config.brandingLogoPath ? 'Custom' : 'Default',
++  };
+   const [processesError, setProcessesError] = useState<string | null>(null);
+ 
+   const modalRef = useFocusTrap<HTMLDivElement>();
+@@ -413,7 +430,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                           : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
+                       )}
+                     >
+-                      {exp === 'user' ? 'Per-User' : 'Per-System'}
++                      {exp === 'user' ? 'Signed-in user' : 'Everyone on the computer'}
+                     </button>
+                   ))}
+                 </div>
+@@ -439,7 +456,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                 <label className="block text-sm font-medium text-text-muted mb-2">Install Scope</label>
+                 <div className="flex gap-2">
+                   {(['machine', 'user'] as WingetScope[]).map((scope) => {
+-                    const label = scope === 'machine' ? 'Per-Machine' : 'Per-User';
++                    const label = scope === 'machine' ? 'Everyone on the computer' : 'Signed-in user only';
+                     return (
+                       <button
+                         key={scope}
+@@ -460,57 +477,87 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+             )}
+ 
+             <div className="border-t border-overlay/10 pt-6">
+-              {isWin32 && <h3 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+-                <Settings className="w-5 h-5 text-blue-400" />
+-                Deployment Configuration
+-              </h3>}
+ 
+-              {isCurated && !canEditExecution && <ConfigSection
+-                title="Dialog appearance"
+-                icon={<MessageSquare className="w-4 h-4" />}
+-                expanded={expandedSection === 'appearance'}
+-                onToggle={() => toggleSection('appearance')}
++              {/* Assignment Configuration (all app types) */}
++              <ConfigSection
++                fixed
++                title="Who gets it"
++                icon={<Target className="w-4 h-4" />}
++                expanded={expandedSection === 'assignment'}
++                onToggle={() => toggleSection('assignment')}
+               >
+-                <div className="space-y-4">
+-                  <p className="text-xs text-text-muted">These choices apply when a dialog is shown. Tested defaults control whether dialogs appear.</p>
+-                  <div>
+-                    <label htmlFor="curated-dialog-position" className="block text-sm font-medium text-text-secondary mb-2">Dialog position</label>
+-                    <select id="curated-dialog-position" value={config.windowLocation || 'Default'}
+-                      onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm">
+-                      <option value="Default">Default</option>
+-                      <option value="Center">Center</option>
+-                      <option value="Top">Top</option>
+-                      <option value="Bottom">Bottom</option>
+-                      <option value="TopLeft">Top Left</option>
+-                      <option value="TopRight">Top Right</option>
+-                      <option value="BottomLeft">Bottom Left</option>
+-                      <option value="BottomRight">Bottom Right</option>
+-                    </select>
+-                  </div>
+-                  <div>
+-                    <label htmlFor="curated-progress-message" className="block text-sm font-medium text-text-secondary mb-2">Status message (optional)</label>
+-                    <input id="curated-progress-message" type="text" value={config.progressDialog?.statusMessage || ''}
+-                      onChange={(e) => updateConfig({ progressDialog: { ...config.progressDialog, statusMessage: e.target.value || undefined } })}
+-                      placeholder="Installing application..."
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm" />
+-                  </div>
+-                  <div>
+-                    <label htmlFor="curated-progress-position" className="block text-sm font-medium text-text-secondary mb-2">Progress window position</label>
+-                    <select id="curated-progress-position" value={config.progressDialog?.windowLocation || 'Default'}
+-                      onChange={(e) => updateConfig({ progressDialog: { ...config.progressDialog, windowLocation: e.target.value as DialogPosition } })}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm">
+-                      <option value="Default">Default</option>
+-                      <option value="Center">Center</option>
+-                      <option value="BottomRight">Bottom Right</option>
+-                    </select>
+-                  </div>
++                <AssignmentConfig
++                  assignments={assignments}
++                  onChange={setAssignments}
++                  supportsAutoUpdateSuperseded={!isStore}
++                />
++              </ConfigSection>
++              {/* App Updates (win32 only) */}
++              {isWin32 && <ConfigSection
++                fixed
++                title="When a new version comes out"
++                icon={<ArrowUpCircle className="w-4 h-4" />}
++                expanded={expandedSection === 'updates'}
++                onToggle={() => toggleSection('updates')}
++              >
++                <div className="space-y-3">
++                  <CartUpdatePolicyPicker
++                    value={updatePolicy}
++                    onChange={setUpdatePolicy}
++                    carryOverAssignments={carryOverAssignments}
++                    onCarryOverAssignmentsChange={setCarryOverAssignments}
++                  />
+                 </div>
+               </ConfigSection>}
+-
++              <div className="mb-6">
++                <h3 className="text-sm font-semibold text-text-primary mb-2">More settings</h3>
++                <div className="rounded-lg border border-overlay/10 divide-y divide-overlay/10 overflow-hidden">
++              {/* ESP Configuration */}
++              <ConfigSection
++                summary={summaries.esp}
++                title="New computer setup"
++                icon={<Shield className="w-4 h-4" />}
++                expanded={expandedSection === 'esp'}
++                onToggle={() => toggleSection('esp')}
++              >
++                <EspProfileSelector
++                  espProfiles={espProfiles}
++                  onChange={setEspProfiles}
++                  mode="pre-deploy"
++                  hasRequiredAssignment={assignments.some((a) => a.intent === 'required')}
++                />
++              </ConfigSection>
++              {/* Dependencies & Supersedence (win32 only) */}
++              {isEditableWin32 && <ConfigSection
++                summary={summaries.dependencies}
++                title="Replaces or needs other apps"
++                icon={<Link2 className="w-4 h-4" />}
++                expanded={expandedSection === 'dependencies'}
++                onToggle={() => toggleSection('dependencies')}
++              >
++                <DependencyConfig
++                  relationships={relationships}
++                  onChange={setRelationships}
++                  manifestDependencies={item.manifestDependencies}
++                />
++              </ConfigSection>}
++              {/* Category Configuration */}
++              <ConfigSection
++                summary={summaries.category}
++                title="Company Portal category"
++                icon={<FolderTree className="w-4 h-4" />}
++                expanded={expandedSection === 'category'}
++                onToggle={() => toggleSection('category')}
++              >
++                <CategoryConfig
++                  categories={categories}
++                  onChange={setCategories}
++                />
++              </ConfigSection>
+               {/* Installation Behavior (win32 only) */}
+               {canEditExecution && <ConfigSection
+-                title="Installation Behavior"
++                summary={summaries.behavior}
++                title="Install behaviour"
+                 icon={<Settings className="w-4 h-4" />}
+                 expanded={expandedSection === 'behavior'}
+                 onToggle={() => toggleSection('behavior')}
+@@ -519,19 +566,19 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   {/* Deploy Mode */}
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Deploy mode
++                      What staff see while it installs
+                     </label>
+                     <select
+                       value={config.deployMode || 'Silent'}
+                       onChange={(e) => updateConfig({ deployMode: e.target.value as DeployMode })}
+                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                     >
+-                      <option value="Silent">Silent - No UI popups (recommended)</option>
+-                      <option value="NonInteractive">Non-Interactive - Show progress only</option>
+-                      <option value="Auto">Auto-detect (PSADT default)</option>
++                      <option value="Silent">Nothing, it installs silently (recommended)</option>
++                      <option value="NonInteractive">A progress window only</option>
++                      <option value="Auto">Let the installer decide</option>
+                     </select>
+                     <p className="text-xs text-text-muted mt-1">
+-                      Controls whether PSADT shows dialogs during installation. Silent is recommended for Intune.
++                      Silent suits Intune: nobody is interrupted. Anything under What staff see during install only shows when this isn't silent.
+                     </p>
+                   </div>
+ 
+@@ -545,7 +592,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+ 
+                   {/* Verify Install Toggle */}
+                   <ToggleOption
+-                    label="Verify installation before marking as installed"
++                    label="Check it installed before reporting success"
+                     description="After the installer finishes, checks Add/Remove Programs for the application and fails the deployment if it is not found. Prevents false success from installers that exit without installing."
+                     checked={config.verifyInstall || false}
+                     onChange={(checked) => updateConfig({ verifyInstall: checked })}
+@@ -554,7 +601,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   {/* Detection Marker Registry Path: curated detection is fixed to the signed release. */}
+                   {!isCurated && <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-1.5">
+-                      Detection marker registry path
++                      Registry key for the install marker
+                     </label>
+                     <input
+                       type="text"
+@@ -572,7 +619,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   <div>
+                     <div className="flex items-center justify-between mb-2">
+                       <label className="block text-sm font-medium text-text-secondary">
+-                        Processes to close before install
++                        Apps to close before installing
+                       </label>
+                       <button
+                         onClick={addProcess}
+@@ -625,7 +672,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   {/* Show Close Prompt Toggle */}
+                   <div className="space-y-3">
+                     <ToggleOption
+-                      label="Show close prompt to users"
++                      label="Ask staff to close the app first"
+                       description="When enabled, users see a countdown dialog if the app is running"
+                       checked={config.showClosePrompt || false}
+                       onChange={(checked) => updateConfig({ showClosePrompt: checked })}
+@@ -656,7 +703,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+ 
+                     {/* Block Execution Toggle */}
+                     <ToggleOption
+-                      label="Block execution during install"
++                      label="Stop staff opening the app while it installs"
+                       description="Prevent users from launching the application during installation"
+                       checked={config.blockExecution || false}
+                       onChange={(checked) => updateConfig({ blockExecution: checked })}
+@@ -672,7 +719,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+ 
+                     {/* Persist Prompt Toggle */}
+                     <ToggleOption
+-                      label="Persist prompt until answered"
++                      label="Keep the prompt open until answered"
+                       description="Make the dialog reappear if user closes it without responding"
+                       checked={config.persistPrompt || false}
+                       onChange={(checked) => updateConfig({ persistPrompt: checked })}
+@@ -711,24 +758,213 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   {/* Restart Behavior */}
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Restart behavior
++                      After installing
+                     </label>
+                     <select
+                       value={config.restartBehavior}
+                       onChange={(e) => updateConfig({ restartBehavior: e.target.value as RestartBehavior })}
+                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                     >
+-                      <option value="Suppress">Suppress restart (recommended)</option>
+-                      <option value="Prompt">Prompt user to restart</option>
+-                      <option value="Force">Force restart</option>
++                      <option value="Suppress">Don't restart (recommended)</option>
++                      <option value="Prompt">Ask staff to restart</option>
++                      <option value="Force">Restart the computer</option>
+                     </select>
+                   </div>
+                 </div>
+               </ConfigSection>}
++              {/* Advanced (win32 only) */}
++              {isEditableWin32 && <ConfigSection
++                summary={summaries.advanced}
++                title="Commands and description"
++                icon={<Terminal className="w-4 h-4" />}
++                expanded={expandedSection === 'advanced'}
++                onToggle={() => toggleSection('advanced')}
++              >
++                <div className="space-y-4">
++                  {/* Custom Description */}
++                  <div>
++                    <label htmlFor="cart-description-override" className="block text-sm font-medium text-text-secondary mb-2">
++                      Description override
++                    </label>
++                    <textarea
++                      id="cart-description-override"
++                      value={description}
++                      onChange={(e) => setDescription(e.target.value)}
++                      rows={3}
++                      placeholder={initialDescription || 'Description shown in Intune and Company Portal'}
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm resize-y"
++                    />
++                    <p className="text-text-muted text-xs mt-1">
++                      Shown in Intune and the Company Portal. Leave empty to keep the current description.
++                    </p>
++                  </div>
++
++                  {/* Custom Install Command */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Install command override
++                    </label>
++                    <input
++                      type="text"
++                      value={installCommand}
++                      onChange={(e) => setInstallCommand(e.target.value)}
++                      placeholder="Leave empty to use default"
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
++                    />
++                    <p className="text-text-muted text-xs mt-1">Override the auto-generated install command</p>
++                  </div>
++
++                  {/* Custom Uninstall Command */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Uninstall command override
++                    </label>
++                    <input
++                      type="text"
++                      value={uninstallCommand}
++                      onChange={(e) => setUninstallCommand(e.target.value)}
++                      placeholder="Leave empty to use default"
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
++                    />
++                    <p className="text-text-muted text-xs mt-1">Override the auto-generated uninstall command</p>
++                  </div>
++
++                  {/* Post-install commands (#118) */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Post-install commands
++                    </label>
++                    <div className="space-y-2">
++                      {(config.postInstallCommands || []).map((cmd, index) => (
++                        <div key={index} className="flex items-center gap-2">
++                          <input
++                            type="text"
++                            value={cmd}
++                            onChange={(e) => updateCommand('postInstallCommands', index, e.target.value)}
++                            aria-label={`Post-install command ${index + 1}`}
++                            placeholder={'e.g. powershell.exe -NoProfile -Command "Remove-Item \'$env:Public\\Desktop\\App.lnk\' -Force"'}
++                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
++                          />
++                          <button
++                            type="button"
++                            onClick={() => removeCommand('postInstallCommands', index)}
++                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
++                            aria-label="Remove command"
++                          >
++                            <Trash2 className="w-4 h-4" />
++                          </button>
++                        </div>
++                      ))}
++                      <button
++                        type="button"
++                        onClick={() => addCommand('postInstallCommands')}
++                        aria-label="Add post-install command"
++                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
++                      >
++                        <Plus className="w-3.5 h-3.5" />
++                        Add command
++                      </button>
++                    </div>
++                    <p className="text-text-muted text-xs mt-1">
++                      Run after the app installs (in order), e.g. to remove a desktop shortcut. Each runs via cmd.exe; a failure fails the deployment.
++                    </p>
++                  </div>
+ 
++                  {/* Post-uninstall commands (#118) */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Post-uninstall commands
++                    </label>
++                    <div className="space-y-2">
++                      {(config.postUninstallCommands || []).map((cmd, index) => (
++                        <div key={index} className="flex items-center gap-2">
++                          <input
++                            type="text"
++                            value={cmd}
++                            onChange={(e) => updateCommand('postUninstallCommands', index, e.target.value)}
++                            aria-label={`Post-uninstall command ${index + 1}`}
++                            placeholder={'e.g. cmd.exe /c rmdir /s /q "C:\\ProgramData\\App"'}
++                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
++                          />
++                          <button
++                            type="button"
++                            onClick={() => removeCommand('postUninstallCommands', index)}
++                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
++                            aria-label="Remove command"
++                          >
++                            <Trash2 className="w-4 h-4" />
++                          </button>
++                        </div>
++                      ))}
++                      <button
++                        type="button"
++                        onClick={() => addCommand('postUninstallCommands')}
++                        aria-label="Add post-uninstall command"
++                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
++                      >
++                        <Plus className="w-3.5 h-3.5" />
++                        Add command
++                      </button>
++                    </div>
++                    <p className="text-text-muted text-xs mt-1">
++                      Run after the app uninstalls (in order), e.g. to clean up leftover files.
++                    </p>
++                  </div>
++                </div>
++              </ConfigSection>}
++                </div>
++              </div>
++              {isWin32 && (<div className="mb-6">
++                <h3 className="text-sm font-semibold text-text-primary mb-2">What staff see during install</h3>
++                <p className="text-xs text-text-muted mb-2">All off unless you turn them on. Staff only see these when the app doesn't install silently.</p>
++                <div className="rounded-lg border border-overlay/10 divide-y divide-overlay/10 overflow-hidden">
++              {isCurated && !canEditExecution && <ConfigSection
++                summary={summaries.branding}
++                title="Dialog appearance"
++                icon={<MessageSquare className="w-4 h-4" />}
++                expanded={expandedSection === 'appearance'}
++                onToggle={() => toggleSection('appearance')}
++              >
++                <div className="space-y-4">
++                  <p className="text-xs text-text-muted">These choices apply when a dialog is shown. Tested defaults control whether dialogs appear.</p>
++                  <div>
++                    <label htmlFor="curated-dialog-position" className="block text-sm font-medium text-text-secondary mb-2">Dialog position</label>
++                    <select id="curated-dialog-position" value={config.windowLocation || 'Default'}
++                      onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm">
++                      <option value="Default">Default</option>
++                      <option value="Center">Center</option>
++                      <option value="Top">Top</option>
++                      <option value="Bottom">Bottom</option>
++                      <option value="TopLeft">Top Left</option>
++                      <option value="TopRight">Top Right</option>
++                      <option value="BottomLeft">Bottom Left</option>
++                      <option value="BottomRight">Bottom Right</option>
++                    </select>
++                  </div>
++                  <div>
++                    <label htmlFor="curated-progress-message" className="block text-sm font-medium text-text-secondary mb-2">Status message (optional)</label>
++                    <input id="curated-progress-message" type="text" value={config.progressDialog?.statusMessage || ''}
++                      onChange={(e) => updateConfig({ progressDialog: { ...config.progressDialog, statusMessage: e.target.value || undefined } })}
++                      placeholder="Installing application..."
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm" />
++                  </div>
++                  <div>
++                    <label htmlFor="curated-progress-position" className="block text-sm font-medium text-text-secondary mb-2">Progress window position</label>
++                    <select id="curated-progress-position" value={config.progressDialog?.windowLocation || 'Default'}
++                      onChange={(e) => updateConfig({ progressDialog: { ...config.progressDialog, windowLocation: e.target.value as DialogPosition } })}
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm">
++                      <option value="Default">Default</option>
++                      <option value="Center">Center</option>
++                      <option value="BottomRight">Bottom Right</option>
++                    </select>
++                  </div>
++                </div>
++              </ConfigSection>}
+               {/* Deferral Settings (win32 only) */}
+               {canEditExecution && <ConfigSection
+-                title="Deferral Settings"
++                summary={summaries.deferral}
++                title="Letting staff postpone"
+                 icon={<Clock className="w-4 h-4" />}
+                 expanded={expandedSection === 'deferral'}
+                 onToggle={() => toggleSection('deferral')}
+@@ -783,7 +1019,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                       </div>
+                       <div>
+                         <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Force close countdown (optional)
++                          Close apps anyway after (seconds, optional)
+                         </label>
+                         <div className="flex items-center gap-3">
+                           <input
+@@ -802,10 +1038,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+               {/* Progress & Notifications (win32 only) */}
+               {canEditExecution && <ConfigSection
+-                title="Progress & Notifications"
++                summary={summaries.progress}
++                title="Progress and notifications"
+                 icon={<Bell className="w-4 h-4" />}
+                 expanded={expandedSection === 'progress'}
+                 onToggle={() => toggleSection('progress')}
+@@ -956,10 +1192,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   </div>
+                 </div>
+               </ConfigSection>}
+-
+               {/* Custom Prompts (win32 only) */}
+               {canEditExecution && <ConfigSection
+-                title="Custom Prompts"
++                summary={summaries.prompts}
++                title="Messages to staff"
+                 icon={<MessageSquare className="w-4 h-4" />}
+                 expanded={expandedSection === 'prompts'}
+                 onToggle={() => toggleSection('prompts')}
+@@ -1163,10 +1399,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+               {/* Restart Prompt (win32 only) */}
+               {canEditExecution && <ConfigSection
+-                title="Restart Prompt"
++                summary={summaries.restart}
++                title="Restart prompt"
+                 icon={<RefreshCw className="w-4 h-4" />}
+                 expanded={expandedSection === 'restart'}
+                 onToggle={() => toggleSection('restart')}
+@@ -1206,7 +1442,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                       </div>
+                       <div>
+                         <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          No-hide countdown (seconds)
++                          Keep the countdown on screen for the last (seconds)
+                         </label>
+                         <div className="flex items-center gap-3">
+                           <input
+@@ -1229,10 +1465,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+               {/* Disk Space Check (win32 only) */}
+               {canEditExecution && <ConfigSection
+-                title="Disk Space Check"
++                summary={summaries.diskspace}
++                title="Disk space check"
+                 icon={<HardDrive className="w-4 h-4" />}
+                 expanded={expandedSection === 'diskspace'}
+                 onToggle={() => toggleSection('diskspace')}
+@@ -1266,86 +1502,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+-              {/* Assignment Configuration (all app types) */}
+-              <ConfigSection
+-                title="Assignment Configuration"
+-                icon={<Target className="w-4 h-4" />}
+-                expanded={expandedSection === 'assignment'}
+-                onToggle={() => toggleSection('assignment')}
+-              >
+-                <AssignmentConfig
+-                  assignments={assignments}
+-                  onChange={setAssignments}
+-                  supportsAutoUpdateSuperseded={!isStore}
+-                />
+-              </ConfigSection>
+-
+-              {/* Category Configuration */}
+-              <ConfigSection
+-                title="Category Configuration"
+-                icon={<FolderTree className="w-4 h-4" />}
+-                expanded={expandedSection === 'category'}
+-                onToggle={() => toggleSection('category')}
+-              >
+-                <CategoryConfig
+-                  categories={categories}
+-                  onChange={setCategories}
+-                />
+-              </ConfigSection>
+-
+-              {/* ESP Configuration */}
+-              <ConfigSection
+-                title="Enrollment Status Page"
+-                icon={<Shield className="w-4 h-4" />}
+-                expanded={expandedSection === 'esp'}
+-                onToggle={() => toggleSection('esp')}
+-              >
+-                <EspProfileSelector
+-                  espProfiles={espProfiles}
+-                  onChange={setEspProfiles}
+-                  mode="pre-deploy"
+-                  hasRequiredAssignment={assignments.some((a) => a.intent === 'required')}
+-                />
+-              </ConfigSection>
+-
+-              {/* App Updates (win32 only) */}
+-              {isWin32 && <ConfigSection
+-                title="App Updates"
+-                icon={<ArrowUpCircle className="w-4 h-4" />}
+-                expanded={expandedSection === 'updates'}
+-                onToggle={() => toggleSection('updates')}
+-              >
+-                <div className="space-y-3">
+-                  <p className="text-sm text-text-secondary">
+-                    Choose how IntuneGet handles future versions of this app.
+-                  </p>
+-                  <CartUpdatePolicyPicker
+-                    value={updatePolicy}
+-                    onChange={setUpdatePolicy}
+-                    carryOverAssignments={carryOverAssignments}
+-                    onCarryOverAssignmentsChange={setCarryOverAssignments}
+-                  />
+-                </div>
+-              </ConfigSection>}
+-
+-              {/* Dependencies & Supersedence (win32 only) */}
+-              {isEditableWin32 && <ConfigSection
+-                title="Dependencies & Supersedence"
+-                icon={<Link2 className="w-4 h-4" />}
+-                expanded={expandedSection === 'dependencies'}
+-                onToggle={() => toggleSection('dependencies')}
+-              >
+-                <DependencyConfig
+-                  relationships={relationships}
+-                  onChange={setRelationships}
+-                  manifestDependencies={item.manifestDependencies}
+-                />
+-              </ConfigSection>}
+-
+               {/* Branding (win32 only) */}
+               {isEditableWin32 && <ConfigSection
+-                title="Branding"
++                summary={summaries.branding}
++                title="Install window branding"
+                 icon={<Palette className="w-4 h-4" />}
+                 expanded={expandedSection === 'branding'}
+                 onToggle={() => toggleSection('branding')}
+@@ -1392,7 +1552,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+ 
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Fluent accent color
++                      Accent color
+                     </label>
+                     <input
+                       type="text"
+@@ -1446,146 +1606,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   </div>
+                 </div>
+               </ConfigSection>}
+-
+-              {/* Advanced (win32 only) */}
+-              {isEditableWin32 && <ConfigSection
+-                title="Advanced Options"
+-                icon={<Terminal className="w-4 h-4" />}
+-                expanded={expandedSection === 'advanced'}
+-                onToggle={() => toggleSection('advanced')}
+-              >
+-                <div className="space-y-4">
+-                  {/* Custom Description */}
+-                  <div>
+-                    <label htmlFor="cart-description-override" className="block text-sm font-medium text-text-secondary mb-2">
+-                      Description override
+-                    </label>
+-                    <textarea
+-                      id="cart-description-override"
+-                      value={description}
+-                      onChange={(e) => setDescription(e.target.value)}
+-                      rows={3}
+-                      placeholder={initialDescription || 'Description shown in Intune and Company Portal'}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm resize-y"
+-                    />
+-                    <p className="text-text-muted text-xs mt-1">
+-                      Shown in Intune and the Company Portal. Leave empty to keep the current description.
+-                    </p>
+-                  </div>
+-
+-                  {/* Custom Install Command */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Install command override
+-                    </label>
+-                    <input
+-                      type="text"
+-                      value={installCommand}
+-                      onChange={(e) => setInstallCommand(e.target.value)}
+-                      placeholder="Leave empty to use default"
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+-                    />
+-                    <p className="text-text-muted text-xs mt-1">Override the auto-generated install command</p>
+-                  </div>
+-
+-                  {/* Custom Uninstall Command */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Uninstall command override
+-                    </label>
+-                    <input
+-                      type="text"
+-                      value={uninstallCommand}
+-                      onChange={(e) => setUninstallCommand(e.target.value)}
+-                      placeholder="Leave empty to use default"
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+-                    />
+-                    <p className="text-text-muted text-xs mt-1">Override the auto-generated uninstall command</p>
+-                  </div>
+-
+-                  {/* Post-install commands (#118) */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Post-install commands
+-                    </label>
+-                    <div className="space-y-2">
+-                      {(config.postInstallCommands || []).map((cmd, index) => (
+-                        <div key={index} className="flex items-center gap-2">
+-                          <input
+-                            type="text"
+-                            value={cmd}
+-                            onChange={(e) => updateCommand('postInstallCommands', index, e.target.value)}
+-                            aria-label={`Post-install command ${index + 1}`}
+-                            placeholder={'e.g. powershell.exe -NoProfile -Command "Remove-Item \'$env:Public\\Desktop\\App.lnk\' -Force"'}
+-                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+-                          />
+-                          <button
+-                            type="button"
+-                            onClick={() => removeCommand('postInstallCommands', index)}
+-                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
+-                            aria-label="Remove command"
+-                          >
+-                            <Trash2 className="w-4 h-4" />
+-                          </button>
+-                        </div>
+-                      ))}
+-                      <button
+-                        type="button"
+-                        onClick={() => addCommand('postInstallCommands')}
+-                        aria-label="Add post-install command"
+-                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
+-                      >
+-                        <Plus className="w-3.5 h-3.5" />
+-                        Add command
+-                      </button>
+-                    </div>
+-                    <p className="text-text-muted text-xs mt-1">
+-                      Run after the app installs (in order), e.g. to remove a desktop shortcut. Each runs via cmd.exe; a failure fails the deployment.
+-                    </p>
+-                  </div>
+-
+-                  {/* Post-uninstall commands (#118) */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Post-uninstall commands
+-                    </label>
+-                    <div className="space-y-2">
+-                      {(config.postUninstallCommands || []).map((cmd, index) => (
+-                        <div key={index} className="flex items-center gap-2">
+-                          <input
+-                            type="text"
+-                            value={cmd}
+-                            onChange={(e) => updateCommand('postUninstallCommands', index, e.target.value)}
+-                            aria-label={`Post-uninstall command ${index + 1}`}
+-                            placeholder={'e.g. cmd.exe /c rmdir /s /q "C:\\ProgramData\\App"'}
+-                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+-                          />
+-                          <button
+-                            type="button"
+-                            onClick={() => removeCommand('postUninstallCommands', index)}
+-                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
+-                            aria-label="Remove command"
+-                          >
+-                            <Trash2 className="w-4 h-4" />
+-                          </button>
+-                        </div>
+-                      ))}
+-                      <button
+-                        type="button"
+-                        onClick={() => addCommand('postUninstallCommands')}
+-                        aria-label="Add post-uninstall command"
+-                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
+-                      >
+-                        <Plus className="w-3.5 h-3.5" />
+-                        Add command
+-                      </button>
+-                    </div>
+-                    <p className="text-text-muted text-xs mt-1">
+-                      Run after the app uninstalls (in order), e.g. to clean up leftover files.
+-                    </p>
+-                  </div>
+                 </div>
+-              </ConfigSection>}
++              </div>)}
+             </div>
+           </div>
+         </div>
+@@ -1655,22 +1677,37 @@ interface ConfigSectionProps {
+   expanded: boolean;
+   onToggle: () => void;
+   children: React.ReactNode;
++  // HRM patch 0022: the current setting in a few words, shown on the closed row
++  summary?: string;
++  // HRM patch 0022: a main group that is always open, with no row to click
++  fixed?: boolean;
+ }
+ 
+-function ConfigSection({ title, icon, expanded, onToggle, children }: ConfigSectionProps) {
++function ConfigSection({ title, icon, expanded, onToggle, children, summary, fixed }: ConfigSectionProps) {
++  if (fixed) {
++    return (
++      <section className="mb-6">
++        <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
++          <span className="text-text-muted">{icon}</span>
++          {title}
++        </h3>
++        {children}
++      </section>
++    );
++  }
+   return (
+-    <div className="border border-overlay/10 rounded-lg overflow-hidden mb-3">
++    <div>
+       <button
+         onClick={onToggle}
+-        className="w-full flex items-center justify-between px-4 py-3 bg-bg-elevated/50 hover:bg-overlay/10 transition-colors"
++        aria-expanded={expanded}
++        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-overlay/5 transition-colors"
+       >
+-        <div className="flex items-center gap-2 text-text-primary">
+-          {icon}
+-          <span className="font-medium">{title}</span>
+-        </div>
+-        <ChevronRight className={cn('w-4 h-4 text-text-muted transition-transform', expanded && 'rotate-90')} />
++        <span className="text-text-muted">{icon}</span>
++        <span className="flex-1 text-sm text-text-primary">{title}</span>
++        {summary && <span className="text-sm text-text-muted truncate max-w-[45%]">{summary}</span>}
++        <ChevronRight className={cn('w-4 h-4 flex-shrink-0 text-text-muted transition-transform', expanded && 'rotate-90')} />
+       </button>
+-      {expanded && <div className="p-4 bg-bg-surface/50">{children}</div>}
++      {expanded && <div className="px-4 pb-4 pt-1">{children}</div>}
+     </div>
+   );
+ }
+diff --git a/components/PackageConfig.custom-detection.test.ts b/components/PackageConfig.custom-detection.test.ts
+index 90076292c..ef05f32cd 100644
+--- a/components/PackageConfig.custom-detection.test.ts
++++ b/components/PackageConfig.custom-detection.test.ts
+@@ -59,6 +59,9 @@ async function render(props: Record<string, unknown> = {}) {
+   await act(async () => root.render(createElement(PackageConfig, {
+     package: pkg, installers: [installer], versions: ['2.0', '1.0'], onClose: vi.fn(), ...props,
+   } as Parameters<typeof PackageConfig>[0])));
++  // HRM patch 0022: detection is a row under More settings, closed until opened
++  const row = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes("How Intune checks it's installed"));
++  if (row?.getAttribute('aria-expanded') === 'false') await act(async () => row.click());
+ }
+ 
+ function buttonWithText(text: string) {
+@@ -99,7 +102,7 @@ async function selectVersion(version: string) {
+ }
+ 
+ async function save() {
+-  await click(buttonWithText('Add to Selection'));
++  await click(buttonWithText('Add to deployment'));
+   return useCartStore.getState().items[0] as Win32CartItem | undefined;
+ }
+ 
+@@ -306,7 +309,7 @@ describe('custom detection rules', () => {
+       ...props,
+       deployedConfig: { ...base, psadtConfig: { ...base.psadtConfig, customDetection: true, detectionRules: forged } },
+     });
+-    expect(document.body.textContent).toContain('Detection Rules');
++    expect(document.body.textContent).toContain("How Intune checks it's installed");
+     expect(customToggle()).toBeUndefined();
+     expect(document.body.textContent).not.toContain('Rule 1 type');
+     const item = await save();
+@@ -316,7 +319,7 @@ describe('custom detection rules', () => {
+ 
+   it('does not show detection rules for Microsoft Store apps', async () => {
+     await render({ package: { ...pkg, appSource: 'store', packageIdentifier: '9NBLGGH4NNS1' }, installers: [] });
+-    expect(document.body.textContent).not.toContain('Detection Rules');
++    expect(document.body.textContent).not.toContain("How Intune checks it's installed");
+     expect(customToggle()).toBeUndefined();
+   });
+ });
+diff --git a/components/PackageConfig.layout.test.ts b/components/PackageConfig.layout.test.ts
+new file mode 100644
+index 000000000..04c1cc038
+--- /dev/null
++++ b/components/PackageConfig.layout.test.ts
+@@ -0,0 +1,115 @@
++// @vitest-environment happy-dom
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { DEFAULT_PSADT_CONFIG } from '@/types/psadt';
++import type { Win32CartItem } from '@/types/upload';
++
++vi.hoisted(() => {
++  const values = new Map<string, string>();
++  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
++    getItem: (key: string) => values.get(key) ?? null,
++    setItem: (key: string, value: string) => values.set(key, value),
++    removeItem: (key: string) => values.delete(key),
++  } });
++});
++
++const manifestState = vi.hoisted(() => ({ data: undefined, isFetching: false, error: null as Error | null }));
++vi.mock('@/hooks/use-packages', () => ({
++  useLocaleVariants: () => ({ data: { variants: [] }, isSuccess: true }),
++  usePackageManifest: () => manifestState,
++}));
++vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: { carryOverAssignments: false } }) }));
++vi.mock('@/hooks/use-update-app-settings', () => ({ useUpdateAppSettings: () => ({ isUpdating: false }) }));
++vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
++vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: () => null }));
++vi.mock('@/components/CategoryConfig', () => ({ CategoryConfig: () => null }));
++vi.mock('@/components/DependencyConfig', () => ({ DependencyConfig: () => null }));
++vi.mock('@/components/EspProfileSelector', () => ({
++  EspProfileSelector: ({ onChange }: { onChange: (v: unknown[]) => void }) =>
++    createElement('button', { onClick: () => onChange([{ id: 'esp-1', displayName: 'Example setup' }]) }, 'Pick setup profile'),
++}));
++vi.mock('@/components/updates/CartUpdatePolicyPicker', () => ({ CartUpdatePolicyPicker: () => null }));
++
++import { PackageConfig } from './PackageConfig';
++import { useCartStore } from '@/stores/cart-store';
++
++// HRM patch 0022: the deploy panel's layout. Fake data only.
++let root: Root;
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++const installer = { architecture: 'x64' as const, type: 'msi' as const, url: 'https://example.test/app.msi', sha256: 'B'.repeat(64), scope: 'machine' as const };
++const deployed: Win32CartItem = {
++  id: 'deployed-id', addedAt: '2026-10-09', appSource: 'win32', wingetId: 'Example.App',
++  displayName: 'Example App', publisher: 'Example', version: '2.0', architecture: 'x64', installScope: 'machine',
++  installerType: 'msi', installerUrl: installer.url, installerSha256: 'B'.repeat(64),
++  installCommand: '', uninstallCommand: '', detectionRules: [],
++  psadtConfig: { ...DEFAULT_PSADT_CONFIG, allowDefer: true, deferTimes: 7, processesToClose: [] },
++  categories: [{ id: 'category-id', displayName: 'Productivity' }],
++};
++
++const text = () => document.body.textContent ?? '';
++const button = (label: string) => [...document.querySelectorAll('button')].find((b) => b.textContent?.includes(label));
++
++async function render(props: Record<string, unknown> = {}) {
++  await act(async () => root.render(createElement(PackageConfig, {
++    package: { id: 'Example.App', name: 'Example App', publisher: 'Example', version: '2.0' },
++    installers: [installer], versions: ['2.0'], onClose: vi.fn(), ...props,
++  } as Parameters<typeof PackageConfig>[0])));
++}
++
++beforeEach(() => {
++  useCartStore.setState({ items: [] });
++  const container = document.createElement('div');
++  document.body.append(container);
++  root = createRoot(container);
++});
++afterEach(async () => {
++  await act(async () => root?.unmount());
++  document.body.innerHTML = '';
++});
++
++describe('deploy panel layout', () => {
++  it('shows the main choices, then every other setting as a closed row with its current value', async () => {
++    await render();
++    for (const heading of ['Installs for', 'Who gets it', 'When a new version comes out', 'More settings', 'What staff see during install']) {
++      expect(text()).toContain(heading);
++    }
++    expect(text()).not.toMatch(/Quick|Advanced|more configuration sections/);
++    const rows = [...document.querySelectorAll('button[aria-expanded]')].map((b) => b.textContent);
++    expect(rows).toEqual(expect.arrayContaining([
++      "How Intune checks it's installedAutomatic",
++      'New computer setupNot required',
++      'Replaces or needs other appsNone',
++      'Install behaviourSilent, no restart',
++      'Letting staff postponeOff',
++      'Install window brandingDefault',
++    ]));
++    expect(document.querySelectorAll('button[aria-expanded="true"]')).toHaveLength(0);
++  });
++
++  it('keeps every setting reachable: opening a row shows its options', async () => {
++    await render();
++    await act(async () => button('Letting staff postpone')!.click());
++    expect(text()).toContain('Allow users to defer installation');
++    await act(async () => button('Install behaviour')!.click());
++    expect(text()).toContain('What staff see while it installs');
++    expect(text()).toContain('Remove existing installation first');
++  });
++
++  it("summarises a deployed app's current settings", async () => {
++    await render({ isDeployed: true, deployedConfig: deployed });
++    const rows = [...document.querySelectorAll('button[aria-expanded]')].map((b) => b.textContent);
++    expect(rows).toContain('Letting staff postponeUp to 7 times');
++    expect(rows).toContain('Company Portal categoryProductivity');
++    expect(text()).toContain('Editing a deployed app');
++  });
++
++  it('sends a new computer setup change through Deploy again, not Save to Intune', async () => {
++    await render({ isDeployed: true, deployedConfig: deployed, intuneAppId: '00000000-0000-0000-0000-00000000000a' });
++    await act(async () => button('New computer setup')!.click());
++    await act(async () => button('Pick setup profile')!.click());
++    expect((button('Save to Intune') as HTMLButtonElement).disabled).toBe(true);
++    expect(text()).toContain('These changes need the app deployed again');
++    expect(button('Deploy again')).toBeDefined();
++  });
++});
+diff --git a/components/PackageConfig.recovery.test.ts b/components/PackageConfig.recovery.test.ts
+index f08f394ac..77129efc3 100644
+--- a/components/PackageConfig.recovery.test.ts
++++ b/components/PackageConfig.recovery.test.ts
+@@ -63,7 +63,7 @@ describe('reviewing a replacement version', () => {
+       installers: [installer], versions: ['v3.0'],
+       deployedConfig: { ...oldItem, version: '3.0' }, onClose: vi.fn(),
+     })));
+-    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Selection'))!;
++    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to deployment'))!;
+     expect(add.disabled).toBe(false);
+     await act(async () => add.click());
+     expect(useCartStore.getState().items[0]).toMatchObject({ version: 'v3.0', installerUrl: installer.url });
+@@ -81,7 +81,7 @@ describe('reviewing a replacement version', () => {
+       onAddedToCart: saved, onClose: vi.fn(),
+     })));
+     expect(useCartStore.getState().items[0].version).toBe('1.0');
+-    const save = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Update Selection'))!;
++    const save = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Update in deployment'))!;
+     expect(save.disabled).toBe(false);
+     await act(async () => save.click());
+     expect(useCartStore.getState().items).toHaveLength(1);
+@@ -104,7 +104,7 @@ describe('reviewing a replacement version', () => {
+       installers: [installer], versions: ['2.0', '1.0'], deployedConfig: oldItem, onClose: vi.fn(),
+     })));
+     expect(document.querySelector('[role="alert"]')?.textContent).toContain('no longer available');
+-    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Selection'))!;
++    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to deployment'))!;
+     expect(add.disabled).toBe(true);
+     await act(async () => add.click());
+     expect(useCartStore.getState().items).toEqual([]);
+diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
+index eea1131fe..8308429f3 100644
+--- a/components/PackageConfig.tsx
++++ b/components/PackageConfig.tsx
+@@ -21,8 +21,6 @@ import {
+   Clock,
+   FolderTree,
+   Palette,
+-  Zap,
+-  SlidersHorizontal,
+   Globe,
+   Search,
+   Shield,
+@@ -228,16 +226,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+   );
+ 
+   // UI state
+-  const [expandedSection, setExpandedSection] = useState<ConfigSection | null>(isStoreApp ? 'assignment' : 'detection');
++  const [expandedSection, setExpandedSection] = useState<ConfigSection | null>(null);
+   const [isAddingToCart, setIsAddingToCart] = useState(false);
+   const [processesError, setProcessesError] = useState<string | null>(null);
+   const [customDetectionErrors, setCustomDetectionErrors] = useState<string[]>([]);
+   const [addedToCartSuccess, setAddedToCartSuccess] = useState(false);
+-  const [configMode, setConfigMode] = useState<'quick' | 'advanced'>('quick');
+-
+-  const quickSections: ConfigSection[] = ['detection', 'assignment', 'category', 'esp', 'updates', 'dependencies'];
+-  const isQuickSection = (section: ConfigSection) => quickSections.includes(section);
+-  const visibleSections = configMode === 'quick' ? quickSections : null; // null = show all
++  // HRM patch 0022: no Quick/Advanced switch. The main choices are always shown and every
++  // other setting is a row under More settings or What staff see during install.
++  const visibleSections = null as ConfigSection[] | null;
+ 
+   // Cart store
+   const addItemToStore = useCartStore((state) => state.addItem);
+@@ -267,7 +263,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+       JSON.stringify(categories) !== JSON.stringify(deployedConfig.categories || []);
+     const hasEspChanges =
+       JSON.stringify(espProfiles) !== JSON.stringify(deployedConfig.espProfiles || []);
+-    const hasGraphChanges = hasAssignmentChanges || hasCategoryChanges || hasEspChanges;
++    // HRM patch 0022: Save to Intune sends groups and categories only, so ESP changes need Deploy again
++    const hasGraphChanges = hasAssignmentChanges || hasCategoryChanges;
+ 
+     // Redeploy-required: version, architecture, scope, locale, PSADT config
+     const hasVersionChange = selectedVersion !== deployedConfig.version;
+@@ -283,12 +280,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     const deployedDescription = stripSourceMarker(deployedConfig.description ?? pkg.description ?? '');
+     const hasDescriptionChange = description.trim() !== deployedDescription.trim();
+     const hasRedeployChanges =
+-      hasVersionChange || hasArchChange || hasScopeChange || hasLocaleChange || hasPsadtChange || hasDescriptionChange;
++      hasVersionChange || hasArchChange || hasScopeChange || hasLocaleChange || hasPsadtChange || hasDescriptionChange || hasEspChanges;
+ 
+     return { hasGraphChanges, hasRedeployChanges };
+   }, [isDeployed, deployedConfig, assignments, categories, espProfiles,
+       selectedVersion, selectedArch, selectedScope, selectedLocale, config, description, pkg.description]);
+ 
++
+   // Installers always arrive for the package's default (latest) version. When the
+   // user selects a different version we must re-fetch so the installer URL/SHA
+   // (which flow straight into the cart item) match the chosen version rather than
+@@ -334,6 +332,28 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+       nestedInstallerType: selectedInstaller.nestedInstallerType,
+     });
+   const customDetectionActive = config.customDetection === true && customDetectionSupported;
++
++  // HRM patch 0022: the current setting of each row under More settings, in a few words
++  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
++  const summaries = {
++    detection: customDetectionActive ? 'Your own rules' : 'Automatic',
++    esp: espProfiles.length ? `Required on ${plural(espProfiles.length, 'setup profile', 'setup profiles')}` : 'Not required',
++    dependencies: relationships.length ? plural(relationships.length, 'linked app', 'linked apps') : 'None',
++    category: categories.map((c) => c.displayName).join(', ') || 'None',
++    behavior: `${{ Silent: 'Silent', NonInteractive: 'Progress only', Auto: 'Installer decides' }[config.deployMode || 'Silent'] ?? 'Silent'}, ${
++      { Suppress: 'no restart', Prompt: 'asks to restart', Force: 'restarts' }[config.restartBehavior] ?? 'no restart'}`,
++    advanced:
++      description.trim() !== stripSourceMarker(pkg.description ?? '').trim() || config.installCommand || config.uninstallCommand ||
++      config.postInstallCommands?.length || config.postUninstallCommands?.length
++        ? 'Changed'
++        : 'Default',
++    deferral: config.allowDefer ? `Up to ${plural(config.deferTimes, 'time', 'times')}` : 'Off',
++    progress: config.progressDialog?.enabled || config.balloonTips?.length ? 'On' : 'Off',
++    prompts: config.customPrompts?.length ? plural(config.customPrompts.length, 'message', 'messages') : 'None',
++    restart: config.restartPrompt?.enabled ? 'On' : 'Off',
++    diskspace: config.checkDiskSpace ? (config.requiredDiskSpace ? `${config.requiredDiskSpace} MB` : 'On') : 'Off',
++    branding: config.brandingCompanyName || config.brandingWelcomeTitle || config.brandingLogoPath ? 'Custom' : 'Default',
++  };
+   const lastCustomRulesRef = useRef<DetectionRule[] | null>(null);
+   useEffect(() => {
+     if (customDetectionActive) lastCustomRulesRef.current = config.detectionRules;
+@@ -695,18 +715,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+               <div className="flex items-start gap-3 p-3 bg-accent-cyan/10 border border-accent-cyan/20 rounded-lg">
+                 <RefreshCw className="w-5 h-5 text-accent-cyan flex-shrink-0 mt-0.5" />
+                 <div className="text-sm">
+-                  <p className="text-accent-cyan font-medium">Editing deployed configuration</p>
++                  <p className="text-accent-cyan font-medium">Editing a deployed app</p>
+                   <p className="text-accent-cyan/70 mt-1">
+                     {!canUpdateSettings
+-                      ? 'Changes will be applied as a new deployment.'
++                      ? 'Changes are applied by deploying it again.'
+                       : !changeState.hasGraphChanges && !changeState.hasRedeployChanges
+-                      ? 'No changes detected. Previous settings have been pre-filled.'
++                      ? 'Its current settings are filled in. Nothing has changed yet.'
+                       : changeState.hasGraphChanges && !changeState.hasRedeployChanges
+-                      ? 'Assignment and category changes can be applied instantly with Update Settings.'
++                      ? 'Group and category changes go straight to Intune with Save to Intune.'
+                       : !changeState.hasGraphChanges && changeState.hasRedeployChanges
+-                      ? 'Package configuration changes require a redeployment.'
+-                      : 'Assignment/category changes can be applied instantly. Package configuration changes also detected -- those require a separate redeployment.'}
+-                    {!canUpdateSettings && deployedConfig ? ' Previous settings have been pre-filled.' : !canUpdateSettings ? ' Using default settings (no previous config found).' : ''}
++                      ? 'These changes need the app deployed again: press Deploy again.'
++                      : 'Save to Intune applies the group and category changes. The other changes need Deploy again.'}
++                    {!canUpdateSettings && deployedConfig ? ' Its previous settings are filled in.' : !canUpdateSettings ? ' Its previous settings weren\'t found, so the defaults are filled in.' : ''}
+                   </p>
+                 </div>
+               </div>
+@@ -724,7 +744,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+             {/* Store App: Install Experience */}
+             {isStoreApp && (
+               <div>
+-                <label className="block text-sm font-medium text-text-muted mb-2">Install Experience</label>
++                <label className="block text-sm font-medium text-text-muted mb-2">Installs for</label>
+                 <div className="flex gap-2">
+                   {(['user', 'system'] as const).map((exp) => (
+                     <button
+@@ -737,7 +757,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                           : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
+                       )}
+                     >
+-                      {exp === 'user' ? 'Per-User (Recommended)' : 'Per-System'}
++                      {exp === 'user' ? 'Signed-in user (recommended)' : 'Everyone on the computer'}
+                     </button>
+                   ))}
+                 </div>
+@@ -970,13 +990,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+ 
+             {/* Install Scope */}
+             <div>
+-              <label className="block text-sm font-medium text-text-muted mb-2">Install Scope</label>
++              <label className="block text-sm font-medium text-text-muted mb-2">Installs for</label>
+               <div className="flex gap-2">
+                 {(['machine', 'user'] as WingetScope[]).map((scope) => {
+                   // Show "(Recommended)" based on manifest scope, or default to machine if not specified
+                   const manifestScope = selectedInstaller?.scope;
+                   const isRecommended = manifestScope ? scope === manifestScope : scope === 'machine';
+-                  const label = scope === 'machine' ? 'Per-Machine' : 'Per-User';
++                  const label = scope === 'machine' ? 'Everyone on the computer' : 'Signed-in user only';
+                   const isAvailable = scopeIsAvailable(scope);
+ 
+                   return (
+@@ -992,7 +1012,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                           : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
+                       )}
+                     >
+-                      {isRecommended ? `${label} (Recommended)` : label}
++                      {isRecommended ? `${label} (recommended)` : label}
+                     </button>
+                   );
+                 })}
+@@ -1001,42 +1021,152 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+             </>)}
+ 
+             <div className="border-t border-overlay/10 pt-6">
+-              {!isStoreApp && <div className="flex items-center justify-between mb-4">
+-                <h3 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+-                  <Settings className="w-5 h-5 text-accent-cyan" />
+-                  Deployment Configuration
+-                </h3>
+-                <div className="inline-flex items-center rounded-lg border border-overlay/10 bg-bg-elevated p-0.5">
+-                  <button
+-                    onClick={() => setConfigMode('quick')}
+-                    className={cn(
+-                      'px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5',
+-                      configMode === 'quick'
+-                        ? 'bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/25'
+-                        : 'text-text-secondary hover:text-text-primary'
+-                    )}
+-                  >
+-                    <Zap className="w-3.5 h-3.5" />
+-                    Quick
+-                  </button>
+-                  <button
+-                    onClick={() => setConfigMode('advanced')}
+-                    className={cn(
+-                      'px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5',
+-                      configMode === 'advanced'
+-                        ? 'bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/25'
+-                        : 'text-text-secondary hover:text-text-primary'
+-                    )}
+-                  >
+-                    <SlidersHorizontal className="w-3.5 h-3.5" />
+-                    Advanced
+-                  </button>
++
++              {/* Assignment Configuration (quick + advanced, all app types) */}
++              {(isStoreApp || visibleSections === null || visibleSections.includes('assignment')) && <ConfigSection
++                fixed
++                title="Who gets it"
++                icon={<Target className="w-4 h-4" />}
++                expanded={expandedSection === 'assignment'}
++                onToggle={() => toggleSection('assignment')}
++              >
++                <AssignmentConfig
++                  assignments={assignments}
++                  onChange={setAssignments}
++                  supportsAutoUpdateSuperseded={!isStoreApp}
++                />
++              </ConfigSection>}
++              {/* App Updates (quick + advanced, win32 only) */}
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('updates')) && <ConfigSection
++                fixed
++                title="When a new version comes out"
++                icon={<ArrowUpCircle className="w-4 h-4" />}
++                expanded={expandedSection === 'updates'}
++                onToggle={() => toggleSection('updates')}
++              >
++                <div className="space-y-3">
++                  <CartUpdatePolicyPicker
++                    value={updatePolicy}
++                    onChange={setUpdatePolicy}
++                    carryOverAssignments={carryOverAssignments}
++                    onCarryOverAssignmentsChange={setCarryOverAssignments}
++                  />
+                 </div>
+-              </div>}
++              </ConfigSection>}
+ 
++              <div className="mb-6">
++                <h3 className="text-sm font-semibold text-text-primary mb-2">More settings</h3>
++                <div className="rounded-lg border border-overlay/10 divide-y divide-overlay/10 overflow-hidden">
++              {/* Detection Rules (quick + advanced, win32 only) */}
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('detection')) && <ConfigSection
++                summary={summaries.detection}
++                title={"How Intune checks it's installed"}
++                icon={<FileCode className="w-4 h-4" />}
++                expanded={expandedSection === 'detection'}
++                onToggle={() => toggleSection('detection')}
++              >
++                <div className="space-y-3">
++                  {customDetectionSupported && (
++                    <ToggleOption
++                      label="Use my own detection rules"
++                      description="Your registry, file or MSI rules replace the IntuneGet version marker. They stay fixed, so edit them before you deploy a newer version."
++                      checked={customDetectionActive}
++                      onChange={setCustomDetection}
++                    />
++                  )}
++                  {customDetectionActive ? (
++                    <CustomDetectionEditor
++                      rules={config.detectionRules}
++                      onChange={(detectionRules) => {
++                        setCustomDetectionErrors([]);
++                        lastCustomRulesRef.current = detectionRules;
++                        updateConfig({ detectionRules });
++                      }}
++                      errors={customDetectionErrors}
++                    />
++                  ) : <>
++                  {config.detectionRules.length === 0 ? (
++                    <p className="text-text-muted text-sm italic">No detection rules configured</p>
++                  ) : (
++                    config.detectionRules.map((rule, index) => (
++                      <div key={index} className="bg-bg-elevated/50 rounded-lg p-3">
++                        <div className="flex items-center gap-2 mb-2">
++                          <span className="px-2 py-0.5 bg-accent-cyan/10 text-accent-cyan text-xs font-medium rounded uppercase">
++                            {rule.type}
++                          </span>
++                        </div>
++                        <DetectionRuleDisplay rule={rule} />
++                      </div>
++                    ))
++                  )}
++                  <p className="text-text-muted text-xs">
++                    Detection rules are auto-generated based on installer type. They determine how Intune verifies the app is installed.
++                  </p>
++                  </>}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-1.5">
++                      Registry key for the install marker
++                    </label>
++                    <input
++                      type="text"
++                      value={config.registryMarkerPath || ''}
++                      onChange={(e) => updateConfig({ registryMarkerPath: e.target.value || undefined })}
++                      placeholder="SOFTWARE\IntuneGet\Apps"
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/10 rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-cyan/50"
++                    />
++                    <p className="text-text-muted text-xs mt-1.5">
++                      Registry key under HKLM/HKCU where the detection marker is written. Customize to track deployments under your own key, e.g. SOFTWARE\CompanyName\Apps.
++                      {customDetectionActive && ' The marker is still written during install, but Intune uses your own rules for detection.'}
++                    </p>
++                  </div>
++                </div>
++              </ConfigSection>}
++              {/* ESP Configuration (quick + advanced, all app types) */}
++              {(isStoreApp || visibleSections === null || visibleSections.includes('esp')) && <ConfigSection
++                summary={summaries.esp}
++                title="New computer setup"
++                icon={<Shield className="w-4 h-4" />}
++                expanded={expandedSection === 'esp'}
++                onToggle={() => toggleSection('esp')}
++              >
++                <EspProfileSelector
++                  espProfiles={espProfiles}
++                  onChange={setEspProfiles}
++                  mode="pre-deploy"
++                  hasRequiredAssignment={assignments.some((a) => a.intent === 'required')}
++                />
++              </ConfigSection>}
++              {/* Dependencies & Supersedence (quick + advanced, win32 only) */}
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('dependencies')) && <ConfigSection
++                summary={summaries.dependencies}
++                title="Replaces or needs other apps"
++                icon={<Link2 className="w-4 h-4" />}
++                expanded={expandedSection === 'dependencies'}
++                onToggle={() => toggleSection('dependencies')}
++              >
++                <DependencyConfig
++                  relationships={relationships}
++                  onChange={setRelationships}
++                  manifestDependencies={selectedInstaller?.packageDependencies}
++                />
++              </ConfigSection>}
++              {/* Category Configuration (quick + advanced, all app types) */}
++              {(isStoreApp || visibleSections === null || visibleSections.includes('category')) && <ConfigSection
++                summary={summaries.category}
++                title="Company Portal category"
++                icon={<FolderTree className="w-4 h-4" />}
++                expanded={expandedSection === 'category'}
++                onToggle={() => toggleSection('category')}
++              >
++                <CategoryConfig
++                  categories={categories}
++                  onChange={setCategories}
++                />
++              </ConfigSection>}
+               {/* Installation Behavior (advanced only, win32 only) */}
+               {!isStoreApp && (visibleSections === null || visibleSections.includes('behavior')) && <ConfigSection
+-                title="Installation Behavior"
++                summary={summaries.behavior}
++                title="Install behaviour"
+                 icon={<Settings className="w-4 h-4" />}
+                 expanded={expandedSection === 'behavior'}
+                 onToggle={() => toggleSection('behavior')}
+@@ -1045,19 +1175,19 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   {/* Deploy Mode */}
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Deploy mode
++                      What staff see while it installs
+                     </label>
+                     <select
+                       value={config.deployMode || 'Silent'}
+                       onChange={(e) => updateConfig({ deployMode: e.target.value as DeployMode })}
+                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                     >
+-                      <option value="Silent">Silent - No UI popups (recommended)</option>
+-                      <option value="NonInteractive">Non-Interactive - Show progress only</option>
+-                      <option value="Auto">Auto-detect (PSADT default)</option>
++                      <option value="Silent">Nothing, it installs silently (recommended)</option>
++                      <option value="NonInteractive">A progress window only</option>
++                      <option value="Auto">Let the installer decide</option>
+                     </select>
+                     <p className="text-xs text-text-muted mt-1">
+-                      Controls whether PSADT shows dialogs during installation. Silent is recommended for Intune.
++                      Silent suits Intune: nobody is interrupted. Anything under What staff see during install only shows when this isn't silent.
+                     </p>
+                   </div>
+ 
+@@ -1071,7 +1201,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+ 
+                   {/* Verify Install Toggle */}
+                   <ToggleOption
+-                    label="Verify installation before marking as installed"
++                    label="Check it installed before reporting success"
+                     description="After the installer finishes, checks Add/Remove Programs for the application and fails the deployment if it is not found. Prevents false success from installers that exit without installing."
+                     checked={config.verifyInstall || false}
+                     onChange={(checked) => updateConfig({ verifyInstall: checked })}
+@@ -1081,7 +1211,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   <div>
+                     <div className="flex items-center justify-between mb-2">
+                       <label className="block text-sm font-medium text-text-secondary">
+-                        Processes to close before install
++                        Apps to close before installing
+                       </label>
+                       <button
+                         onClick={addProcess}
+@@ -1134,7 +1264,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   {/* Show Close Prompt Toggle */}
+                   <div className="space-y-3">
+                     <ToggleOption
+-                      label="Show close prompt to users"
++                      label="Ask staff to close the app first"
+                       description="When enabled, users see a countdown dialog if the app is running"
+                       checked={config.showClosePrompt || false}
+                       onChange={(checked) => updateConfig({ showClosePrompt: checked })}
+@@ -1165,7 +1295,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+ 
+                     {/* Block Execution Toggle */}
+                     <ToggleOption
+-                      label="Block execution during install"
++                      label="Stop staff opening the app while it installs"
+                       description="Prevent users from launching the application during installation"
+                       checked={config.blockExecution || false}
+                       onChange={(checked) => updateConfig({ blockExecution: checked })}
+@@ -1181,7 +1311,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+ 
+                     {/* Persist Prompt Toggle */}
+                     <ToggleOption
+-                      label="Persist prompt until answered"
++                      label="Keep the prompt open until answered"
+                       description="Make the dialog reappear if user closes it without responding"
+                       checked={config.persistPrompt || false}
+                       onChange={(checked) => updateConfig({ persistPrompt: checked })}
+@@ -1220,97 +1350,237 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   {/* Restart Behavior */}
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Restart behavior
++                      After installing
+                     </label>
+                     <select
+                       value={config.restartBehavior}
+                       onChange={(e) => updateConfig({ restartBehavior: e.target.value as RestartBehavior })}
+                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                     >
+-                      <option value="Suppress">Suppress restart (recommended)</option>
+-                      <option value="Prompt">Prompt user to restart</option>
+-                      <option value="Force">Force restart</option>
++                      <option value="Suppress">Don't restart (recommended)</option>
++                      <option value="Prompt">Ask staff to restart</option>
++                      <option value="Force">Restart the computer</option>
+                     </select>
+                   </div>
+                 </div>
+               </ConfigSection>}
+-
+-              {/* Deferral Settings (advanced only, win32 only) */}
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('deferral')) && <ConfigSection
+-                title="Deferral Settings"
+-                icon={<Clock className="w-4 h-4" />}
+-                expanded={expandedSection === 'deferral'}
+-                onToggle={() => toggleSection('deferral')}
++              {/* Advanced (advanced only, win32 only) */}
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('advanced')) && <ConfigSection
++                summary={summaries.advanced}
++                title="Commands and description"
++                icon={<Terminal className="w-4 h-4" />}
++                expanded={expandedSection === 'advanced'}
++                onToggle={() => toggleSection('advanced')}
+               >
+                 <div className="space-y-4">
+-                  {/* Allow Deferral Toggle */}
+-                  <ToggleOption
+-                    label="Allow users to defer installation"
+-                    description="Let users postpone the installation to a later time"
+-                    checked={config.allowDefer}
+-                    onChange={(checked) => updateConfig({ allowDefer: checked })}
+-                  />
+-
+-                  {config.allowDefer && (
+-                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
+-                      {/* Maximum Deferrals */}
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Maximum deferrals allowed
+-                        </label>
+-                        <input
+-                          type="number"
+-                          min="1"
+-                          max="99"
+-                          value={config.deferTimes || 3}
+-                          onChange={(e) => updateConfig({ deferTimes: parseInt(e.target.value) || 3 })}
+-                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                        />
+-                      </div>
++                  {/* Custom Description */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Description override
++                    </label>
++                    <textarea
++                      value={description}
++                      onChange={(e) => setDescription(e.target.value)}
++                      rows={3}
++                      placeholder={pkg.description || 'Description shown in Intune and Company Portal'}
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm resize-y"
++                    />
++                    <p className="text-text-muted text-xs mt-1">
++                      Shown in Intune and the Company Portal. Leave empty to use the default description.
++                    </p>
++                  </div>
+ 
+-                      {/* Deferral Days */}
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Deferral days limit (optional)
+-                        </label>
+-                        <input
+-                          type="number"
+-                          min="1"
+-                          max="365"
+-                          value={config.deferDays || ''}
+-                          onChange={(e) => updateConfig({ deferDays: e.target.value ? parseInt(e.target.value) : undefined })}
+-                          placeholder="No limit"
+-                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                        />
+-                        <p className="text-text-muted text-xs mt-1">Number of days user can defer from first prompt</p>
+-                      </div>
++                  {/* Custom Install Command */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Install command override
++                    </label>
++                    <input
++                      type="text"
++                      value={config.installCommand || ''}
++                      onChange={(e) => updateConfig({ installCommand: e.target.value || undefined })}
++                      placeholder={selectedInstaller ? generateInstallCommand(selectedInstaller, selectedScope) : ''}
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
++                    />
++                    <p className="text-text-muted text-xs mt-1">Leave empty to use auto-generated command</p>
++                  </div>
+ 
+-                      {/* Deferral Deadline */}
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Deferral deadline (optional)
+-                        </label>
+-                        <input
+-                          type="date"
+-                          value={config.deferDeadline || ''}
+-                          onChange={(e) => updateConfig({ deferDeadline: e.target.value || undefined })}
+-                          className="px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                        />
+-                        <p className="text-text-muted text-xs mt-1">After this date, users cannot defer</p>
+-                      </div>
++                  {/* Custom Uninstall Command */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Uninstall command override
++                    </label>
++                    <input
++                      type="text"
++                      value={config.uninstallCommand || ''}
++                      onChange={(e) => updateConfig({ uninstallCommand: e.target.value || undefined })}
++                      placeholder={selectedInstaller ? generateUninstallCommand(selectedInstaller, pkg.name) : ''}
++                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
++                    />
++                  </div>
+ 
+-                      {/* Force Close Countdown */}
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Force close countdown (optional)
+-                        </label>
+-                        <div className="flex items-center gap-3">
+-                          <input
+-                            type="number"
+-                            min="0"
+-                            max="3600"
+-                            value={config.forceCloseProcessesCountdown || ''}
+-                            onChange={(e) => updateConfig({ forceCloseProcessesCountdown: e.target.value ? parseInt(e.target.value) : undefined })}
++                  {/* Post-install commands (#118) */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Post-install commands
++                    </label>
++                    <div className="space-y-2">
++                      {(config.postInstallCommands || []).map((cmd, index) => (
++                        <div key={index} className="flex items-center gap-2">
++                          <input
++                            type="text"
++                            value={cmd}
++                            onChange={(e) => updateCommand('postInstallCommands', index, e.target.value)}
++                            placeholder={'e.g. powershell.exe -NoProfile -Command "Remove-Item \'$env:Public\\Desktop\\App.lnk\' -Force"'}
++                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
++                          />
++                          <button
++                            type="button"
++                            onClick={() => removeCommand('postInstallCommands', index)}
++                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
++                            aria-label="Remove command"
++                          >
++                            <Trash2 className="w-4 h-4" />
++                          </button>
++                        </div>
++                      ))}
++                      <button
++                        type="button"
++                        onClick={() => addCommand('postInstallCommands')}
++                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
++                      >
++                        <Plus className="w-3.5 h-3.5" />
++                        Add command
++                      </button>
++                    </div>
++                    <p className="text-text-muted text-xs mt-1">
++                      Run after the app installs (in order), e.g. to remove a desktop shortcut. Each runs via cmd.exe; a failure fails the deployment.
++                    </p>
++                  </div>
++
++                  {/* Post-uninstall commands (#118) */}
++                  <div>
++                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                      Post-uninstall commands
++                    </label>
++                    <div className="space-y-2">
++                      {(config.postUninstallCommands || []).map((cmd, index) => (
++                        <div key={index} className="flex items-center gap-2">
++                          <input
++                            type="text"
++                            value={cmd}
++                            onChange={(e) => updateCommand('postUninstallCommands', index, e.target.value)}
++                            placeholder={'e.g. cmd.exe /c rmdir /s /q "C:\\ProgramData\\App"'}
++                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
++                          />
++                          <button
++                            type="button"
++                            onClick={() => removeCommand('postUninstallCommands', index)}
++                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
++                            aria-label="Remove command"
++                          >
++                            <Trash2 className="w-4 h-4" />
++                          </button>
++                        </div>
++                      ))}
++                      <button
++                        type="button"
++                        onClick={() => addCommand('postUninstallCommands')}
++                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
++                      >
++                        <Plus className="w-3.5 h-3.5" />
++                        Add command
++                      </button>
++                    </div>
++                    <p className="text-text-muted text-xs mt-1">
++                      Run after the app uninstalls (in order), e.g. to clean up leftover files.
++                    </p>
++                  </div>
++                </div>
++              </ConfigSection>}
++                </div>
++              </div>
++              {!isStoreApp && (<div className="mb-6">
++                <h3 className="text-sm font-semibold text-text-primary mb-2">What staff see during install</h3>
++                <p className="text-xs text-text-muted mb-2">All off unless you turn them on. Staff only see these when the app doesn't install silently.</p>
++                <div className="rounded-lg border border-overlay/10 divide-y divide-overlay/10 overflow-hidden">
++              {/* Deferral Settings (advanced only, win32 only) */}
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('deferral')) && <ConfigSection
++                summary={summaries.deferral}
++                title="Letting staff postpone"
++                icon={<Clock className="w-4 h-4" />}
++                expanded={expandedSection === 'deferral'}
++                onToggle={() => toggleSection('deferral')}
++              >
++                <div className="space-y-4">
++                  {/* Allow Deferral Toggle */}
++                  <ToggleOption
++                    label="Allow users to defer installation"
++                    description="Let users postpone the installation to a later time"
++                    checked={config.allowDefer}
++                    onChange={(checked) => updateConfig({ allowDefer: checked })}
++                  />
++
++                  {config.allowDefer && (
++                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
++                      {/* Maximum Deferrals */}
++                      <div>
++                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                          Maximum deferrals allowed
++                        </label>
++                        <input
++                          type="number"
++                          min="1"
++                          max="99"
++                          value={config.deferTimes || 3}
++                          onChange={(e) => updateConfig({ deferTimes: parseInt(e.target.value) || 3 })}
++                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                        />
++                      </div>
++
++                      {/* Deferral Days */}
++                      <div>
++                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                          Deferral days limit (optional)
++                        </label>
++                        <input
++                          type="number"
++                          min="1"
++                          max="365"
++                          value={config.deferDays || ''}
++                          onChange={(e) => updateConfig({ deferDays: e.target.value ? parseInt(e.target.value) : undefined })}
++                          placeholder="No limit"
++                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                        />
++                        <p className="text-text-muted text-xs mt-1">Number of days user can defer from first prompt</p>
++                      </div>
++
++                      {/* Deferral Deadline */}
++                      <div>
++                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                          Deferral deadline (optional)
++                        </label>
++                        <input
++                          type="date"
++                          value={config.deferDeadline || ''}
++                          onChange={(e) => updateConfig({ deferDeadline: e.target.value || undefined })}
++                          className="px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                        />
++                        <p className="text-text-muted text-xs mt-1">After this date, users cannot defer</p>
++                      </div>
++
++                      {/* Force Close Countdown */}
++                      <div>
++                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                          Close apps anyway after (seconds, optional)
++                        </label>
++                        <div className="flex items-center gap-3">
++                          <input
++                            type="number"
++                            min="0"
++                            max="3600"
++                            value={config.forceCloseProcessesCountdown || ''}
++                            onChange={(e) => updateConfig({ forceCloseProcessesCountdown: e.target.value ? parseInt(e.target.value) : undefined })}
+                             placeholder="Not set"
+                             className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                           />
+@@ -1322,10 +1592,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+               {/* Progress & Notifications (advanced only, win32 only) */}
+               {!isStoreApp && (visibleSections === null || visibleSections.includes('progress')) && <ConfigSection
+-                title="Progress & Notifications"
++                summary={summaries.progress}
++                title="Progress and notifications"
+                 icon={<Bell className="w-4 h-4" />}
+                 expanded={expandedSection === 'progress'}
+                 onToggle={() => toggleSection('progress')}
+@@ -1477,10 +1747,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   </div>
+                 </div>
+               </ConfigSection>}
+-
+               {/* Custom Prompts (advanced only, win32 only) */}
+               {!isStoreApp && (visibleSections === null || visibleSections.includes('prompts')) && <ConfigSection
+-                title="Custom Prompts"
++                summary={summaries.prompts}
++                title="Messages to staff"
+                 icon={<MessageSquare className="w-4 h-4" />}
+                 expanded={expandedSection === 'prompts'}
+                 onToggle={() => toggleSection('prompts')}
+@@ -1684,10 +1954,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+               {/* Restart Prompt (advanced only, win32 only) */}
+               {!isStoreApp && (visibleSections === null || visibleSections.includes('restart')) && <ConfigSection
+-                title="Restart Prompt"
++                summary={summaries.restart}
++                title="Restart prompt"
+                 icon={<RefreshCw className="w-4 h-4" />}
+                 expanded={expandedSection === 'restart'}
+                 onToggle={() => toggleSection('restart')}
+@@ -1728,7 +1998,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                       </div>
+                       <div>
+                         <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          No-hide countdown (seconds)
++                          Keep the countdown on screen for the last (seconds)
+                         </label>
+                         <div className="flex items-center gap-3">
+                           <input
+@@ -1752,10 +2022,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+               {/* Disk Space Check (advanced only, win32 only) */}
+               {!isStoreApp && (visibleSections === null || visibleSections.includes('diskspace')) && <ConfigSection
+-                title="Disk Space Check"
++                summary={summaries.diskspace}
++                title="Disk space check"
+                 icon={<HardDrive className="w-4 h-4" />}
+                 expanded={expandedSection === 'diskspace'}
+                 onToggle={() => toggleSection('diskspace')}
+@@ -1790,160 +2060,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+-              {/* Detection Rules (quick + advanced, win32 only) */}
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('detection')) && <ConfigSection
+-                title="Detection Rules"
+-                icon={<FileCode className="w-4 h-4" />}
+-                expanded={expandedSection === 'detection'}
+-                onToggle={() => toggleSection('detection')}
+-              >
+-                <div className="space-y-3">
+-                  {customDetectionSupported && (
+-                    <ToggleOption
+-                      label="Use my own detection rules"
+-                      description="Your registry, file or MSI rules replace the IntuneGet version marker. They stay fixed, so edit them before you deploy a newer version."
+-                      checked={customDetectionActive}
+-                      onChange={setCustomDetection}
+-                    />
+-                  )}
+-                  {customDetectionActive ? (
+-                    <CustomDetectionEditor
+-                      rules={config.detectionRules}
+-                      onChange={(detectionRules) => {
+-                        setCustomDetectionErrors([]);
+-                        lastCustomRulesRef.current = detectionRules;
+-                        updateConfig({ detectionRules });
+-                      }}
+-                      errors={customDetectionErrors}
+-                    />
+-                  ) : <>
+-                  {config.detectionRules.length === 0 ? (
+-                    <p className="text-text-muted text-sm italic">No detection rules configured</p>
+-                  ) : (
+-                    config.detectionRules.map((rule, index) => (
+-                      <div key={index} className="bg-bg-elevated/50 rounded-lg p-3">
+-                        <div className="flex items-center gap-2 mb-2">
+-                          <span className="px-2 py-0.5 bg-accent-cyan/10 text-accent-cyan text-xs font-medium rounded uppercase">
+-                            {rule.type}
+-                          </span>
+-                        </div>
+-                        <DetectionRuleDisplay rule={rule} />
+-                      </div>
+-                    ))
+-                  )}
+-                  <p className="text-text-muted text-xs">
+-                    Detection rules are auto-generated based on installer type. They determine how Intune verifies the app is installed.
+-                  </p>
+-                  </>}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">
+-                      Detection marker registry path
+-                    </label>
+-                    <input
+-                      type="text"
+-                      value={config.registryMarkerPath || ''}
+-                      onChange={(e) => updateConfig({ registryMarkerPath: e.target.value || undefined })}
+-                      placeholder="SOFTWARE\IntuneGet\Apps"
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/10 rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-cyan/50"
+-                    />
+-                    <p className="text-text-muted text-xs mt-1.5">
+-                      Registry key under HKLM/HKCU where the detection marker is written. Customize to track deployments under your own key, e.g. SOFTWARE\CompanyName\Apps.
+-                      {customDetectionActive && ' The marker is still written during install, but Intune uses your own rules for detection.'}
+-                    </p>
+-                  </div>
+-                </div>
+-              </ConfigSection>}
+-
+-              {/* Assignment Configuration (quick + advanced, all app types) */}
+-              {(isStoreApp || visibleSections === null || visibleSections.includes('assignment')) && <ConfigSection
+-                title="Assignment Configuration"
+-                icon={<Target className="w-4 h-4" />}
+-                expanded={expandedSection === 'assignment'}
+-                onToggle={() => toggleSection('assignment')}
+-              >
+-                <AssignmentConfig
+-                  assignments={assignments}
+-                  onChange={setAssignments}
+-                  supportsAutoUpdateSuperseded={!isStoreApp}
+-                />
+-              </ConfigSection>}
+-
+-              {/* Category Configuration (quick + advanced, all app types) */}
+-              {(isStoreApp || visibleSections === null || visibleSections.includes('category')) && <ConfigSection
+-                title="Category Configuration"
+-                icon={<FolderTree className="w-4 h-4" />}
+-                expanded={expandedSection === 'category'}
+-                onToggle={() => toggleSection('category')}
+-              >
+-                <CategoryConfig
+-                  categories={categories}
+-                  onChange={setCategories}
+-                />
+-              </ConfigSection>}
+-
+-              {/* ESP Configuration (quick + advanced, all app types) */}
+-              {(isStoreApp || visibleSections === null || visibleSections.includes('esp')) && <ConfigSection
+-                title="Enrollment Status Page"
+-                icon={<Shield className="w-4 h-4" />}
+-                expanded={expandedSection === 'esp'}
+-                onToggle={() => toggleSection('esp')}
+-              >
+-                <EspProfileSelector
+-                  espProfiles={espProfiles}
+-                  onChange={setEspProfiles}
+-                  mode="pre-deploy"
+-                  hasRequiredAssignment={assignments.some((a) => a.intent === 'required')}
+-                />
+-              </ConfigSection>}
+-
+-              {/* App Updates (quick + advanced, win32 only) */}
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('updates')) && <ConfigSection
+-                title="App Updates"
+-                icon={<ArrowUpCircle className="w-4 h-4" />}
+-                expanded={expandedSection === 'updates'}
+-                onToggle={() => toggleSection('updates')}
+-              >
+-                <div className="space-y-3">
+-                  <p className="text-sm text-text-secondary">
+-                    Choose how IntuneGet handles future versions of this app.
+-                  </p>
+-                  <CartUpdatePolicyPicker
+-                    value={updatePolicy}
+-                    onChange={setUpdatePolicy}
+-                    carryOverAssignments={carryOverAssignments}
+-                    onCarryOverAssignmentsChange={setCarryOverAssignments}
+-                  />
+-                </div>
+-              </ConfigSection>}
+-
+-              {/* Dependencies & Supersedence (quick + advanced, win32 only) */}
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('dependencies')) && <ConfigSection
+-                title="Dependencies & Supersedence"
+-                icon={<Link2 className="w-4 h-4" />}
+-                expanded={expandedSection === 'dependencies'}
+-                onToggle={() => toggleSection('dependencies')}
+-              >
+-                <DependencyConfig
+-                  relationships={relationships}
+-                  onChange={setRelationships}
+-                  manifestDependencies={selectedInstaller?.packageDependencies}
+-                />
+-              </ConfigSection>}
+-
+-              {/* Teaser for quick mode (win32 only) */}
+-              {!isStoreApp && configMode === 'quick' && (
+-                <button
+-                  onClick={() => setConfigMode('advanced')}
+-                  className="w-full py-3 px-4 rounded-lg border border-dashed border-overlay/15 text-sm text-text-secondary hover:text-text-primary hover:border-overlay/25 transition-colors text-center"
+-                >
+-                  7 more configuration sections available
+-                </button>
+-              )}
+-
+               {/* Branding (advanced only, win32 only) */}
+               {!isStoreApp && (visibleSections === null || visibleSections.includes('branding')) && <ConfigSection
+-                title="Branding"
++                summary={summaries.branding}
++                title="Install window branding"
+                 icon={<Palette className="w-4 h-4" />}
+                 expanded={expandedSection === 'branding'}
+                 onToggle={() => toggleSection('branding')}
+@@ -1990,7 +2110,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+ 
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Fluent accent color
++                      Accent color
+                     </label>
+                     <input
+                       type="text"
+@@ -2044,140 +2164,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   </div>
+                 </div>
+               </ConfigSection>}
+-
+-              {/* Advanced (advanced only, win32 only) */}
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('advanced')) && <ConfigSection
+-                title="Advanced Options"
+-                icon={<Terminal className="w-4 h-4" />}
+-                expanded={expandedSection === 'advanced'}
+-                onToggle={() => toggleSection('advanced')}
+-              >
+-                <div className="space-y-4">
+-                  {/* Custom Description */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Description override
+-                    </label>
+-                    <textarea
+-                      value={description}
+-                      onChange={(e) => setDescription(e.target.value)}
+-                      rows={3}
+-                      placeholder={pkg.description || 'Description shown in Intune and Company Portal'}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm resize-y"
+-                    />
+-                    <p className="text-text-muted text-xs mt-1">
+-                      Shown in Intune and the Company Portal. Leave empty to use the default description.
+-                    </p>
+-                  </div>
+-
+-                  {/* Custom Install Command */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Install command override
+-                    </label>
+-                    <input
+-                      type="text"
+-                      value={config.installCommand || ''}
+-                      onChange={(e) => updateConfig({ installCommand: e.target.value || undefined })}
+-                      placeholder={selectedInstaller ? generateInstallCommand(selectedInstaller, selectedScope) : ''}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+-                    />
+-                    <p className="text-text-muted text-xs mt-1">Leave empty to use auto-generated command</p>
+-                  </div>
+-
+-                  {/* Custom Uninstall Command */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Uninstall command override
+-                    </label>
+-                    <input
+-                      type="text"
+-                      value={config.uninstallCommand || ''}
+-                      onChange={(e) => updateConfig({ uninstallCommand: e.target.value || undefined })}
+-                      placeholder={selectedInstaller ? generateUninstallCommand(selectedInstaller, pkg.name) : ''}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+-                    />
+-                  </div>
+-
+-                  {/* Post-install commands (#118) */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Post-install commands
+-                    </label>
+-                    <div className="space-y-2">
+-                      {(config.postInstallCommands || []).map((cmd, index) => (
+-                        <div key={index} className="flex items-center gap-2">
+-                          <input
+-                            type="text"
+-                            value={cmd}
+-                            onChange={(e) => updateCommand('postInstallCommands', index, e.target.value)}
+-                            placeholder={'e.g. powershell.exe -NoProfile -Command "Remove-Item \'$env:Public\\Desktop\\App.lnk\' -Force"'}
+-                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+-                          />
+-                          <button
+-                            type="button"
+-                            onClick={() => removeCommand('postInstallCommands', index)}
+-                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
+-                            aria-label="Remove command"
+-                          >
+-                            <Trash2 className="w-4 h-4" />
+-                          </button>
+-                        </div>
+-                      ))}
+-                      <button
+-                        type="button"
+-                        onClick={() => addCommand('postInstallCommands')}
+-                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
+-                      >
+-                        <Plus className="w-3.5 h-3.5" />
+-                        Add command
+-                      </button>
+-                    </div>
+-                    <p className="text-text-muted text-xs mt-1">
+-                      Run after the app installs (in order), e.g. to remove a desktop shortcut. Each runs via cmd.exe; a failure fails the deployment.
+-                    </p>
+-                  </div>
+-
+-                  {/* Post-uninstall commands (#118) */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Post-uninstall commands
+-                    </label>
+-                    <div className="space-y-2">
+-                      {(config.postUninstallCommands || []).map((cmd, index) => (
+-                        <div key={index} className="flex items-center gap-2">
+-                          <input
+-                            type="text"
+-                            value={cmd}
+-                            onChange={(e) => updateCommand('postUninstallCommands', index, e.target.value)}
+-                            placeholder={'e.g. cmd.exe /c rmdir /s /q "C:\\ProgramData\\App"'}
+-                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+-                          />
+-                          <button
+-                            type="button"
+-                            onClick={() => removeCommand('postUninstallCommands', index)}
+-                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
+-                            aria-label="Remove command"
+-                          >
+-                            <Trash2 className="w-4 h-4" />
+-                          </button>
+-                        </div>
+-                      ))}
+-                      <button
+-                        type="button"
+-                        onClick={() => addCommand('postUninstallCommands')}
+-                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
+-                      >
+-                        <Plus className="w-3.5 h-3.5" />
+-                        Add command
+-                      </button>
+-                    </div>
+-                    <p className="text-text-muted text-xs mt-1">
+-                      Run after the app uninstalls (in order), e.g. to clean up leftover files.
+-                    </p>
+-                  </div>
+                 </div>
+-              </ConfigSection>}
++              </div>)}
+ 
+             </div>
+           </div>
+@@ -2193,7 +2181,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+           {settingsSuccess && (
+             <div className="flex items-center gap-2 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-400">
+               <Check className="w-4 h-4" />
+-              Settings updated successfully
++              Saved to Intune
+             </div>
+           )}
+           {settingsError && (
+@@ -2206,7 +2194,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+             <div className="space-y-2">
+               {!changeState.hasGraphChanges && !settingsSuccess && !isUpdating && (
+                 <p className="text-text-muted text-xs text-center">
+-                  No assignment or category changes to apply
++                  Group and category changes save straight to Intune
+                 </p>
+               )}
+               <div className="flex gap-3">
+@@ -2223,17 +2211,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   {isUpdating ? (
+                     <>
+                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+-                      Updating...
++                      Saving…
+                     </>
+                   ) : settingsSuccess ? (
+                     <>
+                       <Check className="w-5 h-5 mr-2" />
+-                      Updated
++                      Saved
+                     </>
+                   ) : (
+                     <>
+                       <Settings className="w-5 h-5 mr-2" />
+-                      Update Settings
++                      Save to Intune
+                     </>
+                   )}
+                 </Button>
+@@ -2255,7 +2243,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   ) : (
+                     <>
+                       <RefreshCw className="w-5 h-5 mr-2" />
+-                      Redeploy
++                      Deploy again
+                     </>
+                   )}
+                 </Button>
+@@ -2275,19 +2263,19 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+               {isAddingToCart ? (
+                 <>
+                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+-                  Adding...
++                  Adding…
+                 </>
+               ) : inCart || addedToCartSuccess ? (
+                 <Check className="w-5 h-5" />
+               ) : isDeployed ? (
+                 <>
+                   <RefreshCw className="w-5 h-5 mr-2" />
+-                  Add to Selection (Redeploy)
++                  Add to deployment to deploy again
+                 </>
+               ) : (
+                 <>
+                   <Plus className="w-5 h-5 mr-2" />
+-                  {replaceCartItemId ? 'Update Selection' : 'Add to Selection'}
++                  {replaceCartItemId ? 'Update in deployment' : 'Add to deployment'}
+                 </>
+               )}
+             </Button>
+@@ -2329,30 +2317,45 @@ interface ConfigSectionProps {
+   expanded: boolean;
+   onToggle: () => void;
+   children: React.ReactNode;
++  // HRM patch 0022: the current setting in a few words, shown on the closed row
++  summary?: string;
++  // HRM patch 0022: a main group that is always open, with no row to click
++  fixed?: boolean;
+ }
+ 
+-function ConfigSection({ title, icon, expanded, onToggle, children }: ConfigSectionProps) {
++function ConfigSection({ title, icon, expanded, onToggle, children, summary, fixed }: ConfigSectionProps) {
+   const sectionId = useId();
+   const contentId = `${sectionId}-content`;
+   const headerId = `${sectionId}-header`;
+ 
++  if (fixed) {
++    return (
++      <section aria-labelledby={headerId} className="mb-6">
++        <h3 id={headerId} className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
++          <span className="text-text-muted">{icon}</span>
++          {title}
++        </h3>
++        {children}
++      </section>
++    );
++  }
++
+   return (
+-    <div className="border border-overlay/10 rounded-lg overflow-hidden mb-3">
++    <div>
+       <button
+         id={headerId}
+         onClick={onToggle}
+         aria-expanded={expanded}
+         aria-controls={contentId}
+-        className="w-full flex items-center justify-between px-4 py-3 bg-bg-elevated/50 hover:bg-overlay/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-cyan"
++        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-overlay/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-cyan"
+       >
+-        <div className="flex items-center gap-2 text-text-primary">
+-          {icon}
+-          <span className="font-medium">{title}</span>
+-        </div>
+-        <ChevronRight className={cn('w-4 h-4 text-text-muted transition-transform', expanded && 'rotate-90')} />
++        <span className="text-text-muted">{icon}</span>
++        <span className="flex-1 text-sm text-text-primary">{title}</span>
++        {summary && <span className="text-sm text-text-muted truncate max-w-[45%]">{summary}</span>}
++        <ChevronRight className={cn('w-4 h-4 flex-shrink-0 text-text-muted transition-transform', expanded && 'rotate-90')} />
+       </button>
+       {expanded && (
+-        <div id={contentId} role="region" aria-labelledby={headerId} className="p-4 bg-bg-surface/50">
++        <div id={contentId} role="region" aria-labelledby={headerId} className="px-4 pb-4 pt-1">
+           {children}
+         </div>
+       )}
+diff --git a/components/updates/CartUpdatePolicyPicker.tsx b/components/updates/CartUpdatePolicyPicker.tsx
+index 2f6dbf69d..e61fc01ed 100644
+--- a/components/updates/CartUpdatePolicyPicker.tsx
++++ b/components/updates/CartUpdatePolicyPicker.tsx
+@@ -16,12 +16,12 @@ interface PolicyOption {
+ const POLICY_OPTIONS: PolicyOption[] = [
+   {
+     value: undefined,
+-    label: 'Notify',
++    label: 'Tell me',
+     description: 'New versions appear on the Updates page and in your notifications. You deploy them when you choose.',
+   },
+   {
+     value: 'auto_update',
+-    label: 'Auto update',
++    label: 'Update automatically',
+     description: 'New versions are packaged, checked by QA, and deployed to this tenant automatically. Assignments carry over based on your settings.',
+   },
+   {
+@@ -48,16 +48,17 @@ export function CartUpdatePolicyPicker({
+ 
+   return (
+     <div className="space-y-3">
+-      <div className="flex gap-2">
++      {/* HRM patch 0022: stacked on phones so the labels never break mid-word */}
++      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+         {POLICY_OPTIONS.map((option) => (
+           <button
+             key={option.label}
+             type="button"
+             onClick={() => onChange(option.value)}
+             className={cn(
+-              'flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors',
++              'px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors',
+               selected.label === option.label
+-                ? 'bg-blue-600 border-blue-500 text-white'
++                ? 'bg-accent-cyan border-accent-cyan text-white'
+                 : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
+             )}
+           >
+@@ -72,11 +73,11 @@ export function CartUpdatePolicyPicker({
+             type="checkbox"
+             checked={carryOverAssignments}
+             onChange={(e) => onCarryOverAssignmentsChange(e.target.checked)}
+-            className="mt-0.5 h-4 w-4 rounded border-overlay/30 accent-blue-600"
++            className="mt-0.5 h-4 w-4 rounded border-overlay/30 accent-accent-cyan"
+           />
+           <span>
+             <span className="block text-sm font-medium text-text-primary">
+-              Carry over assignments
++              Keep the same groups on each new version
+             </span>
+             <span className="block text-xs text-text-muted mt-0.5">
+               Move this app&apos;s group assignments to each new version and remove them from the previous one.
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index bfb31f63e..b75fc82ab 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -16,7 +16,9 @@ export const HELP_SECTIONS: HelpSection[] = [
+     id: 'deploying',
+     title: 'Deploying an app',
+     points: [
+-      'Find the app in the App catalog, add it to the cart, choose its groups, then press Deploy to Intune.',
++      'Find the app in the App catalog and open it. Choose its groups under Who gets it and what happens with new versions, then press Add to deployment. Open the cart and press Deploy to Intune.',
++      'Everything else is under More settings and What staff see during install. Each row shows its current setting, so you only open the ones you want to change.',
++      'For an app that is already deployed, Save to Intune applies group and category changes straight away. Other changes, such as the version or New computer setup, need Deploy again.',
+       'Required installs the app without asking. Available lists it in Company Portal for people to install themselves, and only works with user groups.',
+       'Assign to a device group when every computer in the group needs the app, including shared computers and before anyone signs in.',
+       'Assign to a user group when the app follows the person to any computer they use, or when it is offered as Available.',

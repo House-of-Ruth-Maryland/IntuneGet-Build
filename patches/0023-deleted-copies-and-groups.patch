@@ -1,0 +1,427 @@
+diff --git a/app/api/cron/check-updates/route.ts b/app/api/cron/check-updates/route.ts
+index bce33961f..509ea2629 100644
+--- a/app/api/cron/check-updates/route.ts
++++ b/app/api/cron/check-updates/route.ts
+@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server';
+ import { createClient, SupabaseClient } from '@supabase/supabase-js';
+ import { getDatabase, isSqliteMode } from '@/lib/db';
+ import { runSqliteUpdateCheck } from '@/lib/auto-update/sqlite';
++import { listWin32AppIds } from '@/lib/hrm/intune-app-ids';
+ import { runSqliteInstallCheck } from '@/lib/hrm/install-status-check';
+ import { parseVersion, compareVersions } from '@/lib/version-compare';
+ import {
+@@ -271,7 +272,11 @@ export async function GET(request: Request) {
+   if (isSqliteMode()) {
+     try {
+       const { sqliteCustomReleases } = await import('@/lib/db/sqlite');
+-      const summary = await runSqliteUpdateCheck(getDatabase(), { customReleases: { store: sqliteCustomReleases } });
++      const summary = await runSqliteUpdateCheck(getDatabase(), {
++        customReleases: { store: sqliteCustomReleases },
++        // HRM patch 0023: skip copies deleted in Intune
++        existingAppIds: listWin32AppIds,
++      });
+       // HRM patch 0019: install counts per app; a failed check never fails the update check.
+       const installStatus = await runSqliteInstallCheck().catch((error) => ({
+         checked: 0,
+diff --git a/app/api/updates/refresh/route.ts b/app/api/updates/refresh/route.ts
+index 6878ef9b4..b77f75ffe 100644
+--- a/app/api/updates/refresh/route.ts
++++ b/app/api/updates/refresh/route.ts
+@@ -8,6 +8,7 @@ import { parseVersion } from '@/lib/version-compare';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { getDatabase, isSqliteMode } from '@/lib/db';
+ import { runSqliteUpdateCheck } from '@/lib/auto-update/sqlite';
++import { listWin32AppIds } from '@/lib/hrm/intune-app-ids';
+ import { parseAccessToken } from '@/lib/auth-utils';
+ import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
+ import { GET as getLiveIntuneUpdates } from '@/app/api/intune/apps/updates/route';
+@@ -64,7 +65,12 @@ export async function POST(request: NextRequest) {
+     if (isSqliteMode()) {
+       // HRM patch 0020: "Check now" also looks for new GitHub releases of custom apps
+       const { sqliteCustomReleases } = await import('@/lib/db/sqlite');
+-      const summary = await runSqliteUpdateCheck(getDatabase(), { userId: user.userId, customReleases: { store: sqliteCustomReleases } });
++      const summary = await runSqliteUpdateCheck(getDatabase(), {
++        userId: user.userId,
++        customReleases: { store: sqliteCustomReleases },
++        // HRM patch 0023: skip copies deleted in Intune
++        existingAppIds: listWin32AppIds,
++      });
+       return NextResponse.json({
+         success: true,
+         mode: 'sqlite',
+diff --git a/components/hrm/AppGroupsLine.test.ts b/components/hrm/AppGroupsLine.test.ts
+new file mode 100644
+index 000000000..4bbef4530
+--- /dev/null
++++ b/components/hrm/AppGroupsLine.test.ts
+@@ -0,0 +1,55 @@
++// @vitest-environment happy-dom
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++
++const state = vi.hoisted(() => ({ value: {} as { data?: unknown; isLoading?: boolean; error?: Error | null } }));
++vi.mock('@/hooks/use-inventory', () => ({ useAppDetails: () => state.value }));
++import { AppGroupsLine } from './AppGroupsLine';
++
++let root: Root;
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++const group = (id: string, intent: string) => ({ intent, target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: id } });
++
++async function render(id: string | null = 'app-1') {
++  await act(async () => root.render(createElement(AppGroupsLine, { intuneAppId: id })));
++  return document.body.textContent ?? '';
++}
++
++beforeEach(() => {
++  const el = document.createElement('div');
++  document.body.append(el);
++  root = createRoot(el);
++});
++afterEach(async () => {
++  await act(async () => root.unmount());
++  document.body.innerHTML = '';
++});
++
++describe('AppGroupsLine', () => {
++  it('names each group and how it is assigned', async () => {
++    state.value = { data: { app: { assignments: [group('g1', 'required'), group('g2', 'available')],
++      assignmentGroupNames: { g1: 'APP-Example', g2: 'Staff-Example' } } } };
++    expect(await render()).toBe('APP-Example · Required, Staff-Example · Available');
++  });
++
++  it('shortens a long list', async () => {
++    state.value = { data: { app: { assignments: ['a', 'b', 'c', 'd', 'e'].map((g) => group(g, 'required')),
++      assignmentGroupNames: { a: 'A', b: 'B', c: 'C', d: 'D', e: 'E' } } } };
++    expect(await render()).toContain('and 2 more');
++  });
++
++  it('warns when the copy has no groups or is gone from Intune', async () => {
++    state.value = { data: { app: { assignments: [] } } };
++    expect(await render()).toContain('No groups. This copy installs nowhere.');
++    state.value = { error: new Error('App not found') };
++    expect(await render()).toContain('Not in Intune any more');
++  });
++
++  it('shows nothing for other errors or without an app ID', async () => {
++    state.value = { error: new Error('Failed to fetch app details') };
++    expect(await render()).toBe('');
++    state.value = { isLoading: true };
++    expect(await render(null)).toBe('');
++  });
++});
+diff --git a/components/hrm/AppGroupsLine.tsx b/components/hrm/AppGroupsLine.tsx
+new file mode 100644
+index 000000000..ec0a825a4
+--- /dev/null
++++ b/components/hrm/AppGroupsLine.tsx
+@@ -0,0 +1,49 @@
++'use client';
++
++// HRM patch 0023: which groups an Intune app is assigned to, in one line, read live from Intune.
++
++import { AlertTriangle, Users } from 'lucide-react';
++import { useAppDetails } from '@/hooks/use-inventory';
++import { assignmentTargetLabel } from '@/lib/intune/assignment-group-names';
++
++const INTENT: Record<string, string> = { required: 'Required', available: 'Available', uninstall: 'Uninstall', availableWithoutEnrollment: 'Available' };
++const SHOWN = 3;
++
++export function AppGroupsLine({ intuneAppId }: { intuneAppId: string | null | undefined }) {
++  const { data, isLoading, error } = useAppDetails(intuneAppId || null);
++  if (!intuneAppId) return null;
++  if (isLoading) return <p className="text-xs text-text-muted">Checking groups…</p>;
++  if (error) {
++    const gone = error instanceof Error && /not found/i.test(error.message);
++    return gone ? (
++      <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
++        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
++        Not in Intune any more. Don&apos;t update this copy.
++      </p>
++    ) : null;
++  }
++  const app = data?.app;
++  if (!app) return null;
++  const assignments = app.assignments ?? [];
++  if (assignments.length === 0) {
++    return (
++      <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
++        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
++        No groups. This copy installs nowhere.
++      </p>
++    );
++  }
++  const labels = assignments.map((a) => {
++    const target = assignmentTargetLabel(a.target, app.assignmentGroupNames, app.assignmentGroupLookupFailures).replace(/^Group: /, '');
++    return `${target} · ${INTENT[a.intent] ?? a.intent}`;
++  });
++  return (
++    <p className="flex items-start gap-1.5 text-xs text-text-secondary">
++      <Users className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-text-muted" aria-hidden="true" />
++      <span>
++        {labels.slice(0, SHOWN).join(', ')}
++        {labels.length > SHOWN && <span className="text-text-muted"> and {labels.length - SHOWN} more</span>}
++      </span>
++    </p>
++  );
++}
+diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
+index 077909b7c..5da5034f5 100644
+--- a/components/inventory/InventoryAppDetails.tsx
++++ b/components/inventory/InventoryAppDetails.tsx
+@@ -166,12 +166,24 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+             )}
+           </div>
+ 
+-          {/* Assignments */}
++          {/* Assignments. HRM patch 0023: always shown, so an app with no groups is obvious. */}
++          {(!app.assignments || app.assignments.length === 0) && (
++            <div>
++              <h4 className="text-sm font-semibold text-text-secondary mb-3 flex items-center gap-2">
++                <Users className="w-3.5 h-3.5" />
++                Groups
++              </h4>
++              <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-700 dark:text-amber-300">
++                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
++                No groups. This app installs nowhere until it&apos;s assigned to a group.
++              </p>
++            </div>
++          )}
+           {app.assignments && app.assignments.length > 0 && (
+             <div>
+               <h4 className="text-sm font-semibold text-text-secondary mb-3 flex items-center gap-2">
+                 <Users className="w-3.5 h-3.5" />
+-                Assignments ({app.assignments.length})
++                Groups ({app.assignments.length})
+               </h4>
+               <div className="space-y-2">
+                 {app.assignments.map((assignment) => {
+diff --git a/components/updates/UpdateCard.tsx b/components/updates/UpdateCard.tsx
+index 7c53601c7..1cd7ef23f 100644
+--- a/components/updates/UpdateCard.tsx
++++ b/components/updates/UpdateCard.tsx
+@@ -21,6 +21,7 @@ import {
+ import Link from 'next/link';
+ import { Button } from '@/components/ui/button';
+ import { isCustomAppId } from '@/lib/hrm/new-version';
++import { AppGroupsLine } from '@/components/hrm/AppGroupsLine';
+ import { AppIcon } from '@/components/AppIcon';
+ import { UpdatePolicySelector } from './UpdatePolicySelector';
+ import { cn } from '@/lib/utils';
+@@ -258,6 +259,13 @@ export function UpdateCard({
+           )}
+         </div>
+ 
++        {/* HRM patch 0023: where this update lands, read live from Intune */}
++        {update.is_managed !== false && (
++          <div className="pb-3">
++            <AppGroupsLine intuneAppId={update.intune_app_id} />
++          </div>
++        )}
++
+         {/* Action row */}
+         {isCustomAppId(update.winget_id) ? (
+           // HRM patch 0020: a custom app's new GitHub release opens the filled-in custom app form; never automatic.
+diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
+index 69241abf6..3f8ca5034 100644
+--- a/lib/auto-update/__tests__/sqlite.test.ts
++++ b/lib/auto-update/__tests__/sqlite.test.ts
+@@ -377,3 +377,45 @@ describe('custom app GitHub releases', () => {
+     expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ intune_app_id: 'custom-app-1' }]);
+   });
+ });
++
++// HRM patch 0023: copies deleted in Intune
++describe('copies deleted in Intune', () => {
++  const only = (...ids: string[]) => async () => new Set(ids);
++
++  it('drops an update for a copy that is gone from Intune and keeps the live one', async () => {
++    const { db, runSqliteUpdateCheck } = await load();
++    await seedDeployment(db);
++    await db.uploadHistory.create({ id: 'u1-second', user_id: 'u1', winget_id: 'Vendor.App', version: '1.0.0',
++      display_name: 'Vendor App', intune_app_id: 'app-2', intune_tenant_id: 't1' });
++    getAppsByWingetIdsMock.mockResolvedValue([{ winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.1.0' }]);
++    getLatestInstallerInfoMock.mockResolvedValue(installerResolution());
++
++    await runSqliteUpdateCheck(db);
++    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toHaveLength(2);
++
++    const summary = await runSqliteUpdateCheck(db, { existingAppIds: only('app-2') });
++    expect(summary.available).toBe(1);
++    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ intune_app_id: 'app-2' }]);
++  });
++
++  it('never auto-updates a copy that is gone from Intune', async () => {
++    const { db, runSqliteUpdateCheck } = await load();
++    await seedDeployment(db);
++    getAppsByWingetIdsMock.mockResolvedValue([{ winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.1.0' }]);
++    getLatestInstallerInfoMock.mockResolvedValue(installerResolution());
++
++    const summary = await runSqliteUpdateCheck(db, { existingAppIds: only('another-app') });
++    expect(summary).toMatchObject({ available: 0, triggered: 0 });
++    expect(await db.jobs.getByTenantId('t1')).toHaveLength(0);
++  });
++
++  it("skips nothing when Intune can't be read", async () => {
++    const { db, runSqliteUpdateCheck } = await load();
++    await seedDeployment(db);
++    getAppsByWingetIdsMock.mockResolvedValue([{ winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.1.0' }]);
++    getLatestInstallerInfoMock.mockResolvedValue(installerResolution());
++
++    const summary = await runSqliteUpdateCheck(db, { existingAppIds: async () => null });
++    expect(summary).toMatchObject({ available: 1, triggered: 1 });
++  });
++});
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index 53e59bb8d..9d622629d 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -305,6 +305,8 @@ export async function runSqliteUpdateCheck(
+     now?: Date;
+     // HRM patch 0020: also look for new GitHub releases of custom apps
+     customReleases?: { store: CustomReleaseStore; fetchImpl?: typeof fetch };
++    // HRM patch 0023: Win32 apps that still exist in Intune, per tenant (null: couldn't tell)
++    existingAppIds?: ExistingAppIds;
+   }
+ ): Promise<SqliteUpdateCheckSummary> {
+   const catalog = getCatalogSource();
+@@ -320,6 +322,21 @@ export async function runSqliteUpdateCheck(
+     if (!newest.has(key)) newest.set(key, deployment);
+   }
+ 
++  // HRM patch 0023: a copy deleted in Intune is no longer deployed. Skipping it here also lets the
++  // clean-up below remove its old update row, so App updates and auto-update never act on it.
++  const existing = new Map<string, Set<string> | null>();
++  const isGoneFromIntune = (tenantId: string | null | undefined, intuneAppId: string | null | undefined) => {
++    const ids = existing.get(tenantId ?? '');
++    return Boolean(ids && intuneAppId && !ids.has(intuneAppId.toLowerCase()));
++  };
++  if (options?.existingAppIds) {
++    const tenants = [...new Set([...newest.values()].map((d) => d.intune_tenant_id ?? ''))].filter(Boolean);
++    for (const t of tenants) existing.set(t, await options.existingAppIds(t).catch(() => null));
++    for (const [key, deployment] of newest) {
++      if (isGoneFromIntune(deployment.intune_tenant_id, deployment.intune_app_id)) newest.delete(key);
++    }
++  }
++
+   const wingetIds = [...new Set([...newest.values()].map((deployment) => deployment.winget_id))];
+   const apps = wingetIds.length > 0 ? await catalog.getAppsByWingetIds(wingetIds).catch(() => []) : [];
+   const latestVersionByWinget = new Map(apps.map((app) => [app.winget_id, app.latest_version]));
+@@ -436,6 +453,11 @@ export async function runSqliteUpdateCheck(
+ 
+     const deployment = await db.uploadHistory.getLatest(policy.user_id, policy.tenant_id, policy.winget_id);
+     if (!deployment) continue;
++    // HRM patch 0023: never auto-update a copy that was deleted in Intune
++    if (isGoneFromIntune(deployment.intune_tenant_id ?? policy.tenant_id, deployment.intune_app_id)) {
++      skipped += 1;
++      continue;
++    }
+     if (autoUpdateScopeReason(policy.auto_update_scope, deployment.version, latestVersion)) {
+       skipped += 1;
+       continue;
+@@ -495,3 +517,4 @@ import { customDetectionUpdateHold } from '@/lib/custom-detection';
+ import { dispatchUpdateJob } from '@/lib/hrm/update-dispatch';
+ import { findCustomAppReleases, type CustomReleaseStore } from '@/lib/hrm/github-releases';
+ import { isCustomAppId } from '@/lib/hrm/new-version';
++import type { ExistingAppIds } from '@/lib/hrm/intune-app-ids';
+diff --git a/lib/hrm/__tests__/intune-app-ids.test.ts b/lib/hrm/__tests__/intune-app-ids.test.ts
+new file mode 100644
+index 000000000..c611d3dbb
+--- /dev/null
++++ b/lib/hrm/__tests__/intune-app-ids.test.ts
+@@ -0,0 +1,29 @@
++import { describe, expect, it, vi } from 'vitest';
++import { listWin32AppIds } from '../intune-app-ids';
++
++const token = async () => 'token';
++const page = (ids: string[], next?: string) => Response.json({ value: ids.map((id) => ({ id })), ...(next ? { '@odata.nextLink': next } : {}) });
++
++describe('listWin32AppIds', () => {
++  it('reads every page and lower-cases the IDs', async () => {
++    const fetchImpl = vi.fn()
++      .mockResolvedValueOnce(page(['AAA'], 'https://graph.microsoft.com/beta/deviceAppManagement/mobileApps?$skiptoken=2'))
++      .mockResolvedValueOnce(page(['bbb']));
++    const ids = await listWin32AppIds('tenant-one', { token, fetchImpl: fetchImpl as unknown as typeof fetch });
++    expect(ids).toEqual(new Set(['aaa', 'bbb']));
++    expect(String(fetchImpl.mock.calls[0][0])).toContain('$select=id');
++  });
++
++  it("returns null when Intune can't be read, so nothing is skipped", async () => {
++    const failing = vi.fn(async () => new Response('denied', { status: 403 })) as unknown as typeof fetch;
++    expect(await listWin32AppIds('tenant-one', { token, fetchImpl: failing })).toBeNull();
++    expect(await listWin32AppIds('tenant-one', { token: async () => null })).toBeNull();
++    expect(await listWin32AppIds('', { token })).toBeNull();
++  });
++
++  it('never follows a next link to another host', async () => {
++    const fetchImpl = vi.fn().mockResolvedValueOnce(page(['aaa'], 'https://evil.example.test/next'));
++    expect(await listWin32AppIds('tenant-one', { token, fetchImpl: fetchImpl as unknown as typeof fetch })).toEqual(new Set(['aaa']));
++    expect(fetchImpl).toHaveBeenCalledTimes(1);
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index b75fc82ab..5fcaa808e 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -18,6 +18,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+     points: [
+       'Find the app in the App catalog and open it. Choose its groups under Who gets it and what happens with new versions, then press Add to deployment. Open the cart and press Deploy to Intune.',
+       'Everything else is under More settings and What staff see during install. Each row shows its current setting, so you only open the ones you want to change.',
++      'To see where an app is deployed, open it in Inventory: Groups lists each group and whether it is Required or Available. No groups means it installs nowhere.',
+       'For an app that is already deployed, Save to Intune applies group and category changes straight away. Other changes, such as the version or New computer setup, need Deploy again.',
+       'Required installs the app without asking. Available lists it in Company Portal for people to install themselves, and only works with user groups.',
+       'Assign to a device group when every computer in the group needs the app, including shared computers and before anyone signs in.',
+@@ -40,6 +41,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+     points: [
+       'The server checks for new app versions at 3:30 AM and 3:30 PM, and sends update alerts at 4:00 AM and 4:00 PM (Maryland time).',
+       'Updates waiting for approval show on the Home page and in App updates.',
++      'Each App updates card shows the groups that copy is assigned to, read from Intune, so you can see where an update will land. A copy deleted in Intune drops off at the next check, and auto-update never acts on it.',
+       'Custom apps installed from a GitHub release download are checked too. A newer release shows in App updates with Deploy new version.',
+     ],
+   },
+diff --git a/lib/hrm/intune-app-ids.ts b/lib/hrm/intune-app-ids.ts
+new file mode 100644
+index 000000000..93a518ba2
+--- /dev/null
++++ b/lib/hrm/intune-app-ids.ts
+@@ -0,0 +1,40 @@
++/**
++ * HRM patch 0023: which Win32 apps still exist in Intune.
++ *
++ * IntuneGet keeps its own deployment history, so a copy deleted in Intune
++ * still looked like a deployed app: App updates listed it and auto-update
++ * could act on it. The update check asks Intune for the current list and
++ * skips copies that are gone. If Intune can't be asked, nothing is skipped.
++ */
++
++import { inventoryPageUrl } from '@/lib/intune/inventory-list';
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++
++const MAX_PAGES = 50;
++
++// IDs are lower-case.
++export type ExistingAppIds = (tenantId: string) => Promise<Set<string> | null>;
++
++/** Every Win32 app ID in the tenant, or null when Intune couldn't be read completely. */
++export async function listWin32AppIds(
++  tenantId: string,
++  deps: { token?: (tenantId: string) => Promise<string | null>; fetchImpl?: typeof fetch } = {}
++): Promise<Set<string> | null> {
++  if (!tenantId) return null;
++  const token = await (deps.token ?? getServicePrincipalToken)(tenantId).catch(() => null);
++  if (!token) return null;
++  const doFetch = deps.fetchImpl ?? fetch;
++  const ids = new Set<string>();
++  let url: string | null = `${inventoryPageUrl(null)}&$select=id`;
++  for (let page = 0; url && page < MAX_PAGES; page++) {
++    const response = await doFetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }).catch(() => null);
++    if (!response?.ok) return null;
++    const body = (await response.json().catch(() => null)) as { value?: Array<{ id?: string }>; '@odata.nextLink'?: string } | null;
++    if (!body || !Array.isArray(body.value)) return null;
++    for (const app of body.value) if (app.id) ids.add(app.id.toLowerCase());
++    const next = body['@odata.nextLink'];
++    url = typeof next === 'string' && next.startsWith('https://graph.microsoft.com/') ? next : null;
++  }
++  // Stopped at the page limit: the list may be incomplete, so don't skip anything.
++  return url ? null : ids;
++}

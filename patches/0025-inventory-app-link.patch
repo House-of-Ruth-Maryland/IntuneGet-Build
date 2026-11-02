@@ -34,7 +34,7 @@ index d4fb43f0f..bbedd2d62 100644
 +  );
 +}
 +
-+// HRM patch 0022: useSearchParams needs a Suspense boundary, or the build fails at prerender.
++// HRM patch 0025: useSearchParams needs a Suspense boundary, or the build fails at prerender.
  export default function InventoryPage() {
 +  return (
 +    <Suspense fallback={<InventoryLoading />}>
@@ -48,7 +48,7 @@ index d4fb43f0f..bbedd2d62 100644
 +  const searchParams = useSearchParams();
    const { data, isLoading, error, refetch, isFetching, isComplete } = useInventoryApps();
 -  const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
-+  // HRM patch 0022: /dashboard/inventory?app=<Intune app id> opens that app's details.
++  // HRM patch 0025: /dashboard/inventory?app=<Intune app id> opens that app's details.
 +  const [linkedApp] = useState(() => linkedAppId(searchParams.get('app')));
 +  const [selectedAppId, setSelectedAppId] = useState<string | null>(linkedApp);
    const [search, setSearch] = useState('');
@@ -96,7 +96,7 @@ index 40eb97483..4d5e3d46f 100644
      }
  
      const appData = await appResponse.json();
-+    // HRM patch 0022: Inventory lists Win32 apps only, so a linked id for any
++    // HRM patch 0025: Inventory lists Win32 apps only, so a linked id for any
 +    // other app type gets the same answer as an unknown one.
 +    if (appData['@odata.type'] && appData['@odata.type'] !== '#microsoft.graph.win32LobApp') {
 +      return NextResponse.json(
@@ -122,7 +122,7 @@ index 000000000..78d2968b3
 +vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: vi.fn() }));
 +import { GET } from './route';
 +
-+// HRM patch 0022: Inventory links open Win32 apps only; any other app type reads as not found.
++// HRM patch 0025: Inventory links open Win32 apps only; any other app type reads as not found.
 +const id = '11111111-1111-4111-8111-111111111111';
 +const request = () => new NextRequest(`http://localhost/api/intune/apps/${id}`);
 +const params = { params: Promise.resolve({ id }) };
@@ -159,7 +159,7 @@ index 000000000..99cd14039
 +import { createRoot, type Root } from 'react-dom/client';
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +
-+// HRM patch 0022: /dashboard/inventory?app=<Intune app id> opens that app's details.
++// HRM patch 0025: /dashboard/inventory?app=<Intune app id> opens that app's details.
 +const state = vi.hoisted(() => ({ search: '', replace: vi.fn(), push: vi.fn() }));
 +vi.mock('next/navigation', () => ({
 +  useRouter: () => ({ replace: state.replace, push: state.push }),
@@ -266,7 +266,7 @@ index 000000000..b10b9ebda
 +import { createRoot, type Root } from 'react-dom/client';
 +import { afterEach, describe, expect, it, vi } from 'vitest';
 +
-+// HRM patch 0022: a link to an unknown or non-Win32 app shows the panel's error, not a blank panel.
++// HRM patch 0025: a link to an unknown or non-Win32 app shows the panel's error, not a blank panel.
 +vi.mock('@/hooks/use-inventory', () => ({
 +  useAppDetails: () => ({ data: undefined, isLoading: false, error: new Error('App not found'), refetch: vi.fn() }),
 +}));
@@ -293,10 +293,10 @@ index 000000000..b10b9ebda
 +  });
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
-index bfb31f63e..75087e659 100644
+index ac1923dfb..66b4c9174 100644
 --- a/lib/hrm/help-content.ts
 +++ b/lib/hrm/help-content.ts
-@@ -64,6 +64,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -69,6 +69,7 @@ export const HELP_SECTIONS: HelpSection[] = [
      points: [
        'At 3:30 AM and 3:30 PM (Maryland time), with the update check, IntuneGet asks Intune how each app it deployed is installing: installed, failed, pending and not applicable.',
        'Open the app in Inventory to see the counts and the most common reasons for failures, with a link to the app in Intune.',
@@ -311,7 +311,7 @@ index 000000000..2abe88545
 +++ b/lib/hrm/inventory-link.ts
 @@ -0,0 +1,16 @@
 +/**
-+ * HRM patch 0022: open an app's details from a link.
++ * HRM patch 0025: open an app's details from a link.
 + *
 + * /dashboard/inventory?app=<Intune app id> opens that app's details panel, so
 + * other tools can link straight to one Win32 app. Intune app ids are GUIDs;
