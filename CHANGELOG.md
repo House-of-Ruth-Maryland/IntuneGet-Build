@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-01
+
+- Install results per app: twice a day, with the update check, IntuneGet reads how every app it
+  deployed is installing (counts only, never device or user names). Inventory shows installed, failed, pending and not applicable with
+  the most common reasons; Home lists apps with failures; an alert posts when an app's failures go up,
+  at most once a day per app (patch 0019).
+- New GitHub releases of custom apps show in App updates. Deploy new version opens the custom app form
+  with the new version, download link and checksum filled in, for you to check. Nothing deploys on its
+  own (patch 0020).
+- Alerts can go through the HRM alert relay: Custom webhooks now include the server's address so the
+  relay's cards link back to IntuneGet (patch 0019).
+- Safer webhooks: addresses must be public https addresses, checked when saved and before every
+  delivery, and redirects are never followed. Signed-in pages no longer contact changelog.ugurlabs.com
+  (patch 0018).
+- Server status shows the nightly off-site backup. Deploy new version only shows on the newest
+  deployed version. The silent switches hint says they came from the previous version. Help covers
+  install results, release alerts and the alert relay (patch 0021).
+
 ## 2026-10-31
 
 - Moved to upstream IntuneGet v0.8.5 (from v0.8.2), which brings upstream's fixes since v0.8.2,

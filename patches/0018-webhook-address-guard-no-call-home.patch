@@ -1,0 +1,418 @@
+diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
+index a6338cb29..28465fe10 100644
+--- a/app/(app)/dashboard/layout.tsx
++++ b/app/(app)/dashboard/layout.tsx
+@@ -23,7 +23,6 @@ import { TenantSwitcher } from '@/components/msp';
+ import dynamic from 'next/dynamic';
+ const UploadCart = dynamic(() => import('@/components/UploadCart').then(m => m.UploadCart));
+ import { NotificationBell } from '@/components/notifications';
+-import { ChangelogBell } from '@/components/changelog/ChangelogBell';
+ import { Sidebar, DeploymentStatusIndicator } from '@/components/dashboard';
+ const CommandPalette = dynamic(() => import('@/components/dashboard/CommandPalette').then(m => m.CommandPalette));
+ import { springPresets } from '@/lib/animations/variants';
+@@ -179,7 +178,7 @@ export default function DashboardLayout({
+             <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+               <TenantSwitcher />
+               <DeploymentStatusIndicator />
+-              <ChangelogBell />
++              {/* HRM patch: no "What's new" bell; it loaded changelog.ugurlabs.com from every signed-in page */}
+               {hostedServices && <NotificationBell />}
+               <Button
+                 variant="ghost"
+diff --git a/app/api/webhooks/[id]/route.ts b/app/api/webhooks/[id]/route.ts
+index 71a8ef512..3a7780629 100644
+--- a/app/api/webhooks/[id]/route.ts
++++ b/app/api/webhooks/[id]/route.ts
+@@ -10,7 +10,7 @@ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { parseAccessToken } from '@/lib/auth-utils';
+ import { isSqliteMode } from '@/lib/db';
+ import { WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE } from '@/types/notifications';
+-import { validateWebhookUrl } from '@/lib/webhooks/service';
++import { validateWebhookDestination } from '@/lib/webhooks/service';
+ import type {
+   WebhookConfiguration,
+   WebhookConfigurationUpdate,
+@@ -117,7 +117,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
+ 
+     // Validate URL if provided
+     if (body.url) {
+-      const urlValidation = validateWebhookUrl(body.url);
++      const urlValidation = await validateWebhookDestination(body.url);
+       if (!urlValidation.valid) {
+         return NextResponse.json(
+           { error: urlValidation.error || 'Invalid webhook URL' },
+diff --git a/app/api/webhooks/route.sqlite.test.ts b/app/api/webhooks/route.sqlite.test.ts
+index 23d6c7094..f864e8b2e 100644
+--- a/app/api/webhooks/route.sqlite.test.ts
++++ b/app/api/webhooks/route.sqlite.test.ts
+@@ -4,6 +4,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ 
++// Test addresses don't resolve in DNS; keep the no-network checks (HRM address guard).
++vi.mock('@/lib/webhooks/address-guard', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@/lib/webhooks/address-guard')>();
++  return { ...actual, checkWebhookDestination: async (url: string) => actual.checkWebhookUrlShape(url) };
++});
++
+ const parseAccessTokenMock = vi.hoisted(() => vi.fn());
+ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: parseAccessTokenMock }));
+ 
+diff --git a/app/api/webhooks/route.test.ts b/app/api/webhooks/route.test.ts
+index bf145ab4f..fe7bb0d7d 100644
+--- a/app/api/webhooks/route.test.ts
++++ b/app/api/webhooks/route.test.ts
+@@ -1,6 +1,12 @@
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { NextRequest } from 'next/server';
+ 
++// Test addresses don't resolve in DNS; keep the no-network checks (HRM address guard).
++vi.mock('@/lib/webhooks/address-guard', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@/lib/webhooks/address-guard')>();
++  return { ...actual, checkWebhookDestination: async (url: string) => actual.checkWebhookUrlShape(url) };
++});
++
+ const fixture = vi.hoisted(() => ({ allowed: true, client: null as unknown }));
+ const clientFactory = vi.hoisted(() => vi.fn());
+ vi.mock('@/lib/auth-utils', () => ({
+diff --git a/app/api/webhooks/route.ts b/app/api/webhooks/route.ts
+index 72bfc97ba..0d957293f 100644
+--- a/app/api/webhooks/route.ts
++++ b/app/api/webhooks/route.ts
+@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { parseAccessToken } from '@/lib/auth-utils';
+ import { isSqliteMode } from '@/lib/db';
+-import { validateWebhookUrl, detectWebhookType } from '@/lib/webhooks/service';
++import { validateWebhookDestination, detectWebhookType } from '@/lib/webhooks/service';
+ import { WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE } from '@/types/notifications';
+ import type {
+   WebhookConfiguration,
+@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
+     }
+ 
+     // Validate URL
+-    const urlValidation = validateWebhookUrl(body.url);
++    const urlValidation = await validateWebhookDestination(body.url);
+     if (!urlValidation.valid) {
+       return NextResponse.json(
+         { error: urlValidation.error || 'Invalid webhook URL' },
+diff --git a/app/layout.tsx b/app/layout.tsx
+index 249270237..dd5d02974 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -206,7 +206,8 @@ export default async function RootLayout({
+           type="font/woff2"
+           crossOrigin="anonymous"
+         />
+-        <link rel="preconnect" href="https://plausible.io" />
++        {/* HRM patch: only open a connection to plausible.io when analytics are configured */}
++        {PLAUSIBLE_DOMAIN && <link rel="preconnect" href="https://plausible.io" />}
+         <script
+           dangerouslySetInnerHTML={{
+             __html: `window.__RUNTIME_CONFIG__=${JSON.stringify({
+diff --git a/lib/webhooks/address-guard.test.ts b/lib/webhooks/address-guard.test.ts
+new file mode 100644
+index 000000000..01c981fb8
+--- /dev/null
++++ b/lib/webhooks/address-guard.test.ts
+@@ -0,0 +1,74 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++
++const lookupMock = vi.fn();
++let lookupFails = false;
++vi.mock('dns/promises', () => ({
++  lookup: async (...args: unknown[]) => {
++    if (lookupFails) throw new Error('getaddrinfo ENOTFOUND');
++    return lookupMock(...args);
++  },
++}));
++
++import { checkWebhookDestination, checkWebhookUrlShape, isBlockedAddress } from './address-guard';
++
++beforeEach(() => {
++  lookupMock.mockReset();
++  lookupFails = false;
++});
++
++describe('isBlockedAddress', () => {
++  it.each([
++    '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1',
++    '0.0.0.0', '224.0.0.1', '255.255.255.255', '::1', '::', 'fd00::1', 'fe80::1', 'ff02::1',
++    '::ffff:127.0.0.1', '::ffff:7f00:1', '64:ff9b::10.0.0.1', 'not-an-ip',
++  ])('blocks %s', (address) => expect(isBlockedAddress(address)).toBe(true));
++
++  it.each(['20.42.65.92', '172.32.0.1', '8.8.8.8', '2606:4700::1111', '::ffff:8.8.8.8'])('allows %s', (address) =>
++    expect(isBlockedAddress(address)).toBe(false)
++  );
++});
++
++describe('checkWebhookUrlShape', () => {
++  it.each([
++    ['http://hooks.example.test/x', 'https://'],
++    ['https://localhost/x', 'must be public'],
++    ['https://app.internal/x', 'must be public'],
++    ['https://intranet/x', 'must be public'],
++    ['https://169.254.169.254/metadata', 'must be public'],
++    ['https://[::1]/x', 'must be public'],
++    ['https://user:pass@hooks.example.test/x', 'header'],
++    ['not a url', 'https://'],
++  ])('refuses %s', (url, message) => {
++    const result = checkWebhookUrlShape(url);
++    expect(result.ok).toBe(false);
++    expect(result.error).toContain(message);
++  });
++
++  it('accepts a public https address', () => {
++    expect(checkWebhookUrlShape('https://alerts.example.test/in/abc')).toEqual({ ok: true });
++  });
++});
++
++describe('checkWebhookDestination', () => {
++  it('accepts a name that resolves only to public addresses', async () => {
++    lookupMock.mockResolvedValue([{ address: '104.16.1.1', family: 4 }, { address: '2606:4700::1', family: 6 }]);
++    expect(await checkWebhookDestination('https://alerts.example.test/in/abc')).toEqual({ ok: true });
++  });
++
++  it('refuses a public-looking name that resolves to a private address', async () => {
++    lookupMock.mockResolvedValue([{ address: '104.16.1.1', family: 4 }, { address: '10.0.0.4', family: 4 }]);
++    expect((await checkWebhookDestination('https://sneaky.example.test/x')).ok).toBe(false);
++  });
++
++  it('refuses a name that does not resolve', async () => {
++    lookupFails = true;
++    const result = await checkWebhookDestination('https://missing.example.test/x');
++    expect(result.ok).toBe(false);
++    expect(result.error).toContain("Couldn't find");
++  });
++
++  it('does not look up names it already refused', async () => {
++    expect((await checkWebhookDestination('https://localhost/x')).ok).toBe(false);
++    expect(lookupMock).not.toHaveBeenCalled();
++  });
++});
+diff --git a/lib/webhooks/address-guard.ts b/lib/webhooks/address-guard.ts
+new file mode 100644
+index 000000000..233fff938
+--- /dev/null
++++ b/lib/webhooks/address-guard.ts
+@@ -0,0 +1,93 @@
++/**
++ * HRM patch: webhook addresses must be public.
++ *
++ * A webhook URL is typed by a signed-in user, and the server then POSTs to it.
++ * Without this check it could be pointed at the server itself, the private
++ * network or the Azure metadata address. Checked when a webhook is saved and
++ * again before every delivery (DNS can change in between); redirects are not
++ * followed, so a public address can't bounce the request inward.
++ */
++
++import { lookup } from 'dns/promises';
++import { isIP } from 'net';
++
++export interface DestinationCheck {
++  ok: boolean;
++  error?: string;
++}
++
++const BLOCKED_NAMES = /(^|\.)(localhost|local|internal|home\.arpa)$/i;
++
++function ipv4Parts(address: string): number[] | null {
++  const parts = address.split('.').map(Number);
++  return parts.length === 4 && parts.every((p) => Number.isInteger(p) && p >= 0 && p <= 255) ? parts : null;
++}
++
++function blockedIpv4([a, b, c]: number[]): boolean {
++  return (
++    a === 0 || // "this network"
++    a === 10 ||
++    a === 127 ||
++    (a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT
++    (a === 169 && b === 254) || // link-local, including 169.254.169.254 (cloud metadata)
++    (a === 172 && b >= 16 && b <= 31) ||
++    (a === 192 && b === 168) ||
++    (a === 192 && b === 0 && c === 0) ||
++    (a === 198 && (b === 18 || b === 19)) || // benchmarking
++    a >= 224 // multicast and reserved
++  );
++}
++
++/** True for loopback, private, link-local, metadata and other non-public addresses. */
++export function isBlockedAddress(address: string): boolean {
++  const version = isIP(address);
++  if (version === 4) return blockedIpv4(ipv4Parts(address)!);
++  if (version !== 6) return true;
++
++  const lower = address.toLowerCase();
++  // IPv4 written inside IPv6 (::ffff:10.0.0.1, 64:ff9b::10.0.0.1) is judged as IPv4.
++  const embedded = lower.match(/(?:^::ffff:|^64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/);
++  if (embedded) return blockedIpv4(ipv4Parts(embedded[1]) ?? [0, 0, 0, 0]);
++  if (lower === '::' || lower === '::1') return true;
++  if (/^::ffff:/.test(lower)) return true; // mapped address in hex form
++  const first = parseInt(lower.split(':')[0] || '0', 16);
++  return (
++    (first & 0xfe00) === 0xfc00 || // unique local fc00::/7
++    (first & 0xffc0) === 0xfe80 || // link-local fe80::/10
++    (first & 0xff00) === 0xff00 // multicast
++  );
++}
++
++/** The checks that need no network: https, and no local names or private literal addresses. */
++export function checkWebhookUrlShape(url: string): DestinationCheck {
++  let parsed: URL;
++  try {
++    parsed = new URL(url);
++  } catch {
++    return { ok: false, error: 'Enter a full address starting with https://.' };
++  }
++  if (parsed.protocol !== 'https:') return { ok: false, error: 'Enter a full address starting with https://.' };
++  if (parsed.username || parsed.password) return { ok: false, error: 'Put credentials in a header, not in the address.' };
++  const host = parsed.hostname.replace(/^\[|\]$/g, '');
++  if (isIP(host) ? isBlockedAddress(host) : BLOCKED_NAMES.test(host) || !host.includes('.')) {
++    return { ok: false, error: 'Webhook addresses must be public, not this server or the private network.' };
++  }
++  return { ok: true };
++}
++
++/** Full check: the shape, then every address the name resolves to must be public. */
++export async function checkWebhookDestination(url: string): Promise<DestinationCheck> {
++  const shape = checkWebhookUrlShape(url);
++  if (!shape.ok) return shape;
++  const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
++  if (isIP(host)) return { ok: true };
++  try {
++    const addresses = await lookup(host, { all: true, verbatim: true });
++    if (addresses.length === 0 || addresses.some((a) => isBlockedAddress(a.address))) {
++      return { ok: false, error: 'Webhook addresses must be public, not this server or the private network.' };
++    }
++    return { ok: true };
++  } catch {
++    return { ok: false, error: `Couldn't find ${host}. Check the address.` };
++  }
++}
+diff --git a/lib/webhooks/managed-identity.test.ts b/lib/webhooks/managed-identity.test.ts
+index c1406842a..7eaf83929 100644
+--- a/lib/webhooks/managed-identity.test.ts
++++ b/lib/webhooks/managed-identity.test.ts
+@@ -3,6 +3,12 @@ import type { WebhookConfiguration } from '@/types/notifications';
+ import { isSignedWebhookUrl, resetManagedIdentityTokenCache, webhookAuthHeaders } from './managed-identity';
+ import { deliverFormattedWebhook, sendTestWebhook } from './service';
+ 
++// Test addresses don't resolve in DNS; keep the no-network checks (HRM address guard).
++vi.mock('@/lib/webhooks/address-guard', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@/lib/webhooks/address-guard')>();
++  return { ...actual, checkWebhookDestination: async (url: string) => actual.checkWebhookUrlShape(url) };
++});
++
+ const FLOW_URL = 'https://default0000.00.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/abc/triggers/manual/paths/invoke?api-version=1';
+ const OTHER_TENANT_FLOW = 'https://default9999.99.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/evil/triggers/manual/paths/invoke?api-version=1';
+ const OTHER_LOGIC_APP = 'https://prod-01.westus.logic.azure.com/workflows/evil/triggers/manual/paths/invoke';
+@@ -112,7 +118,7 @@ describe('webhook senders', () => {
+     await sendTestWebhook(webhook(OTHER_TENANT_FLOW));
+     expect(fetchMock).toHaveBeenCalledTimes(1);
+     expect(sent(0).headers.Authorization).toBeUndefined();
+-    expect(sent(0).redirect).toBe('follow');
++    expect(sent(0).redirect).toBe('error');
+   });
+ 
+   it('does not sign Slack deliveries', async () => {
+diff --git a/lib/webhooks/service.ts b/lib/webhooks/service.ts
+index 032d47e54..5b4916c44 100644
+--- a/lib/webhooks/service.ts
++++ b/lib/webhooks/service.ts
+@@ -19,7 +19,8 @@ import {
+   formatTeamsTestMessage,
+   formatDiscordTestMessage,
+ } from './formatters';
+-import { isSignedWebhookUrl, webhookAuthHeaders } from './managed-identity';
++import { checkWebhookDestination, checkWebhookUrlShape } from './address-guard';
++import { webhookAuthHeaders } from './managed-identity';
+ 
+ // Circuit breaker thresholds
+ const MAX_FAILURES = 5;
+@@ -149,6 +150,12 @@ export async function deliverFormattedWebhook(
+     };
+   }
+ 
++  // HRM patch: only public addresses, checked again in case DNS changed since it was saved
++  const destination = await checkWebhookDestination(webhook.url);
++  if (!destination.ok) {
++    return { success: false, error: destination.error, retryable: false };
++  }
++
+   const payloadString = JSON.stringify(formattedPayload);
+ 
+   // Build headers
+@@ -184,8 +191,8 @@ export async function deliverFormattedWebhook(
+         headers,
+         body: payloadString,
+         signal: controller.signal,
+-        // HRM patch: a signed request must not follow a redirect elsewhere
+-        redirect: isSignedWebhookUrl(webhook.url) ? 'error' : 'follow',
++        // HRM patch: never follow a redirect, so a public address can't send the request inward
++        redirect: 'error',
+       });
+ 
+       clearTimeout(timeoutId);
+@@ -238,6 +245,11 @@ export async function deliverFormattedWebhook(
+ export async function sendTestWebhook(
+   webhook: WebhookConfiguration
+ ): Promise<WebhookDeliveryResult> {
++  const destination = await checkWebhookDestination(webhook.url);
++  if (!destination.ok) {
++    return { success: false, error: destination.error };
++  }
++
+   const formattedPayload = formatTestPayload(webhook.webhook_type, webhook.name);
+   const payloadString = JSON.stringify(formattedPayload);
+ 
+@@ -262,8 +274,8 @@ export async function sendTestWebhook(
+       headers,
+       body: payloadString,
+       signal: controller.signal,
+-      // HRM patch: a signed request must not follow a redirect elsewhere
+-      redirect: isSignedWebhookUrl(webhook.url) ? 'error' : 'follow',
++      // HRM patch: never follow a redirect, so a public address can't send the request inward
++      redirect: 'error',
+     });
+ 
+     clearTimeout(timeoutId);
+@@ -305,28 +317,17 @@ export async function sendTestWebhook(
+  * Validate webhook URL
+  */
+ export function validateWebhookUrl(url: string): { valid: boolean; error?: string } {
+-  try {
+-    const parsed = new URL(url);
+-
+-    // Must be HTTPS
+-    if (parsed.protocol !== 'https:') {
+-      return { valid: false, error: 'URL must use HTTPS' };
+-    }
+-
+-    // Basic validation for known webhook types
+-    if (
+-      url.includes('hooks.slack.com') ||
+-      url.includes('webhook.office.com') ||
+-      url.includes('discord.com/api/webhooks')
+-    ) {
+-      return { valid: true };
+-    }
++  // HRM patch: https only, and no local names or private literal addresses
++  const shape = checkWebhookUrlShape(url);
++  return shape.ok ? { valid: true } : { valid: false, error: shape.error };
++}
+ 
+-    // Allow any HTTPS URL for custom webhooks
+-    return { valid: true };
+-  } catch {
+-    return { valid: false, error: 'Invalid URL format' };
+-  }
++/**
++ * HRM patch: validate a URL being saved, including where its name resolves
++ */
++export async function validateWebhookDestination(url: string): Promise<{ valid: boolean; error?: string }> {
++  const destination = await checkWebhookDestination(url);
++  return destination.ok ? { valid: true } : { valid: false, error: destination.error };
+ }
+ 
+ /**
