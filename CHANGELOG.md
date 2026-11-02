@@ -8,6 +8,9 @@
 
 ## 2026-11-01
 
+- Links can open one app in Inventory: `/dashboard/inventory?app=<Intune app id>` opens that app's
+  details. Closing the details goes back to the plain Inventory address. A link to an app that isn't
+  a Win32 app, or no longer exists, shows "App not found" (patch 0022).
 - Install results per app: twice a day, with the update check, IntuneGet reads how every app it
   deployed is installing (counts only, never device or user names). Inventory shows installed, failed, pending and not applicable with
   the most common reasons; Home lists apps with failures; an alert posts when an app's failures go up,

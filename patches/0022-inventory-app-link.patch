@@ -1,0 +1,328 @@
+diff --git a/app/(app)/dashboard/inventory/page.tsx b/app/(app)/dashboard/inventory/page.tsx
+index d4fb43f0f..bbedd2d62 100644
+--- a/app/(app)/dashboard/inventory/page.tsx
++++ b/app/(app)/dashboard/inventory/page.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+-import { useState, useMemo, useDeferredValue, useCallback, useEffect } from 'react';
+-import { useRouter } from 'next/navigation';
++import { useState, useMemo, useDeferredValue, useCallback, useEffect, Suspense } from 'react';
++import { useRouter, useSearchParams } from 'next/navigation';
+ import { T } from 'gt-next';
+ import { motion, useReducedMotion } from 'framer-motion';
+ import { AlertCircle, RefreshCw, Package, Server, Building2, Clock, Shield } from 'lucide-react';
+@@ -18,14 +18,40 @@ import {
+ import { PageHeader, AnimatedEmptyState, SkeletonGrid, AnimatedStatCard, StatCardGrid } from '@/components/dashboard';
+ import { useUserSettings } from '@/components/providers/UserSettingsProvider';
+ import { usePagination } from '@/hooks/use-pagination';
++import { INVENTORY_PATH, linkedAppId } from '@/lib/hrm/inventory-link';
+ 
+ type SortBy = 'name' | 'publisher' | 'created' | 'modified';
+ type SortOrder = 'asc' | 'desc';
+ 
++function InventoryLoading() {
++  return (
++    <div className="space-y-6">
++      <PageHeader
++        title={<T>Inventory</T>}
++        description={<T>Win32 applications deployed in your Intune tenant</T>}
++      />
++      <SkeletonGrid count={4} columns={4} variant="stat" />
++      <SkeletonGrid count={6} columns={3} variant="content" />
++    </div>
++  );
++}
++
++// HRM patch 0022: useSearchParams needs a Suspense boundary, or the build fails at prerender.
+ export default function InventoryPage() {
++  return (
++    <Suspense fallback={<InventoryLoading />}>
++      <InventoryPageContent />
++    </Suspense>
++  );
++}
++
++function InventoryPageContent() {
+   const router = useRouter();
++  const searchParams = useSearchParams();
+   const { data, isLoading, error, refetch, isFetching, isComplete } = useInventoryApps();
+-  const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
++  // HRM patch 0022: /dashboard/inventory?app=<Intune app id> opens that app's details.
++  const [linkedApp] = useState(() => linkedAppId(searchParams.get('app')));
++  const [selectedAppId, setSelectedAppId] = useState<string | null>(linkedApp);
+   const [search, setSearch] = useState('');
+   const [sortBy, setSortBy] = useState<SortBy>('name');
+   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+@@ -161,17 +187,14 @@ export default function InventoryPage() {
+     }
+   };
+ 
++  // Closing the panel drops ?app= so a refresh doesn't open it again.
++  const closeDetails = () => {
++    setSelectedAppId(null);
++    if (searchParams.has('app')) router.replace(INVENTORY_PATH);
++  };
++
+   if (isLoading) {
+-    return (
+-      <div className="space-y-6">
+-        <PageHeader
+-          title={<T>Inventory</T>}
+-          description={<T>Win32 applications deployed in your Intune tenant</T>}
+-        />
+-        <SkeletonGrid count={4} columns={4} variant="stat" />
+-        <SkeletonGrid count={6} columns={3} variant="content" />
+-      </div>
+-    );
++    return <InventoryLoading />;
+   }
+ 
+   if (error) {
+@@ -363,7 +386,7 @@ export default function InventoryPage() {
+       {/* App Details Panel */}
+       <InventoryAppDetails
+         appId={selectedAppId}
+-        onClose={() => setSelectedAppId(null)}
++        onClose={closeDetails}
+         onUpdate={handleUpdate}
+       />
+     </div>
+diff --git a/app/api/intune/apps/[id]/route.ts b/app/api/intune/apps/[id]/route.ts
+index 40eb97483..4d5e3d46f 100644
+--- a/app/api/intune/apps/[id]/route.ts
++++ b/app/api/intune/apps/[id]/route.ts
+@@ -99,6 +99,14 @@ export async function GET(
+     }
+ 
+     const appData = await appResponse.json();
++    // HRM patch 0022: Inventory lists Win32 apps only, so a linked id for any
++    // other app type gets the same answer as an unknown one.
++    if (appData['@odata.type'] && appData['@odata.type'] !== '#microsoft.graph.win32LobApp') {
++      return NextResponse.json(
++        { error: 'App not found' },
++        { status: 404 }
++      );
++    }
+     let assignments: IntuneAppAssignment[] = [];
+ 
+     if (assignmentsResponse.ok) {
+diff --git a/app/api/intune/apps/[id]/win32-only.test.ts b/app/api/intune/apps/[id]/win32-only.test.ts
+new file mode 100644
+index 000000000..78d2968b3
+--- /dev/null
++++ b/app/api/intune/apps/[id]/win32-only.test.ts
+@@ -0,0 +1,35 @@
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), token: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: mocks.token }));
++vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
++vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: vi.fn() }));
++import { GET } from './route';
++
++// HRM patch 0022: Inventory links open Win32 apps only; any other app type reads as not found.
++const id = '11111111-1111-4111-8111-111111111111';
++const request = () => new NextRequest(`http://localhost/api/intune/apps/${id}`);
++const params = { params: Promise.resolve({ id }) };
++const graph = (type: string) => vi.fn(async (url: string) =>
++  Response.json(url.endsWith('/assignments') ? { value: [] } : { '@odata.type': type, id, displayName: 'Fixture' }));
++beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'user', tenantId: 'self' }); mocks.token.mockResolvedValue('token'); });
++afterEach(() => vi.unstubAllGlobals());
++
++describe('app details for linked ids', () => {
++  it('returns a Win32 app', async () => {
++    vi.stubGlobal('fetch', graph('#microsoft.graph.win32LobApp'));
++    const response = await GET(request(), params);
++    expect(response.status).toBe(200);
++    expect((await response.json()).app.displayName).toBe('Fixture');
++  });
++
++  it('answers App not found for other app types', async () => {
++    for (const type of ['#microsoft.graph.iosStoreApp', '#microsoft.graph.winGetApp', '#microsoft.graph.officeSuiteApp']) {
++      vi.stubGlobal('fetch', graph(type));
++      const response = await GET(request(), params);
++      expect(response.status).toBe(404);
++      expect(await response.json()).toEqual({ error: 'App not found' });
++    }
++  });
++});
+diff --git a/components/inventory/inventory-app-link.test.ts b/components/inventory/inventory-app-link.test.ts
+new file mode 100644
+index 000000000..99cd14039
+--- /dev/null
++++ b/components/inventory/inventory-app-link.test.ts
+@@ -0,0 +1,101 @@
++// @vitest-environment happy-dom
++import { act, createElement, type ReactNode } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++
++// HRM patch 0022: /dashboard/inventory?app=<Intune app id> opens that app's details.
++const state = vi.hoisted(() => ({ search: '', replace: vi.fn(), push: vi.fn() }));
++vi.mock('next/navigation', () => ({
++  useRouter: () => ({ replace: state.replace, push: state.push }),
++  useSearchParams: () => new URLSearchParams(state.search),
++}));
++vi.mock('gt-next', () => ({ T: ({ children }: { children: ReactNode }) => children }));
++vi.mock('framer-motion', () => ({
++  motion: { div: ({ children }: { children: ReactNode }) => createElement('div', null, children) },
++  useReducedMotion: () => true,
++}));
++vi.mock('@/hooks/use-inventory', () => ({
++  useInventoryApps: () => ({
++    data: { apps: [{ id: 'listed', displayName: 'Fixture', publisher: 'Example', createdDateTime: '2026-01-01T00:00:00Z', lastModifiedDateTime: '2026-01-01T00:00:00Z' }] },
++    isLoading: false, error: null, refetch: vi.fn(), isFetching: false, isComplete: true,
++  }),
++}));
++vi.mock('@/components/providers/UserSettingsProvider', () => ({
++  useUserSettings: () => ({ settings: { viewMode: 'grid' }, setViewMode: vi.fn() }),
++}));
++vi.mock('@/components/dashboard', () => ({
++  PageHeader: () => null, AnimatedEmptyState: () => null, SkeletonGrid: () => null,
++  AnimatedStatCard: () => null, StatCardGrid: () => null,
++}));
++vi.mock('@/components/inventory', () => ({
++  InventoryAppCard: ({ app, onClick }: { app: { id: string }; onClick: () => void }) =>
++    createElement('button', { 'data-card': app.id, onClick }),
++  InventoryAppDetails: ({ appId, onClose }: { appId: string | null; onClose: () => void }) =>
++    createElement('div', { 'data-details': appId ?? '' }, createElement('button', { 'data-close': '', onClick: onClose })),
++  InventoryFilters: () => null, InventoryListRow: () => null,
++  InventoryPagination: () => null, InventoryListHeader: () => null,
++}));
++
++import InventoryPage from '@/app/(app)/dashboard/inventory/page';
++import { linkedAppId } from '@/lib/hrm/inventory-link';
++
++const id = '11111111-1111-4111-8111-111111111111';
++let root: Root;
++let container: HTMLDivElement;
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++async function render(search: string) {
++  state.search = search;
++  container = document.createElement('div');
++  document.body.append(container);
++  root = createRoot(container);
++  await act(async () => root.render(createElement(InventoryPage)));
++}
++const openApp = () => container.querySelector('[data-details]')?.getAttribute('data-details');
++const click = (selector: string) => act(async () => (container.querySelector(selector) as HTMLElement).click());
++
++beforeEach(() => { state.replace.mockReset(); state.push.mockReset(); });
++afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; });
++
++describe('linkedAppId', () => {
++  it('accepts an Intune app id in any case', () => {
++    expect(linkedAppId(id)).toBe(id);
++    expect(linkedAppId(` ${id.toUpperCase()} `)).toBe(id);
++  });
++  it('ignores anything that is not a GUID', () => {
++    for (const value of [null, undefined, '', 'listed', `${id}x`, `${id}/assignments`, '../settings', '11111111111141118111111111111111']) {
++      expect(linkedAppId(value)).toBeNull();
++    }
++  });
++});
++
++describe('inventory link to an app', () => {
++  it('opens the linked app\'s details', async () => {
++    await render(`app=${id}`);
++    expect(openApp()).toBe(id);
++  });
++
++  it('opens nothing without a link or with an id that is not a GUID', async () => {
++    await render('');
++    expect(openApp()).toBe('');
++    await act(async () => root.unmount());
++    await render('app=..%2Fsettings');
++    expect(openApp()).toBe('');
++  });
++
++  it('clears the link when the details close, so a refresh does not reopen them', async () => {
++    await render(`app=${id}&q=keep`);
++    await click('[data-close]');
++    expect(openApp()).toBe('');
++    expect(state.replace).toHaveBeenCalledWith('/dashboard/inventory');
++  });
++
++  it('leaves the address alone when there was no link', async () => {
++    await render('');
++    await click('[data-card="listed"]');
++    expect(openApp()).toBe('listed');
++    await click('[data-close]');
++    expect(openApp()).toBe('');
++    expect(state.replace).not.toHaveBeenCalled();
++  });
++});
+diff --git a/components/inventory/inventory-app-not-found.test.ts b/components/inventory/inventory-app-not-found.test.ts
+new file mode 100644
+index 000000000..b10b9ebda
+--- /dev/null
++++ b/components/inventory/inventory-app-not-found.test.ts
+@@ -0,0 +1,31 @@
++// @vitest-environment happy-dom
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++
++// HRM patch 0022: a link to an unknown or non-Win32 app shows the panel's error, not a blank panel.
++vi.mock('@/hooks/use-inventory', () => ({
++  useAppDetails: () => ({ data: undefined, isLoading: false, error: new Error('App not found'), refetch: vi.fn() }),
++}));
++vi.mock('@/hooks/useNewVersionPrefill', () => ({ useNewVersionPrefill: () => ({ data: null }) }));
++vi.mock('@/hooks/useInstallStatus', () => ({ useInstallStatus: () => ({ data: null }) }));
++vi.mock('@/components/dashboard/animations/SlidePanel', () => ({
++  SlidePanel: ({ children, isOpen }: { children: React.ReactNode; isOpen: boolean }) => (isOpen ? children : null),
++}));
++import { InventoryAppDetails } from './InventoryAppDetails';
++
++let root: Root;
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; });
++
++describe('inventory details for an app that is not found', () => {
++  it('shows the not-found error', async () => {
++    const container = document.createElement('div');
++    document.body.append(container);
++    root = createRoot(container);
++    await act(async () => root.render(createElement(InventoryAppDetails, { appId: '11111111-1111-4111-8111-111111111111', onClose: vi.fn() })));
++    expect(container.textContent).toContain('Failed to load app');
++    expect(container.textContent).toContain('App not found');
++    expect(container.textContent).toContain('Try Again');
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index bfb31f63e..75087e659 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -64,6 +64,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+     points: [
+       'At 3:30 AM and 3:30 PM (Maryland time), with the update check, IntuneGet asks Intune how each app it deployed is installing: installed, failed, pending and not applicable.',
+       'Open the app in Inventory to see the counts and the most common reasons for failures, with a link to the app in Intune.',
++      'A link from another tool can open an app\'s details in Inventory directly. If it shows Failed to load app and App not found, the app was removed from Intune or isn\'t a Win32 app, which Inventory doesn\'t list.',
+       'When devices fail to install an app, the Home page lists it under Needs attention, and a Teams alert posts to the IT Ops team when the number of failed devices goes up (at most once a day per app).',
+       'Only counts are kept. To see which devices failed, open the app in Intune, then Device install status.',
+     ],
+diff --git a/lib/hrm/inventory-link.ts b/lib/hrm/inventory-link.ts
+new file mode 100644
+index 000000000..2abe88545
+--- /dev/null
++++ b/lib/hrm/inventory-link.ts
+@@ -0,0 +1,16 @@
++/**
++ * HRM patch 0022: open an app's details from a link.
++ *
++ * /dashboard/inventory?app=<Intune app id> opens that app's details panel, so
++ * other tools can link straight to one Win32 app. Intune app ids are GUIDs;
++ * anything else is ignored and the page opens as usual.
++ */
++
++export const INVENTORY_PATH = '/dashboard/inventory';
++
++const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++export function linkedAppId(value: string | null | undefined): string | null {
++  const id = value?.trim() ?? '';
++  return GUID.test(id) ? id.toLowerCase() : null;
++}
