@@ -1,0 +1,964 @@
+diff --git a/app/api/package/route.ts b/app/api/package/route.ts
+index 4c834c4ba..dbbf63349 100644
+--- a/app/api/package/route.ts
++++ b/app/api/package/route.ts
+@@ -19,6 +19,7 @@ import {
+   type WorkflowInputs,
+ } from '@/lib/github-actions';
+ import { getAppConfig } from '@/lib/config';
++import { replacementInputs } from '@/lib/hrm/replacement';
+ import { parseAccessToken } from '@/lib/auth-utils';
+ import { getFeatureFlags } from '@/lib/features';
+ import { isValidInstallerUrl, isValidSha256 } from '@/lib/custom-app';
+@@ -850,6 +851,10 @@ export async function POST(request: NextRequest) {
+                 : undefined,
+               installScope: item.installScope,
+               forceCreate: item.forceCreate || forceCreate,
++              // HRM patch 0024: Deploy again on a deployed app replaces it: the new app supersedes it (update),
++              // gets the groups chosen in the panel (or, if none were chosen, the old app's current groups),
++              // and the old app's groups are removed so devices aren't targeted twice.
++              ...replacementInputs(item),
+               qaOverride: item.sourceType === 'curated' ? false : isQaMaintenanceMode() || item.qaOverride,
+               sourceType: item.sourceType,
+               curatedReleaseId: item.curatedReleaseId,
+diff --git a/components/PackageConfig.custom-detection.test.ts b/components/PackageConfig.custom-detection.test.ts
+index ef05f32cd..9982671c2 100644
+--- a/components/PackageConfig.custom-detection.test.ts
++++ b/components/PackageConfig.custom-detection.test.ts
+@@ -25,6 +25,9 @@ vi.mock('@/hooks/use-packages', () => ({
+   usePackageManifest: () => manifestState,
+ }));
+ vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: { carryOverAssignments: false } }) }));
++// HRM patch 0024: Save to Intune also saves the new-version choice
++vi.mock('@/hooks/use-updates', () => ({ useUpdatePolicy: () => ({ updatePolicy: vi.fn() }) }));
++vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ user: { tenantId: 'tenant-one' } }) }));
+ vi.mock('@/hooks/use-update-app-settings', () => ({ useUpdateAppSettings: () => ({ isUpdating: false }) }));
+ vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
+ vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: () => null }));
+diff --git a/components/PackageConfig.layout.test.ts b/components/PackageConfig.layout.test.ts
+index 04c1cc038..c26c7098a 100644
+--- a/components/PackageConfig.layout.test.ts
++++ b/components/PackageConfig.layout.test.ts
+@@ -20,6 +20,9 @@ vi.mock('@/hooks/use-packages', () => ({
+   usePackageManifest: () => manifestState,
+ }));
+ vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: { carryOverAssignments: false } }) }));
++// HRM patch 0024: Save to Intune also saves the new-version choice
++vi.mock('@/hooks/use-updates', () => ({ useUpdatePolicy: () => ({ updatePolicy: vi.fn() }) }));
++vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ user: { tenantId: 'tenant-one' } }) }));
+ vi.mock('@/hooks/use-update-app-settings', () => ({ useUpdateAppSettings: () => ({ isUpdating: false }) }));
+ vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
+ vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: () => null }));
+@@ -112,4 +115,11 @@ describe('deploy panel layout', () => {
+     expect(text()).toContain('These changes need the app deployed again');
+     expect(button('Deploy again')).toBeDefined();
+   });
++
++  // HRM patch 0024
++  it('makes Deploy again replace the current copy', async () => {
++    await render({ isDeployed: true, deployedConfig: deployed, intuneAppId: '00000000-0000-0000-0000-00000000000a' });
++    await act(async () => button('Deploy again')!.click());
++    expect(useCartStore.getState().items[0]).toMatchObject({ forceCreate: true, replacesIntuneAppId: '00000000-0000-0000-0000-00000000000a' });
++  });
+ });
+diff --git a/components/PackageConfig.recovery.test.ts b/components/PackageConfig.recovery.test.ts
+index 77129efc3..c95658ca8 100644
+--- a/components/PackageConfig.recovery.test.ts
++++ b/components/PackageConfig.recovery.test.ts
+@@ -20,6 +20,9 @@ vi.mock('@/hooks/use-packages', () => ({
+   usePackageManifest: () => manifestState,
+ }));
+ vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: { carryOverAssignments: false } }) }));
++// HRM patch 0024: Save to Intune also saves the new-version choice
++vi.mock('@/hooks/use-updates', () => ({ useUpdatePolicy: () => ({ updatePolicy: vi.fn() }) }));
++vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ user: { tenantId: 'tenant-one' } }) }));
+ vi.mock('@/hooks/use-update-app-settings', () => ({ useUpdateAppSettings: () => ({ isUpdating: false }) }));
+ vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
+ vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: () => null }));
+diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
+index 8308429f3..2ab740361 100644
+--- a/components/PackageConfig.tsx
++++ b/components/PackageConfig.tsx
+@@ -64,6 +64,8 @@ import { DEFAULT_PSADT_CONFIG, getDefaultProcessesToClose, sanitizeProcessesToCl
+ import { useCartStore, createStoreCartItem } from '@/stores/cart-store';
+ import { useUserSettings } from '@/components/providers/UserSettingsProvider';
+ import { useUpdateAppSettings } from '@/hooks/use-update-app-settings';
++import { useUpdatePolicy } from '@/hooks/use-updates';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+ import { useFocusTrap } from '@/hooks/use-focus-trap';
+ import { generateDetectionRules, generateInstallCommand, generateUninstallCommand } from '@/lib/detection-rules';
+ import { INTUNE_APP_SOURCE_MARKER } from '@/lib/intune-description';
+@@ -219,6 +221,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+   const [updatePolicy, setUpdatePolicy] = useState<CartUpdatePolicyValue>(
+     deployedConfig?.updatePolicy
+   );
++  // HRM patch 0024: Save to Intune also saves a changed new-version choice, instead of dropping it
++  const [initialUpdatePolicy] = useState<CartUpdatePolicyValue>(deployedConfig?.updatePolicy);
++  const { updatePolicy: saveUpdatePolicy } = useUpdatePolicy();
++  const { user: signedInUser } = useMicrosoftAuth();
+   const { settings: userSettings } = useUserSettings();
+   const [carryOverAssignments, setCarryOverAssignments] = useState<boolean>(
+     deployedConfig?.assignmentMigration?.carryOverAssignments ??
+@@ -253,7 +259,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+   // Change detection: categorize modifications as Graph-patchable vs requires-redeploy
+   const changeState = useMemo(() => {
+     if (!isDeployed || !deployedConfig) {
+-      return { hasGraphChanges: false, hasRedeployChanges: false };
++      return { hasGraphChanges: false, hasRedeployChanges: false, hasPolicyChange: false, hasIntuneChanges: false };
+     }
+ 
+     // Graph-patchable: assignments + categories
+@@ -264,7 +270,12 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     const hasEspChanges =
+       JSON.stringify(espProfiles) !== JSON.stringify(deployedConfig.espProfiles || []);
+     // HRM patch 0022: Save to Intune sends groups and categories only, so ESP changes need Deploy again
+-    const hasGraphChanges = hasAssignmentChanges || hasCategoryChanges;
++    // HRM patch 0024: plus the new-version choice, which IntuneGet saves itself
++    const hasPolicyChange = updatePolicy !== initialUpdatePolicy;
++    const hasGraphChanges = hasAssignmentChanges || hasCategoryChanges || hasPolicyChange;
++    // HRM patch 0024: dependencies are set when the app is created, so they need Deploy again
++    const hasDependencyChanges =
++      JSON.stringify(relationships) !== JSON.stringify(deployedConfig.relationships || []);
+ 
+     // Redeploy-required: version, architecture, scope, locale, PSADT config
+     const hasVersionChange = selectedVersion !== deployedConfig.version;
+@@ -280,10 +291,11 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     const deployedDescription = stripSourceMarker(deployedConfig.description ?? pkg.description ?? '');
+     const hasDescriptionChange = description.trim() !== deployedDescription.trim();
+     const hasRedeployChanges =
+-      hasVersionChange || hasArchChange || hasScopeChange || hasLocaleChange || hasPsadtChange || hasDescriptionChange || hasEspChanges;
++      hasVersionChange || hasArchChange || hasScopeChange || hasLocaleChange || hasPsadtChange || hasDescriptionChange || hasEspChanges ||
++      hasDependencyChanges;
+ 
+-    return { hasGraphChanges, hasRedeployChanges };
+-  }, [isDeployed, deployedConfig, assignments, categories, espProfiles,
++    return { hasGraphChanges, hasRedeployChanges, hasPolicyChange, hasIntuneChanges: hasAssignmentChanges || hasCategoryChanges };
++  }, [isDeployed, deployedConfig, assignments, categories, espProfiles, relationships, updatePolicy, initialUpdatePolicy,
+       selectedVersion, selectedArch, selectedScope, selectedLocale, config, description, pkg.description]);
+ 
+ 
+@@ -582,6 +594,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                 }
+               : undefined,
+           ...(isDeployed ? { forceCreate: true } : {}),
++          // HRM patch 0024: Deploy again replaces the current copy instead of adding a second one
++          ...(isDeployed && intuneAppId ? { replacesIntuneAppId: intuneAppId } : {}),
+         });
+       }
+       setAddedToCartSuccess(true);
+@@ -597,12 +611,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     setSettingsError(null);
+     setSettingsSuccess(false);
+     try {
+-      await updateSettings({
+-        intuneAppId,
+-        wingetId: effectiveWingetId,
+-        assignments,
+-        categories,
+-      });
++      if (changeState.hasIntuneChanges) {
++        await updateSettings({
++          intuneAppId,
++          wingetId: effectiveWingetId,
++          assignments,
++          categories,
++        });
++      }
++      if (changeState.hasPolicyChange && signedInUser?.tenantId) {
++        await saveUpdatePolicy({ winget_id: effectiveWingetId, tenant_id: signedInUser.tenantId, policy_type: updatePolicy ?? 'notify' });
++      }
+       setSettingsSuccess(true);
+       setTimeout(() => onClose(), 1200);
+     } catch (err) {
+@@ -722,9 +741,9 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                       : !changeState.hasGraphChanges && !changeState.hasRedeployChanges
+                       ? 'Its current settings are filled in. Nothing has changed yet.'
+                       : changeState.hasGraphChanges && !changeState.hasRedeployChanges
+-                      ? 'Group and category changes go straight to Intune with Save to Intune.'
++                      ? 'Save to Intune applies the group, category and new-version changes straight away.'
+                       : !changeState.hasGraphChanges && changeState.hasRedeployChanges
+-                      ? 'These changes need the app deployed again: press Deploy again.'
++                      ? 'These changes need the app deployed again. Deploy again replaces the current copy in Intune and keeps the groups shown here.'
+                       : 'Save to Intune applies the group and category changes. The other changes need Deploy again.'}
+                     {!canUpdateSettings && deployedConfig ? ' Its previous settings are filled in.' : !canUpdateSettings ? ' Its previous settings weren\'t found, so the defaults are filled in.' : ''}
+                   </p>
+diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
+index 3f8ca5034..ba6eb582b 100644
+--- a/lib/auto-update/__tests__/sqlite.test.ts
++++ b/lib/auto-update/__tests__/sqlite.test.ts
+@@ -382,20 +382,20 @@ describe('custom app GitHub releases', () => {
+ describe('copies deleted in Intune', () => {
+   const only = (...ids: string[]) => async () => new Set(ids);
+ 
+-  it('drops an update for a copy that is gone from Intune and keeps the live one', async () => {
++  it('lists only the newest copy, and falls back to the next one when the newest is gone from Intune', async () => {
+     const { db, runSqliteUpdateCheck } = await load();
+     await seedDeployment(db);
+     await db.uploadHistory.create({ id: 'u1-second', user_id: 'u1', winget_id: 'Vendor.App', version: '1.0.0',
+-      display_name: 'Vendor App', intune_app_id: 'app-2', intune_tenant_id: 't1' });
++      display_name: 'Vendor App', intune_app_id: 'app-2', intune_tenant_id: 't1', deployed_at: '2099-01-01T00:00:00Z' });
+     getAppsByWingetIdsMock.mockResolvedValue([{ winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.1.0' }]);
+     getLatestInstallerInfoMock.mockResolvedValue(installerResolution());
+ 
+     await runSqliteUpdateCheck(db);
+-    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toHaveLength(2);
++    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ intune_app_id: 'app-2' }]);
+ 
+-    const summary = await runSqliteUpdateCheck(db, { existingAppIds: only('app-2') });
++    const summary = await runSqliteUpdateCheck(db, { existingAppIds: only('app-1') });
+     expect(summary.available).toBe(1);
+-    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ intune_app_id: 'app-2' }]);
++    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ intune_app_id: 'app-1' }]);
+   });
+ 
+   it('never auto-updates a copy that is gone from Intune', async () => {
+@@ -419,3 +419,47 @@ describe('copies deleted in Intune', () => {
+     expect(summary).toMatchObject({ available: 1, triggered: 1 });
+   });
+ });
++
++// HRM patch 0024: updates keep what the current copy has
++describe('updates that replace an Intune app', () => {
++  it("send no group list (so Intune's current groups carry over) and take settings from the job that deployed it", async () => {
++    const { db, runSqliteUpdateCheck } = await load();
++    const policy = await db.updatePolicies.upsert({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', policy_type: 'auto_update',
++      deployment_config: { ...deploymentConfig, assignments: [{ type: 'group', groupId: 'old-group', intent: 'required' }],
++        categories: [{ id: 'old-cat', displayName: 'Old category' }] },
++      original_upload_history_id: 'u1-history', is_enabled: true });
++    const deployed = await db.jobs.create({ user_id: 'u2', tenant_id: 't1', winget_id: 'Vendor.App', version: '1.0.0',
++      display_name: 'Vendor App', installer_type: 'exe', installer_url: 'https://example.test/app.exe', installer_sha256: 'A'.repeat(64),
++      status: 'queued', package_config: { categories: [{ id: 'cat-1', displayName: 'Productivity' }], espProfiles: [{ id: 'esp-1', displayName: 'Example setup' }],
++        relationships: [{ relationshipType: 'dependency', targetId: 'dep-1' }, { relationshipType: 'supersedence', targetId: 'older-app' }] } as never });
++    await db.uploadHistory.create({ id: 'u1-history', user_id: 'u1', winget_id: 'Vendor.App', version: '1.0.0', display_name: 'Vendor App',
++      intune_app_id: 'app-1', intune_tenant_id: 't1', packaging_job_id: deployed.id });
++    getAppsByWingetIdsMock.mockResolvedValue([{ winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.1.0' }]);
++    getLatestInstallerInfoMock.mockResolvedValue(installerResolution());
++
++    expect((await runSqliteUpdateCheck(db)).triggered).toBe(1);
++    const job = (await db.jobs.getByTenantId('t1')).find((j) => j.auto_update_policy_id === policy.id)!;
++    expect(job.package_config).toMatchObject({
++      sourceIntuneAppId: 'app-1', assignments: [],
++      categories: [{ id: 'cat-1', displayName: 'Productivity' }],
++      espProfiles: [{ id: 'esp-1', displayName: 'Example setup' }],
++      relationships: [{ relationshipType: 'dependency', targetId: 'dep-1' }],
++    });
++  });
++
++  it('keeps the update list when the catalog is unavailable', async () => {
++    const { db, runSqliteUpdateCheck } = await load();
++    await seedDeployment(db);
++    getAppsByWingetIdsMock.mockResolvedValue([{ winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.1.0' }]);
++    getLatestInstallerInfoMock.mockResolvedValue({ ok: false, failure: { message: 'unavailable' } });
++    await runSqliteUpdateCheck(db);
++    const [row] = await db.updateCheckResults.list('u1', { includeDismissed: true });
++    await db.updateCheckResults.markNotified?.([row.id]);
++
++    getAppsByWingetIdsMock.mockRejectedValue(new Error('catalog down'));
++    await runSqliteUpdateCheck(db);
++    getAppsByWingetIdsMock.mockResolvedValue([]);
++    await runSqliteUpdateCheck(db);
++    expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ id: row.id }]);
++  });
++});
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index 9d622629d..cdb6c2183 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -127,6 +127,18 @@ async function checkRateLimits(
+ /**
+  * Apply the safety gates and create a queued packaging job for an update.
+  */
++/** HRM patch 0024: the job that deployed an Intune app, whoever deployed it. */
++async function latestJobFor(db: DatabaseAdapter, tenantId: string, intuneAppId: string) {
++  // Unknown history falls back to the policy's saved settings (groups still carry over from Intune).
++  try {
++    const upload = (await db.uploadHistory.listAll(2000))
++      .find((u) => u.intune_tenant_id === tenantId && u.intune_app_id === intuneAppId && u.packaging_job_id);
++    return upload?.packaging_job_id ? await db.jobs.getById(upload.packaging_job_id) : null;
++  } catch {
++    return null;
++  }
++}
++
+ export async function triggerSqliteAutoUpdate(
+   db: DatabaseAdapter,
+   policy: AppUpdatePolicy,
+@@ -213,6 +225,14 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+ 
+       const sourceIntuneAppId = updateInfo.currentIntuneAppId || null;
+       const autoSupersede = Boolean(sourceIntuneAppId);
++      // HRM patch 0024: the policy's settings are a snapshot from the first deployment. When the update
++      // replaces an Intune app, take categories, ESP and dependencies from the job that deployed that app,
++      // and send no group list: the workflow then copies the app's current groups from Intune (carry-over),
++      // so groups added later with Save to Intune aren't lost.
++      const current = sourceIntuneAppId ? await latestJobFor(db, policy.tenant_id, sourceIntuneAppId) : null;
++      const currentConfig = (current?.package_config ?? {}) as Record<string, unknown>;
++      const dependencies = (list: unknown) =>
++        Array.isArray(list) ? (list as Array<{ relationshipType?: string }>).filter((r) => r.relationshipType === 'dependency') : undefined;
+ 
+       const job = await db.jobs.create({
+         user_id: policy.user_id,
+@@ -233,11 +253,12 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+           sourceType: updateInfo.sourceType || config.sourceType,
+           curatedReleaseId: updateInfo.curatedReleaseId,
+           curatedLicenceAcceptance: curatedLicenceAcceptance ?? undefined,
+-          assignments: config.assignments ?? [],
+-          categories: config.categories ?? [],
++          assignments: sourceIntuneAppId ? [] : (config.assignments ?? []),
++          categories: (currentConfig.categories as typeof config.categories) ?? config.categories ?? [],
++          espProfiles: currentConfig.espProfiles ?? undefined,
+           assignedGroups: config.assignedGroups,
+           requirementRules: config.requirementRules,
+-          relationships: config.relationships,
++          relationships: sourceIntuneAppId ? (dependencies(currentConfig.relationships) ?? dependencies(config.relationships)) : config.relationships,
+           psadtConfig: config.psadtConfig,
+           nestedInstallerType: updateInfo.nestedInstallerType,
+           nestedInstallerPath: updateInfo.nestedInstallerPath,
+@@ -314,31 +335,44 @@ export async function runSqliteUpdateCheck(
+   const now = options?.now ?? new Date();
+   const nowIso = now.toISOString();
+ 
+-  // Newest deployment per (user, tenant, app, intune app). listAll is newest first.
+-  const newest = new Map<string, UploadHistoryRecord>();
++  // HRM patch 0024: the newest copy of each app in each tenant, whoever deployed it. Older copies are
++  // superseded (or deleted) and must not get their own update: updating them made duplicate Intune apps.
++  // listAll is newest first. A copy deleted in Intune is skipped below, so the next newest takes its place.
++  const byApp = new Map<string, UploadHistoryRecord[]>();
+   for (const deployment of deployments) {
+-    if (options?.userId && deployment.user_id !== options.userId) continue;
+-    const key = `${deployment.user_id}|${deployment.intune_tenant_id ?? ''}|${deployment.winget_id}|${deployment.intune_app_id}`;
+-    if (!newest.has(key)) newest.set(key, deployment);
++    const appKey = `${deployment.intune_tenant_id ?? ''}|${deployment.winget_id}`;
++    const copies = byApp.get(appKey) ?? [];
++    copies.push(deployment);
++    byApp.set(appKey, copies);
+   }
++  const newest = new Map<string, UploadHistoryRecord>();
+ 
+-  // HRM patch 0023: a copy deleted in Intune is no longer deployed. Skipping it here also lets the
+-  // clean-up below remove its old update row, so App updates and auto-update never act on it.
+   const existing = new Map<string, Set<string> | null>();
+   const isGoneFromIntune = (tenantId: string | null | undefined, intuneAppId: string | null | undefined) => {
+     const ids = existing.get(tenantId ?? '');
+     return Boolean(ids && intuneAppId && !ids.has(intuneAppId.toLowerCase()));
+   };
++  // HRM patch 0023: a copy deleted in Intune is no longer deployed, so it never gets an update row.
+   if (options?.existingAppIds) {
+-    const tenants = [...new Set([...newest.values()].map((d) => d.intune_tenant_id ?? ''))].filter(Boolean);
++    const tenants = [...new Set(deployments.map((d) => d.intune_tenant_id ?? ''))].filter(Boolean);
+     for (const t of tenants) existing.set(t, await options.existingAppIds(t).catch(() => null));
+-    for (const [key, deployment] of newest) {
+-      if (isGoneFromIntune(deployment.intune_tenant_id, deployment.intune_app_id)) newest.delete(key);
+-    }
++  }
++  for (const [appKey, copies] of byApp) {
++    const live = copies.find((d) => !isGoneFromIntune(d.intune_tenant_id, d.intune_app_id));
++    if (!live) continue;
++    if (options?.userId && live.user_id !== options.userId) continue;
++    newest.set(appKey, live);
+   }
+ 
+   const wingetIds = [...new Set([...newest.values()].map((deployment) => deployment.winget_id))];
+-  const apps = wingetIds.length > 0 ? await catalog.getAppsByWingetIds(wingetIds).catch(() => []) : [];
++  // HRM patch 0024: an unavailable catalog answers with nothing. Treat that as "unknown" rather than
++  // "no updates", so the clean-up below keeps the existing rows (and their notified and dismissed state).
++  const catalogIds = wingetIds.filter((id) => !isCustomAppId(id));
++  let catalogUnavailable = false;
++  const apps = catalogIds.length > 0
++    ? await catalog.getAppsByWingetIds(catalogIds).catch(() => { catalogUnavailable = true; return []; })
++    : [];
++  if (catalogIds.length > 0 && apps.length === 0) catalogUnavailable = true;
+   const latestVersionByWinget = new Map(apps.map((app) => [app.winget_id, app.latest_version]));
+ 
+   const keepByScope = new Map<string, Array<{ wingetId: string; intuneAppId: string }>>();
+@@ -354,6 +388,11 @@ export async function runSqliteUpdateCheck(
+     if (options?.userId && policy.user_id !== options.userId) continue;
+     allScopes.add(`${policy.user_id}|${policy.tenant_id}`);
+   }
++  // HRM patch 0024: every user who deployed something, so rows left on older copies are cleaned too.
++  for (const deployment of deployments) {
++    if (options?.userId && deployment.user_id !== options.userId) continue;
++    allScopes.add(`${deployment.user_id}|${deployment.intune_tenant_id ?? ''}`);
++  }
+ 
+   for (const deployment of newest.values()) {
+     const tenantId = deployment.intune_tenant_id ?? '';
+@@ -361,7 +400,14 @@ export async function runSqliteUpdateCheck(
+     allScopes.add(scopeKey);
+ 
+     const latestVersion = latestVersionByWinget.get(deployment.winget_id);
+-    if (!latestVersion) continue;
++    if (!latestVersion) {
++      if (catalogUnavailable && !isCustomAppId(deployment.winget_id)) {
++        const keep = keepByScope.get(scopeKey) ?? [];
++        keep.push({ wingetId: deployment.winget_id, intuneAppId: deployment.intune_app_id });
++        keepByScope.set(scopeKey, keep);
++      }
++      continue;
++    }
+     if (compareVersions(deployment.version, latestVersion) >= 0) continue;
+ 
+     await db.updateCheckResults.upsert({
+@@ -395,7 +441,17 @@ export async function runSqliteUpdateCheck(
+   const customDeployments = [...newestCustom.values()];
+   if (options?.customReleases) {
+     const { store, fetchImpl } = options.customReleases;
+-    const findings = await findCustomAppReleases(customDeployments, (id) => db.jobs.getById(id), { fetchImpl, now });
++    const unchecked: UploadHistoryRecord[] = [];
++    const findings = await findCustomAppReleases(customDeployments, (id) => db.jobs.getById(id), {
++      fetchImpl, now, onUnchecked: (d) => unchecked.push(d),
++    });
++    // HRM patch 0024: GitHub couldn't be asked about these, so keep what was found before
++    for (const deployment of unchecked) {
++      const scopeKey = `${deployment.user_id}|${deployment.intune_tenant_id ?? ''}`;
++      const keep = keepByScope.get(scopeKey) ?? [];
++      keep.push({ wingetId: deployment.winget_id, intuneAppId: deployment.intune_app_id });
++      keepByScope.set(scopeKey, keep);
++    }
+     for (const { deployment, release } of findings) {
+       const tenantId = deployment.intune_tenant_id ?? '';
+       await store.save(release);
+@@ -419,7 +475,10 @@ export async function runSqliteUpdateCheck(
+       keepByScope.set(scopeKey, keep);
+     }
+     if (!options.userId) {
+-      await store.removeMissing(findings.map(({ release }) => ({ tenantId: release.tenant_id, intuneAppId: release.intune_app_id })));
++      await store.removeMissing([
++        ...findings.map(({ release }) => ({ tenantId: release.tenant_id, intuneAppId: release.intune_app_id })),
++        ...unchecked.map((d) => ({ tenantId: d.intune_tenant_id ?? '', intuneAppId: d.intune_app_id })),
++      ]);
+     }
+   } else {
+     // Without the release check, leave custom apps' existing updates alone.
+diff --git a/lib/curated-catalog/updates.test.ts b/lib/curated-catalog/updates.test.ts
+index 705affc42..7741ff8ce 100644
+--- a/lib/curated-catalog/updates.test.ts
++++ b/lib/curated-catalog/updates.test.ts
+@@ -36,7 +36,8 @@ describe('curated updates', () => {
+     expect(create).toHaveBeenCalledWith(expect.objectContaining({ install_command: item.installCommand,
+       detection_rules: item.detectionRules, package_config: expect.objectContaining({
+         sourceType: 'curated', curatedReleaseId: item.curatedReleaseId,
+-        psadtConfig: item.psadtConfig, assignments: [{ type: 'allDevices', intent: 'required' }],
++        // HRM patch 0024: replacing an Intune app sends no group list; the workflow copies its current groups
++        psadtConfig: item.psadtConfig, assignments: [], sourceIntuneAppId: 'intune-id',
+       }) }));
+   });
+   it('resolves the signed latest version without querying Winget', async () => {
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 6fa5af909..263de50bd 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -320,6 +320,13 @@ export const sqliteInstallStatus: InstallStatusStore = {
+       .run(record.tenant_id, record.intune_app_id, record.user_id, record.display_name, record.installed, record.failed, record.pending,
+         record.notApplicable, record.other, JSON.stringify(record.topErrors), record.previous_failed, record.alerted_on, record.checked_at);
+   },
++  async markAlerted(records, day) {
++    const database = getDb();
++    const mark = database.prepare('UPDATE hrm_app_install_status SET previous_failed = failed, alerted_on = ? WHERE tenant_id = ? AND intune_app_id = ?');
++    database.transaction(() => {
++      for (const r of records) mark.run(day, r.tenant_id, r.intune_app_id);
++    })();
++  },
+   async listForTenant(tenantId) {
+     return getDb().prepare('SELECT * FROM hrm_app_install_status WHERE tenant_id = ? ORDER BY failed DESC, display_name').all(tenantId).map(installStatusRow);
+   },
+diff --git a/lib/hrm/__tests__/install-status.test.ts b/lib/hrm/__tests__/install-status.test.ts
+index 8cd78d6cc..fbfb37a74 100644
+--- a/lib/hrm/__tests__/install-status.test.ts
++++ b/lib/hrm/__tests__/install-status.test.ts
+@@ -40,6 +40,9 @@ function memoryStore(): InstallStatusStore & { rows: Map<string, InstallStatusRe
+     rows,
+     async get(t, a) { return rows.get(`${t}|${a}`) ?? null; },
+     async save(r) { rows.set(`${r.tenant_id}|${r.intune_app_id}`, { ...r }); },
++    async markAlerted(records, day) {
++      for (const r of records) { const row = rows.get(`${r.tenant_id}|${r.intune_app_id}`)!; row.previous_failed = row.failed; row.alerted_on = day; }
++    },
+     async listForTenant(t) { return [...rows.values()].filter((r) => r.tenant_id === t); },
+     async removeMissing(keep) {
+       const wanted = new Set(keep.map((k) => `${k.tenantId}|${k.intuneAppId}`));
+@@ -111,7 +114,7 @@ describe('install report counting', () => {
+ describe('nightly install status check', () => {
+   const deployments = [
+     deployment('h3', APP_A, 'Example Reader', '2026-11-01T10:00:00Z'),
+-    deployment('h2', APP_A, 'Example Reader (old)', '2026-10-01T10:00:00Z'),
++    deployment('h2', APP_A, 'Example Reader', '2026-10-01T10:00:00Z'),
+     deployment('h1', APP_B, 'Example Zip', '2026-10-01T10:00:00Z'),
+   ];
+   const token = async () => 'token';
+@@ -122,19 +125,42 @@ describe('nightly install status check', () => {
+     const result = await runInstallStatusCheck(deployments, { store, token, fetchImpl, now: new Date('2026-11-02T08:30:00Z') });
+     expect(result.checked).toBe(2);
+     expect(result.newFailures.map((r) => r.display_name)).toEqual(['Example Reader']);
+-    expect(store.rows.get(`tenant-one|${APP_A}`)).toMatchObject({ failed: 1, previous_failed: 0, alerted_on: '2026-11-02' });
++    expect(store.rows.get(`tenant-one|${APP_A}`)).toMatchObject({ failed: 1, previous_failed: 0, alerted_on: null });
++    await store.markAlerted(result.newFailures, '2026-11-02');
++    expect(store.rows.get(`tenant-one|${APP_A}`)).toMatchObject({ failed: 1, previous_failed: 1, alerted_on: '2026-11-02' });
++  });
++
++  it('alerts at most once a day, and reports a rise from later that day on the next day', async () => {
++    const store = memoryStore();
++    const fails = (n: number) => reportFetch({ [APP_A]: Array.from({ length: n }, () => row('Failed')) }) as unknown as typeof fetch;
++    const only = [deployments[0]];
++    const run = async (n: number, at: string, delivered = true) => {
++      const r = await runInstallStatusCheck(only, { store, token, fetchImpl: fails(n), now: new Date(at) });
++      if (delivered && r.newFailures.length) await store.markAlerted(r.newFailures, at.slice(0, 10));
++      return r.newFailures.length;
++    };
++    expect(await run(5, '2026-11-02T12:00:00Z')).toBe(1);
++    expect(await run(8, '2026-11-02T19:30:00Z')).toBe(0);
++    expect(await run(8, '2026-11-03T12:00:00Z')).toBe(1);
++    expect(await run(8, '2026-11-04T12:00:00Z')).toBe(0);
++  });
++
++  it('tries again when no webhook accepted the alert', async () => {
++    const store = memoryStore();
++    const fetchImpl = reportFetch({ [APP_A]: [row('Failed')] }) as unknown as typeof fetch;
++    const only = [deployments[0]];
++    expect((await runInstallStatusCheck(only, { store, token, fetchImpl, now: new Date('2026-11-02T12:00:00Z') })).newFailures).toHaveLength(1);
++    expect((await runInstallStatusCheck(only, { store, token, fetchImpl, now: new Date('2026-11-02T19:30:00Z') })).newFailures).toHaveLength(1);
+   });
+ 
+-  it('alerts at most once a day per app, and again on a later day when failures rise', async () => {
++  it('alerts again after failures fall and then rise', async () => {
+     const store = memoryStore();
+-    const one = reportFetch({ [APP_A]: [row('Failed')] }) as unknown as typeof fetch;
+-    const two = reportFetch({ [APP_A]: [row('Failed'), row('Failed')] }) as unknown as typeof fetch;
+-    const three = reportFetch({ [APP_A]: [row('Failed'), row('Failed'), row('Failed')] }) as unknown as typeof fetch;
++    const fails = (n: number) => reportFetch({ [APP_A]: Array.from({ length: n }, () => row('Failed')) }) as unknown as typeof fetch;
+     const only = [deployments[0]];
+-    expect((await runInstallStatusCheck(only, { store, token, fetchImpl: one, now: new Date('2026-11-02T08:30:00Z') })).newFailures).toHaveLength(1);
+-    expect((await runInstallStatusCheck(only, { store, token, fetchImpl: two, now: new Date('2026-11-02T15:00:00Z') })).newFailures).toHaveLength(0);
+-    expect((await runInstallStatusCheck(only, { store, token, fetchImpl: two, now: new Date('2026-11-03T08:30:00Z') })).newFailures).toHaveLength(0);
+-    expect((await runInstallStatusCheck(only, { store, token, fetchImpl: three, now: new Date('2026-11-03T08:31:00Z') })).newFailures).toHaveLength(1);
++    const r1 = await runInstallStatusCheck(only, { store, token, fetchImpl: fails(5), now: new Date('2026-11-02T12:00:00Z') });
++    await store.markAlerted(r1.newFailures, '2026-11-02');
++    await runInstallStatusCheck(only, { store, token, fetchImpl: fails(1), now: new Date('2026-11-03T12:00:00Z') });
++    expect((await runInstallStatusCheck(only, { store, token, fetchImpl: fails(3), now: new Date('2026-11-04T12:00:00Z') })).newFailures).toHaveLength(1);
+   });
+ 
+   it('counts a missing token or a failed report as an error and keeps going', async () => {
+diff --git a/lib/hrm/__tests__/replacement.test.ts b/lib/hrm/__tests__/replacement.test.ts
+new file mode 100644
+index 000000000..45f5b1082
+--- /dev/null
++++ b/lib/hrm/__tests__/replacement.test.ts
+@@ -0,0 +1,23 @@
++import { describe, expect, it } from 'vitest';
++import { replacementInputs } from '../replacement';
++
++const ID = '00000000-0000-0000-0000-00000000000a';
++
++describe('Deploy again replaces the current copy', () => {
++  it('supersedes it and moves the panel groups to the new app', () => {
++    expect(replacementInputs({ replacesIntuneAppId: ID, assignments: [{ groupId: 'g1' }] })).toEqual({
++      sourceIntuneAppId: ID, carryOverAssignments: false, removeAssignmentsFromPreviousApp: true,
++      autoSupersede: true, supersedenceType: 'update',
++    });
++  });
++
++  it("copies the old app's groups when no groups were chosen", () => {
++    expect(replacementInputs({ replacesIntuneAppId: ID, assignments: [] })).toMatchObject({ carryOverAssignments: true });
++  });
++
++  it('does nothing for a new app or an ID that is not a GUID', () => {
++    expect(replacementInputs({})).toEqual({});
++    expect(replacementInputs({ replacesIntuneAppId: "x' or 1=1" })).toEqual({});
++    expect(replacementInputs(null)).toEqual({});
++  });
++});
+diff --git a/lib/hrm/__tests__/updates.test.ts b/lib/hrm/__tests__/updates.test.ts
+index aa8626f93..113c896e8 100644
+--- a/lib/hrm/__tests__/updates.test.ts
++++ b/lib/hrm/__tests__/updates.test.ts
+@@ -105,7 +105,8 @@ describe('update workflow inputs', () => {
+       autoSupersede: true, supersedenceType: 'update', carryOverAssignments: true, removeAssignmentsFromPreviousApp: true,
+       callbackUrl: 'https://intune.example.test/api/package/callback', installScope: 'machine',
+     });
+-    expect(JSON.parse(inputs.assignments!)).toHaveLength(1);
++    // HRM patch 0024: no group list, so the workflow copies the replaced app's current groups
++    expect(inputs.assignments).toBeUndefined();
+     const fresh = dispatch.buildUpdateWorkflowInputs({ ...(job as object), package_config: {} } as never, 'x');
+     expect(fresh).toMatchObject({ autoSupersede: false, carryOverAssignments: false, supersedenceType: undefined });
+   });
+@@ -149,7 +150,7 @@ describe('Update and Update All on SQLite', () => {
+     const result = await manual.runSqliteManualUpdates(db, USER, [{ winget_id: 'Vendor.App', tenant_id: USER.tenantId }]);
+     expect(result.results[0]).toMatchObject({ success: false, skipped: true, error: 'Installer flagged by the installation test' });
+     const [job] = (await db.jobs.getByTenantId(USER.tenantId)).filter((j) => j.version === '1.1.0');
+-    expect(job).toMatchObject({ status: 'cancelled', status_message: 'Waiting for the installation test to finish' });
++    expect(job).toMatchObject({ status: 'cancelled', status_message: "Held: the installation test didn't pass" });
+     const [history] = await db.autoUpdateHistory.list(USER.userId, { limit: 10, offset: 0 });
+     expect(history).toMatchObject({ status: 'cancelled' });
+   });
+@@ -235,4 +236,29 @@ describe('who deployed it, on the Teams card', () => {
+     const job = (await db.jobs.getByTenantId(USER.tenantId)).find((j) => j.version === '1.1.0');
+     expect(job?.user_email ?? null).toBeNull();
+   });
++
++  // HRM patch 0024
++  it('updates an app once when Update All lists it twice, and refuses while an update is running', async () => {
++    const { db, manual } = await load();
++    await seed(db);
++    const req = { winget_id: 'Vendor.App', tenant_id: USER.tenantId };
++    const first = await manual.runSqliteManualUpdates(db, USER, [req, req]);
++    expect(first).toMatchObject({ triggered: 1, failed: 0 });
++    expect(first.results).toHaveLength(1);
++    await db.jobs.update(first.results[0].packaging_job_id!, { status: 'packaging' });
++    const again = await manual.runSqliteManualUpdates(db, USER, [req]);
++    expect(again.results[0]).toMatchObject({ success: false, skipped: true });
++    expect(again.results[0].error).toContain('already running');
++  });
++
++  it('lets Update work after automatic updates have failed three times', async () => {
++    const { db, manual } = await load();
++    await seed(db);
++    const policy = await db.updatePolicies.upsert({ user_id: USER.userId, tenant_id: USER.tenantId, winget_id: 'Vendor.App', policy_type: 'auto_update',
++      deployment_config: deploymentConfig as never, original_upload_history_id: 'history-Vendor.App', is_enabled: true } as never);
++    await db.updatePolicies.update(policy.id, USER.userId, { consecutive_failures: 3 } as never);
++    expect((await db.updatePolicies.getById(policy.id, USER.userId))?.consecutive_failures).toBe(3);
++    const result = await manual.runSqliteManualUpdates(db, USER, [{ winget_id: 'Vendor.App', tenant_id: USER.tenantId }]);
++    expect(result).toMatchObject({ triggered: 1, failed: 0 });
++  });
+ });
+diff --git a/lib/hrm/github-releases.ts b/lib/hrm/github-releases.ts
+index 6866f3125..8672cd10f 100644
+--- a/lib/hrm/github-releases.ts
++++ b/lib/hrm/github-releases.ts
+@@ -84,7 +84,7 @@ interface GithubRelease {
+ export async function fetchLatestRelease(
+   source: Pick<GithubReleaseSource, 'owner' | 'repo'>,
+   fetchImpl: typeof fetch = fetch
+-): Promise<GithubRelease | null> {
++): Promise<GithubRelease | null | undefined> {
+   const response = await fetchImpl(`https://api.github.com/repos/${source.owner}/${source.repo}/releases/latest`, {
+     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'IntuneGet-HRM', 'X-GitHub-Api-Version': '2022-11-28' },
+     redirect: 'error',
+@@ -106,10 +106,11 @@ export interface ReleaseFinding {
+ export async function findCustomAppReleases(
+   deployments: UploadHistoryRecord[],
+   getJob: (id: string) => Promise<PackagingJob | null>,
+-  options: { fetchImpl?: typeof fetch; now?: Date } = {}
++  // HRM patch 0024: told about apps whose repository couldn't be checked, so their existing update is kept
++  options: { fetchImpl?: typeof fetch; now?: Date; onUnchecked?: (deployment: UploadHistoryRecord) => void } = {}
+ ): Promise<ReleaseFinding[]> {
+   const nowIso = (options.now ?? new Date()).toISOString();
+-  const latestByRepo = new Map<string, Promise<GithubRelease | null>>();
++  const latestByRepo = new Map<string, Promise<GithubRelease | null | undefined>>();
+   const findings: ReleaseFinding[] = [];
+ 
+   for (const deployment of deployments) {
+@@ -119,8 +120,12 @@ export async function findCustomAppReleases(
+     if (!job || !source) continue;
+ 
+     const repoKey = `${source.owner}/${source.repo}`.toLowerCase();
+-    if (!latestByRepo.has(repoKey)) latestByRepo.set(repoKey, fetchLatestRelease(source, options.fetchImpl).catch(() => null));
++    if (!latestByRepo.has(repoKey)) latestByRepo.set(repoKey, fetchLatestRelease(source, options.fetchImpl).catch(() => undefined));
+     const latest = await latestByRepo.get(repoKey)!;
++    if (latest === undefined) {
++      options.onUnchecked?.(deployment);
++      continue;
++    }
+     if (!latest?.tag_name || latest.draft || latest.prerelease) continue;
+ 
+     const version = versionFromTag(latest.tag_name);
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 5fcaa808e..ac1923dfb 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -19,7 +19,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Find the app in the App catalog and open it. Choose its groups under Who gets it and what happens with new versions, then press Add to deployment. Open the cart and press Deploy to Intune.',
+       'Everything else is under More settings and What staff see during install. Each row shows its current setting, so you only open the ones you want to change.',
+       'To see where an app is deployed, open it in Inventory: Groups lists each group and whether it is Required or Available. No groups means it installs nowhere.',
+-      'For an app that is already deployed, Save to Intune applies group and category changes straight away. Other changes, such as the version or New computer setup, need Deploy again.',
++      'For an app that is already deployed, Save to Intune applies group and category changes straight away. Other changes, such as the version or New computer setup, need Deploy again, which replaces the current copy in Intune (it doesn\'t add a second one).',
+       'Required installs the app without asking. Available lists it in Company Portal for people to install themselves, and only works with user groups.',
+       'Assign to a device group when every computer in the group needs the app, including shared computers and before anyone signs in.',
+       'Assign to a user group when the app follows the person to any computer they use, or when it is offered as Available.',
+@@ -50,7 +50,8 @@ export const HELP_SECTIONS: HelpSection[] = [
+     title: 'Updating an app',
+     points: [
+       'WinGet and curated apps: open App updates and press Update on the app, or Update all. The new version replaces the previous one in Intune and keeps its groups. The result posts to Teams.',
+-      'Apps with auto-update on are updated by the 3:30 AM and 3:30 PM check, with the same safety checks.',
++      'Apps with auto-update on are updated by the 3:30 AM and 3:30 PM check, with the same safety checks. An update takes the groups the app has in Intune at that moment, so groups you add later with Save to Intune carry over.',
++      'If an update can\'t start, for example because the installation test held it, a failed-deployment alert posts to IT Ops.',
+       'If Update says the catalog has not synced the installer yet, try again later (IntuneGet looks for a newer catalog every 6 hours), or deploy the new version from the App catalog with Supersede previous version on update and Carry over assignments turned on.',
+       'Custom apps (installers that are not in WinGet, such as PdfCraft or UniFi Endpoint): open the app in Inventory and press Deploy new version. The form is filled in from the last version; enter the new version and its https download link. The new version keeps the same groups and supersedes the old one (Update), so devices upgrade in place.',
+       'When a custom app installed from a GitHub release has a newer release, App updates shows it. Deploy new version opens the form with the new version, download link and checksum filled in. Check them, then add it to the cart. Nothing deploys on its own.',
+diff --git a/lib/hrm/install-status-check.ts b/lib/hrm/install-status-check.ts
+index a9730a0bb..0dd6164b6 100644
+--- a/lib/hrm/install-status-check.ts
++++ b/lib/hrm/install-status-check.ts
+@@ -3,7 +3,7 @@
+  */
+ 
+ import { getDatabase, isSqliteMode } from '@/lib/db';
+-import { runInstallStatusCheck } from '@/lib/hrm/install-status';
++import { marylandDay, runInstallStatusCheck } from '@/lib/hrm/install-status';
+ import { notifyInstallFailures } from '@/lib/notifications/notify-install-failures';
+ 
+ export async function runSqliteInstallCheck(now = new Date()) {
+@@ -12,7 +12,9 @@ export async function runSqliteInstallCheck(now = new Date()) {
+   const result = await runInstallStatusCheck(deployments, { store: sqliteInstallStatus, now });
+   const sent = await notifyInstallFailures(result.newFailures, sqliteWebhooks, now);
+   if (sent.errors.length > 0) console.warn(`[install status] ${sent.errors.length} webhook delivery error(s)`);
+-  return { checked: result.checked, errors: result.errors, alerted: result.newFailures.length };
++  // HRM patch 0024: only a delivered alert counts; otherwise the next check tries again.
++  if (sent.webhooksSent > 0) await sqliteInstallStatus.markAlerted(result.newFailures, marylandDay(now));
++  return { checked: result.checked, errors: result.errors, alerted: sent.webhooksSent > 0 ? result.newFailures.length : 0 };
+ }
+ 
+ /** Install counts for one tenant's IntuneGet-deployed apps; empty without SQLite. */
+diff --git a/lib/hrm/install-status.ts b/lib/hrm/install-status.ts
+index 1632e6720..61359be29 100644
+--- a/lib/hrm/install-status.ts
++++ b/lib/hrm/install-status.ts
+@@ -44,6 +44,8 @@ export interface InstallStatusRecord extends InstallCounts {
+ export interface InstallStatusStore {
+   get(tenantId: string, intuneAppId: string): Promise<InstallStatusRecord | null>;
+   save(record: InstallStatusRecord): Promise<void>;
++  // HRM patch 0024: record that these apps' failures were reported today
++  markAlerted(records: InstallStatusRecord[], day: string): Promise<void>;
+   listForTenant(tenantId: string): Promise<InstallStatusRecord[]>;
+   removeMissing(keep: Array<{ tenantId: string; intuneAppId: string }>): Promise<void>;
+ }
+@@ -156,11 +158,12 @@ export async function runInstallStatusCheck(
+   const getToken = deps.token ?? appToken;
+   const summary: InstallCheckSummary = { checked: 0, errors: 0, newFailures: [] };
+ 
+-  // One row per Intune app; listAll is newest first.
++  // HRM patch 0024: the newest copy of each app only (listAll is newest first). Older copies are
++  // superseded, so their failures aren't today's problem.
+   const newest = new Map<string, UploadHistoryRecord>();
+   for (const deployment of deployments) {
+     if (!deployment.intune_tenant_id || !deployment.intune_app_id) continue;
+-    const key = `${deployment.intune_tenant_id}|${deployment.intune_app_id}`;
++    const key = `${deployment.intune_tenant_id}|${deployment.winget_id}`;
+     if (!newest.has(key)) newest.set(key, deployment);
+   }
+ 
+@@ -183,7 +186,11 @@ export async function runInstallStatusCheck(
+       continue;
+     }
+     const before = await deps.store.get(tenantId, deployment.intune_app_id);
+-    const previousFailed = before?.failed ?? 0;
++    // HRM patch 0024: previous_failed is the count last reported (lowered when failures go down), so a
++    // rise that couldn't be reported the same day is still reported the next day. alerted_on and
++    // previous_failed only move once a webhook has accepted the alert (markAlerted).
++    const reported = before ? Math.min(before.previous_failed, before.failed) : 0;
++    const previousFailed = Math.min(reported, counts.failed);
+     const alert = counts.failed > previousFailed && before?.alerted_on !== today;
+     const record: InstallStatusRecord = {
+       ...counts,
+@@ -192,7 +199,7 @@ export async function runInstallStatusCheck(
+       user_id: deployment.user_id,
+       display_name: deployment.display_name,
+       previous_failed: previousFailed,
+-      alerted_on: alert ? today : (before?.alerted_on ?? null),
++      alerted_on: before?.alerted_on ?? null,
+       checked_at: now.toISOString(),
+     };
+     await deps.store.save(record);
+diff --git a/lib/hrm/manual-update.ts b/lib/hrm/manual-update.ts
+index ee44f205b..792fd17ac 100644
+--- a/lib/hrm/manual-update.ts
++++ b/lib/hrm/manual-update.ts
+@@ -69,6 +69,11 @@ async function updateOne(
+     return fail(`${req.winget_id} keeps itself up to date on the device (Click-to-Run); IntuneGet does not deploy updates for it. Refresh the updates list to remove it.`);
+   }
+ 
++  // HRM patch 0024: one update at a time per app, so a double press or Update All can't create two Intune apps
++  const running = (await db.jobs.getByTenantId(req.tenant_id, 200).catch(() => []))
++    .find((job) => job.winget_id === req.winget_id && ['queued', 'packaging', 'uploading'].includes(job.status));
++  if (running) return fail('An update for this app is already running. Check Deployments.', { skipped: true });
++
+   const detected = (await db.updateCheckResults.list(user.userId, { tenantId: req.tenant_id, includeDismissed: true }))
+     .find((row) => row.winget_id === req.winget_id);
+   if (!detected) return fail('Update not found');
+@@ -85,7 +90,8 @@ async function updateOne(
+   const latestUpload = await db.uploadHistory.getLatest(user.userId, req.tenant_id, req.winget_id);
+ 
+   // A manual press deploys whatever the policy type is; nothing is written back to the policy type.
+-  const manualPolicy: AppUpdatePolicy = { ...policy, policy_type: 'auto_update', is_enabled: true };
++  // HRM patch 0024: nor by automatic-update failures (three of them switch auto-update off, not the button).
++  const manualPolicy: AppUpdatePolicy = { ...policy, policy_type: 'auto_update', is_enabled: true, consecutive_failures: 0 };
+   const triggered = await triggerSqliteAutoUpdate(db, manualPolicy, {
+     sourceType: info.sourceType,
+     curatedReleaseId: info.curatedReleaseId,
+@@ -128,7 +134,12 @@ export async function runSqliteManualUpdates(
+   requests: { winget_id: string; tenant_id: string }[],
+ ): Promise<TriggerUpdateResponse> {
+   const response: TriggerUpdateResponse = { success: true, triggered: 0, failed: 0, results: [] };
++  // HRM patch 0024: the same app twice in one request (Update All with two copies) is updated once
++  const seen = new Set<string>();
+   for (const req of requests) {
++    const key = `${req.tenant_id}|${req.winget_id}`;
++    if (seen.has(key)) continue;
++    seen.add(key);
+     let result: Result;
+     try {
+       result = await updateOne(db, user, req, requests.length > 1);
+diff --git a/lib/hrm/replacement.ts b/lib/hrm/replacement.ts
+new file mode 100644
+index 000000000..ec774bee2
+--- /dev/null
++++ b/lib/hrm/replacement.ts
+@@ -0,0 +1,21 @@
++/**
++ * HRM patch 0024: Deploy again on a deployed app replaces it instead of adding a second copy.
++ * The new app supersedes the old one (update), gets the groups chosen in the panel (or, when none
++ * were chosen, the old app's current groups), and the old app's groups are removed so devices
++ * aren't targeted twice.
++ */
++
++const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++export function replacementInputs(item: unknown) {
++  const id = (item as { replacesIntuneAppId?: unknown } | null)?.replacesIntuneAppId;
++  if (typeof id !== 'string' || !GUID.test(id)) return {};
++  const assignments = (item as { assignments?: unknown[] }).assignments;
++  return {
++    sourceIntuneAppId: id,
++    carryOverAssignments: !(Array.isArray(assignments) && assignments.length > 0),
++    removeAssignmentsFromPreviousApp: true,
++    autoSupersede: true,
++    supersedenceType: 'update',
++  };
++}
+diff --git a/lib/hrm/update-dispatch.ts b/lib/hrm/update-dispatch.ts
+index 315ce0fcf..82a7ed5f0 100644
+--- a/lib/hrm/update-dispatch.ts
++++ b/lib/hrm/update-dispatch.ts
+@@ -71,10 +71,14 @@ export function buildUpdateWorkflowInputs(job: PackagingJob, callbackUrl: string
+     callbackUrl,
+     detectionRules: json(job.detection_rules ?? undefined),
+     psadtConfig: json(config.psadtConfig),
+-    assignments: Array.isArray(config.assignments)
++    // HRM patch 0024: an update that replaces an app sends no group list, so the workflow copies that
++    // app's current groups from Intune instead of a stale snapshot (and then moves them off the old app).
++    assignments: !replacesApp && Array.isArray(config.assignments)
+       ? JSON.stringify(sanitizeAssignmentsForDispatch(config.assignments as never, requirementRules.length > 0))
+       : undefined,
+     categories: json(config.categories),
++    // HRM patch 0024: the new version joins the same Enrollment Status Page profiles
++    espProfiles: json((config as Record<string, unknown>).espProfiles),
+     requirementRules: requirementRules.length ? JSON.stringify(requirementRules) : undefined,
+     relationships: Array.isArray(config.relationships) && config.relationships.length ? JSON.stringify(config.relationships) : undefined,
+     installScope: job.install_scope === 'user' ? 'user' : 'machine',
+@@ -88,6 +92,14 @@ export function buildUpdateWorkflowInputs(job: PackagingJob, callbackUrl: string
+   };
+ }
+ 
++/** HRM patch 0024: an update that never started is posted like a failed deployment, so it isn't missed. */
++async function alertNotStarted(db: DatabaseAdapter, jobId: string, stage: string): Promise<void> {
++  const job = await db.jobs.getById(jobId).catch(() => null);
++  if (!job) return;
++  const { notifyDeploymentWebhooks } = await import('@/lib/notifications/notify-deployment');
++  await notifyDeploymentWebhooks({ ...job, status: 'failed', error_stage: stage }).catch(() => null);
++}
++
+ function callbackUrl(): string {
+   const base = getAppConfig().app.url || 'http://localhost:3000';
+   return `${base}/api/package/callback`;
+@@ -133,12 +145,14 @@ export async function dispatchUpdateJob(
+       const message = describeQaGateError(error);
+       await db.jobs.update(jobId, {
+         status: 'cancelled',
+-        status_message: 'Waiting for the installation test to finish',
++        // HRM patch 0024: on this server a hold is the test's verdict, not a wait
++        status_message: "Held: the installation test didn't pass",
+         error_message: message,
+         cancelled_at: now(),
+         completed_at: now(),
+       });
+       await closeHistory('cancelled', message);
++      await alertNotStarted(db, jobId, 'installation test');
+       return { dispatched: false, reason: 'qa-hold', message };
+     }
+     const message = error instanceof Error ? error.message : 'Unknown error';
+@@ -151,6 +165,7 @@ export async function dispatchUpdateJob(
+       completed_at: now(),
+     });
+     await closeHistory('failed', message);
++    await alertNotStarted(db, jobId, 'start');
+     return { dispatched: false, reason: 'error', message };
+   }
+ }
+diff --git a/lib/webhooks/address-guard.test.ts b/lib/webhooks/address-guard.test.ts
+index 01c981fb8..71d571c10 100644
+--- a/lib/webhooks/address-guard.test.ts
++++ b/lib/webhooks/address-guard.test.ts
+@@ -20,10 +20,10 @@ describe('isBlockedAddress', () => {
+   it.each([
+     '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1',
+     '0.0.0.0', '224.0.0.1', '255.255.255.255', '::1', '::', 'fd00::1', 'fe80::1', 'ff02::1',
+-    '::ffff:127.0.0.1', '::ffff:7f00:1', '64:ff9b::10.0.0.1', 'not-an-ip',
++    '::ffff:127.0.0.1', '::ffff:7f00:1', '64:ff9b::10.0.0.1', '64:ff9b::a00:1', '::ffff:a9fe:a9fe', 'not-an-ip',
+   ])('blocks %s', (address) => expect(isBlockedAddress(address)).toBe(true));
+ 
+-  it.each(['20.42.65.92', '172.32.0.1', '8.8.8.8', '2606:4700::1111', '::ffff:8.8.8.8'])('allows %s', (address) =>
++  it.each(['20.42.65.92', '172.32.0.1', '8.8.8.8', '2606:4700::1111', '::ffff:8.8.8.8', '::ffff:808:808'])('allows %s', (address) =>
+     expect(isBlockedAddress(address)).toBe(false)
+   );
+ });
+@@ -72,3 +72,10 @@ describe('checkWebhookDestination', () => {
+     expect(lookupMock).not.toHaveBeenCalled();
+   });
+ });
++
++// HRM patch 0024: URL parsing writes embedded IPv4 in hex
++describe('IPv6 literals in URLs', () => {
++  it('refuses a NAT64 private address however it is written', () => {
++    expect(checkWebhookUrlShape('https://[64:ff9b::10.0.0.1]/x').ok).toBe(false);
++  });
++});
+diff --git a/lib/webhooks/address-guard.ts b/lib/webhooks/address-guard.ts
+index 233fff938..3ed744b8f 100644
+--- a/lib/webhooks/address-guard.ts
++++ b/lib/webhooks/address-guard.ts
+@@ -38,6 +38,18 @@ function blockedIpv4([a, b, c]: number[]): boolean {
+   );
+ }
+ 
++/** The IPv4 address inside an IPv4-mapped (::ffff:0:0/96) or NAT64 (64:ff9b::/96) IPv6 address. */
++function embeddedIpv4(lower: string): number[] | null {
++  const prefix = /^(?:::ffff:|0:0:0:0:0:ffff:|64:ff9b::|64:ff9b:0:0:0:0:)(.+)$/.exec(lower);
++  if (!prefix) return null;
++  const rest = prefix[1];
++  if (rest.includes('.')) return ipv4Parts(rest) ?? [0, 0, 0, 0];
++  const words = rest.split(':');
++  if (words.length !== 2 || !words.every((w) => /^[0-9a-f]{1,4}$/.test(w))) return [0, 0, 0, 0];
++  const [hi, lo] = words.map((w) => parseInt(w, 16));
++  return [hi >> 8, hi & 255, lo >> 8, lo & 255];
++}
++
+ /** True for loopback, private, link-local, metadata and other non-public addresses. */
+ export function isBlockedAddress(address: string): boolean {
+   const version = isIP(address);
+@@ -45,11 +57,11 @@ export function isBlockedAddress(address: string): boolean {
+   if (version !== 6) return true;
+ 
+   const lower = address.toLowerCase();
+-  // IPv4 written inside IPv6 (::ffff:10.0.0.1, 64:ff9b::10.0.0.1) is judged as IPv4.
+-  const embedded = lower.match(/(?:^::ffff:|^64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/);
+-  if (embedded) return blockedIpv4(ipv4Parts(embedded[1]) ?? [0, 0, 0, 0]);
++  // IPv4 written inside IPv6 is judged as IPv4, whether dotted (::ffff:10.0.0.1) or in hex
++  // (::ffff:a00:1, 64:ff9b::a00:1), which is how URL parsing writes it. HRM patch 0024.
++  const embedded = embeddedIpv4(lower);
++  if (embedded) return blockedIpv4(embedded);
+   if (lower === '::' || lower === '::1') return true;
+-  if (/^::ffff:/.test(lower)) return true; // mapped address in hex form
+   const first = parseInt(lower.split(':')[0] || '0', 16);
+   return (
+     (first & 0xfe00) === 0xfc00 || // unique local fc00::/7
+diff --git a/types/upload.ts b/types/upload.ts
+index 66c59c9e6..fea11eba9 100644
+--- a/types/upload.ts
++++ b/types/upload.ts
+@@ -190,6 +190,8 @@ export interface Win32CartItem extends CartItemBase {
+   // Server-set audit snapshot of the tenant's licence acceptance (curated apps)
+   curatedLicenceAcceptance?: CuratedLicenceAcceptanceSnapshot;
+   localeCode?: string; // Selected locale for language variant packages
++  // HRM patch 0024: Deploy again replaces this Intune app (supersedes it and moves its groups) instead of adding a copy
++  replacesIntuneAppId?: string;
+   architecture: WingetArchitecture;
+   installScope: WingetScope;
+   installerType: WingetInstallerType;

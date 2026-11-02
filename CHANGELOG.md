@@ -2,6 +2,23 @@
 
 ## 2026-11-02
 
+- Safer updates (patch 0024, from a full logic review):
+  - Updates keep the groups the app has in Intune right now. Before, groups added after the first
+    deployment were lost at the next update.
+  - Only the newest copy of each app is updated, and one update runs at a time, so Update All can't
+    create duplicate apps.
+  - Updates keep the app's New computer setup, categories and dependencies.
+  - Deploy again replaces the current copy instead of adding a second app.
+  - Save to Intune also saves the new-version choice; dependency changes ask for Deploy again.
+  - A short catalog or GitHub outage no longer empties App updates or repeats alerts.
+  - Update works even after automatic updates failed three times.
+  - Install-failure alerts are only marked as sent once Teams accepted them, and a rise later in the
+    day is reported the next day.
+  - An update that can't start posts a failed-deployment alert.
+- App updates only lists copies that still exist in Intune, and auto-update never acts on a copy that
+  was deleted there (the extra Google Chrome and Zoom cards go away at the next check). Each card shows
+  the groups that copy is assigned to. Inventory always shows Groups and warns when an app has none,
+  because then it installs nowhere (patch 0023).
 - Cleaner deploy panel: the main choices (who it installs for, which groups get it, what happens with
   new versions) are always shown, and every other option sits in two short lists, More settings and
   What staff see during install, each row showing its current setting. Labels and buttons are plain
