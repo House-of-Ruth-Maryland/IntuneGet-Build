@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-03
+
+- Delete from Intune now works for copies that another copy of the same app replaces: it removes that
+  link first. If a different app replaces or depends on the copy, it stops and names that app. Errors
+  show Intune's own reason, and an expired sign-in says to reload the page (patch 0026).
+
 ## 2026-11-02
 
 - Deploy to Intune now shows a review first: one line per app saying what happens in Intune, which
