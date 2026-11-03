@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- IntuneGet publishes a status report for HRM's IT dashboard at `/api/status-report`: server
+  problems, failed and stuck packaging jobs, and apps deployed per day. Counts only, behind its own
+  report key (patch 0027). Needs `STATUS_REPORT_KEY` on the VM and a Cloudflare Access bypass for
+  that path before the dashboard can read it.
+
 ## 2026-11-03
 
 - Delete from Intune now works for copies that another copy of the same app replaces: it removes that

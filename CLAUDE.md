@@ -102,6 +102,31 @@ HRM IT notes.
   report the VM itself being down, so a Cloudflare **Tunnel Health Alert** (Notifications, free on
   every plan) emails the IT Ops channel's email address when the tunnel goes degraded or down.
 
+## IT dashboard status report
+
+Patch 0027 serves `GET /api/status-report` for HRM's IT dashboard (format: hrm-it-dashboard
+`docs/status-report.md`). It is built in `lib/hrm/status-report.ts` from the status file and job and
+deploy counts. Counts and states only: never add app names, staff names or emails, tenant IDs or
+error text to it; `lib/hrm/__tests__/status-report.test.ts` checks this.
+
+Setup, once the image with patch 0027 is deployed:
+
+1. On the VM, add the key to `.env.local` without printing it, and pass it through
+   `docker-compose.override.yml` (`- STATUS_REPORT_KEY=${STATUS_REPORT_KEY:-}`), then recreate `web`
+   with `--env-file .env.local`:
+
+   ```bash
+   sudo sh -c 'umask 077; printf "\nSTATUS_REPORT_KEY=%s\n" "$(openssl rand -hex 32)" >> /opt/intuneget/.env.local'
+   ```
+
+   The route answers `401` to everything until the key is set (32 characters or more).
+2. In Cloudflare Access, add a Bypass application for this one path (`<host>/api/status-report`)
+   so the dashboard's request isn't sent to sign-in. Nothing else on the server is bypassed.
+3. On the IT dashboard's Connections page, enter `https://<host>/api/status-report` and the same key.
+   Copy the key from the VM over SSH; never paste it into chat, issues or this repo.
+
+Links in the report's to-dos use `NEXT_PUBLIC_URL` and are left out unless it is https.
+
 ## Deploys and rollback
 
 - Roll back by reverting the Deploy PR. Going to an older version restores the backup taken when the
