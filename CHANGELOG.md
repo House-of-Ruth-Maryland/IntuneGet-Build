@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Inventory has App activity: the latest 100 deployment, version, group and installation-count events
+  across versions of an app. Existing deployment history appears immediately; observed changes start
+  with this release. Save to Intune and duplicate cleanup record known group edits (patch 0028).
+- Installation failures have What to check: suggested next steps for detection failures and common
+  installer errors, with Microsoft troubleshooting links and general guidance for other codes.
+- Inventory has Group changes to review for changed assignments, no groups receiving installations
+  or a missing newest copy. The twice-daily check and Check now compare successful Intune reads;
+  failed or partial reads keep the last successful state. Compare Previously / Now, then Mark reviewed
+  without changing Intune. Missing and unassigned warnings stay until fixed. Saved warnings also show
+  in App updates and replacement deployment reviews. Adds SQLite migration 12 and updates Help.
+
 - Harden the IT dashboard report: authenticate before its per-key cache, always return empty 401
   for invalid credentials and 200 for authenticated reports, and sanitize all build failures.
   Cancellable SQLite aggregate reads use a separate read-only connection with a short busy timeout;
