@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Harden the IT dashboard report: authenticate before its per-key cache, always return empty 401
+  for invalid credentials and 200 for authenticated reports, and sanitize all build failures.
+  Cancellable SQLite aggregate reads use a separate read-only connection with a short busy timeout;
+  slow builds return the last safe report within the response budget. Enforce version, link, text
+  and size limits, count UTC calendar days, and omit waiting deployments from completed updates.
+
 - IntuneGet publishes a status report for HRM's IT dashboard at `/api/status-report`: server
   problems, failed and stuck packaging jobs, and apps deployed per day. Counts only, behind its own
   report key (patch 0027). Needs `STATUS_REPORT_KEY` on the VM and a Cloudflare Access bypass for

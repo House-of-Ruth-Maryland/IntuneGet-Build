@@ -106,8 +106,10 @@ HRM IT notes.
 
 Patch 0027 serves `GET /api/status-report` for HRM's IT dashboard (format: hrm-it-dashboard
 `docs/status-report.md`). It is built in `lib/hrm/status-report.ts` from the status file and job and
-deploy counts. Counts and states only: never add app names, staff names or emails, tenant IDs or
-error text to it; `lib/hrm/__tests__/status-report.test.ts` checks this.
+deploy counts. Counts and states only: never add app names, staff names or emails, tenant IDs,
+device names or error text to it. The report tests check independent synthetic forbidden markers, version-tag
+allowlisting, UTC calendar buckets, text limits and the 64 KB limit. Server status follows Home; the
+watchdog additionally checks app health and whether scheduled checks and alerts are late.
 
 Setup, once the image with patch 0027 is deployed:
 
@@ -119,13 +121,28 @@ Setup, once the image with patch 0027 is deployed:
    sudo sh -c 'umask 077; printf "\nSTATUS_REPORT_KEY=%s\n" "$(openssl rand -hex 32)" >> /opt/intuneget/.env.local'
    ```
 
-   The route answers `401` to everything until the key is set (32 characters or more).
+   Missing, wrong or unset keys always receive an empty `401`; configured keys must have at least
+   32 characters. Invalid credentials never consume the valid key's allowance.
 2. In Cloudflare Access, add a Bypass application for this one path (`<host>/api/status-report`)
    so the dashboard's request isn't sent to sign-in. Nothing else on the server is bypassed.
 3. On the IT dashboard's Connections page, enter `https://<host>/api/status-report` and the same key.
    Copy the key from the VM over SSH; never paste it into chat, issues or this repo.
 
-Links in the report's to-dos use `NEXT_PUBLIC_URL` and are left out unless it is https.
+Authenticated requests receive `200`, using a server-side cache rebuilt at most once a minute per
+configured key. Concurrent requests share one build. A 2.25-second deadline returns the last safe
+report, preserving its original `generatedAt`, or a fixed down report if no safe report exists.
+Throws anywhere in the build return only the fixed down report, with no exception text. Key rotation
+starts a fresh cache. Responses use `Cache-Control: no-store`; this cache is inside the server.
+
+SQLite counts are aggregate queries in a cancellable worker with its own read-only connection and
+200 ms busy timeout. They do not change the app connection or load app/staff/error records. Status
+file reads are limited to 32 KB before parsing. Supabase mode retains the adapter's bounded history
+reads under the same response deadline. The report's daily buckets use UTC calendar days.
+
+Links in the report's to-dos use only the parsed https origin of `NEXT_PUBLIC_URL`; credentials,
+paths, query strings and fragments are never copied. Invalid or credential-bearing URLs are omitted.
+Only strict release tags can appear as version text. Output text/item limits and the UTF-8 report
+size are enforced at a single boundary.
 
 ## Deploys and rollback
 

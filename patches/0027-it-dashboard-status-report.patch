@@ -1,120 +1,290 @@
 diff --git a/app/api/status-report/route.test.ts b/app/api/status-report/route.test.ts
 new file mode 100644
-index 000000000..3edbab217
+index 000000000..f3e680150
 --- /dev/null
 +++ b/app/api/status-report/route.test.ts
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,120 @@
 +import { NextRequest } from 'next/server';
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-+const mocks = vi.hoisted(() => ({ byStatus: vi.fn(), history: vi.fn(), status: vi.fn() }));
-+vi.mock('@/lib/db', () => ({
-+  getDatabase: () => ({ jobs: { getByStatus: mocks.byStatus }, uploadHistory: { listAll: mocks.history } }),
++const mocks = vi.hoisted(() => ({ byStatus: vi.fn(), history: vi.fn(), status: vi.fn(), factory: vi.fn() }));
++vi.mock('@/lib/db', () => ({ isSqliteMode: () => false, getDatabase: () => mocks.factory() }));
++vi.mock('@/lib/hrm/status-report-data', async original => ({
++  ...(await original<typeof import('@/lib/hrm/status-report-data')>()), readReportServerStatus: mocks.status,
 +}));
-+vi.mock('@/lib/hrm/home', async (original) => ({ ...(await original<typeof import('@/lib/hrm/home')>()), readServerStatus: mocks.status }));
-+import { GET } from './route';
-+
++let GET: typeof import('./route')['GET'];
 +const KEY = 'a'.repeat(64);
-+// Each test starts two minutes after the last, so earlier requests don't count against the rate limit.
-+let testIndex = 0;
-+const request = (authorization?: string) => new NextRequest('http://localhost/api/status-report', {
++const request = (authorization?: string) => new NextRequest('https://example.test/api/status-report', {
 +  headers: authorization ? { authorization } : {},
 +});
++const authorized = () => request(`Bearer ${KEY}`);
 +
-+beforeEach(() => {
++beforeEach(async () => {
++  vi.resetModules();
 +  vi.useFakeTimers();
-+  vi.setSystemTime(new Date(Date.UTC(2026, 10, 3, 12) + testIndex++ * 120_000));
++  vi.setSystemTime(new Date('2026-11-03T12:00:00Z'));
 +  process.env.STATUS_REPORT_KEY = KEY;
 +  mocks.byStatus.mockReset().mockResolvedValue([]);
 +  mocks.history.mockReset().mockResolvedValue([]);
 +  mocks.status.mockReset().mockResolvedValue({ reported: false, reason: 'missing' });
++  mocks.factory.mockReset().mockImplementation(() => ({ jobs: { getByStatus: mocks.byStatus }, uploadHistory: { listAll: mocks.history } }));
++  GET = (await import('./route')).GET;
 +});
-+afterEach(() => {
-+  vi.useRealTimers();
-+  delete process.env.STATUS_REPORT_KEY;
-+});
++afterEach(() => { vi.useRealTimers(); delete process.env.STATUS_REPORT_KEY; });
++
++async function down(response: Response) {
++  expect(response.status).toBe(200);
++  const text = await response.text();
++  expect(text).not.toContain('FORBIDDEN');
++  expect(text).not.toContain(KEY);
++  expect(JSON.parse(text)).toMatchObject({ health: 'down', status: 'Report unavailable' });
++}
 +
 +describe('status report route', () => {
-+  it('rejects a missing or wrong key without reading anything', async () => {
-+    for (const header of [undefined, 'Bearer wrong', `Basic ${KEY}`]) {
-+      const response = await GET(request(header));
-+      expect(response.status).toBe(401);
-+      expect(await response.text()).toBe('');
++  it('always rejects missing or wrong keys with empty 401s without reading anything', async () => {
++    for (let i = 0; i < 30; i++) {
++      for (const header of [undefined, `Bearer wrong-${i}`, `Basic ${KEY}`]) {
++        const response = await GET(request(header));
++        expect(response.status).toBe(401);
++        expect(await response.text()).toBe('');
++      }
 +    }
-+    expect(mocks.byStatus).not.toHaveBeenCalled();
++    expect(mocks.factory).not.toHaveBeenCalled();
 +    expect(mocks.status).not.toHaveBeenCalled();
++    expect((await GET(authorized())).status).toBe(200);
 +  });
 +
-+  it('rejects every key when STATUS_REPORT_KEY is unset or short', async () => {
-+    delete process.env.STATUS_REPORT_KEY;
-+    expect((await GET(request('Bearer '))).status).toBe(401);
-+    process.env.STATUS_REPORT_KEY = 'short';
-+    expect((await GET(request('Bearer short'))).status).toBe(401);
++  it('rejects every key when unset or shorter than 32 characters', async () => {
++    for (const key of [undefined, 's'.repeat(31)]) {
++      process.env.STATUS_REPORT_KEY = key ?? '';
++      for (let i = 0; i < 25; i++) expect((await GET(request(`Bearer ${key ?? ''}`))).status).toBe(401);
++    }
 +  });
 +
-+  it('answers the right key with a version 1 report that is never cached', async () => {
-+    const response = await GET(request(`Bearer ${KEY}`));
++  it('serves cached 200 reports and rebuilds at most once a minute', async () => {
++    const first = await GET(authorized());
++    expect(first.status).toBe(200);
++    expect(first.headers.get('cache-control')).toBe('no-store');
++    const report = await first.json();
++    for (let i = 0; i < 30; i++) expect(await (await GET(authorized())).json()).toEqual(report);
++    expect(mocks.factory).toHaveBeenCalledTimes(1);
++    vi.advanceTimersByTime(60_001);
++    expect((await GET(authorized())).status).toBe(200);
++    expect(mocks.factory).toHaveBeenCalledTimes(2);
++  });
++
++  it('shares one build between simultaneous valid requests', async () => {
++    await Promise.all(Array.from({ length: 10 }, () => GET(authorized())));
++    expect(mocks.factory).toHaveBeenCalledTimes(1);
++  });
++
++  it('does not reuse another key cache after rotation', async () => {
++    const first = await (await GET(authorized())).json();
++    process.env.STATUS_REPORT_KEY = 'b'.repeat(64);
++    vi.advanceTimersByTime(1_000);
++    const next = await GET(request(`Bearer ${process.env.STATUS_REPORT_KEY}`));
++    expect((await next.json()).generatedAt).not.toBe(first.generatedAt);
++    expect(mocks.factory).toHaveBeenCalledTimes(2);
++    expect((await GET(authorized())).status).toBe(401);
++  });
++
++  it('sanitizes query failures and database factory throws', async () => {
++    mocks.factory.mockImplementation(() => { throw new Error('FORBIDDEN_FACTORY'); });
++    await down(await GET(authorized()));
++    expect(mocks.status).toHaveBeenCalled();
++    vi.advanceTimersByTime(60_001);
++    mocks.factory.mockReturnValue({ jobs: { getByStatus: mocks.byStatus }, uploadHistory: { listAll: mocks.history } });
++    mocks.history.mockRejectedValue(new Error('FORBIDDEN_QUERY'));
++    const response = await GET(authorized());
++    const text = await response.text();
 +    expect(response.status).toBe(200);
-+    expect(response.headers.get('cache-control')).toBe('no-store');
-+    expect(await response.json()).toMatchObject({ version: 1, tool: 'intuneget', health: 'warn', status: 'No server status' });
++    expect(JSON.parse(text).health).toBe('down');
++    expect(text).not.toContain('FORBIDDEN');
 +  });
 +
-+  it('reports the database as down instead of failing', async () => {
-+    mocks.history.mockRejectedValue(new Error('locked'));
-+    expect(await (await GET(request(`Bearer ${KEY}`))).json()).toMatchObject({ health: 'down', status: 'Database error' });
++  it('sanitizes malformed status data when building the report throws', async () => {
++    mocks.status.mockResolvedValue({ reported: true, problems: null });
++    await down(await GET(authorized()));
 +  });
 +
-+  it('allows about one request a minute per key', async () => {
-+    expect((await GET(request(`Bearer ${KEY}`))).status).toBe(200);
-+    expect((await GET(request(`Bearer ${KEY}`))).status).toBe(200);
-+    expect((await GET(request(`Bearer ${KEY}`))).status).toBe(429);
-+    vi.advanceTimersByTime(61_000);
-+    expect((await GET(request(`Bearer ${KEY}`))).status).toBe(200);
++  it('answers a cold slow build within three seconds and cancels its reads', async () => {
++    let signal: AbortSignal | undefined;
++    mocks.status.mockImplementation((value: AbortSignal) => { signal = value; return new Promise(() => {}); });
++    const response = GET(authorized());
++    await vi.advanceTimersByTimeAsync(2_250);
++    await down(await response);
++    expect(signal?.aborted).toBe(true);
++  });
++
++  it('returns the last safe report on a slow refresh without changing its generatedAt', async () => {
++    const first = await (await GET(authorized())).json();
++    vi.advanceTimersByTime(60_001);
++    mocks.history.mockImplementation(() => new Promise(() => {}));
++    const response = GET(authorized());
++    await vi.advanceTimersByTimeAsync(2_250);
++    expect(await (await response).json()).toEqual(first);
 +  });
 +});
 diff --git a/app/api/status-report/route.ts b/app/api/status-report/route.ts
 new file mode 100644
-index 000000000..0a0e390cd
+index 000000000..25fc74af8
 --- /dev/null
 +++ b/app/api/status-report/route.ts
-@@ -0,0 +1,29 @@
-+// HRM patch: the IT dashboard's status report. Protected by STATUS_REPORT_KEY alone, not sign-in;
-+// Cloudflare Access bypasses this one path. Counts and states only (lib/hrm/status-report.ts).
-+
+@@ -0,0 +1,70 @@
++// HRM patch: protected by STATUS_REPORT_KEY alone; the report path bypasses sign-in.
++import { createHash } from 'node:crypto';
 +import { NextRequest, NextResponse } from 'next/server';
-+import { getDatabase } from '@/lib/db';
-+import { readServerStatus } from '@/lib/hrm/home';
-+import { buildStatusReport, reportKeyMatches, reportRateLimited } from '@/lib/hrm/status-report';
++import { readReportCounts, readReportServerStatus } from '@/lib/hrm/status-report-data';
++import { buildStatusReport, degradedReport, reportKeyMatches, type StatusReport } from '@/lib/hrm/status-report';
 +
 +export const dynamic = 'force-dynamic';
++export const runtime = 'nodejs';
++const CACHE_MS = 60_000;
++const BUILD_MS = 2_250; // Leave headroom inside the dashboard contract's three-second budget.
++interface Cache {
++  key: string;
++  attemptedAt: number;
++  report?: StatusReport;
++  lastGood?: StatusReport;
++  pending?: Promise<StatusReport>;
++}
++let cache: Cache | undefined;
++
++async function rebuild(entry: Cache, now: Date): Promise<StatusReport> {
++  const controller = new AbortController();
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  try {
++    const work = Promise.resolve().then(async () => {
++      const [server, counts] = await Promise.all([
++        readReportServerStatus(controller.signal, now),
++        readReportCounts(controller.signal, now),
++      ]);
++      return buildStatusReport({ server, counts, jobs: [], deploys: [], origin: process.env.NEXT_PUBLIC_URL, now });
++    });
++    const deadline = new Promise<StatusReport>(resolve => {
++      timer = setTimeout(() => {
++        // Keep the original generatedAt when serving older numbers.
++        resolve(entry.lastGood ?? degradedReport(now));
++        controller.abort();
++      }, BUILD_MS);
++    });
++    entry.report = await Promise.race([work, deadline]);
++    if (!controller.signal.aborted && entry.report.health !== 'down') entry.lastGood = entry.report;
++  } catch {
++    entry.report = degradedReport(now);
++  } finally {
++    if (timer) clearTimeout(timer);
++    controller.abort();
++  }
++  return entry.report;
++}
 +
 +export async function GET(request: NextRequest) {
 +  const authorization = request.headers.get('authorization');
-+  if (reportRateLimited(authorization)) return new NextResponse(null, { status: 429 });
-+  if (!reportKeyMatches(authorization, process.env.STATUS_REPORT_KEY)) return new NextResponse(null, { status: 401 });
-+
-+  const db = getDatabase();
-+  const [server, jobs, deploys] = await Promise.all([
-+    readServerStatus(),
-+    Promise.all([
-+      db.jobs.getByStatus('failed', 500, false),
-+      ...['queued', 'packaging', 'uploading'].map((status) => db.jobs.getByStatus(status, 200)),
-+    ]).then((lists) => lists.flat()).catch(() => null),
-+    db.uploadHistory.listAll(1000).catch(() => null),
-+  ]);
-+  return NextResponse.json(
-+    buildStatusReport({ server, jobs, deploys, origin: process.env.NEXT_PUBLIC_URL }),
-+    { headers: { 'Cache-Control': 'no-store' } },
-+  );
++  // Invalid credentials never touch the cache or consume an authenticated request's allowance.
++  if (!reportKeyMatches(authorization, process.env.STATUS_REPORT_KEY)) {
++    return new NextResponse(null, { status: 401, headers: { 'Cache-Control': 'no-store' } });
++  }
++  try {
++    const key = createHash('sha256').update(process.env.STATUS_REPORT_KEY!).digest('hex');
++    const now = new Date();
++    if (!cache || cache.key !== key) cache = { key, attemptedAt: -Infinity };
++    const entry = cache;
++    if (!entry.pending && now.getTime() - entry.attemptedAt >= CACHE_MS) {
++      entry.attemptedAt = now.getTime();
++      entry.pending = rebuild(entry, now).finally(() => { entry.pending = undefined; });
++    }
++    const report = await (entry.pending ?? entry.report ?? degradedReport(now));
++    return NextResponse.json(report, { headers: { 'Cache-Control': 'no-store' } });
++  } catch {
++    // Includes factory/setup, malformed status, query, build and serialization failures. Never log errors or keys.
++    return NextResponse.json(degradedReport(), { headers: { 'Cache-Control': 'no-store' } });
++  }
 +}
+diff --git a/lib/hrm/__tests__/status-report-data.test.ts b/lib/hrm/__tests__/status-report-data.test.ts
+new file mode 100644
+index 000000000..44d2db5fe
+--- /dev/null
++++ b/lib/hrm/__tests__/status-report-data.test.ts
+@@ -0,0 +1,70 @@
++import { afterEach, describe, expect, it } from 'vitest';
++import Database from 'better-sqlite3';
++import { mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import path from 'node:path';
++import { readReportServerStatus, readSqliteReportCounts } from '../status-report-data';
++const NOW = new Date('2026-11-03T12:00:00Z');
++const dirs: string[] = [];
++const originalPath = process.env.DATABASE_PATH;
++afterEach(async () => {
++  if (originalPath === undefined) delete process.env.DATABASE_PATH;
++  else process.env.DATABASE_PATH = originalPath;
++  for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
++});
++async function directory() {
++  const dir = await mkdtemp(path.join(tmpdir(), 'report-counts-'));
++  dirs.push(dir);
++  process.env.DATABASE_PATH = path.join(dir, 'test.db');
++  return dir;
++}
++
++describe('isolated report reads', () => {
++  it('aggregates complete counts in UTC without exposing records or changing the app connection', async () => {
++    await directory();
++    const db = new Database(process.env.DATABASE_PATH!);
++    try {
++      db.exec(`CREATE TABLE packaging_jobs (status TEXT, created_at TEXT, updated_at TEXT, archived_at TEXT, display_name TEXT);
++        CREATE TABLE upload_history (deployed_at TEXT, display_name TEXT);`);
++      const insert = db.prepare('INSERT INTO upload_history VALUES (?, ?)');
++      db.transaction(() => {
++        for (let i = 0; i < 1_205; i++) insert.run('2026-11-02T23:59:00Z', 'FORBIDDEN_APP');
++      })();
++      insert.run('2026-11-03T00:00:00Z', 'FORBIDDEN_APP');
++      insert.run('2026-11-04T00:00:00Z', 'FORBIDDEN_FUTURE');
++      db.prepare('INSERT INTO packaging_jobs VALUES (?, ?, ?, ?, ?)').run('failed', NOW.toISOString(), NOW.toISOString(), null, 'FORBIDDEN_ERROR');
++      db.prepare('INSERT INTO packaging_jobs VALUES (?, ?, ?, ?, ?)').run('queued', '2026-11-02T00:00:00Z', NOW.toISOString(), null, 'FORBIDDEN_STAFF');
++      db.prepare('INSERT INTO packaging_jobs VALUES (?, ?, ?, ?, ?)').run('failed', NOW.toISOString(), NOW.toISOString(), NOW.toISOString(), 'FORBIDDEN_ARCHIVED');
++      const timeout = db.pragma('busy_timeout', { simple: true });
++      const result = await readSqliteReportCounts(new AbortController().signal, NOW);
++      expect(result).toMatchObject({ failedRecent: 1, stuck: 1 });
++      expect(result.days.slice(-2)).toEqual([1_205, 1]);
++      expect(result.deployed.reduce((sum, group) => sum + group.count, 0)).toBe(1_206);
++      expect(result.failed.reduce((sum, group) => sum + group.count, 0)).toBe(1);
++      expect(JSON.stringify(result)).not.toContain('FORBIDDEN');
++      expect(db.pragma('busy_timeout', { simple: true })).toBe(timeout);
++    } finally { db.close(); }
++  });
++
++  it('cancels an isolated reader without waiting for a busy database', async () => {
++    await directory();
++    const db = new Database(process.env.DATABASE_PATH!);
++    try {
++      db.exec('CREATE TABLE packaging_jobs (status TEXT); BEGIN EXCLUSIVE;');
++      const controller = new AbortController();
++      const result = readSqliteReportCounts(controller.signal, NOW);
++      controller.abort();
++      await expect(result).rejects.toThrow('Report unavailable');
++    } finally { db.exec('ROLLBACK'); db.close(); }
++  });
++
++  it('bounds status-file bytes and keeps missing status distinct from malformed input', async () => {
++    const dir = await directory();
++    const signal = new AbortController().signal;
++    expect(await readReportServerStatus(signal, NOW)).toEqual({ reported: false, reason: 'missing' });
++    await writeFile(path.join(dir, 'hrm-status.json'), 'x'.repeat(32_769));
++    await expect(readReportServerStatus(signal, NOW)).rejects.toThrow('Report unavailable');
++    await writeFile(path.join(dir, 'hrm-status.json'), JSON.stringify({ generatedAt: NOW.toISOString(), disk: {}, tunnel: { running: true, lastUpdate: null } }));
++    await expect(readReportServerStatus(signal, NOW)).rejects.toThrow();
++  });
++});
 diff --git a/lib/hrm/__tests__/status-report.test.ts b/lib/hrm/__tests__/status-report.test.ts
 new file mode 100644
-index 000000000..f773e147c
+index 000000000..a198cc7b3
 --- /dev/null
 +++ b/lib/hrm/__tests__/status-report.test.ts
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,221 @@
 +import { describe, expect, it } from 'vitest';
 +import { interpretServerStatus } from '../home';
-+import { buildStatusReport, reportKeyMatches } from '../status-report';
++import { buildStatusReport, reportKeyMatches, constrainReport } from '../status-report';
 +
 +const NOW = new Date('2026-11-03T12:00:00Z');
 +const ORIGIN = 'https://intuneget.example.test';
@@ -172,7 +342,7 @@ index 000000000..f773e147c
 +      { id: 'server-deploy', title: 'The last deploy did not finish', link: `${ORIGIN}/dashboard` },
 +      { id: 'server-disk', title: 'Disk space is running low', link: `${ORIGIN}/dashboard` },
 +    ]);
-+    expect(report.events).toContainEqual({ at: '2026-11-03T10:00:00.000Z', text: 'Server update to b did not finish', tone: 'down' });
++    expect(report.events).toContainEqual({ at: '2026-11-03T10:00:00.000Z', text: 'Server update did not finish', tone: 'down' });
 +  });
 +
 +  it('warns when the status file is missing or stale, without guessing', () => {
@@ -211,25 +381,122 @@ index 000000000..f773e147c
 +    expect(report.todos[0]).not.toHaveProperty('link');
 +  });
 +
-+  it('never carries app names, staff details, tenant IDs or error text', () => {
++  it('drops independent forbidden markers from every raw input field', () => {
++    const marker = (field: string) => `FORBIDDEN_${field}`;
++    const raw = (fields: string[]) => Object.fromEntries(fields.map(field => [field, marker(field)]));
 +    const report = build({
-+      server: server({ lastDeploy: { time: '2026-11-03T10:00:00Z', result: 'failed', from: 'a', to: 'b' } }),
-+      jobs: [{
-+        ...job('failed', '2026-11-03T09:00:00Z'),
-+        display_name: 'Client A Notes', user_email: 'staff01@example.test', tenant_id: 'tenant-01', status_message: 'Error for Client A',
-+      } as ReturnType<typeof job>],
-+      deploys: [{ deployed_at: '2026-11-03T11:00:00Z', display_name: 'Client A Notes', user_id: 'staff-01' } as { deployed_at: string }],
++      server: server({
++        ...raw(['version', 'startedAt', 'extra', 'device_name', 'staff_name', 'error']),
++        lastDeploy: { ...raw(['from', 'to', 'error']), time: NOW.toISOString(), result: marker('result') },
++        lastBackup: raw(['at', 'sizeKb']), offsiteBackup: { at: NOW.toISOString(), result: marker('backup_result') },
++        tunnel: { ...raw(['version', 'device_name']), running: false, lastUpdate: raw(['result', 'at']) },
++        updateCheck: raw(['result', 'at']), notifications: raw(['result', 'at']),
++      }),
++      jobs: [{ ...raw(['display_name', 'user_email', 'tenant_id', 'status_message', 'staff_name', 'device_name', 'id']),
++        ...job('failed', NOW.toISOString()) }, { ...job(marker('job_status'), marker('created_at')), updated_at: marker('updated_at') }],
++      deploys: [{ ...raw(['display_name', 'user_id', 'tenant_id', 'device_name', 'error']), deployed_at: NOW.toISOString() },
++        { deployed_at: marker('deployed_at') }],
++      origin: `${ORIGIN}/FORBIDDEN_path?value=FORBIDDEN_query#FORBIDDEN_fragment`,
 +    });
-+    const text = JSON.stringify(report);
-+    for (const leak of ['Client A', 'staff01', 'tenant-01', 'staff-01']) expect(text).not.toContain(leak);
++    expect(JSON.stringify(report)).not.toContain('FORBIDDEN');
++    for (const field of ['generatedAt', 'disk']) {
++      const bad = build({ server: server({ [field]: marker(field) }) });
++      expect(JSON.stringify(bad)).not.toContain('FORBIDDEN');
++    }
++    for (const field of ['totalKb', 'usedKb']) {
++      expect(JSON.stringify(build({ server: server({ disk: { totalKb: 1, usedKb: 1, [field]: marker(field) } }) }))).not.toContain('FORBIDDEN');
++    }
 +  });
++
++  it('checks each server-status leaf independently with a synthetic forbidden marker', () => {
++    const fixture = server() as unknown as Record<string, unknown>;
++    const leaves = (value: unknown, prefix: string[] = []): string[][] => {
++      if (value && typeof value === 'object' && !Array.isArray(value)) {
++        return Object.entries(value).flatMap(([key, child]) => leaves(child, [...prefix, key]));
++      }
++      return [prefix];
++    };
++    for (const fields of leaves(fixture)) {
++      const copy = structuredClone(fixture);
++      let parent = copy;
++      for (const field of fields.slice(0, -1)) parent = parent[field] as Record<string, unknown>;
++      parent[fields.at(-1)!] = 'FORBIDDEN_SERVER_FIELD';
++      const report = build({ server: interpretServerStatus(JSON.stringify(copy), NOW) });
++      expect(JSON.stringify(report), fields.join('.')).not.toContain('FORBIDDEN');
++    }
++  });
++
++  it('uses parsed https origins only, without credentials, paths, queries or fragments', () => {
++    const jobs = [job('failed', NOW.toISOString())];
++    for (const origin of ['https://', 'invalid', 'http://example.test', 'https://FORBIDDEN:FORBIDDEN@example.test']) {
++      expect(build({ origin, jobs }).todos[0]).not.toHaveProperty('link');
++    }
++    expect(build({ origin: `${ORIGIN}/discard?discard=yes#discard`, jobs }).todos[0].link).toBe(`${ORIGIN}/dashboard/uploads?status=failed`);
++  });
++
++  it('omits waiting deployments and accepts only release tags as version text', () => {
++    expect(build({ server: server({ version: 'FORBIDDEN', lastDeploy: { time: NOW.toISOString(), result: 'waiting', to: 'FORBIDDEN' } }) }).events.some(event => event.text.startsWith('Server updated'))).toBe(false);
++    for (const version of ['FORBIDDEN', 'x'.repeat(100_000), 'v1.2.3-extra', 'v1.2.3\n', 'v1.2.3\nFORBIDDEN']) {
++      const report = build({ server: server({ version, lastDeploy: { time: NOW.toISOString(), result: 'deployed', to: version } }) });
++      expect(report.foot.some(line => line.startsWith('Running'))).toBe(false);
++      expect(report.events).toContainEqual({ at: NOW.toISOString(), text: 'Server updated', tone: 'ok' });
++    }
++  });
++
++  it('uses UTC calendar buckets at midnight and noon and ignores future deployments', () => {
++    for (const time of ['2026-11-03T00:00:00Z', '2026-11-03T12:00:00Z']) {
++      const report = build({ now: new Date(time), deploys: [
++        { deployed_at: '2026-11-02T23:59:59Z' }, { deployed_at: '2026-11-03T00:00:00Z' },
++        { deployed_at: '2026-11-04T00:00:00Z' },
++      ] });
++      expect(report.series.values.slice(-2)).toEqual([1, 1]);
++    }
++  });
++
++  it('enforces all text and item limits centrally and stays below 64 KB in UTF-8', () => {
++    const report = build();
++    const long = '界'.repeat(10_000);
++    report.status = long;
++    report.metric.label = long;
++    report.series.label = long;
++    report.foot = [long, long, long];
++    report.todos = Array.from({ length: 30 }, () => ({ id: long, title: long, detail: long }));
++    report.events = Array.from({ length: 30 }, () => ({ at: NOW.toISOString(), text: long, tone: 'ok' as const }));
++    const bounded = constrainReport(report, NOW);
++    expect(bounded.status.length).toBe(24);
++    expect(bounded.metric.label.length).toBe(40);
++    expect(bounded.series.label.length).toBeLessThanOrEqual(60);
++    expect(bounded.foot).toHaveLength(2);
++    expect(bounded.foot.every(line => line.length <= 60)).toBe(true);
++    expect(bounded.todos).toHaveLength(20);
++    expect(bounded.todos.every(todo => todo.id.length <= 80 && todo.title.length <= 100 && todo.detail!.length <= 100)).toBe(true);
++    expect(bounded.events).toHaveLength(20);
++    expect(bounded.events.every(event => event.text.length <= 80)).toBe(true);
++    expect(Buffer.byteLength(JSON.stringify(bounded))).toBeLessThan(65_536);
++    bounded.todos = bounded.todos.map(todo => ({ ...todo, link: `${ORIGIN}/${'界'.repeat(1_900)}` }));
++    const oversized = constrainReport(bounded, NOW);
++    expect(oversized.health).toBe('down');
++    expect(Buffer.byteLength(JSON.stringify(oversized))).toBeLessThan(65_536);
++  });
++
++  it('keeps events only within the last 48 hours, newest first, at most 20', () => {
++    const deploys = Array.from({ length: 60 }, (_, hour) => ({ deployed_at: new Date(NOW.getTime() - hour * 3_600_000).toISOString() }));
++    deploys.push({ deployed_at: new Date(NOW.getTime() + 3_600_000).toISOString() });
++    const report = build({ deploys });
++    expect(report.events).toHaveLength(20);
++    expect(report.events.every(event => Date.parse(event.at) <= NOW.getTime() && Date.parse(event.at) >= NOW.getTime() - 48 * 3_600_000)).toBe(true);
++    expect(report.events.map(event => event.at)).toEqual(report.events.map(event => event.at).sort().reverse());
++  });
++
 +});
 +
 +describe('report key', () => {
 +  const key = 'k'.repeat(64);
 +  it('accepts only the exact bearer key, and nothing when the key is unset or short', () => {
 +    expect(reportKeyMatches(`Bearer ${key}`, key)).toBe(true);
++    expect(reportKeyMatches(`Bearer ${'s'.repeat(32)}`, 's'.repeat(32))).toBe(true);
 +    expect(reportKeyMatches(`Bearer ${key}x`, key)).toBe(false);
++    expect(reportKeyMatches(`Bearer ${key}\n`, key)).toBe(false);
 +    expect(reportKeyMatches(key, key)).toBe(false);
 +    expect(reportKeyMatches(null, key)).toBe(false);
 +    expect(reportKeyMatches('Bearer ', undefined)).toBe(false);
@@ -237,14 +504,15 @@ index 000000000..f773e147c
 +  });
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
-index 0da91967e..9b7146602 100644
+index 0da91967e..9dc61c2d2 100644
 --- a/lib/hrm/help-content.ts
 +++ b/lib/hrm/help-content.ts
-@@ -102,6 +102,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -102,6 +102,8 @@ export const HELP_SECTIONS: HelpSection[] = [
        'Merging it updates the server within 5 minutes. The server backs up its data first and goes back to the previous version on its own if the new one doesn\'t start.',
        'Server status on the Home page shows the running version, the nightly off-site backup, the backup taken before each deploy, disk space and the tunnel.',
        'Off-site backup turns red if the last nightly copy to Azure failed or is more than 36 hours old.',
-+      'HRM\'s IT dashboard shows a summary from the server: Server status problems, failed or stuck deployments, and apps deployed each day. It shows counts only. For details, open the Home page here.',
++      'HRM\'s IT dashboard shows Server status problems, failed or stuck deployments, and counts of apps deployed each day. Open Home here for details.',
++      'The summary refreshes at most once a minute. If the server is slow, the IT dashboard keeps the last safe summary and its original time.',
      ],
      links: [{ label: 'IntuneGet-Build runbook', href: RUNBOOK_URL }],
    },
@@ -261,12 +529,139 @@ index f3a2a2865..4a6ab1e59 100644
    let failedRecent = 0;
    let stuck = 0;
    for (const job of jobs) {
+diff --git a/lib/hrm/status-report-data.ts b/lib/hrm/status-report-data.ts
+new file mode 100644
+index 000000000..0a5cddb7e
+--- /dev/null
++++ b/lib/hrm/status-report-data.ts
+@@ -0,0 +1,121 @@
++/** Counts only, using an isolated read-only SQLite connection so a slow query cannot block HTTP. */
++import { Worker } from 'node:worker_threads';
++import path from 'node:path';
++import { getDatabase, isSqliteMode } from '@/lib/db';
++import type { ReportCounts } from './status-report';
++import { countsFromRecords } from './status-report';
++
++// The worker has its own 200 ms busy timeout; no setting on the app's connection is changed.
++// Its inputs contain only the database path and time. Its output contains counts and timestamps.
++const QUERY = `
++const { parentPort, workerData } = require('node:worker_threads');
++let db;
++try {
++  // Resolve inside the worker: webpack must not rewrite a parent require.resolve into a bundle ID.
++  const Database = require('node:module').createRequire(workerData.packagePath)('better-sqlite3');
++  db = new Database(workerData.databasePath, { readonly: true, fileMustExist: true, timeout: 200 });
++  db.pragma('query_only = ON');
++  const now = workerData.now;
++  const day = 86400000;
++  const start = new Date(Math.floor(now / day) * day - 13 * day).toISOString();
++  const end = new Date(now).toISOString();
++  const failedSince = new Date(now - 7 * day).toISOString();
++  const stuckBefore = new Date(now - 2 * 3600000).toISOString();
++  const eventsSince = new Date(now - 2 * day).toISOString();
++  const failedRecent = db.prepare(\`SELECT COUNT(*) AS n FROM packaging_jobs WHERE archived_at IS NULL
++    AND status = 'failed' AND julianday(created_at) BETWEEN julianday(?) AND julianday(?)\`).get(failedSince, end).n;
++  const stuck = db.prepare(\`SELECT COUNT(*) AS n FROM packaging_jobs WHERE archived_at IS NULL
++    AND status IN ('queued', 'packaging', 'uploading') AND julianday(created_at) < julianday(?)\`).get(stuckBefore).n;
++  const days = Array(14).fill(0);
++  for (const row of db.prepare(\`SELECT date(deployed_at) AS date, COUNT(*) AS n FROM upload_history
++    WHERE julianday(deployed_at) BETWEEN julianday(?) AND julianday(?) GROUP BY date(deployed_at)\`).all(start, end)) {
++    const offset = Math.round((Date.parse(row.date + 'T00:00:00Z') - Date.parse(start)) / day);
++    if (offset >= 0 && offset < 14) days[offset] = row.n;
++  }
++  const groups = (table, time, condition) => db.prepare(\`SELECT MAX(julianday(\${time})) AS at, COUNT(*) AS count
++    FROM \${table} WHERE \${condition} AND julianday(\${time}) BETWEEN julianday(?) AND julianday(?)
++    GROUP BY strftime('%Y-%m-%dT%H', \${time})\`).all(eventsSince, end)
++    .map(row => ({ at: new Date(Math.round((row.at - 2440587.5) * day)).toISOString(), count: row.count }));
++  const failed = groups('packaging_jobs', 'COALESCE(updated_at, created_at)', "status = 'failed' AND archived_at IS NULL");
++  const deployed = groups('upload_history', 'deployed_at', '1 = 1');
++  parentPort.postMessage({ failedRecent, stuck, days, failed, deployed });
++} catch {
++  parentPort.postMessage(null);
++} finally {
++  if (db) db.close();
++}
++`;
++
++export function readSqliteReportCounts(signal: AbortSignal, now = new Date()): Promise<ReportCounts> {
++  return new Promise((resolve, reject) => {
++    signal.throwIfAborted();
++    const worker = new Worker(QUERY, {
++      eval: true,
++      workerData: {
++        packagePath: path.join(process.cwd(), 'package.json'),
++        databasePath: path.resolve(process.env.DATABASE_PATH || './data/intuneget.db'),
++        now: now.getTime(),
++      },
++    });
++    let finished = false;
++    const finish = (value?: ReportCounts) => {
++      if (finished) return;
++      finished = true;
++      signal.removeEventListener('abort', abort);
++      void worker.terminate();
++      if (value) resolve(value);
++      else reject(new Error('Report unavailable'));
++    };
++    const abort = () => finish();
++    signal.addEventListener('abort', abort, { once: true });
++    worker.once('message', (value: ReportCounts | null) => finish(value ?? undefined));
++    worker.once('error', () => finish());
++    worker.once('exit', () => finish());
++    // Covers cancellation between construction and listener registration.
++    if (signal.aborted) abort();
++  });
++}
++
++export async function readReportCounts(signal: AbortSignal, now = new Date()): Promise<ReportCounts> {
++  if (isSqliteMode()) return readSqliteReportCounts(signal, now);
++  // The shared adapter is asynchronous in Supabase mode. The route still enforces its deadline.
++  const db = getDatabase();
++  const [jobs, deploys] = await Promise.all([
++    Promise.all([
++      db.jobs.getByStatus('failed', 500, false),
++      ...['queued', 'packaging', 'uploading'].map(status => db.jobs.getByStatus(status, 200)),
++    ]).then(lists => lists.flat()),
++    db.uploadHistory.listAll(1000),
++  ]);
++  signal.throwIfAborted();
++  return countsFromRecords(jobs, deploys, now);
++}
++
++/** Bound file size before parsing; malformed or oversized status data becomes a sanitized degraded report. */
++export async function readReportServerStatus(signal: AbortSignal, now = new Date()) {
++  const { open } = await import('node:fs/promises');
++  const { interpretServerStatus, statusFilePath } = await import('./home');
++  let file;
++  try {
++    file = await open(statusFilePath(), 'r');
++  } catch (error) {
++    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return interpretServerStatus(null, now);
++    throw error;
++  }
++  try {
++    signal.throwIfAborted();
++    if ((await file.stat()).size > 32_768) throw new Error('Report unavailable');
++    const buffer = Buffer.alloc(32_769);
++    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
++    signal.throwIfAborted();
++    if (bytesRead > 32_768) throw new Error('Report unavailable');
++    const raw = buffer.toString('utf8', 0, bytesRead);
++    const value = JSON.parse(raw);
++    if (!value || typeof value.generatedAt !== 'string' || !Number.isFinite(Date.parse(value.generatedAt))
++      || !Number.isFinite(value.disk?.totalKb) || value.disk.totalKb < 0
++      || !Number.isFinite(value.disk?.usedKb) || value.disk.usedKb < 0) throw new Error('Report unavailable');
++    return interpretServerStatus(raw, now);
++  } finally {
++    await file.close();
++  }
++}
 diff --git a/lib/hrm/status-report.ts b/lib/hrm/status-report.ts
 new file mode 100644
-index 000000000..c3eb1ad65
+index 000000000..1cdad172c
 --- /dev/null
 +++ b/lib/hrm/status-report.ts
-@@ -0,0 +1,190 @@
+@@ -0,0 +1,247 @@
 +/**
 + * HRM patch: the IT dashboard's status report (hrm-it-dashboard
 + * docs/status-report.md, version 1), served at GET /api/status-report.
@@ -304,6 +699,7 @@ index 000000000..c3eb1ad65
 +  /** The server's public address (NEXT_PUBLIC_URL); links are left out unless it is https. */
 +  origin: string | undefined;
 +  now?: Date;
++  counts?: ReportCounts;
 +}
 +
 +const HOUR = 3_600_000;
@@ -312,7 +708,7 @@ index 000000000..c3eb1ad65
 +const EVENT_HOURS = 48;
 +const MAX_ITEMS = 20;
 +
-+// Same wording as the VM watchdog's Teams alerts (deploy/intuneget-watchdog.py).
++// Summarizes the Home page status states; the watchdog also checks timer lateness and app health.
 +const PROBLEMS: Record<string, { status: string; title: string }> = {
 +  deploy: { status: 'Deploy failed', title: 'The last deploy did not finish' },
 +  offsiteBackup: { status: 'Backup failed', title: 'The nightly off-site backup failed or is late' },
@@ -328,27 +724,10 @@ index 000000000..c3eb1ad65
 +
 +/** Compares the presented bearer key with STATUS_REPORT_KEY in constant time. */
 +export function reportKeyMatches(authorization: string | null, expected: string | undefined): boolean {
-+  const presented = authorization?.match(/^Bearer (.+)$/)?.[1];
++  const presented = authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined;
 +  if (!presented || !expected || expected.length < 32) return false;
 +  const digest = (value: string) => createHash('sha256').update(value).digest();
 +  return timingSafeEqual(digest(presented), digest(expected));
-+}
-+
-+const hits = new Map<string, number[]>();
-+
-+/** About one request a minute per key: 2 a minute per presented key, 20 a minute in all. */
-+export function reportRateLimited(authorization: string | null, now = Date.now()): boolean {
-+  const key = createHash('sha256').update(authorization ?? '').digest('hex');
-+  const recent = (name: string) => (hits.get(name) ?? []).filter((at) => now - at < 60_000);
-+  const mine = recent(key);
-+  const all = recent('*');
-+  if (mine.length >= 2 || all.length >= 20) return true;
-+  for (const [name, times] of hits) {
-+    if (times.every((at) => now - at >= 60_000)) hits.delete(name);
-+  }
-+  hits.set(key, [...mine, now]);
-+  hits.set('*', [...all, now]);
-+  return false;
 +}
 +
 +/** Groups timestamps from the last 48 hours by hour, newest first: [{ at, count }]. */
@@ -375,8 +754,8 @@ index 000000000..c3eb1ad65
 +    : null;
 +}
 +
-+export function buildStatusReport({ server, jobs, deploys, origin, now = new Date() }: StatusReportInput): StatusReport {
-+  const base = origin?.startsWith('https://') ? origin.replace(/\/+$/, '') : null;
++export function buildStatusReport({ server, jobs, deploys, origin, counts, now = new Date() }: StatusReportInput): StatusReport {
++  const base = httpsOrigin(origin);
 +  const link = (path: string) => (base ? { link: `${base}${path}` } : {});
 +  const todos: StatusReport['todos'] = [];
 +  const events: StatusReport['events'] = [];
@@ -402,7 +781,7 @@ index 000000000..c3eb1ad65
 +  if (jobs === null || deploys === null) {
 +    flag('Database error', 'down');
 +  } else {
-+    const { failedRecent, stuck } = attentionCounts(jobs, now);
++    const { failedRecent, stuck } = counts ?? countsFromRecords(jobs, deploys, now);
 +    if (failedRecent > 0) {
 +      flag(`${failedRecent} failed`);
 +      todos.push({ id: 'jobs-failed', title: `${plural(failedRecent, 'packaging job')} failed in the last 7 days`, ...link('/dashboard/uploads?status=failed') });
@@ -411,28 +790,26 @@ index 000000000..c3eb1ad65
 +      flag(`${stuck} stuck`);
 +      todos.push({ id: 'jobs-stuck', title: `${plural(stuck, 'packaging job')} waiting more than 2 hours`, ...link('/dashboard/uploads?status=pending') });
 +    }
-+    for (const group of byHour(jobs.filter((job) => job.status === 'failed').map((job) => job.updated_at ?? job.created_at), now)) {
++    for (const group of (counts?.failed ?? byHour(jobs.filter((job) => job.status === 'failed').map((job) => job.updated_at ?? job.created_at), now))) {
 +      events.push({ at: group.at, text: `${plural(group.count, 'packaging job')} failed`, tone: 'warn' });
 +    }
-+    for (const group of byHour(deploys.map((deploy) => deploy.deployed_at), now)) {
++    for (const group of (counts?.deployed ?? byHour(deploys.map((deploy) => deploy.deployed_at), now))) {
 +      events.push({ at: group.at, text: `${plural(group.count, 'app')} deployed to Intune`, tone: 'ok' });
 +    }
 +  }
 +
-+  const values = Array.from({ length: SERIES_DAYS }, () => 0);
-+  for (const deploy of deploys ?? []) {
-+    const daysAgo = Math.floor((now.getTime() - Date.parse(deploy.deployed_at)) / DAY);
-+    if (daysAgo >= 0 && daysAgo < SERIES_DAYS) values[SERIES_DAYS - 1 - daysAgo]++;
-+  }
++  const values = (counts ?? countsFromRecords(jobs ?? [], deploys ?? [], now)).days;
 +
 +  const foot: string[] = [];
 +  if (server.reported) {
 +    const deployAt = recent(server.lastDeploy?.time, now);
-+    if (server.lastDeploy && deployAt) {
-+      const done = ['deployed', 'waiting'].includes(server.lastDeploy.result);
-+      events.push(done
-+        ? { at: deployAt, text: `Server updated to ${server.lastDeploy.to}`, tone: 'ok' }
-+        : { at: deployAt, text: `Server update to ${server.lastDeploy.to} did not finish`, tone: 'down' });
++    if (server.lastDeploy && deployAt && server.lastDeploy.result !== 'waiting') {
++      const version = safeVersion(server.lastDeploy.to);
++      if (server.lastDeploy.result === 'deployed') {
++        events.push({ at: deployAt, text: version ? `Server updated to ${version}` : 'Server updated', tone: 'ok' });
++      } else {
++        events.push({ at: deployAt, text: 'Server update did not finish', tone: 'down' });
++      }
 +    }
 +    const backupAt = recent(server.offsiteBackup?.at, now);
 +    if (server.offsiteBackup && backupAt) {
@@ -440,20 +817,95 @@ index 000000000..c3eb1ad65
 +        ? { at: backupAt, text: 'Off-site backup finished', tone: 'ok' }
 +        : { at: backupAt, text: 'Off-site backup failed', tone: 'down' });
 +    }
-+    if (server.version) foot.push(`Running ${server.version}`);
++    const version = safeVersion(server.version);
++    if (version) foot.push(`Running ${version}`);
 +    foot.push(`Disk ${Math.round(server.diskRatio * 100)}% used`);
 +  }
 +
-+  return {
++  return constrainReport({
 +    version: 1,
 +    tool: 'intuneget',
 +    generatedAt: now.toISOString(),
 +    health,
 +    status,
 +    metric: { value: values.reduce((sum, n) => sum + n, 0), label: 'apps deployed in 14 days' },
-+    series: { label: 'Apps deployed per day, last 14 days', values },
++    series: { label: 'Apps deployed per UTC day, last 14 days', values },
 +    foot,
 +    todos: todos.slice(0, MAX_ITEMS),
 +    events: events.sort((a, b) => b.at.localeCompare(a.at)).slice(0, MAX_ITEMS),
++  }, now);
++}
++
++
++export interface ReportCounts {
++  failedRecent: number;
++  stuck: number;
++  days: number[];
++  failed: { at: string; count: number }[];
++  deployed: { at: string; count: number }[];
++}
++
++/** UTC calendar days, not moving 24-hour intervals; also used by the SQLite aggregate reader. */
++export function countsFromRecords(jobs: NonNullable<StatusReportInput['jobs']>, deploys: NonNullable<StatusReportInput['deploys']>, now: Date): ReportCounts {
++  const days = Array.from({ length: SERIES_DAYS }, () => 0);
++  const today = Math.floor(now.getTime() / DAY);
++  for (const deploy of deploys) {
++    const at = Date.parse(deploy.deployed_at);
++    const daysAgo = today - Math.floor(at / DAY);
++    if (at <= now.getTime() && daysAgo >= 0 && daysAgo < SERIES_DAYS) days[SERIES_DAYS - 1 - daysAgo]++;
++  }
++  return {
++    ...attentionCounts(jobs.filter(job => Date.parse(job.created_at) <= now.getTime()), now),
++    days,
++    failed: byHour(jobs.filter(job => job.status === 'failed').map(job => job.updated_at ?? job.created_at), now),
++    deployed: byHour(deploys.map(deploy => deploy.deployed_at), now),
 +  };
++}
++
++/** Only release tags used by this build; no arbitrary status-file strings can become report text. */
++function safeVersion(value: unknown): string | null {
++  return typeof value === 'string' && /^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-hrm\.[0-9]{1,6})?$/.exec(value)?.[0] === value ? value : null;
++}
++
++function httpsOrigin(value: string | undefined): string | null {
++  try {
++    const url = new URL(value ?? '');
++    return url.protocol === 'https:' && !url.username && !url.password ? url.origin : null;
++  } catch { return null; }
++}
++
++export function degradedReport(now = new Date()): StatusReport {
++  return {
++    version: 1, tool: 'intuneget', generatedAt: now.toISOString(), health: 'down', status: 'Report unavailable',
++    metric: { value: 0, label: 'apps deployed in 14 days' },
++    series: { label: 'Apps deployed per UTC day, last 14 days', values: Array(14).fill(0) },
++    foot: [], todos: [], events: [],
++  };
++}
++
++/** One output boundary enforces the contract, including UTF-8 bytes rather than JS string size. */
++export function constrainReport(report: StatusReport, now = new Date()): StatusReport {
++  const text = (value: string, limit: number) => value.slice(0, limit);
++  const link = (value: string | undefined) => {
++    if (!value || value.length > 2048) return {};
++    try {
++      const url = new URL(value);
++      return url.protocol === 'https:' && !url.username && !url.password ? { link: url.href } : {};
++    } catch { return {}; }
++  };
++  const result: StatusReport = {
++    version: 1, tool: 'intuneget', generatedAt: report.generatedAt,
++    health: report.health, status: text(report.status, 24) || 'Report unavailable',
++    metric: { value: report.metric.value, label: text(report.metric.label, 40) },
++    series: { label: text(report.series.label, 60), values: report.series.values.slice(0, 30) },
++    foot: report.foot.slice(0, 2).map(line => text(line, 60)),
++    todos: report.todos.slice(0, MAX_ITEMS).map(todo => ({
++      id: text(todo.id, 80), title: text(todo.title, 100),
++      ...(todo.detail ? { detail: text(todo.detail, 100) } : {}), ...link(todo.link),
++    })),
++    events: report.events.filter(event => recent(event.at, now)).slice(0, MAX_ITEMS).map(event => ({
++      at: recent(event.at, now)!, text: text(event.text, 80), tone: event.tone,
++    })),
++  };
++  return Buffer.byteLength(JSON.stringify(result), 'utf8') < 65_536 ? result : degradedReport(now);
 +}
