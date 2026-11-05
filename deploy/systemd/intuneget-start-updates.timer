@@ -1,0 +1,11 @@
+[Unit]
+Description=Start automatic updates held for the update schedule (hourly)
+
+[Timer]
+OnCalendar=*-*-* *:05:00 America/New_York
+RandomizedDelaySec=60
+Persistent=true
+Unit=intuneget-cron@start-scheduled-updates.service
+
+[Install]
+WantedBy=timers.target
