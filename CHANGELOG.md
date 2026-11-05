@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Install results work again. Microsoft removed the Intune report IntuneGet used
+  (getDeviceInstallStatusReport), so every check since 2026-11-02 read nothing; it now uses
+  retrieveDeviceAppInstallationStatusReport (patch 0031).
+- App activity, Group changes to review, pilot start and pilot review work again. Intune rejected the
+  app read because it selected displayVersion on the general app type (400 for every app).
+- The update check's result now includes a short reason (status codes only) when install results or
+  app activity can't be read, and the server logs it, so a failure like this is visible.
+- Deployment cards for jobs that never started show the real stage and reason. An installer that
+  failed its check before packaging (publisher serves different bytes, version withdrawn from WinGet)
+  is shown as Validation with its own code instead of Auth and a network hint, and every card shows
+  Details with the recorded reason, including older jobs.
+- Automatic updates no longer retry, at every check, a version whose installer already failed that
+  check. They try again when the catalog offers a different version or WinGet corrects the checksum.
+- Help explains these failures in Updating an app and When something goes wrong.
+
+## 2026-11-05 (v0.8.5-hrm.11)
+
+- Production runs v0.8.5-hrm.11 with the update schedule; the hourly timer is installed on the VM.
+
 - App updates has an Update schedule card. Staff can choose the days and hours (Maryland time) when
   automatic updates and pilots may start, and add blackout dates (for example Month-end close) when
   they never start. Updates found outside the schedule wait, and a new hourly VM timer
