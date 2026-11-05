@@ -1,0 +1,11 @@
+[Unit]
+Description=Test every Intune read the server depends on (daily)
+
+[Timer]
+OnCalendar=*-*-* 07:15:00 America/New_York
+RandomizedDelaySec=120
+Persistent=true
+Unit=intuneget-cron@intune-self-test.service
+
+[Install]
+WantedBy=timers.target

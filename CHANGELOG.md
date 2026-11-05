@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- The server's own Intune reads can't fail silently any more. Home's Server status shows Intune reads,
+  Intune self-test and Scheduled updates, and IT Ops gets a Teams alert when install results or app
+  activity fail at 2 update checks in a row, when the new daily read-only Intune self-test
+  (7:15 AM) fails or is late, or when the hourly scheduled-update run fails or is late. The IT
+  dashboard report shows the same (patch 0032).
+- Home lists apps that reach no devices: deployed over 3 days ago with nothing installed, pending or
+  failed in Intune. Check groups opens the app in Inventory.
+- Auto-update now really turns itself off after 3 failed updates in a row (a new attempt used to reset
+  the count). Installer-check blocks don't count. IT Ops gets one Teams alert, and the App updates
+  card offers Turn auto-update back on, which clears the count.
+- Inventory opens an app's details from a `?app=<id>` link (the change from PR #40, which no longer
+  applied). Home and single-app install-failure alerts link straight to the app.
+- The build reads the registry address and Azure sign-in IDs from repo secrets, so GitHub masks them
+  in public run logs (the change from PR #10).
+- The VM needs `intuneget-intune-self-test.timer` and the updated status and watchdog scripts; see
+  CLAUDE.md, VM setup. SQLite migration 15.
+
+## 2026-11-05 (v0.8.5-hrm.12)
+
+Production runs v0.8.5-hrm.12.
+
 - Install results work again. Microsoft removed the Intune report IntuneGet used
   (getDeviceInstallStatusReport), so every check since 2026-11-02 read nothing; it now uses
   retrieveDeviceAppInstallationStatusReport (patch 0031).
