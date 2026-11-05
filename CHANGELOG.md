@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- App updates can Test with a pilot group for deployed WinGet and curated apps. The new version is
+  Required for 1 selected security group; the previous copy keeps its groups. Other deployments and
+  automatic updates for that app stay held during the pilot (patch 0029, SQLite migration 13).
+- Pilot rollouts compares app-wide installation results for both versions and shows the live groups
+  before Approve wider rollout. Approval requires an explicit review, refuses a changed group list,
+  and copies intent, exclusions, filters and settings to the new copy. It leaves the previous copy's
+  groups intact; Inventory duplicate cleanup remains separate. Nothing promotes automatically.
+- Pilots need SQLite with GitHub packaging. Custom apps, Store apps and apps with saved New computer
+  setup profiles are excluded from this first version. A failed pilot stays held until its workflow
+  is confirmed finished unsuccessfully and no copy remains in Intune; an unstarted stale reservation
+  can be ended after 2 minutes. Help includes the controls, limits and a step diagram.
+
 - Inventory has App activity: the latest 100 deployment, version, group and installation-count events
   across versions of an app. Existing deployment history appears immediately; observed changes start
   with this release. Save to Intune and duplicate cleanup record known group edits (patch 0028).
