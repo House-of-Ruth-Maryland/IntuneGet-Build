@@ -1,0 +1,505 @@
+diff --git a/app/api/hrm/pilots/route.test.ts b/app/api/hrm/pilots/route.test.ts
+index fc9c3dcb0..1b3f2a165 100644
+--- a/app/api/hrm/pilots/route.test.ts
++++ b/app/api/hrm/pilots/route.test.ts
+@@ -25,7 +25,7 @@ beforeEach(async()=>{
+   return {success:true,packaging_job_id:next.id};
+  });
+  vi.stubGlobal('fetch',vi.fn(async(url:string,init?:RequestInit)=>{
+-  if(url.includes('getDeviceInstallStatusReport'))return Response.json({Schema:[{Column:'AppInstallState'}],Values:[['Installed']],TotalRowCount:1});
++  if(url.includes('retrieveDeviceAppInstallationStatusReport'))return Response.json({Schema:[{Column:'AppInstallState'}],Values:[['Installed']],TotalRowCount:1});
+   if(url.includes('/groups/'))return Response.json({id:GROUP,displayName:'Pilot group',securityEnabled:true});
+   if(url.endsWith('/assign')){writes.push(url);newGroups=JSON.parse(String(init?.body)).mobileAppAssignments;if(state.failAssign)return new Response(null,{status:500});return new Response(null,{status:204});}
+   if(url.endsWith('/assignments'))return Response.json({value:url.includes(OLD)?oldGroups:newGroups});
+diff --git a/app/api/package/route.ts b/app/api/package/route.ts
+index 14df79d6b..1f17978d1 100644
+--- a/app/api/package/route.ts
++++ b/app/api/package/route.ts
+@@ -1,4 +1,5 @@
+ import { isQaMaintenanceMode } from '@/lib/qa/maintenance';
++import { dispatchFailureFields } from '@/lib/hrm/dispatch-failure';
+ import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
+ import { reconcileCuratedCartItem } from '@/lib/curated-catalog/server';
+ import { findCuratedApp } from '@/lib/curated-catalog/definitions';
+@@ -920,9 +921,10 @@ export async function POST(request: NextRequest) {
+                 status: reputationHold ? 'awaiting_qa' : 'failed',
+                 status_message: reputationHold ? dispatchError : null,
+                 progress_percent: 0,
+-                error_stage: qaGateError ? 'validation' : 'authenticate',
+-                error_category: qaGateError ? null : 'network',
+-                error_code: qaGateError ? qaGateError.code : 'WORKFLOW_DISPATCH_FAILED',
++                // HRM patch 0031: installer check failures keep their own stage and code.
++                ...(qaGateError
++                  ? { error_stage: 'validation', error_category: null, error_code: qaGateError.code }
++                  : dispatchFailureFields(result.reason)),
+                 error_message: dispatchError,
+                 completed_at: reputationHold ? null : new Date().toISOString(),
+               }).catch((updateError) => {
+diff --git a/components/ErrorDisplay.test.ts b/components/ErrorDisplay.test.ts
+index 798b046c5..640139836 100644
+--- a/components/ErrorDisplay.test.ts
++++ b/components/ErrorDisplay.test.ts
+@@ -44,7 +44,7 @@ describe('ErrorDisplay QA failure stage', () => {
+       errorCode: 'HASH_MISMATCH', errorStage: 'validation', errorCategory: 'validation',
+     }));
+     expect(html).toContain('Failed at: Validation');
+-    expect(html).toContain('SHA256 hash mismatch');
++    expect(html).toContain('no longer matches its WinGet checksum');
+     expect(html).not.toContain('Installation check');
+   });
+ });
+diff --git a/components/ErrorDisplay.tsx b/components/ErrorDisplay.tsx
+index a4d3b5c6c..599cc8579 100644
+--- a/components/ErrorDisplay.tsx
++++ b/components/ErrorDisplay.tsx
+@@ -94,7 +94,10 @@ const errorCodeMessages: Record<string, string> = {
+   DOWNLOAD_INVALID_RESPONSE: 'Received an invalid response instead of the installer file',
+   DOWNLOAD_FILE_TOO_SMALL: 'Downloaded file is suspiciously small and may be corrupted',
+   INVALID_EXPECTED_HASH: 'The expected SHA256 hash in the manifest is malformed',
+-  HASH_MISMATCH: 'SHA256 hash mismatch - the installer has been updated and the manifest is out of date',
++  HASH_MISMATCH: 'The installer the publisher serves no longer matches its WinGet checksum, so it was not packaged. Nothing was uploaded. This clears when WinGet lists the publisher\'s current version.',
++  MANIFEST_UNAVAILABLE: 'This version is no longer listed in WinGet, so it was not packaged. Nothing was uploaded. Update to the version App updates now offers.',
++  MANIFEST_CHANGED: 'The installer no longer matches the trusted WinGet manifest, so it was blocked before packaging. Nothing was uploaded.',
++  PREFLIGHT_IN_PROGRESS: 'The installer check did not finish in time. Nothing was uploaded. Try again in a few minutes.',
+   PACKAGE_CREATION_FAILED: 'Failed to create the .intunewin package',
+   AUTH_FAILED: 'Failed to acquire authentication token',
+   AUTH_INVALID_CREDENTIALS: 'Service principal credentials are invalid',
+@@ -190,6 +193,10 @@ export function ErrorDisplay({
+       {/* Main error message */}
+       <div className="text-sm text-status-error/90">
+         <p>{codeMessage || errorMessage || 'An error occurred'}</p>
++        {/* HRM patch 0031: the recorded reason, when the code's summary doesn't already say it. */}
++        {codeMessage && errorMessage && errorMessage !== codeMessage && (
++          <p className="mt-1 text-status-error/80">Details: {errorMessage}</p>
++        )}
+       </div>
+ 
+       {/* Hash mismatch details */}
+diff --git a/components/__tests__/ErrorDisplay.test.ts b/components/__tests__/ErrorDisplay.test.ts
+index 38c5694b9..185bbd36c 100644
+--- a/components/__tests__/ErrorDisplay.test.ts
++++ b/components/__tests__/ErrorDisplay.test.ts
+@@ -16,3 +16,23 @@ describe('approval failure guidance', () => {
+     expect(isIntuneApprovalFailure({ error_category: 'network' })).toBe(false);
+   });
+ });
++
++describe('jobs that never started (HRM patch 0031)', () => {
++  const reason = 'The publisher currently serves different bytes for Google.Chrome 156.0.8078.80. The deployment was quarantined before the packaging pipeline started.';
++  it('shows the recorded reason under the summary for older jobs stored as dispatch failures', () => {
++    const html = renderToStaticMarkup(createElement(ErrorDisplay, { errorStage: 'authenticate', errorCategory: 'network', errorCode: 'WORKFLOW_DISPATCH_FAILED', errorMessage: reason }));
++    expect(html).toContain('The packaging workflow could not be started');
++    expect(html).toContain('Details: The publisher currently serves different bytes');
++  });
++  it('explains an installer that failed its check as validation, not a network or sign-in failure', () => {
++    const html = renderToStaticMarkup(createElement(ErrorDisplay, { errorStage: 'validation', errorCategory: 'validation', errorCode: 'HASH_MISMATCH', errorMessage: reason }));
++    expect(html).toContain('Failed at: Validation');
++    expect(html).toContain('no longer matches its WinGet checksum');
++    expect(html).not.toContain('network-related');
++    expect(html).not.toContain('Authentication');
++  });
++  it('does not repeat the reason when it is the summary', () => {
++    const html = renderToStaticMarkup(createElement(ErrorDisplay, { errorStage: 'unknown', errorCode: 'NOT_A_KNOWN_CODE', errorMessage: reason }));
++    expect(html).not.toContain('Details:');
++  });
++});
+diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
+index 061f0f9a7..6cd049db6 100644
+--- a/lib/auto-update/__tests__/sqlite.test.ts
++++ b/lib/auto-update/__tests__/sqlite.test.ts
+@@ -513,3 +513,36 @@ describe('update schedule and blackouts (HRM patch 0030)', () => {
+     expect(await runSqliteUpdateCheck(db, { now: morning })).toMatchObject({ triggered: 1, held: 0 });
+   });
+ });
++
++describe('installers that failed their check (HRM patch 0031)', () => {
++  beforeEach(() => { vi.stubEnv('DATABASE_MODE', 'sqlite'); });
++  afterEach(() => { vi.unstubAllEnvs(); });
++  async function failedEarlier(code: string, message: string, sha = 'ABCDEF') {
++    const loaded = await load();
++    await seedDeployment(loaded.db);
++    getAppsByWingetIdsMock.mockResolvedValue([{ winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.1.0' }]);
++    getLatestInstallerInfoMock.mockResolvedValue(installerResolution());
++    const job = await loaded.db.jobs.create({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', version: '1.1.0', display_name: 'Vendor App',
++      installer_type: 'exe', installer_url: 'https://example.com/app.exe', installer_sha256: sha, status: 'queued' });
++    await loaded.db.jobs.update(job.id, { status: 'failed', error_code: code, error_message: message, completed_at: new Date().toISOString() });
++    return loaded;
++  }
++  it.each([
++    ['HASH_MISMATCH', 'bytes changed'],
++    ['MANIFEST_UNAVAILABLE', 'gone'],
++    ['WORKFLOW_DISPATCH_FAILED', 'The publisher currently serves different bytes for Vendor.App 1.1.0. The deployment was quarantined before the packaging pipeline started.'],
++    ['WORKFLOW_DISPATCH_FAILED', 'Version 1.1.0 of Vendor App is no longer available from WinGet. Review the current version to update your selection.'],
++  ])('does not retry the same version and installer after %s', async (code, message) => {
++    const { db, runSqliteUpdateCheck } = await failedEarlier(code, message);
++    expect(await runSqliteUpdateCheck(db)).toMatchObject({ available: 1, triggered: 0, skipped: 1 });
++    expect((await db.jobs.getByTenantId('t1')).filter((j) => j.status === 'queued')).toHaveLength(0);
++  });
++  it('tries again when WinGet corrects the checksum', async () => {
++    const { db, runSqliteUpdateCheck } = await failedEarlier('HASH_MISMATCH', 'bytes changed', 'OLDHASH');
++    expect(await runSqliteUpdateCheck(db)).toMatchObject({ triggered: 1 });
++  });
++  it('still retries after an ordinary dispatch failure', async () => {
++    const { db, runSqliteUpdateCheck } = await failedEarlier('WORKFLOW_DISPATCH_FAILED', 'GitHub returned 502');
++    expect(await runSqliteUpdateCheck(db)).toMatchObject({ triggered: 1 });
++  });
++});
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index 1e837fb67..f7bac2d1e 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -565,6 +565,13 @@ async function triggerDueAutoUpdates(
+       skipped += 1;
+       continue;
+     }
++    // HRM patch 0031: don't retry an installer that already failed its check, at every check.
++    const blocked = await installerBlocked(policy.tenant_id, policy.winget_id, resolution.info.latestVersion, resolution.info.installerSha256);
++    if (blocked) {
++      skipped += 1;
++      console.warn(`[auto-update] ${policy.winget_id} ${resolution.info.latestVersion} not retried: its installer failed the check (${blocked.code}). Waiting for a different version or checksum.`);
++      continue;
++    }
+ 
+     const result = await triggerSqliteAutoUpdate(db, policy, {
+       sourceType: resolution.info.sourceType,
+@@ -638,6 +645,7 @@ export async function runSqliteScheduledUpdates(
+ import { customDetectionUpdateHold } from '@/lib/custom-detection';
+ import { dispatchUpdateJob } from '@/lib/hrm/update-dispatch';
+ import { updateWindowFor } from '@/lib/hrm/update-gate';
++import { installerBlocked } from '@/lib/hrm/installer-block';
+ import { findCustomAppReleases, type CustomReleaseStore } from '@/lib/hrm/github-releases';
+ import { isCustomAppId } from '@/lib/hrm/new-version';
+ import type { ExistingAppIds } from '@/lib/hrm/intune-app-ids';
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 56766333e..88a192187 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -6,6 +6,7 @@
+ import Database from 'better-sqlite3';
+ import { createPilotStore } from '@/lib/hrm/pilot-store';
+ import { createUpdateScheduleStore } from '@/lib/hrm/update-schedule-store';
++import { createInstallerBlockStore } from '@/lib/hrm/installer-block';
+ import { createAppInsightsStore } from '@/lib/hrm/app-insights-store';
+ import { syncSqliteAutoUpdate } from './sqlite-auto-update';
+ import type { InstallStatusRecord, InstallStatusStore } from '@/lib/hrm/install-status';
+@@ -309,6 +310,7 @@ function installStatusRow(row: unknown): InstallStatusRecord {
+ 
+ export const sqlitePilotRollouts = createPilotStore(getDb);
+ export const sqliteUpdateSchedule = createUpdateScheduleStore(getDb);
++export const sqliteInstallerBlocks = createInstallerBlockStore(getDb);
+ export const sqliteAppInsights = createAppInsightsStore(getDb);
+ 
+ export const sqliteInstallStatus: InstallStatusStore = {
+diff --git a/lib/hrm/__tests__/app-insights-check.test.ts b/lib/hrm/__tests__/app-insights-check.test.ts
+index ccbf6f336..fae9b131c 100644
+--- a/lib/hrm/__tests__/app-insights-check.test.ts
++++ b/lib/hrm/__tests__/app-insights-check.test.ts
+@@ -16,6 +16,12 @@ describe('safe Intune observations', () => {
+     expect(observation.assignments).toHaveLength(1);
+     expect(fetchImpl).toHaveBeenCalledTimes(3);
+   });
++  it('never $selects displayVersion on mobileApp, which Intune rejects with 400 (HRM patch 0031)', async () => {
++    // Intune: "Could not find a property named 'displayVersion' on type 'microsoft.graph.mobileApp'".
++    const fetchImpl = vi.fn(async (url: string) => url.includes('$select') ? new Response(null, { status: 400 })
++      : url.endsWith('/assignments') ? Response.json({ value: [] }) : Response.json({ id: A, displayVersion: '2' }));
++    expect(await readObservation(app, 'token', signal(), fetchImpl as unknown as typeof fetch)).toMatchObject({ exists: true, version: '2' });
++  });
+   it('only marks an app missing on its own 404', async () => {
+     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+     expect(await readObservation(app, 'token', signal(), fetchImpl)).toMatchObject({ exists: false });
+@@ -37,7 +43,7 @@ describe('safe Intune observations', () => {
+     const observe = vi.fn();
+     const store = { tracked: () => [app], observe } as unknown as AppInsightsStore;
+     const result = await checkAppInsights(store, { token: async () => 'token', fetchImpl: vi.fn().mockRejectedValue(new Error('offline')) });
+-    expect(result).toEqual({ checked: 0, errors: 1 });
++    expect(result).toEqual({ checked: 0, errors: 1, lastError: 'offline' });
+     expect(observe).not.toHaveBeenCalled();
+   });
+   it('scopes manual checks to the tenant and optional app', async () => {
+diff --git a/lib/hrm/__tests__/dispatch-failure.test.ts b/lib/hrm/__tests__/dispatch-failure.test.ts
+new file mode 100644
+index 000000000..91d422a17
+--- /dev/null
++++ b/lib/hrm/__tests__/dispatch-failure.test.ts
+@@ -0,0 +1,12 @@
++import { describe, expect, it } from 'vitest';
++import { InstallerPreflightError } from '@/lib/installer-preflight';
++import { dispatchFailureFields } from '../dispatch-failure';
++describe('jobs that never started (HRM patch 0031)', () => {
++  it('records installer check failures as validation with their own code', () => {
++    expect(dispatchFailureFields(new InstallerPreflightError('HASH_MISMATCH', 'bytes changed'))).toEqual({ error_stage: 'validation', error_category: 'validation', error_code: 'HASH_MISMATCH' });
++    expect(dispatchFailureFields(new InstallerPreflightError('PREFLIGHT_IN_PROGRESS', 'slow', true))).toEqual({ error_stage: 'validation', error_category: 'network', error_code: 'PREFLIGHT_IN_PROGRESS' });
++  });
++  it('keeps other failures as workflow dispatch failures', () => {
++    expect(dispatchFailureFields(new Error('GitHub returned 502'))).toEqual({ error_stage: 'authenticate', error_category: 'network', error_code: 'WORKFLOW_DISPATCH_FAILED' });
++  });
++});
+diff --git a/lib/hrm/__tests__/install-status.test.ts b/lib/hrm/__tests__/install-status.test.ts
+index fbfb37a74..b0c99f13d 100644
+--- a/lib/hrm/__tests__/install-status.test.ts
++++ b/lib/hrm/__tests__/install-status.test.ts
+@@ -89,6 +89,8 @@ describe('install report counting', () => {
+     await fetchInstallCounts('token', APP_A, fetchMock as unknown as typeof fetch);
+     const [url, init] = fetchMock.mock.calls[0];
+     expect(url).toBe(INSTALL_REPORT_URL);
++    // HRM patch 0031: Microsoft removed getDeviceInstallStatusReport (400 "Resource not found for the segment").
++    expect(url).toBe('https://graph.microsoft.com/beta/deviceManagement/reports/retrieveDeviceAppInstallationStatusReport');
+     const body = JSON.parse(String(init?.body));
+     expect(body.select).toEqual(['AppInstallState', 'AppInstallStateDetails', 'HexErrorCode']);
+     expect(JSON.stringify(body)).not.toMatch(/DeviceName|UserName|UserPrincipalName|DeviceId/);
+diff --git a/lib/hrm/__tests__/pilot-graph.test.ts b/lib/hrm/__tests__/pilot-graph.test.ts
+index 2a7eb03a2..0e8b0b597 100644
+--- a/lib/hrm/__tests__/pilot-graph.test.ts
++++ b/lib/hrm/__tests__/pilot-graph.test.ts
+@@ -8,10 +8,12 @@ function fixture(){
+  const writes:Array<{url:string;body:unknown}>=[];
+  const fetchImpl=vi.fn(async(url:string|URL|Request,init?:RequestInit)=>{
+   const path=String(url);if(init?.method==='POST'&&path.endsWith('/assign')){writes.push({url:path,body:JSON.parse(String(init.body))});return new Response(null,{status:204});}
+-  if(path.includes('getDeviceInstallStatusReport'))return Response.json({Schema:[{Column:'AppInstallState'}],Values:[['Installed']],TotalRowCount:1});
++  if(path.includes('retrieveDeviceAppInstallationStatusReport'))return Response.json({Schema:[{Column:'AppInstallState'}],Values:[['Installed']],TotalRowCount:1});
+   if(path.endsWith('/relationships'))return Response.json({value:[{targetId:OLD,targetType:'child',supersedenceType:'update'}]});
+   if(path.endsWith('/assignments'))return Response.json({value:path.includes(OLD)?[assignment]:[]});
+   if(path.includes('/groups/'))return Response.json({id:OLD,displayName:'Pilot security group',securityEnabled:true});
++  // HRM patch 0031: Intune rejects $select of displayVersion on mobileApp with 400, as production did.
++  if(path.includes('/mobileApps/')&&path.includes('displayVersion'))return new Response(null,{status:400});
+   return Response.json({id:path.includes(OLD)?OLD:NEW,'@odata.type':'#microsoft.graph.win32LobApp',displayName:'Example',publisher:'Example',displayVersion:path.includes(OLD)?'1':'2'});
+  });
+  return {graph:pilotGraph('token',fetchImpl),fetchImpl,writes};
+diff --git a/lib/hrm/app-insights-check.ts b/lib/hrm/app-insights-check.ts
+index 30329979d..526eb10da 100644
+--- a/lib/hrm/app-insights-check.ts
++++ b/lib/hrm/app-insights-check.ts
+@@ -9,16 +9,16 @@ export async function readObservation(app: Tracked, token: string, signal: Abort
+   if (!GUID.test(app.appId)) throw new Error('Invalid app');
+   const checkedAt = new Date().toISOString();
+   const init = { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' as const, signal };
+-  const response = await fetchImpl(`${BASE}/${app.appId}?$select=id,displayVersion`, init);
++  const response = await fetchImpl(`${BASE}/${app.appId}`, init);
+   if (response.status === 404) return { ...app, exists: false, assignments: [], checkedAt };
+-  if (!response.ok) throw new Error('App read failed');
++  if (!response.ok) throw new Error(`Intune app read returned ${response.status}`);
+   const body = await response.json();
+   if (typeof body.id !== 'string' || body.id.toLowerCase() !== app.appId.toLowerCase()) throw new Error('Incomplete app');
+   const rows: unknown[] = [];
+   let url: string | null = `${BASE}/${app.appId}/assignments`;
+   for (let page = 0; url && page < 20; page++) {
+     const result: Response = await fetchImpl(url, init);
+-    if (!result.ok) throw new Error('Assignment read failed');
++    if (!result.ok) throw new Error(`Intune assignment read returned ${result.status}`);
+     const data: { value?: unknown[]; '@odata.nextLink'?: unknown } = await result.json();
+     if (!Array.isArray(data.value)) throw new Error('Incomplete assignments');
+     rows.push(...data.value);
+@@ -57,6 +57,7 @@ export async function checkAppInsights(store: AppInsightsStore, options: {
+   const signal = AbortSignal.any([AbortSignal.timeout(45000), ...(options.signal ? [options.signal] : [])]);
+   const tokens = new Map<string, Promise<string | null>>();
+   let next = 0, checked = 0, errors = 0;
++  let lastError: string | undefined;
+   await Promise.all(Array.from({ length: Math.min(4, apps.length) }, async () => {
+     while (next < apps.length && !signal.aborted) {
+       const app = apps[next++];
+@@ -67,10 +68,13 @@ export async function checkAppInsights(store: AppInsightsStore, options: {
+         const observation = await readObservation(app, token, AbortSignal.any([signal, AbortSignal.timeout(8000)]), options.fetchImpl);
+         store.observe(app.tenantId, observation, options.actor, options.knownChange);
+         checked++;
+-      } catch { errors++; }
++      } catch (error) { errors++; lastError = error instanceof Error ? error.message.slice(0, 120) : 'App read failed'; }
+     }
+   }));
+-  return { checked, errors: errors + apps.length - next };
++  const skipped = apps.length - next;
++  if (skipped > 0 && !lastError) lastError = 'Timed out';
++  if (errors + skipped > 0) console.warn(`[app activity] ${errors + skipped} app(s) not checked: ${lastError}`);
++  return { checked, errors: errors + skipped, ...(lastError ? { lastError } : {}) };
+ }
+ 
+ export async function runSqliteAppInsightsCheck() {
+diff --git a/lib/hrm/dispatch-failure.ts b/lib/hrm/dispatch-failure.ts
+new file mode 100644
+index 000000000..57e9b3a8e
+--- /dev/null
++++ b/lib/hrm/dispatch-failure.ts
+@@ -0,0 +1,14 @@
++import { InstallerPreflightError } from '@/lib/installer-preflight';
++
++/**
++ * HRM patch 0031: how a job that never started is recorded. Upstream recorded every failure to start
++ * as an authentication/network failure. An installer that failed its pre-packaging check (changed
++ * bytes, version withdrawn from WinGet) is a validation outcome with its own code, so the deployment
++ * card shows the real stage and reason.
++ */
++export function dispatchFailureFields(error: unknown): { error_stage: string; error_category: string; error_code: string } {
++  if (error instanceof InstallerPreflightError) {
++    return { error_stage: 'validation', error_category: error.retryable ? 'network' : 'validation', error_code: error.code };
++  }
++  return { error_stage: 'authenticate', error_category: 'network', error_code: 'WORKFLOW_DISPATCH_FAILED' };
++}
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 5acd2d2f4..b2e8f2755 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -55,6 +55,10 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'An active pilot holds other updates for that app until you approve wider rollout or safely end a failed pilot.',
+       'An ordinary update takes the groups the app has in Intune at that moment, so groups added later with Save to Intune carry over.',
+       'If an update can\'t start, for example because the installation test held it, a failed-deployment alert posts to IT Ops.',
++      'If the installer fails its check before packaging, nothing is uploaded. The card in Deployments shows Validation, and Details gives the recorded reason.',
++      'If the card says the installer no longer matches its WinGet checksum, the publisher replaced the installer before WinGet caught up. This happens often with Chrome.',
++      'Retry safely fails the same way until WinGet lists the publisher\'s current version. Check App updates again after the next update check.',
++      'Auto-update does not retry an installer that failed this check at every check. It tries again when the catalog offers a different version or WinGet corrects the checksum. Other failures are retried at the next check.',
+       'If Update says the catalog has not synced the installer yet, try again later (IntuneGet looks for a newer catalog every 6 hours), or deploy the new version from the App catalog with Supersede previous version on update and Carry over assignments turned on.',
+       'Custom apps (installers that are not in WinGet, such as PdfCraft or UniFi Endpoint): open the app in Inventory and press Deploy new version. The form is filled in from the last version; enter the new version and its https download link. The new version keeps the same groups and supersedes the old one (Update), so devices upgrade in place.',
+       'When a custom app installed from a GitHub release has a newer release, App updates shows it. Deploy new version opens the form with the new version, download link and checksum filled in. Check them, then add it to the cart. Nothing deploys on its own.',
+@@ -130,7 +134,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+     title: 'App activity',
+     points: [
+       'Open an app in Inventory, then App activity, to see its latest 100 events across versions deployed by IntuneGet: deployments, failed deployment attempts, version changes, group changes and installation-result counts.',
+-      'Existing deployment history appears immediately. Group and installation-result history starts with the first check after this feature was added. Unchanged counts do not add another event.',
++      'Existing deployment history appears immediately. Group and installation-result history starts with the first successful check of Intune. Unchanged counts do not add another event.',
+       'Changes found in Intune show when they were observed. IntuneGet does not know who made those changes in Intune. Known group edits through Save to Intune or Keep this copy show the staff member who saved them.',
+       'For a copy that is no longer in Intune, open Inventory, then Open activity beside its warning, to see its recorded history.',
+     ],
+@@ -195,7 +199,8 @@ export const HELP_SECTIONS: HelpSection[] = [
+     id: 'support',
+     title: 'When something goes wrong',
+     points: [
+-      'A failed deployment shows on the Home page. Open it in Deployments to see the error and the GitHub run.',
++      'A failed deployment shows on the Home page. Open it in Deployments to see the stage, the error and Details with the recorded reason.',
++      'If you open a ticket about a deployment, include the Support ID from its card.',
+       'For anything else, open a ticket with HRM Support.',
+     ],
+     links: [{ label: 'HRM Support', href: HRM_SUPPORT_URL }],
+diff --git a/lib/hrm/install-status-check.ts b/lib/hrm/install-status-check.ts
+index 0dd6164b6..8f0444a88 100644
+--- a/lib/hrm/install-status-check.ts
++++ b/lib/hrm/install-status-check.ts
+@@ -14,7 +14,8 @@ export async function runSqliteInstallCheck(now = new Date()) {
+   if (sent.errors.length > 0) console.warn(`[install status] ${sent.errors.length} webhook delivery error(s)`);
+   // HRM patch 0024: only a delivered alert counts; otherwise the next check tries again.
+   if (sent.webhooksSent > 0) await sqliteInstallStatus.markAlerted(result.newFailures, marylandDay(now));
+-  return { checked: result.checked, errors: result.errors, alerted: sent.webhooksSent > 0 ? result.newFailures.length : 0 };
++  if (result.errors > 0) console.warn(`[install status] ${result.errors} app(s) not checked: ${result.lastError ?? 'unknown'}`);
++  return { checked: result.checked, errors: result.errors, ...(result.lastError ? { lastError: result.lastError } : {}), alerted: sent.webhooksSent > 0 ? result.newFailures.length : 0 };
+ }
+ 
+ /** Install counts for one tenant's IntuneGet-deployed apps; empty without SQLite. */
+diff --git a/lib/hrm/install-status.ts b/lib/hrm/install-status.ts
+index 61359be29..04ad33e1f 100644
+--- a/lib/hrm/install-status.ts
++++ b/lib/hrm/install-status.ts
+@@ -1,7 +1,7 @@
+ /**
+  * HRM patch 0019: install results per IntuneGet-deployed app, as counts only.
+  *
+- * Intune's per-app install report (getDeviceInstallStatusReport) is asked for
++ * Intune's per-app install report (retrieveDeviceAppInstallationStatusReport; Microsoft removed getDeviceInstallStatusReport in 2026) is asked for
+  * the install state and error columns only, so device names, user names and
+  * device IDs are never fetched, stored or shown. The update check (3:30 AM and
+  * 3:30 PM) refreshes the counts; an alert goes out when an app's failed count goes up,
+@@ -11,7 +11,7 @@
+ import { acquireAppOnlyToken } from '@/lib/azure-app-credential';
+ import type { UploadHistoryRecord } from '@/lib/db/types';
+ 
+-export const INSTALL_REPORT_URL = 'https://graph.microsoft.com/beta/deviceManagement/reports/getDeviceInstallStatusReport';
++export const INSTALL_REPORT_URL = 'https://graph.microsoft.com/beta/deviceManagement/reports/retrieveDeviceAppInstallationStatusReport';
+ const PAGE_SIZE = 1000;
+ const MAX_ROWS = 20000;
+ const TOP_ERRORS = 3;
+@@ -134,6 +134,8 @@ export interface InstallCheckDeps {
+ export interface InstallCheckSummary {
+   checked: number;
+   errors: number;
++  /** HRM patch 0031: a short reason for the last error (status codes only), so failures aren't silent. */
++  lastError?: string;
+   /** Apps whose failed count went up and haven't been alerted today. */
+   newFailures: InstallStatusRecord[];
+ }
+@@ -176,13 +178,15 @@ export async function runInstallStatusCheck(
+     const token = tokens.get(tenantId);
+     if (!token) {
+       summary.errors += 1;
++      summary.lastError = 'No Intune token';
+       continue;
+     }
+     let counts: InstallCounts;
+     try {
+       counts = await fetchInstallCounts(token, deployment.intune_app_id, deps.fetchImpl);
+-    } catch {
++    } catch (error) {
+       summary.errors += 1;
++      summary.lastError = error instanceof Error ? error.message.slice(0, 120) : 'Install report failed';
+       continue;
+     }
+     const before = await deps.store.get(tenantId, deployment.intune_app_id);
+diff --git a/lib/hrm/installer-block.ts b/lib/hrm/installer-block.ts
+new file mode 100644
+index 000000000..69d7620eb
+--- /dev/null
++++ b/lib/hrm/installer-block.ts
+@@ -0,0 +1,32 @@
++import type Database from 'better-sqlite3';
++
++/**
++ * HRM patch 0031: an automatic update whose installer already failed the pre-packaging check
++ * (publisher serves different bytes, version withdrawn from WinGet, manifest changed) is not tried
++ * again for the same version and installer checksum. It is tried again when the catalog offers a
++ * different version or WinGet corrects the checksum. Jobs from before this patch were recorded as
++ * WORKFLOW_DISPATCH_FAILED, so their message is matched too.
++ */
++export const INSTALLER_CHECK_CODES = ['HASH_MISMATCH', 'MANIFEST_UNAVAILABLE', 'MANIFEST_CHANGED'] as const;
++const LEGACY_MESSAGE = /serves different bytes|is no longer available from WinGet|no longer matches the trusted WinGet manifest/;
++
++export function createInstallerBlockStore(getDb: () => Database.Database) {
++  return {
++    /** The failed job's code and time when this exact installer already failed its check, else null. */
++    blocked(tenant: string, winget: string, version: string, sha256: string): { code: string; at: string } | null {
++      const rows = getDb().prepare(`SELECT error_code, error_message, created_at FROM packaging_jobs
++        WHERE tenant_id = ? AND winget_id = ? COLLATE NOCASE AND version = ? AND status = 'failed'
++          AND upper(COALESCE(installer_sha256, '')) = upper(?)
++          AND error_code IN ('HASH_MISMATCH','MANIFEST_UNAVAILABLE','MANIFEST_CHANGED','WORKFLOW_DISPATCH_FAILED')
++        ORDER BY created_at DESC LIMIT 5`).all(tenant, winget, version, sha256) as Array<{ error_code: string; error_message: string | null; created_at: string }>;
++      const hit = rows.find((r) => r.error_code !== 'WORKFLOW_DISPATCH_FAILED' || LEGACY_MESSAGE.test(r.error_message ?? ''));
++      return hit ? { code: hit.error_code, at: hit.created_at } : null;
++    },
++  };
++}
++
++export async function installerBlocked(tenant: string, winget: string, version: string, sha256: string) {
++  if (process.env.DATABASE_MODE?.toLowerCase() !== 'sqlite' || !sha256) return null;
++  const { sqliteInstallerBlocks } = await import('@/lib/db/sqlite');
++  return sqliteInstallerBlocks.blocked(tenant, winget, version, sha256);
++}
+diff --git a/lib/hrm/pilot-graph.ts b/lib/hrm/pilot-graph.ts
+index ea5902a7d..3016742ab 100644
+--- a/lib/hrm/pilot-graph.ts
++++ b/lib/hrm/pilot-graph.ts
+@@ -17,7 +17,7 @@ export function pilotGraph(token: string, fetchImpl: typeof fetch = fetch) {
+   };
+   const app = async (id: string): Promise<App> => {
+     if (!GUID.test(id)) throw new PilotError('Invalid app.');
+-    const a = await get(`/deviceAppManagement/mobileApps/${id}?$select=id,displayName,publisher,displayVersion`);
++    const a = await get(`/deviceAppManagement/mobileApps/${id}`);
+     if (typeof a.id !== 'string' || a.id.toLowerCase() !== id.toLowerCase() || a['@odata.type'] !== '#microsoft.graph.win32LobApp') throw new PilotError('This is not the expected Win32 app.');
+     return a;
+   };
+diff --git a/lib/hrm/update-dispatch.ts b/lib/hrm/update-dispatch.ts
+index aa74e3597..41cce5205 100644
+--- a/lib/hrm/update-dispatch.ts
++++ b/lib/hrm/update-dispatch.ts
+@@ -17,6 +17,7 @@ import { sanitizeAssignmentsForDispatch } from '@/lib/assignment-intents';
+ import { buildIntuneAppDescription } from '@/lib/intune-description';
+ import { extractSilentSwitches } from '@/lib/msp/silent-switches';
+ import { describeQaGateError, isQaGateError } from '@/lib/qa/gate';
++import { dispatchFailureFields } from '@/lib/hrm/dispatch-failure';
+ 
+ export type UpdateDispatchResult =
+   | { dispatched: true; runUrl?: string }
+@@ -159,9 +160,7 @@ export async function dispatchUpdateJob(
+     const message = error instanceof Error ? error.message : 'Unknown error';
+     await db.jobs.update(jobId, {
+       status: 'failed',
+-      error_stage: 'authenticate',
+-      error_category: 'network',
+-      error_code: 'WORKFLOW_DISPATCH_FAILED',
++      ...dispatchFailureFields(error),
+       error_message: message,
+       completed_at: now(),
+     });
