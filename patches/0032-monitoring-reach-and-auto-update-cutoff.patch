@@ -1,0 +1,1370 @@
+diff --git a/app/(app)/dashboard/inventory/page.tsx b/app/(app)/dashboard/inventory/page.tsx
+index 32b0c683d..8f581ebda 100644
+--- a/app/(app)/dashboard/inventory/page.tsx
++++ b/app/(app)/dashboard/inventory/page.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+-import { useState, useMemo, useDeferredValue, useCallback, useEffect } from 'react';
+-import { useRouter } from 'next/navigation';
++import { useState, useMemo, useDeferredValue, useCallback, useEffect, Suspense } from 'react';
++import { useRouter, useSearchParams } from 'next/navigation';
+ import { T } from 'gt-next';
+ import { motion, useReducedMotion } from 'framer-motion';
+ import { AlertCircle, RefreshCw, Package, Server, Building2, Clock, Shield } from 'lucide-react';
+@@ -20,14 +20,40 @@ import {
+ import { PageHeader, AnimatedEmptyState, SkeletonGrid, AnimatedStatCard, StatCardGrid } from '@/components/dashboard';
+ import { useUserSettings } from '@/components/providers/UserSettingsProvider';
+ import { usePagination } from '@/hooks/use-pagination';
++import { INVENTORY_PATH, linkedAppId } from '@/lib/hrm/inventory-link';
+ 
+ type SortBy = 'name' | 'publisher' | 'created' | 'modified';
+ type SortOrder = 'asc' | 'desc';
+ 
++function InventoryLoading() {
++  return (
++    <div className="space-y-6">
++      <PageHeader
++        title={<T>Inventory</T>}
++        description={<T>Win32 applications deployed in your Intune tenant</T>}
++      />
++      <SkeletonGrid count={4} columns={4} variant="stat" />
++      <SkeletonGrid count={6} columns={3} variant="content" />
++    </div>
++  );
++}
++
++// HRM patch 0025: useSearchParams needs a Suspense boundary, or the build fails at prerender.
+ export default function InventoryPage() {
++  return (
++    <Suspense fallback={<InventoryLoading />}>
++      <InventoryPageContent />
++    </Suspense>
++  );
++}
++
++function InventoryPageContent() {
+   const router = useRouter();
++  const searchParams = useSearchParams();
+   const { data, isLoading, error, refetch, isFetching, isComplete } = useInventoryApps();
+-  const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
++  // HRM patch 0025: /dashboard/inventory?app=<Intune app id> opens that app's details.
++  const [linkedApp] = useState(() => linkedAppId(searchParams.get('app')));
++  const [selectedAppId, setSelectedAppId] = useState<string | null>(linkedApp);
+   const [search, setSearch] = useState('');
+   const [sortBy, setSortBy] = useState<SortBy>('name');
+   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+@@ -163,17 +189,14 @@ export default function InventoryPage() {
+     }
+   };
+ 
++  // Closing the panel drops ?app= so a refresh doesn't open it again.
++  const closeDetails = () => {
++    setSelectedAppId(null);
++    if (searchParams.has('app')) router.replace(INVENTORY_PATH);
++  };
++
+   if (isLoading) {
+-    return (
+-      <div className="space-y-6">
+-        <PageHeader
+-          title={<T>Inventory</T>}
+-          description={<T>Win32 applications deployed in your Intune tenant</T>}
+-        />
+-        <SkeletonGrid count={4} columns={4} variant="stat" />
+-        <SkeletonGrid count={6} columns={3} variant="content" />
+-      </div>
+-    );
++    return <InventoryLoading />;
+   }
+ 
+   if (error) {
+@@ -369,7 +392,7 @@ export default function InventoryPage() {
+       {/* App Details Panel */}
+       <InventoryAppDetails
+         appId={selectedAppId}
+-        onClose={() => setSelectedAppId(null)}
++        onClose={closeDetails}
+         onUpdate={handleUpdate}
+       />
+     </div>
+diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
+index ffc45d85c..4ceabd991 100644
+--- a/app/(app)/dashboard/page.tsx
++++ b/app/(app)/dashboard/page.tsx
+@@ -101,11 +101,27 @@ export default function DashboardPage() {
+           ? `${first.displayName}: ${first.failed === 1 ? '1 device' : `${first.failed} devices`} failed to install`
+           : `${installFailures.length} apps have devices that failed to install`,
+         description: 'From Intune, checked twice a day',
+-        href: '/dashboard/inventory',
++        // HRM patch 0032: one app opens its details directly
++        href: installFailures.length === 1 ? `/dashboard/inventory?app=${first.intuneAppId}` : '/dashboard/inventory',
+         actionLabel: 'View',
+         color: 'warning',
+       });
+     }
++    // HRM patch 0032: deployed apps that no device has, installs or is trying to install
++    const unreached = home?.unreached ?? [];
++    if (unreached.length > 0) {
++      items.push({
++        id: 'unreached-apps',
++        icon: AlertCircle,
++        title: unreached.length === 1
++          ? `${unreached[0].displayName} reaches no devices`
++          : `${unreached.length} apps reach no devices`,
++        description: 'Deployed over 3 days ago, but Intune reports nothing installed or pending. Check the groups in Inventory.',
++        href: unreached.length === 1 ? `/dashboard/inventory?app=${unreached[0].intuneAppId}` : '/dashboard/inventory',
++        actionLabel: 'Check groups',
++        color: 'warning',
++      });
++    }
+     const stuck = home?.attention?.stuck ?? 0;
+     if (stuck > 0) {
+       items.push({
+diff --git a/app/api/cron/check-updates/route.ts b/app/api/cron/check-updates/route.ts
+index 5d79dfebd..ef85da8b7 100644
+--- a/app/api/cron/check-updates/route.ts
++++ b/app/api/cron/check-updates/route.ts
+@@ -12,6 +12,7 @@ import { runSqliteUpdateCheck } from '@/lib/auto-update/sqlite';
+ import { listWin32AppIds } from '@/lib/hrm/intune-app-ids';
+ import { runSqliteAppInsightsCheck } from '@/lib/hrm/app-insights-check';
+ import { runSqliteInstallCheck } from '@/lib/hrm/install-status-check';
++import { alertPausedAutoUpdates } from '@/lib/hrm/paused-auto-update';
+ import { parseVersion, compareVersions } from '@/lib/version-compare';
+ import {
+   AutoUpdateTrigger,
+@@ -286,7 +287,9 @@ export async function GET(request: Request) {
+         alerted: 0,
+         message: error instanceof Error ? error.message : 'Install status check failed',
+       }));
+-      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights });
++      // HRM patch 0032: tell IT Ops when auto-update turned itself off for an app.
++      const pausedAutoUpdates = await alertPausedAutoUpdates(getDatabase()).catch(() => ({ paused: 0, alerted: 0, error: true }));
++      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates });
+     } catch (error) {
+       return NextResponse.json(
+         { error: error instanceof Error ? error.message : 'Update check failed' },
+diff --git a/app/api/cron/intune-self-test/route.ts b/app/api/cron/intune-self-test/route.ts
+new file mode 100644
+index 000000000..06a5e72c5
+--- /dev/null
++++ b/app/api/cron/intune-self-test/route.ts
+@@ -0,0 +1,19 @@
++/** HRM patch 0032: daily read-only Intune self-test (VM timer intuneget-intune-self-test). */
++import { NextResponse } from 'next/server';
++import { isSqliteMode } from '@/lib/db';
++import { runIntuneSelfTest } from '@/lib/hrm/intune-self-test';
++
++export const maxDuration = 120;
++
++export async function GET(request: Request) {
++  const cronSecret = process.env.CRON_SECRET;
++  if (!cronSecret || request.headers.get('authorization') !== `Bearer ${cronSecret}`) {
++    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
++  }
++  if (!isSqliteMode()) return NextResponse.json({ success: true, skipped: 'The self-test needs SQLite mode' });
++  const { sqliteAppInsights } = await import('@/lib/db/sqlite');
++  const result = await runIntuneSelfTest(sqliteAppInsights.tracked());
++  if (!result.ok) console.warn(`[intune self-test] failed: ${result.checks.filter((c) => !c.ok).map((c) => `${c.name} (${c.error})`).join(', ')}`);
++  // 200 either way: the result is the finding; the status file and watchdog read it.
++  return NextResponse.json({ success: true, ...result });
++}
+diff --git a/app/api/hrm/home/route.test.ts b/app/api/hrm/home/route.test.ts
+index 9c2585370..085ba2b1a 100644
+--- a/app/api/hrm/home/route.test.ts
++++ b/app/api/hrm/home/route.test.ts
+@@ -1,8 +1,8 @@
+ import { NextRequest } from 'next/server';
+ import { beforeEach, describe, expect, it, vi } from 'vitest';
+-const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn(), status: vi.fn(), installs: vi.fn() }));
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn(), status: vi.fn(), installs: vi.fn(), history: vi.fn() }));
+ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
+-vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getAnalyticsJobs: mocks.jobs } }) }));
++vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getAnalyticsJobs: mocks.jobs }, uploadHistory: { listAll: mocks.history } }) }));
+ vi.mock('@/lib/hrm/install-status-check', () => ({ listInstallStatus: mocks.installs }));
+ vi.mock('@/lib/hrm/home', async (original) => ({ ...(await original<typeof import('@/lib/hrm/home')>()), readServerStatus: mocks.status }));
+ import { GET } from './route';
+@@ -14,6 +14,7 @@ beforeEach(() => {
+   mocks.jobs.mockResolvedValue([]);
+   mocks.status.mockResolvedValue({ reported: false, reason: 'missing' });
+   mocks.installs.mockResolvedValue([]);
++  mocks.history.mockResolvedValue([]);
+ });
+ 
+ describe('HRM home route', () => {
+@@ -28,7 +29,7 @@ describe('HRM home route', () => {
+     const response = await GET(request());
+     expect(mocks.jobs).toHaveBeenCalledWith({ tenantId: 'token-tenant' });
+     expect(response.headers.get('cache-control')).toBe('private, no-store');
+-    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [] });
++    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [] });
+     expect(mocks.installs).toHaveBeenCalledWith('token-tenant');
+   });
+ 
+@@ -46,4 +47,14 @@ describe('HRM home route', () => {
+       { displayName: 'Example Reader', intuneAppId: '00000000-0000-0000-0000-000000000001', failed: 3 },
+     ]);
+   });
++  it('lists apps that reach no devices, only from the signed-in tenant (HRM patch 0032)', async () => {
++    const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString();
++    const old = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
++    mocks.installs.mockResolvedValue([{ intune_app_id: 'app-a', display_name: 'App A', installed: 0, pending: 0, failed: 0, checked_at: recent }]);
++    mocks.history.mockResolvedValue([
++      { intune_tenant_id: 'other-tenant', intune_app_id: 'app-a', deployed_at: recent },
++      { intune_tenant_id: 'token-tenant', intune_app_id: 'app-a', deployed_at: old },
++    ]);
++    expect((await (await GET(request())).json()).unreached).toEqual([{ displayName: 'App A', intuneAppId: 'app-a', deployedAt: old }]);
++  });
+ });
+diff --git a/app/api/hrm/home/route.ts b/app/api/hrm/home/route.ts
+index c4f7ef122..b55c0fc87 100644
+--- a/app/api/hrm/home/route.ts
++++ b/app/api/hrm/home/route.ts
+@@ -3,24 +3,27 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { getDatabase } from '@/lib/db';
+ import { parseAccessToken } from '@/lib/auth-utils';
+-import { attentionCounts, readServerStatus } from '@/lib/hrm/home';
++import { attentionCounts, readServerStatus, unreachedApps } from '@/lib/hrm/home';
+ import { listInstallStatus } from '@/lib/hrm/install-status-check';
+ 
+ export async function GET(request: NextRequest) {
+   const user = await parseAccessToken(request.headers.get('Authorization'));
+   if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+ 
+-  const [jobs, server, installs] = await Promise.all([
+-    getDatabase().jobs.getAnalyticsJobs({ tenantId: user.tenantId }).catch(() => null),
++  const db = getDatabase();
++  const [jobs, server, installs, deployments] = await Promise.all([
++    db.jobs.getAnalyticsJobs({ tenantId: user.tenantId }).catch(() => null),
+     readServerStatus(),
+     // HRM patch 0019: apps with devices that failed to install (counts only)
+     listInstallStatus(user.tenantId).catch(() => []),
++    // HRM patch 0032: when each copy was deployed, for apps that reach no devices
++    db.uploadHistory.listAll(2000).then((rows) => rows.filter((r) => r.intune_tenant_id === user.tenantId)).catch(() => []),
+   ]);
+   const installFailures = installs
+     .filter((app) => app.failed > 0)
+     .map((app) => ({ displayName: app.display_name, intuneAppId: app.intune_app_id, failed: app.failed }));
+   return NextResponse.json(
+-    { attention: jobs ? attentionCounts(jobs) : null, server, installFailures },
++    { attention: jobs ? attentionCounts(jobs) : null, server, installFailures, unreached: unreachedApps(installs, deployments) },
+     { headers: { 'Cache-Control': 'private, no-store' } },
+   );
+ }
+diff --git a/app/api/intune/apps/[id]/route.ts b/app/api/intune/apps/[id]/route.ts
+index 40eb97483..401ac1edd 100644
+--- a/app/api/intune/apps/[id]/route.ts
++++ b/app/api/intune/apps/[id]/route.ts
+@@ -99,6 +99,14 @@ export async function GET(
+     }
+ 
+     const appData = await appResponse.json();
++    // HRM patch 0025: Inventory lists Win32 apps only, so a linked id for any
++    // other app type gets the same answer as an unknown one.
++    if (appData['@odata.type'] && appData['@odata.type'] !== '#microsoft.graph.win32LobApp') {
++      return NextResponse.json(
++        { error: 'App not found' },
++        { status: 404 }
++      );
++    }
+     let assignments: IntuneAppAssignment[] = [];
+ 
+     if (assignmentsResponse.ok) {
+diff --git a/app/api/intune/apps/[id]/win32-only.test.ts b/app/api/intune/apps/[id]/win32-only.test.ts
+new file mode 100644
+index 000000000..dd2461b5c
+--- /dev/null
++++ b/app/api/intune/apps/[id]/win32-only.test.ts
+@@ -0,0 +1,35 @@
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), token: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: mocks.token }));
++vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
++vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: vi.fn() }));
++import { GET } from './route';
++
++// HRM patch 0025: Inventory links open Win32 apps only; any other app type reads as not found.
++const id = '11111111-1111-4111-8111-111111111111';
++const request = () => new NextRequest(`http://localhost/api/intune/apps/${id}`);
++const params = { params: Promise.resolve({ id }) };
++const graph = (type: string) => vi.fn(async (url: string) =>
++  Response.json(url.endsWith('/assignments') ? { value: [] } : { '@odata.type': type, id, displayName: 'Fixture' }));
++beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'user', tenantId: 'self' }); mocks.token.mockResolvedValue('token'); });
++afterEach(() => vi.unstubAllGlobals());
++
++describe('app details for linked ids', () => {
++  it('returns a Win32 app', async () => {
++    vi.stubGlobal('fetch', graph('#microsoft.graph.win32LobApp'));
++    const response = await GET(request(), params);
++    expect(response.status).toBe(200);
++    expect((await response.json()).app.displayName).toBe('Fixture');
++  });
++
++  it('answers App not found for other app types', async () => {
++    for (const type of ['#microsoft.graph.iosStoreApp', '#microsoft.graph.winGetApp', '#microsoft.graph.officeSuiteApp']) {
++      vi.stubGlobal('fetch', graph(type));
++      const response = await GET(request(), params);
++      expect(response.status).toBe(404);
++      expect(await response.json()).toEqual({ error: 'App not found' });
++    }
++  });
++});
+diff --git a/app/api/update-policies/route.sqlite.test.ts b/app/api/update-policies/route.sqlite.test.ts
+index 3dfe6ca1f..12f01260e 100644
+--- a/app/api/update-policies/route.sqlite.test.ts
++++ b/app/api/update-policies/route.sqlite.test.ts
+@@ -171,3 +171,22 @@ it('scope only PATCH keeps a disabled policy and its custom deployment settings
+   expect(response.status).toBe(200);
+   expect((await response.json()).policy).toMatchObject({ auto_update_scope: 'major', is_enabled: false, original_upload_history_id: 'original-fixture', deployment_config: config });
+ });
++
++describe('turning auto-update back on (HRM patch 0032)', () => {
++  it('turns it on and clears the failure count after it turned itself off', async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    await sqliteDb.uploadHistory.create({ id: 'h1', user_id: 'u1', winget_id: 'Vendor.App', version: '1.0', display_name: 'Vendor App', intune_app_id: 'app-1', intune_tenant_id: 't1' });
++    const paused = await sqliteDb.updatePolicies.upsert({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', policy_type: 'auto_update', is_enabled: false, consecutive_failures: 3, deployment_config: { displayName: 'Vendor App' }, original_upload_history_id: 'h1' });
++    // The settings come from the app's last deployment; given directly here.
++    const response = await route.POST(postRequest({ tenant_id: 't1', winget_id: 'Vendor.App', policy_type: 'auto_update', deployment_config: { displayName: 'Vendor App' }, original_upload_history_id: 'h1' }));
++    expect(response.status).toBe(200);
++    expect(await sqliteDb.updatePolicies.getById(paused.id, 'u1')).toMatchObject({ is_enabled: true, consecutive_failures: 0, policy_type: 'auto_update' });
++  });
++  it('keeps the count when an enabled policy is saved unchanged', async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    await sqliteDb.uploadHistory.create({ id: 'h1', user_id: 'u1', winget_id: 'Vendor.App', version: '1.0', display_name: 'Vendor App', intune_app_id: 'app-1', intune_tenant_id: 't1' });
++    const policy = await sqliteDb.updatePolicies.upsert({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', policy_type: 'auto_update', is_enabled: true, consecutive_failures: 2, deployment_config: { displayName: 'Vendor App' }, original_upload_history_id: 'h1' });
++    expect((await route.POST(postRequest({ tenant_id: 't1', winget_id: 'Vendor.App', policy_type: 'auto_update', deployment_config: { displayName: 'Vendor App' }, original_upload_history_id: 'h1' }))).status).toBe(200);
++    expect((await sqliteDb.updatePolicies.getById(policy.id, 'u1'))?.consecutive_failures).toBe(2);
++  });
++});
+diff --git a/app/api/update-policies/route.ts b/app/api/update-policies/route.ts
+index 0a1ade383..beb1a435b 100644
+--- a/app/api/update-policies/route.ts
++++ b/app/api/update-policies/route.ts
+@@ -76,6 +76,10 @@ async function savePolicySqlite(userId: string, body: AppUpdatePolicyInput): Pro
+     deployment_config: derivedDeploymentConfig,
+     original_upload_history_id: derivedOriginalUploadHistoryId,
+     is_enabled: body.is_enabled ?? true,
++    // HRM patch 0032: turning a policy back on, or changing it, is a fresh start. Otherwise an app whose
++    // auto-update turned itself off after 3 failures would turn off again after 1 more.
++    ...(existing && (body.is_enabled ?? true) && (!existing.is_enabled || existing.policy_type !== body.policy_type)
++      ? { consecutive_failures: 0 } : {}),
+     updated_at: new Date().toISOString(),
+   };
+ 
+diff --git a/components/hrm/ServerStatusCard.tsx b/components/hrm/ServerStatusCard.tsx
+index 990a4116b..b7371dabf 100644
+--- a/components/hrm/ServerStatusCard.tsx
++++ b/components/hrm/ServerStatusCard.tsx
+@@ -84,6 +84,21 @@ export function ServerStatusCard({ status, loading }: { status?: ServerStatus; l
+           <Row label="Update alerts">
+             {status.problems.includes('notifications') ? <Pill tone="bad">Failed</Pill> : relative(status.notifications.at)}
+           </Row>
++          {/* HRM patch 0032: whether the server can still read what it needs from Intune */}
++          {([['intuneReads', 'Intune reads'], ['intuneSelfTest', 'Intune self-test'], ['scheduledUpdates', 'Scheduled updates']] as const).map(([key, label]) => {
++            const check = status.checks?.[key];
++            if (!check) return null;
++            return (
++              <Row key={key} label={label}>
++                {check.ok ? <Pill tone="ok">Working</Pill> : (
++                  <span className="inline-flex flex-col items-end gap-1 text-right">
++                    <Pill tone="bad">Failing</Pill>
++                    {check.detail && <span className="text-xs text-text-muted max-w-xs break-words">{check.detail}</span>}
++                  </span>
++                )}
++              </Row>
++            );
++          })}
+           <Row label="Disk">
+             {status.diskWarning ? <Pill tone="warn">{Math.round(status.diskRatio * 100)}% used</Pill> : `${Math.round(status.diskRatio * 100)}% used`}
+           </Row>
+diff --git a/components/inventory/inventory-app-link.test.ts b/components/inventory/inventory-app-link.test.ts
+new file mode 100644
+index 000000000..ba8dba1ca
+--- /dev/null
++++ b/components/inventory/inventory-app-link.test.ts
+@@ -0,0 +1,104 @@
++// @vitest-environment happy-dom
++import { act, createElement, type ReactNode } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++
++// HRM patch 0025: /dashboard/inventory?app=<Intune app id> opens that app's details.
++const state = vi.hoisted(() => ({ search: '', replace: vi.fn(), push: vi.fn() }));
++// Panels added after this test was written (patches 0025-0028) read their own data; not under test here.
++vi.mock('@/components/hrm/AppInsights', () => ({ AppDriftPanel: () => null, AppActivityTimeline: () => null, AppDriftWarning: () => null }));
++vi.mock('@/components/hrm/DuplicatesPanel', () => ({ DuplicatesPanel: () => null }));
++vi.mock('next/navigation', () => ({
++  useRouter: () => ({ replace: state.replace, push: state.push }),
++  useSearchParams: () => new URLSearchParams(state.search),
++}));
++vi.mock('gt-next', () => ({ T: ({ children }: { children: ReactNode }) => children }));
++vi.mock('framer-motion', () => ({
++  motion: { div: ({ children }: { children: ReactNode }) => createElement('div', null, children) },
++  useReducedMotion: () => true,
++}));
++vi.mock('@/hooks/use-inventory', () => ({
++  useInventoryApps: () => ({
++    data: { apps: [{ id: 'listed', displayName: 'Fixture', publisher: 'Example', createdDateTime: '2026-01-01T00:00:00Z', lastModifiedDateTime: '2026-01-01T00:00:00Z' }] },
++    isLoading: false, error: null, refetch: vi.fn(), isFetching: false, isComplete: true,
++  }),
++}));
++vi.mock('@/components/providers/UserSettingsProvider', () => ({
++  useUserSettings: () => ({ settings: { viewMode: 'grid' }, setViewMode: vi.fn() }),
++}));
++vi.mock('@/components/dashboard', () => ({
++  PageHeader: () => null, AnimatedEmptyState: () => null, SkeletonGrid: () => null,
++  AnimatedStatCard: () => null, StatCardGrid: () => null,
++}));
++vi.mock('@/components/inventory', () => ({
++  InventoryAppCard: ({ app, onClick }: { app: { id: string }; onClick: () => void }) =>
++    createElement('button', { 'data-card': app.id, onClick }),
++  InventoryAppDetails: ({ appId, onClose }: { appId: string | null; onClose: () => void }) =>
++    createElement('div', { 'data-details': appId ?? '' }, createElement('button', { 'data-close': '', onClick: onClose })),
++  InventoryFilters: () => null, InventoryListRow: () => null,
++  InventoryPagination: () => null, InventoryListHeader: () => null,
++}));
++
++import InventoryPage from '@/app/(app)/dashboard/inventory/page';
++import { linkedAppId } from '@/lib/hrm/inventory-link';
++
++const id = '11111111-1111-4111-8111-111111111111';
++let root: Root;
++let container: HTMLDivElement;
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++async function render(search: string) {
++  state.search = search;
++  container = document.createElement('div');
++  document.body.append(container);
++  root = createRoot(container);
++  await act(async () => root.render(createElement(InventoryPage)));
++}
++const openApp = () => container.querySelector('[data-details]')?.getAttribute('data-details');
++const click = (selector: string) => act(async () => (container.querySelector(selector) as HTMLElement).click());
++
++beforeEach(() => { state.replace.mockReset(); state.push.mockReset(); });
++afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; });
++
++describe('linkedAppId', () => {
++  it('accepts an Intune app id in any case', () => {
++    expect(linkedAppId(id)).toBe(id);
++    expect(linkedAppId(` ${id.toUpperCase()} `)).toBe(id);
++  });
++  it('ignores anything that is not a GUID', () => {
++    for (const value of [null, undefined, '', 'listed', `${id}x`, `${id}/assignments`, '../settings', '11111111111141118111111111111111']) {
++      expect(linkedAppId(value)).toBeNull();
++    }
++  });
++});
++
++describe('inventory link to an app', () => {
++  it('opens the linked app\'s details', async () => {
++    await render(`app=${id}`);
++    expect(openApp()).toBe(id);
++  });
++
++  it('opens nothing without a link or with an id that is not a GUID', async () => {
++    await render('');
++    expect(openApp()).toBe('');
++    await act(async () => root.unmount());
++    await render('app=..%2Fsettings');
++    expect(openApp()).toBe('');
++  });
++
++  it('clears the link when the details close, so a refresh does not reopen them', async () => {
++    await render(`app=${id}&q=keep`);
++    await click('[data-close]');
++    expect(openApp()).toBe('');
++    expect(state.replace).toHaveBeenCalledWith('/dashboard/inventory');
++  });
++
++  it('leaves the address alone when there was no link', async () => {
++    await render('');
++    await click('[data-card="listed"]');
++    expect(openApp()).toBe('listed');
++    await click('[data-close]');
++    expect(openApp()).toBe('');
++    expect(state.replace).not.toHaveBeenCalled();
++  });
++});
+diff --git a/components/inventory/inventory-app-not-found.test.ts b/components/inventory/inventory-app-not-found.test.ts
+new file mode 100644
+index 000000000..7966fc017
+--- /dev/null
++++ b/components/inventory/inventory-app-not-found.test.ts
+@@ -0,0 +1,34 @@
++// @vitest-environment happy-dom
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++
++// HRM patch 0025: a link to an unknown or non-Win32 app shows the panel's error, not a blank panel.
++// Panels added after this test was written (patches 0025-0028) read their own data; not under test here.
++vi.mock('@/components/hrm/AppInsights', () => ({ AppDriftPanel: () => null, AppActivityTimeline: () => null, AppDriftWarning: () => null }));
++vi.mock('@/components/hrm/DuplicatesPanel', () => ({ DuplicatesPanel: () => null }));
++vi.mock('@/hooks/use-inventory', () => ({
++  useAppDetails: () => ({ data: undefined, isLoading: false, error: new Error('App not found'), refetch: vi.fn() }),
++}));
++vi.mock('@/hooks/useNewVersionPrefill', () => ({ useNewVersionPrefill: () => ({ data: null }) }));
++vi.mock('@/hooks/useInstallStatus', () => ({ useInstallStatus: () => ({ data: null }) }));
++vi.mock('@/components/dashboard/animations/SlidePanel', () => ({
++  SlidePanel: ({ children, isOpen }: { children: React.ReactNode; isOpen: boolean }) => (isOpen ? children : null),
++}));
++import { InventoryAppDetails } from './InventoryAppDetails';
++
++let root: Root;
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; });
++
++describe('inventory details for an app that is not found', () => {
++  it('shows the not-found error', async () => {
++    const container = document.createElement('div');
++    document.body.append(container);
++    root = createRoot(container);
++    await act(async () => root.render(createElement(InventoryAppDetails, { appId: '11111111-1111-4111-8111-111111111111', onClose: vi.fn() })));
++    expect(container.textContent).toContain('Failed to load app');
++    expect(container.textContent).toContain('App not found');
++    expect(container.textContent).toContain('Try Again');
++  });
++});
+diff --git a/components/updates/UpdateCard.tsx b/components/updates/UpdateCard.tsx
+index 845a56945..f0fab47a3 100644
+--- a/components/updates/UpdateCard.tsx
++++ b/components/updates/UpdateCard.tsx
+@@ -103,6 +103,8 @@ export function UpdateCard({
+     policyStatus?.policy_type === 'auto_update' && policyStatus?.is_enabled;
+   const scopeReason = isAutoUpdateEnabled ? autoUpdateScopeReason(policyStatus?.auto_update_scope, update.current_version, update.latest_version) : null;
+   const hasFailures = (policyStatus?.consecutive_failures || 0) > 0;
++  // HRM patch 0032: auto-update turned itself off after repeated failures
++  const autoUpdateOff = policyStatus?.policy_type === 'auto_update' && policyStatus?.is_enabled === false;
+   const updateType = classifyUpdateType(update.current_version, update.latest_version);
+   const typeConfig = updateTypeConfig[updateType];
+   const PolicyIcon = policyStatus?.policy_type ? policyIcons[policyStatus.policy_type] : null;
+@@ -246,6 +248,14 @@ export function UpdateCard({
+               {policyStatus?.consecutive_failures} <T>failed</T>
+             </span>
+           )}
++          {autoUpdateOff && (
++            <span className="flex items-center gap-2 text-[11px] font-medium text-status-warning">
++              Auto-update turned off after failed updates
++              <button type="button" className="text-accent-cyan hover:underline" onClick={() => void handlePolicyChange('auto_update')}>
++                Turn auto-update back on
++              </button>
++            </span>
++          )}
+           {policyStatus?.last_auto_update_at && (
+             <span className="flex items-center gap-1 text-[11px] text-text-muted">
+               <Clock className="w-3 h-3" />
+@@ -285,6 +295,7 @@ export function UpdateCard({
+             <UpdatePolicySelector
+               currentPolicy={policyStatus?.policy_type || null}
+               currentScope={policyStatus?.auto_update_scope}
++              isEnabled={policyStatus?.is_enabled !== false}
+               onPolicyChange={handlePolicyChange}
+               size="sm"
+               showLabel={false}
+diff --git a/components/updates/UpdatePolicySelector.tsx b/components/updates/UpdatePolicySelector.tsx
+index 45fe6f642..58df781fb 100644
+--- a/components/updates/UpdatePolicySelector.tsx
++++ b/components/updates/UpdatePolicySelector.tsx
+@@ -28,6 +28,8 @@ interface UpdatePolicySelectorProps {
+   currentScope?: AutoUpdateScope;
+   onPolicyChange: (policyType: UpdatePolicyType, scope?: AutoUpdateScope) => Promise<void>;
+   disabled?: boolean;
++  /** HRM patch 0032: false when auto-update turned itself off; choosing it again turns it back on. */
++  isEnabled?: boolean;
+   size?: 'sm' | 'default';
+   showLabel?: boolean;
+ }
+@@ -84,6 +86,7 @@ export function UpdatePolicySelector({
+   currentScope = 'all',
+   onPolicyChange,
+   disabled = false,
++  isEnabled = true,
+   size = 'default',
+   showLabel = true,
+ }: UpdatePolicySelectorProps) {
+@@ -92,7 +95,7 @@ export function UpdatePolicySelector({
+   const selectedOption = policyOptions.find((o) => o.type === currentPolicy) || policyOptions[1];
+ 
+   const handleSelect = async (policyType: UpdatePolicyType) => {
+-    if (policyType === currentPolicy) return;
++    if (policyType === currentPolicy && isEnabled) return;
+ 
+     setIsUpdating(true);
+     try {
+diff --git a/hooks/useHrmHome.ts b/hooks/useHrmHome.ts
+index e42431e61..80c68939b 100644
+--- a/hooks/useHrmHome.ts
++++ b/hooks/useHrmHome.ts
+@@ -11,6 +11,8 @@ export interface HrmHomeData {
+   server: ServerStatus;
+   // HRM patch 0019
+   installFailures?: Array<{ displayName: string; intuneAppId: string; failed: number }>;
++  // HRM patch 0032
++  unreached?: Array<{ displayName: string; intuneAppId: string; deployedAt: string }>;
+ }
+ 
+ export function useHrmHome() {
+diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
+index 6cd049db6..b4f6a1d91 100644
+--- a/lib/auto-update/__tests__/sqlite.test.ts
++++ b/lib/auto-update/__tests__/sqlite.test.ts
+@@ -546,3 +546,26 @@ describe('installers that failed their check (HRM patch 0031)', () => {
+     expect(await runSqliteUpdateCheck(db)).toMatchObject({ triggered: 1 });
+   });
+ });
++
++describe('failure cutoff (HRM patch 0032)', () => {
++  it('keeps counting failures when a new attempt starts, so 3 in a row turn auto-update off', async () => {
++    const { db, runSqliteUpdateCheck } = await load();
++    const policy = await seedDeployment(db);
++    getAppsByWingetIdsMock.mockResolvedValue([{ winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.1.0' }]);
++    getLatestInstallerInfoMock.mockResolvedValue(installerResolution());
++    for (let attempt = 1; attempt <= 3; attempt++) {
++      expect((await runSqliteUpdateCheck(db)).triggered).toBe(1);
++      const queued = (await db.jobs.getByTenantId('t1')).find((j) => j.status === 'queued')!;
++      await db.jobs.update(queued.id, { status: 'failed', error_code: 'PACKAGE_CREATION_FAILED', error_message: 'packaging failed', completed_at: new Date().toISOString() });
++      // The cooldown is about pace, not this rule.
++      const { closeSqliteDb } = await import('@/lib/db/sqlite');
++      closeSqliteDb();
++      const Database = (await import('better-sqlite3')).default;
++      const raw = new Database(process.env.DATABASE_PATH!);
++      raw.prepare("UPDATE auto_update_history SET triggered_at = '2000-01-01T00:00:00Z'").run();
++      raw.close();
++      expect(await db.updatePolicies.getById(policy.id, 'u1')).toMatchObject({ consecutive_failures: attempt, is_enabled: attempt < 3 });
++    }
++    expect((await runSqliteUpdateCheck(db)).triggered).toBe(0);
++  });
++});
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index f7bac2d1e..e39788489 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -293,7 +293,8 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+       await db.updatePolicies.update(policy.id, policy.user_id, {
+         last_auto_update_at: now,
+         last_auto_update_version: updateInfo.latestVersion,
+-        consecutive_failures: 0,
++        // HRM patch 0032: only a successful update resets the failure count (syncSqliteAutoUpdate).
++        // Resetting it here meant the 3-failure cutoff could never be reached.
+         updated_at: now,
+       });
+ 
+diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
+index a5e304458..08a084d60 100644
+--- a/lib/db/__tests__/job-create.test.ts
++++ b/lib/db/__tests__/job-create.test.ts
+@@ -49,8 +49,8 @@ function readStoredJob(id: string): Record<string, unknown> {
+   closeDb?.();
+   const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
+   try {
+-    // Versions 10-14 (HRM install status, releases, activity, pilots, update schedule) follow manual mappings, automatic update scope, and webhooks.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(14);
++    // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts) follow manual mappings, automatic update scope, and webhooks.
++    expect(stored.pragma('user_version', { simple: true })).toBe(15);
+     return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
+   } finally {
+     stored.close();
+diff --git a/lib/db/sqlite-auto-update.test.ts b/lib/db/sqlite-auto-update.test.ts
+index 40dd1b163..2a1550f67 100644
+--- a/lib/db/sqlite-auto-update.test.ts
++++ b/lib/db/sqlite-auto-update.test.ts
+@@ -32,6 +32,14 @@ describe('SQLite auto-update completion', () => {
+     expect(history).toMatchObject({ status: success ? 'completed' : status, completed_at: time, error_message: success ? null : 'test failure' });
+     expect(await db.updatePolicies.getById(policy.id, 'user')).toMatchObject({ consecutive_failures: success ? 0 : 3, is_enabled: success, last_auto_update_version: success ? '2.0' : null });
+   });
++  it.each([
++    ['HASH_MISMATCH', 'bytes changed'],
++    ['WORKFLOW_DISPATCH_FAILED', 'The publisher currently serves different bytes for Vendor.App 2.0. The deployment was quarantined before the packaging pipeline started.'],
++  ])('does not count an installer check failure (%s) toward turning auto-update off (HRM patch 0032)', async (code, message) => {
++    const { policy, job } = await seed();
++    await db.jobs.update(job.id, { status: 'failed', error_code: code, error_message: message, completed_at: new Date().toISOString() });
++    expect(await db.updatePolicies.getById(policy.id, 'user')).toMatchObject({ consecutive_failures: 2, is_enabled: true, last_auto_update_version: null });
++  });
+   it('does not change history when the ownership condition rejects the job update', async () => {
+     const { job } = await seed();
+     expect(await db.jobs.update(job.id, { status: 'deployed' }, { packager_id: 'other' })).toBeNull();
+diff --git a/lib/db/sqlite-auto-update.ts b/lib/db/sqlite-auto-update.ts
+index 24e4c6a4d..8b4565a6a 100644
+--- a/lib/db/sqlite-auto-update.ts
++++ b/lib/db/sqlite-auto-update.ts
+@@ -1,17 +1,18 @@
+ import type Database from 'better-sqlite3';
+ import { DEFAULT_SAFETY_CONFIG } from '@/types/update-policies';
++import { isInstallerCheckFailure } from '@/lib/hrm/installer-block';
+ 
+ /** Run inside the job write transaction so history and policy cannot lag behind it. */
+ export function syncSqliteAutoUpdate(database: Database.Database, jobId: string): void {
+   const row = database.prepare(`
+-    SELECT h.id, h.policy_id, j.status, j.error_message, j.completed_at, j.updated_at
++    SELECT h.id, h.policy_id, j.status, j.error_code, j.error_message, j.completed_at, j.updated_at
+     FROM packaging_jobs j
+     JOIN app_update_policies p ON p.id = j.auto_update_policy_id AND p.user_id = j.user_id AND p.tenant_id = j.tenant_id AND p.winget_id = j.winget_id
+     JOIN auto_update_history h ON h.policy_id = p.id AND h.packaging_job_id = j.id
+     WHERE j.id = ? AND j.is_auto_update = 1
+       AND j.status IN ('deployed', 'duplicate_skipped', 'failed', 'cancelled')
+       AND h.status IN ('pending', 'packaging', 'deploying')
+-  `).get(jobId) as { id: string; policy_id: string; status: string; error_message: string | null; completed_at: string | null; updated_at: string } | undefined;
++  `).get(jobId) as { id: string; policy_id: string; status: string; error_code: string | null; error_message: string | null; completed_at: string | null; updated_at: string } | undefined;
+   if (!row) return;
+   // An older completion must not clear the version or reset failure tracking
+   // belonging to a newer attempt, whether that attempt is still running or done.
+@@ -24,6 +25,11 @@ export function syncSqliteAutoUpdate(database: Database.Database, jobId: string)
+   if (latest.id !== row.id) return;
+   if (success) {
+     database.prepare('UPDATE app_update_policies SET consecutive_failures = 0, updated_at = ? WHERE id = ?').run(now, row.policy_id);
++  } else if (isInstallerCheckFailure(row.error_code, row.error_message)) {
++    // HRM patch 0032: the publisher's installer failed its check before packaging. That says nothing
++    // about the app or the policy, so it doesn't count toward turning auto-update off. Patch 0031
++    // stops the same installer being retried.
++    database.prepare('UPDATE app_update_policies SET last_auto_update_version = NULL, updated_at = ? WHERE id = ?').run(now, row.policy_id);
+   } else {
+     database.prepare(`UPDATE app_update_policies SET last_auto_update_version = NULL,
+       consecutive_failures = consecutive_failures + 1,
+diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
+index e08406d6e..5a18bb807 100644
+--- a/lib/db/sqlite-migrations.ts
++++ b/lib/db/sqlite-migrations.ts
+@@ -430,6 +430,13 @@ export const MIGRATIONS: SqliteMigration[] = [
+       CREATE INDEX IF NOT EXISTS idx_hrm_update_blackouts ON hrm_update_blackouts(tenant_id, ends_on);`);
+     },
+   },
++  {
++    version: 15,
++    name: 'paused auto-update alerts (HRM patch 0032)',
++    up: db => {
++      db.exec('CREATE TABLE IF NOT EXISTS hrm_paused_auto_update_alerts (policy_id TEXT PRIMARY KEY, alerted_at TEXT NOT NULL)');
++    },
++  },
+ ];
+ 
+ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 88a192187..0e0cd2697 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
+ import { createPilotStore } from '@/lib/hrm/pilot-store';
+ import { createUpdateScheduleStore } from '@/lib/hrm/update-schedule-store';
+ import { createInstallerBlockStore } from '@/lib/hrm/installer-block';
++import { createPausedAlertStore } from '@/lib/hrm/paused-auto-update';
+ import { createAppInsightsStore } from '@/lib/hrm/app-insights-store';
+ import { syncSqliteAutoUpdate } from './sqlite-auto-update';
+ import type { InstallStatusRecord, InstallStatusStore } from '@/lib/hrm/install-status';
+@@ -311,6 +312,7 @@ function installStatusRow(row: unknown): InstallStatusRecord {
+ export const sqlitePilotRollouts = createPilotStore(getDb);
+ export const sqliteUpdateSchedule = createUpdateScheduleStore(getDb);
+ export const sqliteInstallerBlocks = createInstallerBlockStore(getDb);
++export const sqlitePausedAlerts = createPausedAlertStore(getDb);
+ export const sqliteAppInsights = createAppInsightsStore(getDb);
+ 
+ export const sqliteInstallStatus: InstallStatusStore = {
+diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
+index 936b276d1..2b7299e3e 100644
+--- a/lib/hrm/__tests__/help-content.test.ts
++++ b/lib/hrm/__tests__/help-content.test.ts
+@@ -33,6 +33,14 @@ describe('help content', () => {
+     expect(HELP_SECTIONS.find((s) => s.id === 'pilot-rollouts')!.points.join(' ')).toContain('update schedule allows updates');
+   });
+ 
++  it('explains Intune checks, unreached apps and auto-update turning off (HRM patch 0032)', () => {
++    const section = (id: string) => HELP_SECTIONS.find((s) => s.id === id)!.points.join(' ');
++    for (const label of ['Intune reads', 'Intune self-test', 'Scheduled updates', '7:15 AM', 'Maryland time']) expect(section('server')).toContain(label);
++    for (const label of ['Needs attention', 'Check groups', '0 installed, 0 pending and 0 failed']) expect(section('install-results')).toContain(label);
++    for (const label of ['3 times in a row', 'Auto-update turned off', 'Open Deployments']) expect(section('updating')).toContain(label);
++    expect(section('alerts')).toContain('Auto-update turned off');
++  });
++
+   it('keeps Help flows short and accessible as ordered steps', () => {
+     for (const section of HELP_SECTIONS) {
+       if (!section.flow) continue;
+diff --git a/lib/hrm/__tests__/intune-self-test.test.ts b/lib/hrm/__tests__/intune-self-test.test.ts
+new file mode 100644
+index 000000000..072d202b0
+--- /dev/null
++++ b/lib/hrm/__tests__/intune-self-test.test.ts
+@@ -0,0 +1,33 @@
++import { describe, expect, it, vi } from 'vitest';
++import { runIntuneSelfTest } from '../intune-self-test';
++const A = '11111111-1111-4111-8111-111111111111';
++const app = { tenantId: 'tenant', appId: A, wingetId: 'Example.App', displayName: 'Example', version: '1' };
++function graph(fail?: (url: string) => boolean) {
++  return vi.fn(async (url: string) => {
++    if (fail?.(url)) return new Response(JSON.stringify({ error: { code: 'BadRequest' } }), { status: 400 });
++    if (url.includes('retrieveDeviceAppInstallationStatusReport')) return Response.json({ Schema: [{ Column: 'AppInstallState' }], Values: [['Installed']], TotalRowCount: 1 });
++    if (url.endsWith('/assignments')) return Response.json({ value: [] });
++    if (url.includes(`mobileApps/${A}`)) return Response.json({ id: A, '@odata.type': '#microsoft.graph.win32LobApp', displayVersion: '1' });
++    return Response.json({ value: [{ id: A }] });
++  }) as unknown as typeof fetch;
++}
++describe('Intune self-test (HRM patch 0032)', () => {
++  it('passes when every read works, once per tenant', async () => {
++    const result = await runIntuneSelfTest([app, { ...app, appId: '22222222-2222-4222-8222-222222222222' }], { token: async () => 'token', fetchImpl: graph() });
++    expect(result).toMatchObject({ ok: true, tenants: 1 });
++    expect(result.checks.map((c) => c.name)).toEqual(['App list', 'App and groups', 'Install results', 'Pilot reads']);
++  });
++  it('names the read that Microsoft changed, with a status-only reason', async () => {
++    const result = await runIntuneSelfTest([app], { token: async () => 'token', fetchImpl: graph((url) => url.includes('reports/')) });
++    expect(result.ok).toBe(false);
++    expect(result.checks.find((c) => !c.ok)).toEqual({ name: 'Install results', ok: false, error: 'Intune install report returned 400' });
++  });
++  it('fails without a token, and passes with nothing to test yet', async () => {
++    expect(await runIntuneSelfTest([app], { token: async () => null, fetchImpl: graph() })).toMatchObject({ ok: false, checks: [{ name: 'Intune sign-in', ok: false }] });
++    expect(await runIntuneSelfTest([], { token: async () => 'token', fetchImpl: graph() })).toMatchObject({ ok: true, tenants: 0, checks: [] });
++  });
++  it('never returns IDs in reasons', async () => {
++    const result = await runIntuneSelfTest([app], { token: async () => 'token', fetchImpl: vi.fn(async () => { throw new Error(`boom ${A}`); }) as unknown as typeof fetch });
++    expect(JSON.stringify(result)).not.toContain(A);
++  });
++});
+diff --git a/lib/hrm/__tests__/paused-auto-update.test.ts b/lib/hrm/__tests__/paused-auto-update.test.ts
+new file mode 100644
+index 000000000..a4412f085
+--- /dev/null
++++ b/lib/hrm/__tests__/paused-auto-update.test.ts
+@@ -0,0 +1,44 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++const deliver = vi.hoisted(() => vi.fn(async () => ({ success: true })));
++vi.mock('@/lib/webhooks/service', () => ({ deliverFormattedWebhook: deliver }));
++let dir: string;
++beforeEach(() => { vi.resetModules(); deliver.mockClear(); deliver.mockResolvedValue({ success: true }); dir = mkdtempSync(join(tmpdir(), 'intuneget-paused-')); process.env.DATABASE_PATH = join(dir, 'app.db'); });
++afterEach(async () => { (await import('@/lib/db/sqlite')).closeSqliteDb(); rmSync(dir, { recursive: true, force: true }); delete process.env.DATABASE_PATH; });
++async function setup() {
++  const { sqliteDb: db, sqliteWebhooks } = await import('@/lib/db/sqlite');
++  const { alertPausedAutoUpdates } = await import('../paused-auto-update');
++  const webhooks = vi.spyOn(sqliteWebhooks, 'listAllEnabled').mockResolvedValue([{ id: 'w1', name: 'IT Ops', webhook_type: 'teams' }] as never);
++  vi.spyOn(sqliteWebhooks, 'recordResult').mockResolvedValue(undefined as never);
++  const policy = await db.updatePolicies.upsert({ user_id: 'u', tenant_id: 't', winget_id: 'Vendor.App', policy_type: 'auto_update', is_enabled: false, consecutive_failures: 3, deployment_config: { displayName: 'Vendor App' } });
++  return { db, policy, alert: () => alertPausedAutoUpdates(db), webhooks };
++}
++describe('paused auto-update alert (HRM patch 0032)', () => {
++  it('posts once per pause, naming the app, and again after a later pause', async () => {
++    const { db, policy, alert } = await setup();
++    expect(await alert()).toEqual({ paused: 1, alerted: 1 });
++    const card = JSON.stringify((deliver.mock.calls[0] as unknown[])[1]);
++    expect(card).toContain('Auto-update turned off for Vendor App');
++    expect(card).toContain('3 failed updates in a row');
++    expect(await alert()).toEqual({ paused: 1, alerted: 0 });
++    await db.updatePolicies.update(policy.id, 'u', { is_enabled: true, consecutive_failures: 0 });
++    expect(await alert()).toEqual({ paused: 0, alerted: 0 });
++    await db.updatePolicies.update(policy.id, 'u', { is_enabled: false, consecutive_failures: 3 });
++    expect(await alert()).toEqual({ paused: 1, alerted: 1 });
++    expect(deliver).toHaveBeenCalledTimes(2);
++  });
++  it('tries again at the next check when no webhook accepted it', async () => {
++    const { alert } = await setup();
++    deliver.mockResolvedValueOnce({ success: false, error: 'down' } as never);
++    expect(await alert()).toEqual({ paused: 1, alerted: 0 });
++    expect(await alert()).toEqual({ paused: 1, alerted: 1 });
++  });
++  it('ignores policies turned off by staff', async () => {
++    const { db, policy, alert } = await setup();
++    await db.updatePolicies.update(policy.id, 'u', { consecutive_failures: 0 });
++    expect(await alert()).toEqual({ paused: 0, alerted: 0 });
++    expect(deliver).not.toHaveBeenCalled();
++  });
++});
+diff --git a/lib/hrm/__tests__/unreached-apps.test.ts b/lib/hrm/__tests__/unreached-apps.test.ts
+new file mode 100644
+index 000000000..5b80ebf4e
+--- /dev/null
++++ b/lib/hrm/__tests__/unreached-apps.test.ts
+@@ -0,0 +1,23 @@
++import { describe, expect, it } from 'vitest';
++import { unreachedApps } from '../home';
++const now = new Date('2026-11-10T12:00:00Z');
++const counts = (over: Record<string, unknown> = {}) => ({ intune_app_id: 'APP-1', display_name: 'Zoom Workplace', installed: 0, pending: 0, failed: 0, checked_at: '2026-11-10T08:30:00Z', ...over });
++const deployed = (at: string) => [{ intune_app_id: 'app-1', deployed_at: at }];
++describe('apps that reach no devices (HRM patch 0032)', () => {
++  it('lists an app deployed over 3 days ago with nothing installed, pending or failed', () => {
++    expect(unreachedApps([counts()], deployed('2026-11-05T12:00:00Z'), now)).toEqual([{ displayName: 'Zoom Workplace', intuneAppId: 'APP-1', deployedAt: '2026-11-05T12:00:00Z' }]);
++  });
++  it.each([
++    ['deployed recently', counts(), deployed('2026-11-08T12:00:00Z')],
++    ['installed somewhere', counts({ installed: 1 }), deployed('2026-11-01T12:00:00Z')],
++    ['pending somewhere', counts({ pending: 1 }), deployed('2026-11-01T12:00:00Z')],
++    ['failing somewhere (already its own alert)', counts({ failed: 1 }), deployed('2026-11-01T12:00:00Z')],
++    ['counts are stale', counts({ checked_at: '2026-11-07T08:30:00Z' }), deployed('2026-11-01T12:00:00Z')],
++    ['no deployment record', counts(), []],
++  ])('ignores an app when %s', (_label, install, history) => {
++    expect(unreachedApps([install], history, now)).toEqual([]);
++  });
++  it('uses the newest deployment of a copy (history is newest first)', () => {
++    expect(unreachedApps([counts()], [{ intune_app_id: 'app-1', deployed_at: '2026-11-09T12:00:00Z' }, { intune_app_id: 'app-1', deployed_at: '2026-10-01T12:00:00Z' }], now)).toEqual([]);
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index b2e8f2755..ab831259f 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -59,6 +59,9 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'If the card says the installer no longer matches its WinGet checksum, the publisher replaced the installer before WinGet caught up. This happens often with Chrome.',
+       'Retry safely fails the same way until WinGet lists the publisher\'s current version. Check App updates again after the next update check.',
+       'Auto-update does not retry an installer that failed this check at every check. It tries again when the catalog offers a different version or WinGet corrects the checksum. Other failures are retried at the next check.',
++      'If an app\'s automatic update fails 3 times in a row, auto-update turns itself off for that app. Installers that fail the check before packaging don\'t count toward the 3.',
++      'When that happens, a Teams alert, Auto-update turned off for the app, posts to IT Ops once. Press Open Deployments in the alert to read the failures.',
++      'After fixing the cause, open the app\'s card in App updates and press Turn auto-update back on, or choose Auto-update in its menu. This also clears the failed count.',
+       'If Update says the catalog has not synced the installer yet, try again later (IntuneGet looks for a newer catalog every 6 hours), or deploy the new version from the App catalog with Supersede previous version on update and Carry over assignments turned on.',
+       'Custom apps (installers that are not in WinGet, such as PdfCraft or UniFi Endpoint): open the app in Inventory and press Deploy new version. The form is filled in from the last version; enter the new version and its https download link. The new version keeps the same groups and supersedes the old one (Update), so devices upgrade in place.',
+       'When a custom app installed from a GitHub release has a newer release, App updates shows it. Deploy new version opens the form with the new version, download link and checksum filled in. Check them, then add it to the cart. Nothing deploys on its own.',
+@@ -125,9 +128,12 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Open the app in Inventory to see the counts and the most common reasons for failures, with a link to the app in Intune.',
+       'Under a failure reason, open What to check for suggested next steps and Microsoft troubleshooting guidance. These are checks to try, not a diagnosis or an automatic repair.',
+       'When devices fail to install an app, the Home page lists it under Needs attention, and a Teams alert posts to the IT Ops team when the number of failed devices goes up (at most once a day per app).',
++      'If an app was deployed over 3 days ago and Intune reports 0 installed, 0 pending and 0 failed, Home lists it under Needs attention as reaching no devices.',
++      'Press Check groups to open Inventory (the app\'s details open directly when only one app is listed). Usually the app has no groups, a group with no members, or the wrong group.',
++      'A link from another tool, or from a Teams alert about one app, can open an app\'s details in Inventory directly. If it shows Failed to load app and App not found, the app was removed from Intune or isn\'t a Win32 app, which Inventory doesn\'t list.',
+       'Only counts are kept. To see which devices failed, open the app in Intune, then Device install status.',
+     ],
+-    links: [{ label: 'Microsoft Intune', href: INTUNE_URL }],
++    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Microsoft Intune', href: INTUNE_URL }],
+   },
+   {
+     id: 'app-activity',
+@@ -167,7 +173,8 @@ export const HELP_SECTIONS: HelpSection[] = [
+     id: 'alerts',
+     title: 'Teams alerts',
+     points: [
+-      'Update alerts, deployment results and install failures post to the IT Ops team, IT chat channel, through the HRM alert relay. The relay page keeps a 30-day list of every alert.',
++      'Update alerts, deployment results, install failures and Auto-update turned off post to the IT Ops team, IT chat channel, through the HRM alert relay. The relay page keeps a 30-day list of every alert.',
++      'Server status problems also post to IT Ops: once when seen on 2 checks in a row, once a day while they last, and once when they clear.',
+       'To check the connection, open Settings, then Notifications, and press Test on the alert relay webhook. A Test from IntuneGet card should appear in IT Ops.',
+     ],
+     links: [{ label: 'HRM alert relay', href: ALERT_RELAY_URL }],
+@@ -178,8 +185,12 @@ export const HELP_SECTIONS: HelpSection[] = [
+     points: [
+       'New IntuneGet versions are built with HRM\'s changes and proposed as a Deploy pull request in IntuneGet-Build.',
+       'Merging it updates the server within 5 minutes. The server backs up its data first and goes back to the previous version on its own if the new one doesn\'t start.',
+-      'Server status on the Home page shows the running version, the nightly off-site backup, the backup taken before each deploy, disk space and the tunnel.',
++      'Server status on the Home page shows the running version, the nightly off-site backup, the backup taken before each deploy, the update check and update alerts, the Intune checks below, disk space and the tunnel.',
+       'Off-site backup turns red if the last nightly copy to Azure failed or is more than 36 hours old.',
++      'Intune reads shows Failing when install results or app activity could not be read at the last 2 update checks (3:30 AM and 3:30 PM).',
++      'Intune self-test tests every Intune read the server relies on, daily at 7:15 AM (Maryland time), without changing anything in Intune. It shows Failing if a read fails or the test is more than 26 hours old.',
++      'Scheduled updates is the hourly run that starts updates held for the update schedule. It shows Failing if the last run failed or none ran for 2 hours.',
++      'Each of these shows Working, or Failing with a short reason, and a Teams alert posts to IT Ops. If Failing lasts, open a ticket with HRM Support.',
+       'HRM\'s IT dashboard shows Server status problems, failed or stuck deployments, and counts of apps deployed each day. Open Home here for details.',
+       'The summary refreshes at most once a minute. If the server is slow, the IT dashboard keeps the last safe summary and its original time.',
+     ],
+diff --git a/lib/hrm/home.ts b/lib/hrm/home.ts
+index 4a6ab1e59..3702ec056 100644
+--- a/lib/hrm/home.ts
++++ b/lib/hrm/home.ts
+@@ -7,7 +7,8 @@
+ 
+ import { readFile } from 'fs/promises';
+ import path from 'path';
+-import type { AnalyticsJob } from '@/lib/db/types';
++import type { AnalyticsJob, UploadHistoryRecord } from '@/lib/db/types';
++import type { InstallStatusRecord } from './install-status';
+ 
+ export const STATUS_STALE_AFTER_MS = 15 * 60 * 1000;
+ export const STUCK_AFTER_MS = 2 * 60 * 60 * 1000;
+@@ -17,6 +18,10 @@ export const DISK_WARNING_RATIO = 0.85;
+ export const OFFSITE_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
+ 
+ interface UnitRun { result: string | null; at: string | null }
++/** HRM patch 0032: a verdict the VM status script already worked out; null when not set up. */
++export interface StatusCheck { ok: boolean; at: string | null; detail: string | null }
++export const STATUS_CHECKS = ['intuneReads', 'intuneSelfTest', 'scheduledUpdates'] as const;
++export type StatusCheckKey = (typeof STATUS_CHECKS)[number];
+ 
+ export interface ServerStatusFile {
+   generatedAt: string;
+@@ -30,6 +35,7 @@ export interface ServerStatusFile {
+   updateCheck: UnitRun;
+   notifications: UnitRun;
+   tunnel: { version: string | null; running: boolean; lastUpdate: UnitRun };
++  checks?: Partial<Record<StatusCheckKey, StatusCheck | null>>;
+ }
+ 
+ export type ServerStatus =
+@@ -67,6 +73,7 @@ export function interpretServerStatus(raw: string | null, now = new Date()): Ser
+       problems.push('offsiteBackup');
+     }
+   }
++  for (const key of STATUS_CHECKS) if (file.checks?.[key]?.ok === false) problems.push(key);
+   if (!file.tunnel?.running) problems.push('tunnel');
+   else if (file.tunnel.lastUpdate?.result && file.tunnel.lastUpdate.result !== 'success') problems.push('tunnelUpdate');
+   return { ...file, reported: true, diskRatio, diskWarning: diskRatio >= DISK_WARNING_RATIO, problems };
+@@ -97,3 +104,30 @@ export function attentionCounts(jobs: Pick<AnalyticsJob, 'status' | 'created_at'
+   }
+   return { failedRecent, stuck };
+ }
++
++// HRM patch 0032: an app deployed this long ago that no device has, installs or is trying to install.
++export const UNREACHED_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
++const FRESH_COUNTS_MS = 2 * 24 * 60 * 60 * 1000;
++
++/**
++ * Deployed apps that reach no devices: Intune reports nothing installed, pending or failed. Usually an
++ * empty group, a group with no devices or a wrong assignment. Only recent counts and the newest copy
++ * of each app count, so an old copy or a stale check never raises it.
++ */
++export function unreachedApps(
++  installs: Pick<InstallStatusRecord, 'intune_app_id' | 'display_name' | 'installed' | 'pending' | 'failed' | 'checked_at'>[],
++  deployments: Pick<UploadHistoryRecord, 'intune_app_id' | 'deployed_at'>[],
++  now = new Date(),
++): Array<{ displayName: string; intuneAppId: string; deployedAt: string }> {
++  const deployedAt = new Map<string, string>();
++  for (const d of deployments) if (d.intune_app_id && d.deployed_at && !deployedAt.has(d.intune_app_id.toLowerCase())) deployedAt.set(d.intune_app_id.toLowerCase(), d.deployed_at);
++  return installs.flatMap((app) => {
++    const at = deployedAt.get(app.intune_app_id.toLowerCase());
++    const deployed = Date.parse(at ?? '');
++    const checked = Date.parse(app.checked_at);
++    if (!at || !Number.isFinite(deployed) || now.getTime() - deployed < UNREACHED_AFTER_MS) return [];
++    if (!Number.isFinite(checked) || now.getTime() - checked > FRESH_COUNTS_MS) return [];
++    if (app.installed + app.pending + app.failed > 0) return [];
++    return [{ displayName: app.display_name, intuneAppId: app.intune_app_id, deployedAt: at }];
++  });
++}
+diff --git a/lib/hrm/installer-block.ts b/lib/hrm/installer-block.ts
+index 69d7620eb..8a62a3ea4 100644
+--- a/lib/hrm/installer-block.ts
++++ b/lib/hrm/installer-block.ts
+@@ -10,6 +10,12 @@ import type Database from 'better-sqlite3';
+ export const INSTALLER_CHECK_CODES = ['HASH_MISMATCH', 'MANIFEST_UNAVAILABLE', 'MANIFEST_CHANGED'] as const;
+ const LEGACY_MESSAGE = /serves different bytes|is no longer available from WinGet|no longer matches the trusted WinGet manifest/;
+ 
++/** HRM patch 0032: whether a failed job was the installer check, including jobs recorded before 0031. */
++export function isInstallerCheckFailure(code: string | null | undefined, message: string | null | undefined): boolean {
++  if ((INSTALLER_CHECK_CODES as readonly string[]).includes(code ?? '')) return true;
++  return code === 'WORKFLOW_DISPATCH_FAILED' && LEGACY_MESSAGE.test(message ?? '');
++}
++
+ export function createInstallerBlockStore(getDb: () => Database.Database) {
+   return {
+     /** The failed job's code and time when this exact installer already failed its check, else null. */
+@@ -19,7 +25,7 @@ export function createInstallerBlockStore(getDb: () => Database.Database) {
+           AND upper(COALESCE(installer_sha256, '')) = upper(?)
+           AND error_code IN ('HASH_MISMATCH','MANIFEST_UNAVAILABLE','MANIFEST_CHANGED','WORKFLOW_DISPATCH_FAILED')
+         ORDER BY created_at DESC LIMIT 5`).all(tenant, winget, version, sha256) as Array<{ error_code: string; error_message: string | null; created_at: string }>;
+-      const hit = rows.find((r) => r.error_code !== 'WORKFLOW_DISPATCH_FAILED' || LEGACY_MESSAGE.test(r.error_message ?? ''));
++      const hit = rows.find((r) => isInstallerCheckFailure(r.error_code, r.error_message));
+       return hit ? { code: hit.error_code, at: hit.created_at } : null;
+     },
+   };
+diff --git a/lib/hrm/intune-self-test.ts b/lib/hrm/intune-self-test.ts
+new file mode 100644
+index 000000000..a2f492676
+--- /dev/null
++++ b/lib/hrm/intune-self-test.ts
+@@ -0,0 +1,44 @@
++/**
++ * HRM patch 0032: a daily read-only test of every Intune request the server depends on.
++ *
++ * Microsoft changes Graph without notice (in 2026 it removed the install report IntuneGet used, and
++ * started rejecting a $select it relied on), and the scheduled checks only counted the failures.
++ * This runs the server's own read functions against one tracked app per tenant and reports which
++ * failed, with a status-only reason. It never writes to Intune and never returns app, group, user
++ * or device names.
++ */
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++import { listWin32AppIds } from './intune-app-ids';
++import { readObservation } from './app-insights-check';
++import { fetchInstallCounts } from './install-status';
++import { pilotGraph } from './pilot-graph';
++
++export interface SelfTestCheck { name: string; ok: boolean; error?: string }
++export interface SelfTestResult { ok: boolean; tenants: number; checks: SelfTestCheck[] }
++interface Tracked { tenantId: string; appId: string; wingetId: string; displayName: string; version: string }
++
++const reason = (error: unknown) => (error instanceof Error ? error.message : 'Failed').replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, '<id>').slice(0, 120);
++
++export async function runIntuneSelfTest(tracked: Tracked[], deps: {
++  token?: (tenant: string) => Promise<string | null>; fetchImpl?: typeof fetch;
++} = {}): Promise<SelfTestResult> {
++  const getToken = deps.token ?? getServicePrincipalToken;
++  const byTenant = new Map<string, Tracked>();
++  for (const app of tracked) if (!byTenant.has(app.tenantId)) byTenant.set(app.tenantId, app);
++  const checks: SelfTestCheck[] = [];
++  const check = async (name: string, run: () => Promise<unknown>) => {
++    try { await run(); checks.push({ name, ok: true }); }
++    catch (error) { checks.push({ name, ok: false, error: reason(error) }); }
++  };
++  for (const app of byTenant.values()) {
++    const token = await getToken(app.tenantId).catch(() => null);
++    if (!token) { checks.push({ name: 'Intune sign-in', ok: false, error: 'No Intune token' }); continue; }
++    const signal = AbortSignal.timeout(30000);
++    await check('App list', async () => { if (!(await listWin32AppIds(app.tenantId, { token: async () => token, fetchImpl: deps.fetchImpl }))) throw new Error('App list could not be read completely'); });
++    await check('App and groups', async () => { const o = await readObservation(app, token, signal, deps.fetchImpl); if (!o.exists) throw new Error('Tracked app not found'); });
++    await check('Install results', () => fetchInstallCounts(token, app.appId, deps.fetchImpl));
++    const graph = pilotGraph(token, deps.fetchImpl);
++    await check('Pilot reads', async () => { await graph.app(app.appId); await graph.assignments(app.appId); });
++  }
++  return { ok: checks.every((c) => c.ok), tenants: byTenant.size, checks };
++}
+diff --git a/lib/hrm/inventory-link.ts b/lib/hrm/inventory-link.ts
+new file mode 100644
+index 000000000..07785bd56
+--- /dev/null
++++ b/lib/hrm/inventory-link.ts
+@@ -0,0 +1,16 @@
++/**
++ * HRM patch 0025: open an app's details from a link.
++ *
++ * /dashboard/inventory?app=<Intune app id> opens that app's details panel, so
++ * other tools can link straight to one Win32 app. Intune app ids are GUIDs;
++ * anything else is ignored and the page opens as usual.
++ */
++
++export const INVENTORY_PATH = '/dashboard/inventory';
++
++const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++export function linkedAppId(value: string | null | undefined): string | null {
++  const id = value?.trim() ?? '';
++  return GUID.test(id) ? id.toLowerCase() : null;
++}
+diff --git a/lib/hrm/paused-auto-update.ts b/lib/hrm/paused-auto-update.ts
+new file mode 100644
+index 000000000..819640892
+--- /dev/null
++++ b/lib/hrm/paused-auto-update.ts
+@@ -0,0 +1,64 @@
++/**
++ * HRM patch 0032: tell IT Ops when auto-update turns itself off for an app after repeated failures.
++ * Upstream silently disabled the policy (and, before 0032, never reached the limit). One alert per
++ * pause; turning auto-update back on clears it, so a later pause alerts again.
++ */
++import type Database from 'better-sqlite3';
++import type { DatabaseAdapter } from '@/lib/db/types';
++import { DEFAULT_SAFETY_CONFIG, type AppUpdatePolicy, type DeploymentConfig } from '@/types/update-policies';
++import { formatSimpleAlert } from '@/lib/webhooks/simple-alert';
++import { deliverFormattedWebhook } from '@/lib/webhooks/service';
++import { appUrl } from './site';
++
++export function createPausedAlertStore(getDb: () => Database.Database) {
++  return {
++    alerted(policyIds: string[]): Set<string> {
++      if (policyIds.length === 0) return new Set();
++      const rows = getDb().prepare(`SELECT policy_id FROM hrm_paused_auto_update_alerts WHERE policy_id IN (${policyIds.map(() => '?').join(',')})`).all(...policyIds) as Array<{ policy_id: string }>;
++      return new Set(rows.map((r) => r.policy_id));
++    },
++    mark(policyIds: string[], at: string) {
++      const db = getDb();
++      const insert = db.prepare('INSERT OR REPLACE INTO hrm_paused_auto_update_alerts (policy_id, alerted_at) VALUES (?, ?)');
++      db.transaction(() => { for (const id of policyIds) insert.run(id, at); })();
++    },
++    /** Forget every policy that isn't paused any more. */
++    keepOnly(pausedIds: string[]) {
++      const db = getDb();
++      if (pausedIds.length === 0) { db.prepare('DELETE FROM hrm_paused_auto_update_alerts').run(); return; }
++      db.prepare(`DELETE FROM hrm_paused_auto_update_alerts WHERE policy_id NOT IN (${pausedIds.map(() => '?').join(',')})`).run(...pausedIds);
++    },
++  };
++}
++
++export const isPausedByFailures = (p: AppUpdatePolicy) =>
++  p.policy_type === 'auto_update' && !p.is_enabled && p.consecutive_failures >= DEFAULT_SAFETY_CONFIG.maxConsecutiveFailures;
++
++export async function alertPausedAutoUpdates(db: DatabaseAdapter, now = new Date()) {
++  const { sqlitePausedAlerts: store, sqliteWebhooks: webhooks } = await import('@/lib/db/sqlite');
++  const paused = (await db.updatePolicies.listAll()).filter(isPausedByFailures);
++  store.keepOnly(paused.map((p) => p.id));
++  const done = store.alerted(paused.map((p) => p.id));
++  const fresh = paused.filter((p) => !done.has(p.id));
++  if (fresh.length === 0) return { paused: paused.length, alerted: 0 };
++  const names = fresh.map((p) => (p.deployment_config as DeploymentConfig | null)?.displayName || p.winget_id);
++  const base = appUrl();
++  const data = { event: 'auto_update_paused', timestamp: now.toISOString(), app_url: base, apps: fresh.map((p, i) => ({ display_name: names[i], winget_id: p.winget_id, failures: p.consecutive_failures })) };
++  let sent = 0;
++  for (const webhook of await webhooks.listAllEnabled()) {
++    const result = await deliverFormattedWebhook(webhook, formatSimpleAlert(webhook.webhook_type, {
++      data, timestamp: data.timestamp, tone: 'attention',
++      title: fresh.length === 1 ? `Auto-update turned off for ${names[0]}` : `Auto-update turned off for ${fresh.length} apps`,
++      lines: [
++        ...data.apps.map((a) => `${a.display_name}: ${a.failures} failed updates in a row`),
++        'Check the failed deployments, fix the cause, then turn auto-update back on in App updates.',
++      ],
++      link: base ? { label: 'Open Deployments', url: `${base}/dashboard/uploads?status=failed` } : undefined,
++    }));
++    await webhooks.recordResult(webhook.id, result.success);
++    if (result.success) sent++;
++  }
++  // Only a delivered alert counts; otherwise the next check tries again.
++  if (sent > 0) store.mark(fresh.map((p) => p.id), now.toISOString());
++  return { paused: paused.length, alerted: sent > 0 ? fresh.length : 0 };
++}
+diff --git a/lib/hrm/status-report.ts b/lib/hrm/status-report.ts
+index 1cdad172c..66ba72d6a 100644
+--- a/lib/hrm/status-report.ts
++++ b/lib/hrm/status-report.ts
+@@ -53,6 +53,10 @@ const PROBLEMS: Record<string, { status: string; title: string }> = {
+   notifications: { status: 'Alerts failed', title: 'The scheduled update alerts failed' },
+   tunnel: { status: 'Tunnel down', title: 'The Cloudflare tunnel is not running' },
+   tunnelUpdate: { status: 'Tunnel update failed', title: 'The nightly cloudflared update failed' },
++  // HRM patch 0032
++  intuneReads: { status: 'Intune reads failing', title: 'Install results or app activity could not be read from Intune' },
++  intuneSelfTest: { status: 'Intune self-test failed', title: 'The daily Intune self-test failed' },
++  scheduledUpdates: { status: 'Scheduled updates failing', title: 'The hourly scheduled update run failed or is late' },
+ };
+ const PROBLEM_ORDER = Object.keys(PROBLEMS);
+ 
+diff --git a/lib/webhooks/install-failure-formatters.ts b/lib/webhooks/install-failure-formatters.ts
+index 539d0f916..f51377295 100644
+--- a/lib/webhooks/install-failure-formatters.ts
++++ b/lib/webhooks/install-failure-formatters.ts
+@@ -6,6 +6,7 @@
+ import { appUrl } from '@/lib/hrm/site';
+ import type { InstallStatusRecord } from '@/lib/hrm/install-status';
+ import type { WebhookType } from '@/types/notifications';
++import { formatSimpleAlert } from './simple-alert';
+ 
+ export interface InstallFailureWebhookData {
+   event: 'install_failures';
+@@ -22,8 +23,6 @@ export interface InstallFailureWebhookData {
+   }>;
+ }
+ 
+-const DISCORD_WARNING_COLOR = 0xf59e0b;
+-
+ export function buildInstallFailureData(records: InstallStatusRecord[], now = new Date()): InstallFailureWebhookData {
+   return {
+     event: 'install_failures',
+@@ -56,49 +55,12 @@ function lines(data: InstallFailureWebhookData): string[] {
+   });
+ }
+ 
+-function inventoryLink(data: InstallFailureWebhookData): string | undefined {
+-  return data.app_url ? `${data.app_url}/dashboard/inventory` : undefined;
+-}
+-
+ export function formatInstallFailurePayload(webhookType: WebhookType, data: InstallFailureWebhookData): unknown {
+-  const link = inventoryLink(data);
+-  switch (webhookType) {
+-    case 'teams':
+-      return {
+-        type: 'message',
+-        data,
+-        attachments: [
+-          {
+-            contentType: 'application/vnd.microsoft.card.adaptive',
+-            content: {
+-              $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+-              type: 'AdaptiveCard',
+-              version: '1.4',
+-              body: [
+-                { type: 'TextBlock', text: title(data), size: 'Large', weight: 'Bolder', color: 'Warning', wrap: true },
+-                ...lines(data).map((text) => ({ type: 'TextBlock', text, wrap: true })),
+-              ],
+-              actions: link ? [{ type: 'Action.OpenUrl', title: 'Open Inventory', url: link }] : [],
+-            },
+-          },
+-        ],
+-      };
+-    case 'slack':
+-      return {
+-        data,
+-        blocks: [
+-          { type: 'header', text: { type: 'plain_text', text: title(data), emoji: true } },
+-          { type: 'section', text: { type: 'mrkdwn', text: lines(data).join('\n').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!) } },
+-          ...(link ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: `<${link}|Open Inventory>` }] }] : []),
+-        ],
+-      };
+-    case 'discord':
+-      return {
+-        data,
+-        embeds: [{ title: title(data), url: link, description: lines(data).join('\n'), color: DISCORD_WARNING_COLOR, footer: { text: 'IntuneGet' }, timestamp: data.timestamp }],
+-      };
+-    case 'custom':
+-    default:
+-      return data;
+-  }
++  return formatSimpleAlert(webhookType, {
++    data, title: title(data), lines: lines(data), timestamp: data.timestamp,
++    // HRM patch 0032: a single app links straight to its details
++    link: !data.app_url ? undefined : data.apps.length === 1
++      ? { label: 'Open in Inventory', url: `${data.app_url}/dashboard/inventory?app=${encodeURIComponent(data.apps[0].intune_app_id)}` }
++      : { label: 'Open Inventory', url: `${data.app_url}/dashboard/inventory` },
++  });
+ }
+diff --git a/lib/webhooks/simple-alert.test.ts b/lib/webhooks/simple-alert.test.ts
+new file mode 100644
+index 000000000..4ec1b9b3c
+--- /dev/null
++++ b/lib/webhooks/simple-alert.test.ts
+@@ -0,0 +1,16 @@
++import { describe, expect, it } from 'vitest';
++import { formatInstallFailurePayload, type InstallFailureWebhookData } from './install-failure-formatters';
++const app = (id: string) => ({ display_name: 'Example', intune_app_id: id, failed: 1, previous_failed: 0, installed: 2, pending: 0, top_errors: [] });
++const data = (apps: InstallFailureWebhookData['apps']): InstallFailureWebhookData => ({ event: 'install_failures', timestamp: '2026-11-05T12:00:00Z', app_url: 'https://intuneget.example.test', apps });
++const teamsLink = (payload: unknown) => (payload as { attachments: Array<{ content: { actions: Array<{ title: string; url: string }> } }> }).attachments[0].content.actions[0];
++describe('alert links (HRM patch 0032)', () => {
++  it('links one app straight to its Inventory details', () => {
++    expect(teamsLink(formatInstallFailurePayload('teams', data([app('11111111-1111-4111-8111-111111111111')])))).toEqual({ type: 'Action.OpenUrl', title: 'Open in Inventory', url: 'https://intuneget.example.test/dashboard/inventory?app=11111111-1111-4111-8111-111111111111' });
++  });
++  it('links several apps to Inventory, and every webhook type keeps the same data', () => {
++    const many = data([app('a'), app('b')]);
++    expect(teamsLink(formatInstallFailurePayload('teams', many)).url).toBe('https://intuneget.example.test/dashboard/inventory');
++    for (const type of ['slack', 'discord'] as const) expect((formatInstallFailurePayload(type, many) as { data: unknown }).data).toEqual(many);
++    expect(formatInstallFailurePayload('custom', many)).toEqual(many);
++  });
++});
+diff --git a/lib/webhooks/simple-alert.ts b/lib/webhooks/simple-alert.ts
+new file mode 100644
+index 000000000..23b879669
+--- /dev/null
++++ b/lib/webhooks/simple-alert.ts
+@@ -0,0 +1,55 @@
++/**
++ * HRM patch 0032: one alert layout for every webhook type: a title, a few lines and one link.
++ * Used by install-failure and paused auto-update alerts. Counts, app names and versions only.
++ */
++import type { WebhookType } from '@/types/notifications';
++
++export interface SimpleAlert<T> {
++  data: T;
++  title: string;
++  lines: string[];
++  link?: { label: string; url: string };
++  timestamp: string;
++  tone?: 'warning' | 'attention';
++}
++
++const DISCORD_COLOR = { warning: 0xf59e0b, attention: 0xef4444 };
++const escapeSlack = (text: string) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
++
++export function formatSimpleAlert<T>(webhookType: WebhookType, alert: SimpleAlert<T>): unknown {
++  const { data, title, lines, link, timestamp, tone = 'warning' } = alert;
++  switch (webhookType) {
++    case 'teams':
++      return {
++        type: 'message',
++        data,
++        attachments: [{
++          contentType: 'application/vnd.microsoft.card.adaptive',
++          content: {
++            $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
++            type: 'AdaptiveCard',
++            version: '1.4',
++            body: [
++              { type: 'TextBlock', text: title, size: 'Large', weight: 'Bolder', color: tone === 'attention' ? 'Attention' : 'Warning', wrap: true },
++              ...lines.map((text) => ({ type: 'TextBlock', text, wrap: true })),
++            ],
++            actions: link ? [{ type: 'Action.OpenUrl', title: link.label, url: link.url }] : [],
++          },
++        }],
++      };
++    case 'slack':
++      return {
++        data,
++        blocks: [
++          { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },
++          { type: 'section', text: { type: 'mrkdwn', text: escapeSlack(lines.join('\n')) } },
++          ...(link ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: `<${link.url}|${link.label}>` }] }] : []),
++        ],
++      };
++    case 'discord':
++      return { data, embeds: [{ title, url: link?.url, description: lines.join('\n'), color: DISCORD_COLOR[tone], footer: { text: 'IntuneGet' }, timestamp }] };
++    case 'custom':
++    default:
++      return data;
++  }
++}

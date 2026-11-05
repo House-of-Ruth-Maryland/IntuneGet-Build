@@ -17,9 +17,9 @@ HRM IT notes.
 | `patches/*.patch` | HRM changes, applied in name order with `git apply`. Why each exists: README. |
 | `deploy/version` | Image tag the server should run (for example `v0.8.2-hrm.1`) and, on the second line, the image digest the build recorded. The VM refuses the tag if it no longer points at that digest. **Changing it on `main` deploys to production.** |
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
-| `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day, scheduled update start hourly (patch 0030). |
+| `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day, scheduled update start hourly (patch 0030), Intune self-test daily at 7:15 AM New York (patch 0032). |
 | `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
-| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. |
+| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. Its `checks` section holds verdicts the app, watchdog and IT dashboard report all read as-is: Intune reads (install results or app activity failed at the last 2 update checks), the daily Intune self-test, and the hourly scheduled-update run. |
 | `deploy/intuneget-watchdog.py` | Every 5 minutes (installed as `/usr/local/sbin/intuneget-watchdog`, run by `intuneget-watchdog.timer`): checks the app's health and the status file and posts to IT Ops in Teams when a problem is confirmed, daily while it lasts, and when it clears. `intuneget-watchdog status` lists current problems; `intuneget-watchdog test` sends a test post. |
 | `deploy/intuneget-curated-refresh.sh` | Daily at 2:15 AM New York (installed as `/usr/local/sbin/intuneget-curated-refresh`, run by `intuneget-curated-refresh.timer`): downloads upstream's latest signed curated catalog into the app's data volume for patch 0011. |
 | `deploy/intuneget-backup.py` | Nightly at 1:30 AM New York (installed as `/usr/local/sbin/intuneget-backup`, run by `intuneget-backup.timer`): copies the SQLite database while the app runs, checks it, compresses it and uploads it to the Azure Storage container in `BACKUP_CONTAINER_URL` as the VM's managed identity. `intuneget-backup status` shows the last result. |
@@ -29,8 +29,9 @@ HRM IT notes.
 ## Registry and sign-in
 
 - Images go to HRM's shared Azure Container Registry (Basic tier, private). Its address, and the IDs
-  GitHub signs in with, are repo variables: `ACR_LOGIN_SERVER`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`.
-  None of them is a secret, but keep registry and resource names out of files in this public repo.
+  GitHub signs in with, are repo secrets: `ACR_LOGIN_SERVER`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`.
+  None of them is truly secret, but run logs here are public and GitHub masks only secrets, so never
+  move them back to variables. Keep registry and resource names out of files, logs and step output.
 - **Build:** an Entra app with a federated credential for this repo's `main` branch (it uses GitHub's
   immutable subject, `repo:<org>@<org id>/<repo>@<repo id>:ref:refs/heads/main`) holds AcrPush on the
   registry only. No client secret exists.
@@ -96,6 +97,12 @@ HRM IT notes.
   finishes as deployed or failed. That's correct only while the server serves one Intune tenant.
 - Messages carry app names, versions, staff emails, links and error text only; never add device,
   user or client details to them.
+- **Server alerts** also cover the server's own Intune reads (patch 0032): install results or app
+  activity failing at 2 update checks in a row, the daily read-only Intune self-test
+  (`/api/cron/intune-self-test`), and the hourly scheduled-update run. Graph changes without notice;
+  when the self-test fails, compare the failing read with Microsoft's Graph changelog.
+- When auto-update turns itself off for an app after 3 failed updates in a row, every enabled webhook
+  gets one "Auto-update turned off" message (installer-check blocks don't count).
 - **Server alerts** come from two places. The VM watchdog (`intuneget-watchdog`) posts through the
   same signed flow (first URL in `WEBHOOK_MANAGED_IDENTITY_URLS`) when a problem is seen on two
   checks in a row, daily while it lasts, and when it clears; it is quiet during deploys. It can't
@@ -231,7 +238,7 @@ Check, then enable:
 ```bash
 sudo intuneget-deploy run && sudo intuneget-deploy status
 sudo intuneget-backup && sudo intuneget-backup status
-sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer intuneget-watchdog.timer intuneget-curated-refresh.timer intuneget-backup.timer intuneget-start-updates.timer cloudflared-update.timer
+sudo systemctl enable --now intuneget-deploy.timer intuneget-check-updates.timer intuneget-send-notifications.timer intuneget-status.timer intuneget-watchdog.timer intuneget-curated-refresh.timer intuneget-backup.timer intuneget-start-updates.timer intuneget-intune-self-test.timer cloudflared-update.timer
 ```
 
 The app's port is published only on the VM itself (`127.0.0.1:3000:3000` in
