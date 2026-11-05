@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Help matches the screens again: deploying, replacing a version, Carry over assignments (it moves
+  groups off the old version, it doesn't copy them), the alert test button (Send test) and the
+  Discovered apps badges. Long help points are split (patch 0033).
+- Staff screens use sentence case: Partial match, No match, Link package, Link WinGet package,
+  Claim discovered app, Keyboard shortcuts, Microsoft Store app, SCCM migration and App requests. The
+  pilot screens say "pilot group" and no longer say "promotes".
+- The watchdog's self-test alert says "failed or is late", matching Server status, which also flags
+  a self-test more than 26 hours old. Reinstall `intuneget-watchdog` on the VM to pick this up.
+
+## 2026-11-05 (v0.8.5-hrm.13)
+
+Production runs v0.8.5-hrm.13.
+
 - The server's own Intune reads can't fail silently any more. Home's Server status shows Intune reads,
   Intune self-test and Scheduled updates, and IT Ops gets a Teams alert when install results or app
   activity fail at 2 update checks in a row, when the new daily read-only Intune self-test

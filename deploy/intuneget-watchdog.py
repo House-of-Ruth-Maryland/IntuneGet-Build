@@ -50,7 +50,7 @@ LABELS = {
     'tunnelUpdate': 'The nightly cloudflared update failed',
     'offsiteBackup': 'The nightly off-site backup failed or is late',
     'intuneReads': 'Install results or app activity could not be read from Intune',
-    'intuneSelfTest': 'The daily Intune self-test failed',
+    'intuneSelfTest': 'The daily Intune self-test failed or is late',
     'scheduledUpdates': 'The hourly scheduled update run failed or is late',
 }
 
