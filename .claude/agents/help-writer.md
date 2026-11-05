@@ -64,6 +64,10 @@ Use these exactly; sentence case, as the screen shows them.
 | Deploy new version (custom apps), Update (WinGet and curated apps) | upgrade, redeploy |
 | Supersede previous version on update | supersedence (except when quoting Intune) |
 | Carry over assignments | copy groups |
+| pilot group | test group, ring, canary |
+| Pilot rollouts | staged rollouts, rings |
+| wider rollout | full rollout, promotion, broad deployment |
+| Update schedule, blackout | maintenance window, change freeze, quiet hours |
 | groups (people and devices an app is assigned to) | targets, audiences |
 | device group, user group | device-based group |
 | Required, Available | Mandatory, Optional |

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- App updates has an Update schedule card. Staff can choose the days and hours (Maryland time) when
+  automatic updates and pilots may start, and add blackout dates (for example Month-end close) when
+  they never start. Updates found outside the schedule wait, and a new hourly VM timer
+  (`intuneget-start-updates.timer`) starts them once it opens. Deploy to pilot group and Approve wider
+  rollout are refused while closed. Update, Update all and App catalog deploys still work at any time
+  (patch 0030, SQLite migration 14). No schedule means no change.
+- Screen labels use sentence case: App catalog, App updates, Discovered apps (the Discovered apps page
+  heading said Unmanaged Apps), Available updates, Critical updates, Auto-update on.
+- The VM needs the new timer installed and enabled; see CLAUDE.md, VM setup.
+
+## 2026-11-05
+
+Production runs v0.8.5-hrm.10.
+
 - App updates can Test with a pilot group for deployed WinGet and curated apps. The new version is
   Required for 1 selected security group; the previous copy keeps its groups. Other deployments and
   automatic updates for that app stay held during the pilot (patch 0029, SQLite migration 13).
