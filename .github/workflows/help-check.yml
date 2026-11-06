@@ -1,0 +1,87 @@
+name: Help check
+
+# On every PR that changes what the server runs or when it runs it (patches,
+# upstream-ref, VM scripts and timers): apply the patches, check the Help page
+# against the app and the timers, and require the PR to say Help and tooltips
+# were checked. Deploy PRs (deploy/version only) pass straight through.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: help-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  help:
+    # Runs upstream code, so it gets a read-only token and no saved credentials.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the PR
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: hrm
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Does this PR change what the server runs?
+        id: scope
+        working-directory: hrm
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE...$HEAD" | grep -E '^(patches/|upstream-ref$|deploy/|scripts/check-help\.mjs$)' | grep -v '^deploy/version$' || true)
+          if [ -n "$changed" ]; then echo "relevant=true" >> "$GITHUB_OUTPUT"; else echo "relevant=false" >> "$GITHUB_OUTPUT"; fi
+          printf 'Files that can change Help:\n%s\n' "${changed:-none}"
+
+      - name: Read the upstream tag
+        if: steps.scope.outputs.relevant == 'true'
+        id: ref
+        run: |
+          ref=$(sed -n 1p hrm/upstream-ref | tr -d '[:space:]')
+          [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Not an upstream tag: '$ref'"; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: steps.scope.outputs.relevant == 'true'
+        with:
+          repository: ugurkocde/IntuneGet
+          ref: ${{ steps.ref.outputs.ref }}
+          path: upstream
+          persist-credentials: false
+
+      - name: Apply patches
+        if: steps.scope.outputs.relevant == 'true'
+        working-directory: upstream
+        run: for p in ../hrm/patches/*.patch; do git apply "$p"; done
+
+      - name: Set up Node.js
+        if: steps.scope.outputs.relevant == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Check Help matches the app and the timers
+        if: steps.scope.outputs.relevant == 'true'
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON hrm/scripts/check-help.mjs upstream hrm
+
+      - name: Require "Help and tooltips checked"
+        # A deliberate sign-off: the help-writer agent was run on this change and
+        # the PR says what it changed in Help and tooltips, or why nothing did.
+        if: steps.scope.outputs.relevant == 'true'
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s' "$BODY" | grep -qiE '^\s*[-*] \[x\] Help and tooltips checked'; then
+            echo "Help sign-off found."
+          else
+            echo "::error title=Help not checked::This PR changes what the server runs. Run the help-writer agent, fold its edits into the patch, then tick '- [x] Help and tooltips checked' in the PR description with what changed (or why nothing did)."
+            exit 1
+          fi

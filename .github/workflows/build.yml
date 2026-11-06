@@ -11,6 +11,7 @@ on:
       - upstream-ref
       - patches/**
       - branding/**
+      - scripts/check-help.mjs
       - .github/workflows/build.yml
   workflow_dispatch:
     inputs:
@@ -90,6 +91,16 @@ jobs:
             git apply --verbose "$p"
           done
           git diff --stat
+
+      - name: Set up Node.js for the Help check
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Check Help matches the app
+        # Every on-screen label Help names must still exist, and every time it
+        # gives must match a VM timer. A stale Help page stops the build.
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON hrm/scripts/check-help.mjs upstream hrm
 
       - name: Apply HRM branding (logo + icons)
         working-directory: upstream

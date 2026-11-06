@@ -2,8 +2,56 @@
 
 ## Unreleased
 
-- Help matches the screens again: deploying, replacing a version, Carry over assignments (it moves
-  groups off the old version, it doesn't copy them), the alert test button (Send test) and the
+- Help is now checked on every build. `scripts/check-help.mjs` fails the build, the weekly upstream
+  check and PRs when Help names a button or heading the app no longer shows, or gives a time no VM
+  timer runs at, and checks HRM's tooltips and hints for em dashes and "contact IT" (patch 0034 adds
+  the label lists). PRs that change patches, `upstream-ref` or `deploy/` must tick "Help and tooltips
+  checked" after running the help-writer agent.
+- Help and tooltips audited against the running build and corrected (patch 0034):
+  - Help no longer says the Settings switches Supersede previous version on update and Carry over
+    assignments decide what an update does. On this server Update and automatic updates always
+    replace the previous version and keep its groups; Help now says so.
+  - Discovered apps uses the screen's labels (Partial match, No match, Link package). Teams alerts
+    names Send test. Server status lists all its rows. Updating an app explains that auto-update
+    turns off after 3 failures in a row, how the replace step shows supersedence, and the fallback
+    when the catalog hasn't synced (Deploy again).
+  - Hints fixed: the update policy picker no longer says assignments follow your settings, Save to
+    Intune's hint includes new-version settings, "test group" is now "pilot group", the shortcut
+    list says App catalog, install results say Maryland time.
+  - Update all and Keyboard shortcuts are sentence case on screen.
+- Under Update automatically, "Keep the same groups on each new version" is hidden on this server,
+  because every update already keeps its groups. It still shows on a Supabase server (patch 0035).
+- In Deployments, the button for a newer version of an app already in Intune says "and replace" only
+  when the new version supersedes the old one, and "alongside" when both versions will stay in Intune.
+- Find in App catalog in Inventory now opens the App catalog already searching for the app.
+- UI cleanup (patch 0036), with Help rewritten to match:
+  - The policy badge on an update card no longer says Auto-update after auto-update turned itself
+    off (patch 0032's line and Turn auto-update back on button stay). The Auto-update on list marks
+    those apps, and choosing Auto-update there or in the card's menu turns it back on.
+  - Apps set to Ignore no longer appear in App updates. Ignored apps lists them so they can be
+    changed back. Pin version (the same as Ignore on this server) is offered only on Supabase.
+  - The Critical banner, card, filter, sort and badge are hidden on this server, where they only
+    repeated Major.
+  - Settings: the Export and Data tabs, which did nothing, are gone; the email card that can't work
+    here is hidden; Notifications is described as Teams alerts. The Account page link is removed
+    (it repeated Settings and Home).
+  - SCCM, App requests and MSP pages, already hidden from the menu, now redirect to Home.
+  - Webhook cards, Custom webhook links and the IT dashboard all use the same server address
+    (`NEXT_PUBLIC_URL`, or `NEXT_PUBLIC_APP_URL` if that's the only one set).
+  - One name per thing: Deployments (not Uploads), Deployment list (not cart or Selected apps),
+    Notify only / Auto-update / Ignore, Open in Intune, Search, Curated apps. Forced deploys in the
+    list say Replaces current copy or Second copy.
+  - Fewer duplicates: one warning instead of two for apps with no groups, one Save to Intune hint,
+    one policy-change handler (failed changes always show an error), shared summary and Intune-link
+    helpers. The cart editor's Advanced row now notices edited commands.
+  - Update schedule and Pilot rollouts sit under the App updates title; Pilot rollouts shows only
+    while a pilot runs. Reports says it shows only your own deployments. Sentence case throughout.
+
+## 2026-11-05 (v0.8.5-hrm.14)
+
+Production runs v0.8.5-hrm.14.
+
+- Help matches the screens again: deploying, replacing a version, the alert test button (Send test) and the
   Discovered apps badges. Long help points are split (patch 0033).
 - Staff screens use sentence case: Partial match, No match, Link package, Link WinGet package,
   Claim discovered app, Keyboard shortcuts, Microsoft Store app, SCCM migration and App requests. The
