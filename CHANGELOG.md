@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Inventory: previous-installer readiness checks at the 3:30 AM and 3:30 PM update checks,
+  Maryland time. Check installer now downloads the saved installer once and compares its SHA-256,
+  without saving it. A missing installer or checksum mismatch blocks going back; a temporary
+  connection failure can be retried. Rollback review and start also recheck availability.
+  Downloads use public HTTPS destinations with validated DNS connections and bounded resources.
+  Help explains the checks and results (patch 0039, SQLite migration 18).
+
 - Inventory: Go back to previous version. On the newest copy IntuneGet deployed, it redeploys the
   older version IntuneGet used before (same installer), replacing the current copy so Intune
   uninstalls the current version and installs the older one; the groups move over. Automatic updates
