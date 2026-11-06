@@ -24,7 +24,9 @@ HRM IT notes.
 | `deploy/intuneget-curated-refresh.sh` | Daily at 2:15 AM New York (installed as `/usr/local/sbin/intuneget-curated-refresh`, run by `intuneget-curated-refresh.timer`): downloads upstream's latest signed curated catalog into the app's data volume for patch 0011. |
 | `deploy/intuneget-backup.py` | Nightly at 1:30 AM New York (installed as `/usr/local/sbin/intuneget-backup`, run by `intuneget-backup.timer`): copies the SQLite database while the app runs, checks it, compresses it and uploads it to the Azure Storage container in `BACKUP_CONTAINER_URL` as the VM's managed identity. `intuneget-backup status` shows the last result. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
-| `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: build `<tag>-hrm.<n>` and open the "Deploy" PR. |
+| `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: check Help (below), build `<tag>-hrm.<n>` and open the "Deploy" PR. |
+| `.github/workflows/help-check.yml` | On PRs that change patches, `upstream-ref` or `deploy/` (not `deploy/version`): run the Help check and require "Help and tooltips checked" ticked in the PR description. |
+| `scripts/check-help.mjs` | The Help check: every on-screen label a Help section lists in `uiLabels` (patch 0034) still exists in the app, every time Help gives matches a timer in `deploy/systemd/`, and HRM's tooltips and hints keep the writing rules. Run by the build, the weekly upstream check and PRs. |
 
 ## Registry and sign-in
 
@@ -254,10 +256,13 @@ line: older copies of the script can't read the two-line file and stop deploying
 - Never merge a Deploy PR or change `deploy/version` without David saying so in that conversation.
 - Third-party services stay in test mode; secrets only in GitHub secrets or root-only files on the VM.
 - Update CHANGELOG.md for every change to what the server runs or how it deploys.
-- Run the `help-writer` agent (`.claude/agents/help-writer.md`) before committing any change to a
-  patch, a deploy script or a VM timer that staff would notice. It keeps the in-app Help page current,
-  in the shared word list, with step diagrams and links where they help. Fold its Help edits into the
-  patch being built and report what it changed.
+- **Help and tooltips stay true to every build.** Run the `help-writer` agent
+  (`.claude/agents/help-writer.md`) before committing any change to a patch, a deploy script or a VM
+  timer, and on every "Build upstream" PR (against upstream's changes). When the app's logic changes,
+  it rewrites the Help sections and the tooltips and hints that describe it, rather than adding to
+  them. Fold its edits into the patch that changes the behaviour (or a Help-only patch), run
+  `node scripts/check-help.mjs <patched tree> .`, and tick `- [x] Help and tooltips checked: <what
+  changed>` in the PR description. The PR check and the build fail without them.
 
 ## Retire
 

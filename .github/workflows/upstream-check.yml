@@ -37,6 +37,7 @@ jobs:
       tsc: ${{ steps.tests.outputs.tsc }}
       tests: ${{ steps.tests.outputs.tests }}
       mappings: ${{ steps.mappings.outputs.result }}
+      help: ${{ steps.help.outputs.result }}
     steps:
       - name: Check out HRM patches
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -160,6 +161,17 @@ jobs:
             echo "tests=failed ($(grep -E '^ +Tests ' ../test.log | tail -n 1 | tr -s ' ' | sed -e 's/^ //' -e 's/|/,/g'))" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check Help against the new release
+        # Upstream may rename or remove a screen or button that Help names.
+        id: help
+        if: steps.patches.outputs.result == 'ok'
+        run: |
+          if node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON hrm/scripts/check-help.mjs upstream hrm 2>&1 | tee help.log; [ "${PIPESTATUS[0]}" = 0 ]; then
+            echo "result=matches the app" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failed ($(grep -c '^- ' help.log) stale points, see the run log)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check app mapping IDs against WinGet
         # Patch 0004's live check: every built-in app mapping must resolve in
         # winget-pkgs the way Claim looks it up.
@@ -199,6 +211,7 @@ jobs:
       TSC: ${{ needs.test.outputs.tsc }}
       TESTS: ${{ needs.test.outputs.tests }}
       MAPPINGS: ${{ needs.test.outputs.mappings }}
+      HELP: ${{ needs.test.outputs.help }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Check out
@@ -239,6 +252,7 @@ jobs:
           | Type check | $TSC |
           | Upstream tests | $TESTS |
           | App mapping IDs | $MAPPINGS |
+          | Help labels and times | $HELP |
           | Migration numbers | $MIGRATIONS |
           | Packaging workflow | $PACKAGING_WORKFLOW |
 
@@ -249,6 +263,7 @@ jobs:
           - [ ] If the packaging workflow changed, update IntuneGet-Workflows to the $LATEST version (merge that before the Deploy PR).
           - [ ] If migration numbers clash, rework the patch first.
           - [ ] If app mapping IDs fail, fix them in patch 0004 (or list products that aren't in WinGet there).
+          - [ ] Help and tooltips checked: run the help-writer agent against the upstream changes, fold its edits into a patch, and note here what changed (or why nothing did).
 
           Run: $RUN_URL
           EOF
