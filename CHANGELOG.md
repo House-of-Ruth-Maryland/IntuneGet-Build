@@ -2,12 +2,17 @@
 
 ## Unreleased
 
-- Inventory: previous-installer readiness checks at the 3:30 AM and 3:30 PM update checks,
-  Maryland time. Check installer now downloads the saved installer once and compares its SHA-256,
-  without saving it. A missing installer or checksum mismatch blocks going back; a temporary
-  connection failure can be retried. Rollback review and start also recheck availability.
-  Downloads use public HTTPS destinations with validated DNS connections and bounded resources.
-  Help explains the checks and results (patch 0039, SQLite migration 18).
+- Inventory: the previous version's installer is checked at the 3:30 AM and 3:30 PM update checks,
+  Maryland time (a light check of the link, never a download). Check installer now downloads it
+  once and compares its SHA-256 without keeping it. A missing installer, a changed checksum or a link
+  IntuneGet can't use (not https, or not a public host) hides Go back to previous version and lists
+  the app on Home; a link that didn't answer can be retried. The review checks the link again before
+  going back. Downloads only reach public https hosts, checked again at every redirect and connection,
+  with size, time and two-at-a-time limits. Help explains the checks (patch 0039, SQLite migration 18).
+
+## 2026-11-06 (v0.8.5-hrm.16)
+
+Production runs v0.8.5-hrm.16.
 
 - Inventory: Go back to previous version. On the newest copy IntuneGet deployed, it redeploys the
   older version IntuneGet used before (same installer), replacing the current copy so Intune
