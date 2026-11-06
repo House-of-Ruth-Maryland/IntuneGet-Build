@@ -1,0 +1,858 @@
+diff --git a/app/api/hrm/rollback/route.test.ts b/app/api/hrm/rollback/route.test.ts
+new file mode 100644
+index 000000000..583a4af67
+--- /dev/null
++++ b/app/api/hrm/rollback/route.test.ts
+@@ -0,0 +1,78 @@
++// HRM patch 0037: going back to the previous version from Inventory.
++import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
++import {NextRequest} from 'next/server';
++const state=vi.hoisted(()=>{vi.stubEnv('DATABASE_MODE','sqlite');vi.stubEnv('DATABASE_PATH',':memory:');return {auth:true,dispatch:vi.fn()};});
++vi.mock('@/lib/auth-utils',()=>({parseAccessToken:async()=>state.auth?{tenantId:'tenant',userId:'staff',userEmail:'staff@example.test'}:null}));
++vi.mock('@/lib/db',async()=>{const {sqliteDb}=await import('@/lib/db/sqlite');return {isSqliteMode:()=>true,getDatabase:()=>sqliteDb};});
++vi.mock('@/lib/features',()=>({getFeatureFlags:()=>({localPackager:false})}));
++vi.mock('@/lib/github-actions',()=>({isGitHubActionsConfigured:()=>true}));
++vi.mock('@/lib/intune/graph-client',()=>({getServicePrincipalToken:async()=>'token'}));
++vi.mock('@/lib/hrm/update-dispatch',()=>({dispatchUpdateJob:state.dispatch}));
++import {sqliteDb,sqliteRollbacks,sqlitePilotRollouts,closeSqliteDb} from '@/lib/db/sqlite';
++import {GET,POST} from './route';
++const OLD='11111111-1111-4111-8111-111111111111',NEW='22222222-2222-4222-8222-222222222222',GROUP='33333333-3333-4333-8333-333333333333';
++let groups:unknown[];let writes:string[];
++const group=(id=GROUP)=>({intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:id}});
++const post=(body:unknown)=>POST(new NextRequest('http://localhost/api/hrm/rollback',{method:'POST',body:JSON.stringify(body),headers:{Authorization:'Bearer fixture'}}));
++const get=(appId=NEW)=>GET(new NextRequest(`http://localhost/api/hrm/rollback?appId=${appId}`,{headers:{Authorization:'Bearer fixture'}}));
++async function deployed(version:string,appId:string,at:string,config:Record<string,unknown>={}){
++ const job=await sqliteDb.jobs.create({user_id:'staff',tenant_id:'tenant',winget_id:'Example.App',version,display_name:'Example',publisher:'Example Co',installer_type:'exe',installer_url:`https://example.invalid/${version}.exe`,installer_sha256:'a'.repeat(64),uninstall_command:'uninstall.exe /S',package_config:config,status:'queued'});
++ await sqliteDb.jobs.update(job.id,{status:'deployed',intune_app_id:appId,completed_at:at});
++ await sqliteDb.uploadHistory.create({packaging_job_id:job.id,user_id:'staff',intune_tenant_id:'tenant',winget_id:'Example.App',intune_app_id:appId,version,display_name:'Example',deployed_at:at});
++ return job.id;
++}
++let previousJob:string;
++beforeEach(async()=>{
++ closeSqliteDb();state.auth=true;groups=[group()];writes=[];state.dispatch.mockReset();state.dispatch.mockResolvedValue({dispatched:true});
++ previousJob=await deployed('1.1',OLD,'2026-01-01T00:00:00Z');
++ await deployed('2.0',NEW,'2026-01-02T00:00:00Z',{categories:[{id:'now'}]});
++ vi.stubGlobal('fetch',vi.fn(async(url:string,init?:RequestInit)=>{
++  if(init?.method && init.method!=='GET'){writes.push(url);return new Response(null,{status:204});}
++  if(url.endsWith('/assignments'))return Response.json({value:groups});
++  return Response.json({id:NEW,'@odata.type':'#microsoft.graph.win32LobApp',displayName:'Example',publisher:'Example Co',displayVersion:'2.0'});
++ }));
++});
++afterEach(()=>{closeSqliteDb();vi.unstubAllGlobals();});
++describe('go back to the previous version',()=>{
++ it('requires sign-in',async()=>{state.auth=false;expect((await get()).status).toBe(401);expect((await post({action:'preview',appId:NEW})).status).toBe(401);});
++ it('offers the previous version only on the newest copy',async()=>{
++  expect(await (await get()).json()).toMatchObject({supported:true,available:true,currentVersion:'2.0',previousVersion:'1.1',hold:null});
++  expect(await (await get(OLD)).json()).toMatchObject({supported:true,available:false});
++ });
++ it('reviews, then starts a Replace deployment of the previous installer and skips the bad version for automatic updates',async()=>{
++  const {preview}=await (await post({action:'preview',appId:NEW})).json();
++  expect(preview).toMatchObject({currentVersion:'2.0',previousVersion:'1.1',previousJobId:previousJob});
++  expect(preview.groups).toHaveLength(1);
++  expect((await post({action:'start',appId:NEW,previousJobId:previousJob,token:preview.token})).status).toBe(400);
++  const response=await post({action:'start',appId:NEW,previousJobId:previousJob,token:preview.token,confirmed:true});
++  expect(response.status).toBe(200);
++  const {jobId}=await response.json();
++  const job=await sqliteDb.jobs.getById(jobId);
++  expect(job).toMatchObject({version:'1.1',installer_url:'https://example.invalid/1.1.exe',status:'queued',user_email:'staff@example.test'});
++  expect(job!.package_config).toMatchObject({sourceIntuneAppId:NEW,supersedenceType:'replace',assignments:[],categories:[{id:'now'}]});
++  expect(state.dispatch).toHaveBeenCalledWith(expect.anything(),jobId);
++  expect(sqliteRollbacks.skipped('tenant','Example.App','2.0')).toMatchObject({rolled_back_to:'1.1',created_by:'staff@example.test'});
++  expect(writes).toEqual([]);
++  expect((await (await get()).json()).hold).toMatch(/still running/);
++ });
++ it('refuses a stale review when the groups changed',async()=>{
++  const {preview}=await (await post({action:'preview',appId:NEW})).json();
++  groups.push(group('44444444-4444-4444-8444-444444444444'));
++  const response=await post({action:'start',appId:NEW,previousJobId:previousJob,token:preview.token,confirmed:true});
++  expect(response.status).toBe(409);
++  expect(state.dispatch).not.toHaveBeenCalled();
++  expect(sqliteRollbacks.skipped('tenant','Example.App','2.0')).toBeNull();
++ });
++ it('refuses while a pilot is active',async()=>{
++  sqlitePilotRollouts.reserve({id:'pilot',tenant_id:'tenant',winget_id:'Example.App',display_name:'Example',group_id:GROUP,group_name:'Pilot',previous_app_id:NEW,previous_version:'2.0',created_at:new Date().toISOString()});
++  expect((await (await get()).json()).hold).toMatch(/pilot/i);
++  expect((await post({action:'preview',appId:NEW})).status).toBe(409);
++ });
++ it('lets staff allow a skipped version again',async()=>{
++  sqliteRollbacks.skip({tenant_id:'tenant',winget_id:'Example.App',version:'2.1',rolled_back_to:'2.0',job_id:null,created_by:'staff@example.test',created_at:'2026-01-03T00:00:00Z'});
++  expect((await (await get()).json()).skipped).toEqual([{version:'2.1',rolledBackTo:'2.0',at:'2026-01-03T00:00:00Z'}]);
++  expect((await post({action:'allow',appId:NEW,version:'2.1'})).status).toBe(200);
++  expect(sqliteRollbacks.skipped('tenant','Example.App','2.1')).toBeNull();
++  expect((await post({action:'allow',appId:NEW,version:'2.1'})).status).toBe(409);
++ });
++});
+diff --git a/app/api/hrm/rollback/route.ts b/app/api/hrm/rollback/route.ts
+new file mode 100644
+index 000000000..da90067c8
+--- /dev/null
++++ b/app/api/hrm/rollback/route.ts
+@@ -0,0 +1,140 @@
++// HRM patch 0037: go back to the previous version of an app IntuneGet deployed.
++//   GET  ?appId=  whether this copy can go back, and to which version (database only)
++//   POST { action: 'preview', appId }  read the copy and its live groups from Intune; returns a review token
++//   POST { action: 'start', appId, previousJobId, token, confirmed: true }  start the rollback deployment
++//   POST { action: 'allow', appId, version }  let automatic updates deploy a skipped version again
++// The new deployment replaces the current copy (Replace supersedence: Intune uninstalls the current
++// version, then installs the previous one) and takes over its live groups. Nothing changes in Intune
++// until packaging finishes. Failures use 409/424, because Cloudflare replaces 502 with its own page.
++import { NextRequest, NextResponse } from 'next/server';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { getDatabase, isSqliteMode } from '@/lib/db';
++import { getFeatureFlags } from '@/lib/features';
++import { isGitHubActionsConfigured } from '@/lib/github-actions';
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++import { isSelfUpdatingApp } from '@/lib/self-updating-apps';
++import { GUID, summarizeAssignments } from '@/lib/hrm/app-insights';
++import { pilotGraph, PilotError } from '@/lib/hrm/pilot-graph';
++import { pilotHold } from '@/lib/hrm/pilot-guard';
++import { dispatchUpdateJob } from '@/lib/hrm/update-dispatch';
++import { buildRollbackJob, rollbackToken, type RollbackPreview } from '@/lib/hrm/rollback';
++
++export const maxDuration = 120;
++const reply = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
++const supported = () => isSqliteMode() && !getFeatureFlags().localPackager && isGitHubActionsConfigured();
++// One rollback start at a time per app on this server (a double press can't create two copies).
++const starting = new Set<string>();
++
++type User = NonNullable<Awaited<ReturnType<typeof parseAccessToken>>>;
++
++async function candidate(user: User, appId: string) {
++  const { sqliteAppInsights, sqliteRollbacks } = await import('@/lib/db/sqlite');
++  const deployment = sqliteAppInsights.tracked(user.tenantId).find((d) => d.appId.toLowerCase() === appId.toLowerCase());
++  if (!deployment) return null;
++  if (isSelfUpdatingApp(deployment.wingetId)) return { deployment, previous: null, reason: 'This app keeps itself up to date on the device, so IntuneGet does not deploy its versions.' };
++  const previous = sqliteRollbacks.previousJob(user.tenantId, deployment.wingetId, deployment.version, deployment.appId);
++  return { deployment, previous, reason: previous ? null : 'No earlier version deployed by IntuneGet to go back to.' };
++}
++
++async function blocked(user: User, wingetId: string, appId: string): Promise<string | null> {
++  const { sqlitePilotRollouts, sqliteRollbacks } = await import('@/lib/db/sqlite');
++  if (sqlitePilotRollouts.holdsApp(user.tenantId, appId) || await pilotHold(user.tenantId, wingetId)) return 'A pilot is active for this app. Finish it in App updates first.';
++  if (sqliteRollbacks.running(user.tenantId, wingetId)) return 'A deployment for this app is still running. Check Deployments.';
++  return null;
++}
++
++async function preview(user: User, appId: string): Promise<RollbackPreview> {
++  const found = await candidate(user, appId);
++  if (!found) throw new PilotError('Only the newest copy IntuneGet deployed can go back to a previous version. Refresh Inventory.');
++  if (!found.previous) throw new PilotError(found.reason!);
++  const hold = await blocked(user, found.deployment.wingetId, found.deployment.appId);
++  if (hold) throw new PilotError(hold);
++  const token = await getServicePrincipalToken(user.tenantId);
++  if (!token) throw new PilotError("Couldn't reach Intune. Try again.", 424);
++  const graph = pilotGraph(token, fetch, 'Could not read this app from Intune completely. Nothing was changed.');
++  const [app, rows] = await Promise.all([graph.app(found.deployment.appId), graph.assignments(found.deployment.appId)]);
++  if (app.displayVersion !== found.deployment.version) throw new PilotError('The version in Intune no longer matches IntuneGet. Refresh Inventory.');
++  const groups = summarizeAssignments(rows);
++  return {
++    token: rollbackToken(found.deployment.appId, found.deployment.version, found.previous.id, groups.map((g) => g.key)),
++    appId: found.deployment.appId,
++    displayName: found.deployment.displayName,
++    currentVersion: found.deployment.version,
++    previousVersion: found.previous.version,
++    previousJobId: found.previous.id,
++    groups: groups.map((g) => g.label),
++    checkedAt: new Date().toISOString(),
++  };
++}
++
++export async function GET(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return reply({ error: 'Authentication required' }, 401);
++  if (!supported()) return reply({ supported: false });
++  const appId = new URL(request.url).searchParams.get('appId') ?? '';
++  if (!GUID.test(appId)) return reply({ error: 'Invalid app' }, 400);
++  const found = await candidate(user, appId);
++  if (!found) return reply({ supported: true, available: false });
++  const { sqliteRollbacks } = await import('@/lib/db/sqlite');
++  return reply({
++    supported: true,
++    available: Boolean(found.previous),
++    currentVersion: found.deployment.version,
++    previousVersion: found.previous?.version ?? null,
++    reason: found.reason,
++    hold: found.previous ? await blocked(user, found.deployment.wingetId, found.deployment.appId) : null,
++    skipped: sqliteRollbacks.listSkipped(user.tenantId, found.deployment.wingetId).map((s) => ({ version: s.version, rolledBackTo: s.rolled_back_to, at: s.created_at })),
++  });
++}
++
++export async function POST(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return reply({ error: 'Authentication required' }, 401);
++  if (!supported()) return reply({ error: 'Going back to a previous version needs this server’s SQLite and GitHub packaging mode.' }, 409);
++  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
++  const appId = typeof body?.appId === 'string' ? body.appId : '';
++  if (!body || !['preview', 'start', 'allow'].includes(String(body.action)) || !GUID.test(appId)) return reply({ error: 'Invalid request' }, 400);
++  try {
++    if (body.action === 'preview') return reply({ preview: await preview(user, appId) });
++    if (body.action === 'allow') {
++      const found = await candidate(user, appId);
++      if (!found || typeof body.version !== 'string' || body.version.length > 100) throw new PilotError('Refresh Inventory and try again.', 400);
++      const { sqliteRollbacks } = await import('@/lib/db/sqlite');
++      if (!sqliteRollbacks.unskip(user.tenantId, found.deployment.wingetId, body.version)) throw new PilotError('That version is no longer skipped.');
++      return reply({ allowed: true });
++    }
++
++    if (body.confirmed !== true || typeof body.token !== 'string' || !/^[a-f0-9]{64}$/.test(body.token) || typeof body.previousJobId !== 'string') {
++      throw new PilotError('Review the versions and groups, and confirm, first.', 400);
++    }
++    const key = `${user.tenantId}|${appId.toLowerCase()}`;
++    if (starting.has(key)) throw new PilotError('Going back is already starting for this app. Check Deployments.');
++    starting.add(key);
++    try {
++      const checked = await preview(user, appId);
++      if (checked.token !== body.token || checked.previousJobId !== body.previousJobId) {
++        throw new PilotError('The versions or groups changed after your review. Review again before going back.');
++      }
++      const { sqliteRollbacks } = await import('@/lib/db/sqlite');
++      const previous = sqliteRollbacks.previousJob(user.tenantId, (await candidate(user, appId))!.deployment.wingetId, checked.currentVersion, checked.appId);
++      if (!previous || previous.id !== checked.previousJobId) throw new PilotError('The previous version changed. Review again.');
++      const db = getDatabase();
++      const job = await db.jobs.create(buildRollbackJob(previous, sqliteRollbacks.currentJob(user.tenantId, checked.appId), checked.appId, user, checked.currentVersion));
++      // Automatic updates must not redeploy the version staff just went back from.
++      sqliteRollbacks.skip({ tenant_id: user.tenantId, winget_id: previous.winget_id, version: checked.currentVersion, rolled_back_to: previous.version,
++        job_id: job.id, created_by: user.userEmail || user.userId, created_at: new Date().toISOString() });
++      const dispatch = await dispatchUpdateJob(db, job.id);
++      console.log(JSON.stringify({ route: '/api/hrm/rollback', action: 'start', job: job.id, dispatched: dispatch.dispatched }));
++      if (!dispatch.dispatched && dispatch.reason !== 'local-packager') {
++        return reply({ started: false, jobId: job.id, error: `Going back didn't start: ${dispatch.message} Check Deployments.` }, 409);
++      }
++      return reply({ started: true, jobId: job.id, previousVersion: previous.version });
++    } finally {
++      starting.delete(key);
++    }
++  } catch (error) {
++    if (error instanceof PilotError) return reply({ error: error.message }, error.status);
++    const message = error instanceof Error && /pilot rollout is active/i.test(error.message) ? 'A pilot is active for this app. Finish it in App updates first.' : 'Could not go back to the previous version. Check Deployments and try again.';
++    return reply({ error: message }, 409);
++  }
++}
+diff --git a/components/hrm/RollbackPanel.tsx b/components/hrm/RollbackPanel.tsx
+new file mode 100644
+index 000000000..6038fec4b
+--- /dev/null
++++ b/components/hrm/RollbackPanel.tsx
+@@ -0,0 +1,108 @@
++'use client';
++// HRM patch 0037: go back to the previous version of an app IntuneGet deployed (Inventory app details).
++import { useState } from 'react';
++import Link from 'next/link';
++import { Undo2 } from 'lucide-react';
++import { Button } from '@/components/ui/button';
++import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
++import { useRollback } from '@/hooks/useRollback';
++import type { RollbackPreview } from '@/lib/hrm/rollback';
++
++export const ROLLBACK_LABELS = {
++  section: 'Previous version',
++  open: 'Go back to previous version',
++  confirm: 'I checked the versions and groups',
++  allow: 'Allow again',
++} as const;
++
++export function RollbackPanel({ appId }: { appId: string }) {
++  const { data, action } = useRollback(appId);
++  const [open, setOpen] = useState(false);
++  const [review, setReview] = useState<RollbackPreview | null>(null);
++  const [confirmed, setConfirmed] = useState(false);
++  const [startedJob, setStartedJob] = useState<string | null>(null);
++  if (!data?.supported || data.currentVersion === undefined) return null;
++  const skipped = data.skipped ?? [];
++  if (!data.available && skipped.length === 0) return null;
++
++  const openReview = () => {
++    action.reset(); setReview(null); setConfirmed(false); setStartedJob(null); setOpen(true);
++    action.mutate({ action: 'preview' }, { onSuccess: (r) => setReview(r.preview ?? null) });
++  };
++
++  return (
++    <div>
++      <h4 className="text-sm font-semibold text-text-secondary mb-2">{ROLLBACK_LABELS.section}</h4>
++      {data.available && data.previousVersion && (
++        <>
++          <p className="text-sm text-text-secondary">
++            If v{data.currentVersion} causes problems, go back to v{data.previousVersion}. Devices in this app&apos;s groups uninstall v{data.currentVersion} and install v{data.previousVersion}.
++          </p>
++          {data.hold ? (
++            <p className="mt-2 text-sm text-status-warning">{data.hold}</p>
++          ) : (
++            <Button variant="outline" size="sm" className="mt-2 border-overlay/10" onClick={openReview}>
++              <Undo2 className="w-4 h-4 mr-2" />
++              {ROLLBACK_LABELS.open}
++            </Button>
++          )}
++        </>
++      )}
++      {skipped.map((s) => (
++        <p key={s.version} className="mt-2 text-sm text-text-secondary">
++          Automatic updates skip v{s.version} (staff went back to v{s.rolledBackTo}).{' '}
++          <button className="text-accent-cyan hover:underline disabled:opacity-50" disabled={action.isPending}
++            onClick={() => action.mutate({ action: 'allow', version: s.version })}>{ROLLBACK_LABELS.allow}</button>
++        </p>
++      ))}
++
++      <Dialog open={open} onOpenChange={(value) => { if (!action.isPending) setOpen(value); }}>
++        <DialogContent className="max-w-lg">
++          <DialogHeader>
++            <DialogTitle>Go back to v{data.previousVersion}</DialogTitle>
++            <DialogDescription>
++              IntuneGet deploys v{data.previousVersion} again, from the installer it used before, as a new copy that replaces v{data.currentVersion}.
++              Intune uninstalls v{data.currentVersion} and then installs v{data.previousVersion} on devices in these groups.
++            </DialogDescription>
++          </DialogHeader>
++          {startedJob ? (
++            <div className="space-y-3 px-6 py-4 text-sm text-text-secondary">
++              <p>Going back to v{data.previousVersion} has started. Packaging takes a few minutes, then the groups move to the new copy.</p>
++              <p>Automatic updates skip v{data.currentVersion} from now on. A newer version still updates automatically.</p>
++              <Link className="text-accent-cyan hover:underline" href="/dashboard/uploads">Open Deployments</Link>
++            </div>
++          ) : (
++            <>
++              <div className="space-y-3 px-6 py-4">
++              {action.isPending && !review && <p role="status" className="text-sm text-text-muted">Reading the app and its groups in Intune…</p>}
++              {review && (
++                <div className="space-y-3 text-sm">
++                  <p className="text-text-secondary">These groups move from v{review.currentVersion} to v{review.previousVersion}:</p>
++                  {review.groups.length === 0
++                    ? <p className="text-status-warning">This copy has no groups, so the previous version would install nowhere. Add groups with Save to Intune first.</p>
++                    : <ul className="list-disc pl-5 text-text-primary">{review.groups.map((g) => <li key={g}>{g}</li>)}</ul>}
++                  <p className="text-text-muted">Check v{review.previousVersion} still works for staff, and that a downgrade is safe for this app (some apps keep settings the older version can&apos;t read).</p>
++                  <label className="flex items-start gap-2 text-text-primary">
++                    <input type="checkbox" className="mt-1" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
++                    {ROLLBACK_LABELS.confirm}
++                  </label>
++                </div>
++              )}
++              {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
++              </div>
++              {review && (
++                <DialogFooter>
++                <Button disabled={!confirmed || action.isPending || review.groups.length === 0}
++                  onClick={() => action.mutate({ action: 'start', token: review.token, previousJobId: review.previousJobId, confirmed: true },
++                    { onSuccess: (r) => setStartedJob(r.jobId ?? 'started') })}>
++                  {action.isPending ? 'Starting…' : `Go back to v${review.previousVersion}`}
++                </Button>
++                </DialogFooter>
++              )}
++            </>
++          )}
++        </DialogContent>
++      </Dialog>
++    </div>
++  );
++}
+diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
+index b668c54e9..191d75a7c 100644
+--- a/components/inventory/InventoryAppDetails.tsx
++++ b/components/inventory/InventoryAppDetails.tsx
+@@ -7,6 +7,7 @@ import { jobIdFromNotes } from '@/lib/hrm/new-version';
+ import { CopyableCommand } from './CopyableCommand';
+ import { AppActivityTimeline, AppDriftWarning } from '@/components/hrm/AppInsights';
+ import { InstallStatusBar } from '@/components/hrm/InstallStatusBar';
++import { RollbackPanel } from '@/components/hrm/RollbackPanel';
+ import { Button } from '@/components/ui/button';
+ import { SlidePanel } from '@/components/dashboard/animations/SlidePanel';
+ import { useAppDetails } from '@/hooks/use-inventory';
+@@ -149,6 +150,8 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+           {/* HRM patch 0019: install results for apps IntuneGet deployed */}
+           {/* HRM patch 0036: the Groups section below reads Intune live, so the saved check adds only unreviewed changes */}
+           {appId && <><InstallStatusBar appId={appId} /><AppDriftWarning appId={appId} changesOnly /></>}
++          {/* HRM patch 0037: go back to the previous version */}
++          {appId && <RollbackPanel appId={appId} />}
+ 
+           {/* Description */}
+           {app.description && (
+diff --git a/components/inventory/assignment-group-labels.test.ts b/components/inventory/assignment-group-labels.test.ts
+index 2d665bd95..2b5a9871f 100644
+--- a/components/inventory/assignment-group-labels.test.ts
++++ b/components/inventory/assignment-group-labels.test.ts
+@@ -1,5 +1,6 @@
+ // @vitest-environment happy-dom
+ vi.mock('@/hooks/useAppInsights', () => ({ useAppInsights: () => ({ data: { supported: false }, action: {} }) }));
++vi.mock('@/hooks/useRollback', () => ({ useRollback: () => ({ data: { supported: false }, action: {} }) })); // HRM patch 0037
+ import {act,createElement} from 'react';
+ import {createRoot,type Root} from 'react-dom/client';
+ import {afterEach,describe,expect,it,vi} from 'vitest';
+diff --git a/hooks/useRollback.ts b/hooks/useRollback.ts
+new file mode 100644
+index 000000000..c263f6bb7
+--- /dev/null
++++ b/hooks/useRollback.ts
+@@ -0,0 +1,43 @@
++'use client';
++// HRM patch 0037: go back to the previous version (Inventory app details).
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
++import { useMicrosoftAuth } from './useMicrosoftAuth';
++import type { RollbackPreview } from '@/lib/hrm/rollback';
++
++export interface RollbackStatus {
++  supported: boolean;
++  available?: boolean;
++  currentVersion?: string;
++  previousVersion?: string | null;
++  reason?: string | null;
++  hold?: string | null;
++  skipped?: Array<{ version: string; rolledBackTo: string; at: string }>;
++}
++
++export function useRollback(appId: string | null) {
++  const { getAccessToken, isAuthenticated, account } = useMicrosoftAuth();
++  const client = useQueryClient();
++  const key = ['hrm', 'rollback', account?.tenantId, appId];
++  const request = async (body?: Record<string, unknown>) => {
++    const token = await getAccessToken();
++    if (!token) throw new Error('Sign in again.');
++    const response = await fetch(body ? '/api/hrm/rollback' : `/api/hrm/rollback?appId=${encodeURIComponent(appId ?? '')}`, {
++      method: body ? 'POST' : 'GET',
++      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
++      ...(body ? { body: JSON.stringify({ appId, ...body }) } : {}),
++    });
++    if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Your sign-in expired. Reload and sign in again.');
++    const data = await response.json();
++    if (!response.ok) throw new Error(data.error || 'Could not go back to the previous version.');
++    return data as RollbackStatus & { preview?: RollbackPreview; started?: boolean; jobId?: string; allowed?: boolean };
++  };
++  const query = useQuery({ queryKey: key, queryFn: () => request(), enabled: isAuthenticated && Boolean(appId), staleTime: 15000 });
++  const action = useMutation({
++    mutationFn: request,
++    onSuccess: async (data) => {
++      if (data.preview) return;
++      await Promise.all([client.invalidateQueries({ queryKey: key }), client.invalidateQueries({ queryKey: ['availableUpdates'] })]);
++    },
++  });
++  return { ...query, action };
++}
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index e39788489..05c723ec5 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -19,6 +19,7 @@
+  */
+ 
+ import { pilotHold } from '@/lib/hrm/pilot-guard';
++import { skippedVersionHold } from '@/lib/hrm/rollback-guard';
+ import type { DatabaseAdapter, UploadHistoryRecord } from '@/lib/db/types';
+ import { findPendingApprovalBlocks } from '@/lib/intune-approval-guard';
+ import type { Json } from '@/types/database';
+@@ -151,6 +152,11 @@ export async function triggerSqliteAutoUpdate(
+   try {
+     const pilotHeld = await pilotHold(policy.tenant_id, updateInfo.wingetId, options?.pilot?.id);
+     if (pilotHeld) return { success: false, skipped: true, skipReason: pilotHeld };
++    // HRM patch 0037: a version staff went back from is never redeployed automatically. Update (bypassUpdateScope) still can.
++    if (!options?.bypassUpdateScope) {
++      const rolledBack = await skippedVersionHold(policy.tenant_id, updateInfo.wingetId, updateInfo.latestVersion);
++      if (rolledBack) return { success: false, skipped: true, skipReason: rolledBack };
++    }
+     if (!canAutoUpdate(policy)) {
+       return { success: false, skipped: true, skipReason: 'Policy does not allow auto-update or is disabled' };
+     }
+diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
+index 08a084d60..9960fa8de 100644
+--- a/lib/db/__tests__/job-create.test.ts
++++ b/lib/db/__tests__/job-create.test.ts
+@@ -50,7 +50,7 @@ function readStoredJob(id: string): Record<string, unknown> {
+   const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
+   try {
+     // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts) follow manual mappings, automatic update scope, and webhooks.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(15);
++    expect(stored.pragma('user_version', { simple: true })).toBe(16);
+     return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
+   } finally {
+     stored.close();
+diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
+index 5a18bb807..9ad06635e 100644
+--- a/lib/db/sqlite-migrations.ts
++++ b/lib/db/sqlite-migrations.ts
+@@ -437,6 +437,17 @@ export const MIGRATIONS: SqliteMigration[] = [
+       db.exec('CREATE TABLE IF NOT EXISTS hrm_paused_auto_update_alerts (policy_id TEXT PRIMARY KEY, alerted_at TEXT NOT NULL)');
+     },
+   },
++  {
++    version: 16,
++    name: 'versions skipped after a rollback (HRM patch 0037)',
++    up: db => {
++      db.exec(`CREATE TABLE IF NOT EXISTS hrm_skipped_versions (
++        tenant_id TEXT NOT NULL, winget_id TEXT NOT NULL COLLATE NOCASE, version TEXT NOT NULL,
++        rolled_back_to TEXT NOT NULL, job_id TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
++        PRIMARY KEY (tenant_id, winget_id, version)
++      )`);
++    },
++  },
+ ];
+ 
+ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 0e0cd2697..7ab539a99 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -5,6 +5,7 @@
+ 
+ import Database from 'better-sqlite3';
+ import { createPilotStore } from '@/lib/hrm/pilot-store';
++import { createRollbackStore } from '@/lib/hrm/rollback-store';
+ import { createUpdateScheduleStore } from '@/lib/hrm/update-schedule-store';
+ import { createInstallerBlockStore } from '@/lib/hrm/installer-block';
+ import { createPausedAlertStore } from '@/lib/hrm/paused-auto-update';
+@@ -314,6 +315,7 @@ export const sqliteUpdateSchedule = createUpdateScheduleStore(getDb);
+ export const sqliteInstallerBlocks = createInstallerBlockStore(getDb);
+ export const sqlitePausedAlerts = createPausedAlertStore(getDb);
+ export const sqliteAppInsights = createAppInsightsStore(getDb);
++export const sqliteRollbacks = createRollbackStore(getDb);
+ 
+ export const sqliteInstallStatus: InstallStatusStore = {
+   async get(tenantId, intuneAppId) {
+diff --git a/lib/hrm/__tests__/rollback.test.ts b/lib/hrm/__tests__/rollback.test.ts
+new file mode 100644
+index 000000000..19441175e
+--- /dev/null
++++ b/lib/hrm/__tests__/rollback.test.ts
+@@ -0,0 +1,117 @@
++// HRM patch 0037: going back to the previous version.
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import Database from 'better-sqlite3';
++import { runSqliteMigrations } from '@/lib/db/sqlite-migrations';
++import { createRollbackStore } from '../rollback-store';
++import { buildRollbackJob, rollbackToken, ROLLBACK_SKIP_REASON } from '../rollback';
++import { buildUpdateWorkflowInputs } from '../update-dispatch';
++import type { PackagingJob } from '@/lib/db/types';
++
++let db: Database.Database;
++let store: ReturnType<typeof createRollbackStore>;
++const CURRENT = '11111111-1111-4111-8111-111111111111';
++const OLDER = '22222222-2222-4222-8222-222222222222';
++const OLDEST = '33333333-3333-4333-8333-333333333333';
++
++function job(id: string, version: string, appId: string | null, status = 'deployed', at = '2026-01-01T00:00:00Z', extra: Record<string, unknown> = {}) {
++  db.prepare(`INSERT INTO packaging_jobs (id,user_id,tenant_id,winget_id,version,display_name,installer_type,installer_url,installer_sha256,package_config,status,intune_app_id,completed_at)
++    VALUES (?,'staff','tenant','Example.App',?,'Example','exe',?,?,?,?,?,?)`)
++    .run(id, version, extra.installer_url ?? `https://example.invalid/${version}.exe`, 'a'.repeat(64), JSON.stringify(extra.config ?? {}), status, appId, at);
++}
++
++beforeEach(() => { db = new Database(':memory:'); runSqliteMigrations(db); store = createRollbackStore(() => db); });
++afterEach(() => db.close());
++
++describe('finding the version to go back to', () => {
++  it('picks the newest earlier deployment of another copy with a different version and a saved installer', () => {
++    job('oldest', '1.0', OLDEST, 'deployed', '2026-01-01T00:00:00Z');
++    job('older', '1.1', OLDER, 'deployed', '2026-01-02T00:00:00Z');
++    job('failed', '1.2', null, 'failed', '2026-01-03T00:00:00Z');
++    job('no-installer', '1.3', '44444444-4444-4444-8444-444444444444', 'deployed', '2026-01-04T00:00:00Z', { installer_url: '' });
++    job('current', '2.0', CURRENT, 'deployed', '2026-01-05T00:00:00Z');
++    expect(store.previousJob('tenant', 'example.app', '2.0', CURRENT)?.id).toBe('older');
++    expect(store.currentJob('tenant', CURRENT)?.id).toBe('current');
++    expect(store.previousJob('other-tenant', 'Example.App', '2.0', CURRENT)).toBeNull();
++  });
++
++  it('never offers the same version again (a redeploy of 2.0 is not a previous version)', () => {
++    job('redeploy', '2.0', OLDER, 'deployed', '2026-01-02T00:00:00Z');
++    job('current', '2.0', CURRENT, 'deployed', '2026-01-05T00:00:00Z');
++    expect(store.previousJob('tenant', 'Example.App', '2.0', CURRENT)).toBeNull();
++  });
++
++  it('reports a running deployment for the app', () => {
++    job('current', '2.0', CURRENT);
++    expect(store.running('tenant', 'Example.App')).toBe(false);
++    job('queued', '1.1', null, 'queued');
++    expect(store.running('tenant', 'example.app')).toBe(true);
++  });
++
++  it('remembers skipped versions per tenant and app, and can allow them again', () => {
++    store.skip({ tenant_id: 'tenant', winget_id: 'Example.App', version: '2.0', rolled_back_to: '1.1', job_id: 'j', created_by: 'staff@example.test', created_at: '2026-01-06T00:00:00Z' });
++    expect(store.skipped('tenant', 'example.app', '2.0')?.rolled_back_to).toBe('1.1');
++    expect(store.skipped('tenant', 'Example.App', '2.1')).toBeNull();
++    expect(store.skipped('other', 'Example.App', '2.0')).toBeNull();
++    expect(store.listSkipped('tenant', 'Example.App')).toHaveLength(1);
++    expect(store.unskip('tenant', 'Example.App', '2.0')).toBe(true);
++    expect(store.unskip('tenant', 'Example.App', '2.0')).toBe(false);
++  });
++});
++
++describe('the rollback deployment', () => {
++  const previous = {
++    id: 'older', winget_id: 'Example.App', version: '1.1', display_name: 'Example', publisher: 'Example Co', architecture: 'x64',
++    installer_type: 'exe', installer_url: 'https://example.invalid/1.1.exe', installer_sha256: 'a'.repeat(64),
++    install_command: 'setup.exe /S', uninstall_command: 'uninstall.exe /S', install_scope: 'machine', detection_rules: [{ type: 'file' }],
++    package_config: { pilotRolloutId: 'old-pilot', autoUpdateHistoryId: 'h', sourceIntuneAppId: OLDEST, assignments: [{ groupId: 'stale' }],
++      categories: [{ id: 'old' }], relationships: [{ relationshipType: 'supersedence' }, { relationshipType: 'dependency', targetId: 'dep-old' }] },
++  } as unknown as PackagingJob;
++  const current = { id: 'current', display_name: 'Example App', package_config: { categories: [{ id: 'now' }], espProfiles: ['esp'], relationships: [{ relationshipType: 'dependency', targetId: 'dep-now' }] } } as unknown as PackagingJob;
++
++  it('reuses the previous installer and replaces the current copy, taking its live groups', () => {
++    const built = buildRollbackJob(previous, current, CURRENT, { userId: 'u', tenantId: 'tenant', userEmail: 'staff@example.test' }, '2.0');
++    const config = built.package_config as Record<string, unknown>;
++    expect(built).toMatchObject({ version: '1.1', installer_url: 'https://example.invalid/1.1.exe', installer_sha256: 'a'.repeat(64), uninstall_command: 'uninstall.exe /S', status: 'queued', is_auto_update: false, display_name: 'Example App' });
++    expect(config).toMatchObject({ sourceIntuneAppId: CURRENT, autoSupersede: true, supersedenceType: 'replace', forceCreate: true, assignments: [], categories: [{ id: 'now' }], espProfiles: ['esp'] });
++    expect(config.relationships).toEqual([{ relationshipType: 'dependency', targetId: 'dep-now' }]);
++    expect(config).not.toHaveProperty('pilotRolloutId');
++    expect(config).not.toHaveProperty('autoUpdateHistoryId');
++    expect(config.hrmRollback).toEqual({ fromVersion: '2.0', fromAppId: CURRENT, previousJobId: 'older' });
++  });
++
++  it('sends Replace supersedence and carries the groups over in the workflow', () => {
++    const built = { ...buildRollbackJob(previous, current, CURRENT, { userId: 'u', tenantId: 'tenant' }, '2.0'), id: 'rollback' } as PackagingJob;
++    const inputs = buildUpdateWorkflowInputs(built, 'https://example.invalid/callback');
++    expect(inputs).toMatchObject({ sourceIntuneAppId: CURRENT, supersedenceType: 'replace', autoSupersede: true, carryOverAssignments: true, removeAssignmentsFromPreviousApp: true, version: '1.1' });
++    expect(inputs.assignments).toBeUndefined();
++    const update = buildUpdateWorkflowInputs({ ...built, package_config: { sourceIntuneAppId: CURRENT } } as unknown as PackagingJob, 'https://example.invalid/callback');
++    expect(update.supersedenceType).toBe('update');
++  });
++
++  it('ties approval to the copy, both versions and the groups (in any order)', () => {
++    const a = rollbackToken(CURRENT, '2.0', 'older', ['g1', 'g2']);
++    expect(rollbackToken(CURRENT.toUpperCase(), '2.0', 'older', ['g2', 'g1'])).toBe(a);
++    expect(rollbackToken(CURRENT, '2.0', 'older', ['g1'])).not.toBe(a);
++    expect(rollbackToken(CURRENT, '2.1', 'older', ['g1', 'g2'])).not.toBe(a);
++    expect(rollbackToken(CURRENT, '2.0', 'oldest', ['g1', 'g2'])).not.toBe(a);
++  });
++});
++
++describe('automatic updates skip a rolled-back version', () => {
++  afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); vi.doUnmock('@/lib/db/sqlite'); });
++  it('holds only the skipped version, and only in SQLite mode', async () => {
++    vi.stubEnv('DATABASE_MODE', 'sqlite');
++    vi.doMock('@/lib/db/sqlite', () => ({ sqliteRollbacks: { skipped: (_t: string, _w: string, v: string) => (v === '2.0' ? { version: '2.0', rolled_back_to: '1.1' } : null) } }));
++    const { skippedVersionHold } = await import('../rollback-guard');
++    expect(await skippedVersionHold('tenant', 'Example.App', '2.0')).toBe(ROLLBACK_SKIP_REASON('2.0', '1.1'));
++    expect(await skippedVersionHold('tenant', 'Example.App', '2.1')).toBeNull();
++    vi.stubEnv('DATABASE_MODE', 'supabase');
++    expect(await skippedVersionHold('tenant', 'Example.App', '2.0')).toBeNull();
++  });
++  it('ignores a mocked database module without the store', async () => {
++    vi.stubEnv('DATABASE_MODE', 'sqlite');
++    vi.doMock('@/lib/db/sqlite', () => ({}));
++    const { skippedVersionHold } = await import('../rollback-guard');
++    expect(await skippedVersionHold('tenant', 'Example.App', '2.0')).toBeNull();
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index a20244bb0..4e769985e 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -144,6 +144,25 @@ export const HELP_SECTIONS: HelpSection[] = [
+     ],
+     links: [{ label: 'Open App updates', href: '/dashboard/updates' }],
+   },
++  {
++    id: 'rollback',
++    title: 'Going back to a previous version',
++    uiLabels: ['Inventory', 'Previous version', 'Go back to previous version', 'I checked the versions and groups', 'Allow again', 'Deployments'],
++    flow: ['Open the app in Inventory', 'Press Go back to previous version', 'Check versions and groups', 'Press Go back'],
++    points: [
++      'If a new version causes problems, open the app in Inventory. Under Previous version, press Go back to previous version.',
++      'It appears on the newest copy IntuneGet deployed, when IntuneGet also deployed an older version of the app. Custom apps can go back too. Self-updating apps can\'t.',
++      'The review reads the app and its groups from Intune. Check both versions and the groups, select I checked the versions and groups, then press Go back to v[version].',
++      'IntuneGet deploys the earlier version again from the installer it used before, as a new copy. It replaces the current copy, so Intune uninstalls the current version and then installs the earlier one.',
++      'The groups move from the current copy to the new one, as with an update. Nothing changes in Intune until packaging finishes, which takes a few minutes. Follow it in Deployments.',
++      'Before going back, check that the earlier version is safe to reinstall. Some apps keep settings or data that an older version can\'t read.',
++      'Automatic updates then skip the version you went back from. A newer version still updates automatically. Update or Update all on App updates can still deploy it on purpose.',
++      'The version stays skipped even if going back fails.',
++      'To let automatic updates deploy a skipped version again, press Allow again next to it under Previous version.',
++      'Going back is refused while a pilot or another deployment for the app is running.',
++    ],
++    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open Deployments', href: '/dashboard/uploads' }],
++  },
+   {
+     id: 'install-results',
+     title: 'Install results',
+diff --git a/lib/hrm/pilot-graph.ts b/lib/hrm/pilot-graph.ts
+index 3016742ab..c968d88d0 100644
+--- a/lib/hrm/pilot-graph.ts
++++ b/lib/hrm/pilot-graph.ts
+@@ -8,11 +8,12 @@ import type { PilotView, PilotPreview } from './pilot-types';
+ const BASE = 'https://graph.microsoft.com/beta';
+ export class PilotError extends Error { constructor(message: string, public status = 409) { super(message); } }
+ interface App { id: string; displayName: string; publisher: string; displayVersion: string; '@odata.type': string }
+-export function pilotGraph(token: string, fetchImpl: typeof fetch = fetch) {
++// HRM patch 0037: rollback and retire reuse these reads with their own message.
++export function pilotGraph(token: string, fetchImpl: typeof fetch = fetch, readError = 'Could not read Intune completely. No rollout was approved.') {
+   const signal = AbortSignal.timeout(30000);
+   const get = async (path: string) => {
+     const r = await fetchImpl(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal });
+-    if (!r.ok) throw new PilotError('Could not read Intune completely. No rollout was approved.', 424);
++    if (!r.ok) throw new PilotError(readError, 424);
+     return r.json();
+   };
+   const app = async (id: string): Promise<App> => {
+diff --git a/lib/hrm/rollback-guard.ts b/lib/hrm/rollback-guard.ts
+new file mode 100644
+index 000000000..fc9e9ace0
+--- /dev/null
++++ b/lib/hrm/rollback-guard.ts
+@@ -0,0 +1,12 @@
++import { ROLLBACK_SKIP_REASON } from './rollback';
++type Store = typeof import('@/lib/db/sqlite')['sqliteRollbacks'];
++/** HRM patch 0037: automatic updates skip a version staff rolled back from. Null when not skipped. */
++export async function skippedVersionHold(tenant: string, winget: string, version: string): Promise<string | null> {
++  if (process.env.DATABASE_MODE?.toLowerCase() !== 'sqlite') return null;
++  const mod = await import('@/lib/db/sqlite');
++  // Upstream tests mock '@/lib/db/sqlite' without this store (and vitest throws on a missing export).
++  let store: Store | undefined;
++  try { store = mod.sqliteRollbacks; } catch { return null; }
++  const row = store?.skipped(tenant, winget, version);
++  return row ? ROLLBACK_SKIP_REASON(row.version, row.rolled_back_to) : null;
++}
+diff --git a/lib/hrm/rollback-store.ts b/lib/hrm/rollback-store.ts
+new file mode 100644
+index 000000000..f3c264318
+--- /dev/null
++++ b/lib/hrm/rollback-store.ts
+@@ -0,0 +1,58 @@
++/**
++ * HRM patch 0037: go back to the previous version of an app.
++ *
++ * The store finds the deployment to go back to (the newest successful IntuneGet deployment of the same
++ * app with a different version and a saved installer), and remembers the version that was rolled back
++ * so automatic updates don't deploy it again. Manual Update can still deploy it.
++ */
++import type Database from 'better-sqlite3';
++import type { PackagingJob } from '@/lib/db/types';
++import { compareVersions } from '@/lib/version-compare';
++
++const parse = (row: Record<string, unknown> | undefined): PackagingJob | null => {
++  if (!row) return null;
++  const json = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value ?? null);
++  return { ...row, package_config: json(row.package_config), detection_rules: json(row.detection_rules) } as unknown as PackagingJob;
++};
++
++export interface SkippedVersion { tenant_id: string; winget_id: string; version: string; rolled_back_to: string; job_id: string | null; created_by: string; created_at: string }
++
++export function createRollbackStore(getDb: () => Database.Database) {
++  return {
++    /** The job that deployed this Intune app copy. */
++    currentJob(tenant: string, appId: string): PackagingJob | null {
++      return parse(getDb().prepare(`SELECT * FROM packaging_jobs WHERE tenant_id = ? AND intune_app_id = ? COLLATE NOCASE AND status = 'deployed'
++        ORDER BY COALESCE(completed_at, updated_at, created_at) DESC LIMIT 1`).get(tenant, appId) as Record<string, unknown> | undefined);
++    },
++    /**
++     * The newest earlier deployment of this app: another copy with an older version and its installer saved.
++     * Only older versions: after going back from 2.0 to 1.0, 2.0 is not offered as the "previous" version.
++     */
++    previousJob(tenant: string, wingetId: string, currentVersion: string, currentAppId: string): PackagingJob | null {
++      const rows = getDb().prepare(`SELECT * FROM packaging_jobs WHERE tenant_id = ? AND winget_id = ? COLLATE NOCASE AND status = 'deployed'
++        AND intune_app_id IS NOT NULL AND intune_app_id != ? COLLATE NOCASE AND version != ? AND COALESCE(installer_url, '') != ''
++        ORDER BY COALESCE(completed_at, updated_at, created_at) DESC LIMIT 50`).all(tenant, wingetId, currentAppId, currentVersion) as Record<string, unknown>[];
++      return parse(rows.find((row) => compareVersions(String(row.version), currentVersion) < 0));
++    },
++    /** Any deployment of this app that hasn't finished. */
++    running(tenant: string, wingetId: string): boolean {
++      return Boolean(getDb().prepare(`SELECT 1 FROM packaging_jobs WHERE tenant_id = ? AND winget_id = ? COLLATE NOCASE AND archived_at IS NULL
++        AND status NOT IN ('deployed','failed','cancelled','duplicate_skipped') LIMIT 1`).get(tenant, wingetId));
++    },
++    skip(row: SkippedVersion) {
++      getDb().prepare(`INSERT INTO hrm_skipped_versions (tenant_id, winget_id, version, rolled_back_to, job_id, created_by, created_at) VALUES (?,?,?,?,?,?,?)
++        ON CONFLICT (tenant_id, winget_id, version) DO UPDATE SET rolled_back_to = excluded.rolled_back_to, job_id = excluded.job_id,
++        created_by = excluded.created_by, created_at = excluded.created_at`)
++        .run(row.tenant_id, row.winget_id, row.version, row.rolled_back_to, row.job_id, row.created_by, row.created_at);
++    },
++    skipped(tenant: string, wingetId: string, version: string): SkippedVersion | null {
++      return (getDb().prepare('SELECT * FROM hrm_skipped_versions WHERE tenant_id = ? AND winget_id = ? AND version = ?').get(tenant, wingetId, version) as SkippedVersion) ?? null;
++    },
++    listSkipped(tenant: string, wingetId: string): SkippedVersion[] {
++      return getDb().prepare('SELECT * FROM hrm_skipped_versions WHERE tenant_id = ? AND winget_id = ? ORDER BY created_at DESC LIMIT 20').all(tenant, wingetId) as SkippedVersion[];
++    },
++    unskip(tenant: string, wingetId: string, version: string): boolean {
++      return getDb().prepare('DELETE FROM hrm_skipped_versions WHERE tenant_id = ? AND winget_id = ? AND version = ?').run(tenant, wingetId, version).changes === 1;
++    },
++  };
++}
+diff --git a/lib/hrm/rollback.ts b/lib/hrm/rollback.ts
+new file mode 100644
+index 000000000..84423e037
+--- /dev/null
++++ b/lib/hrm/rollback.ts
+@@ -0,0 +1,80 @@
++/**
++ * HRM patch 0037: go back to the previous version.
++ *
++ * A rollback is a new deployment of the previous version, built from the job that deployed it (same
++ * installer, checksum, commands and detection). It replaces the current copy with Intune's Replace
++ * supersedence, which uninstalls the current version and then installs the previous one, and moves
++ * the current copy's live groups onto it, as an update does. Browser-safe: no database or Graph here.
++ */
++import { createHash } from 'node:crypto';
++import type { PackagingJob } from '@/lib/db/types';
++import type { Json } from '@/types/database';
++
++export const ROLLBACK_SKIP_REASON = (version: string, to: string) =>
++  `Automatic updates skip v${version} because staff went back to v${to}. A newer version still updates automatically; Update deploys v${version} on purpose.`;
++
++export interface RollbackPreview {
++  token: string;
++  appId: string;
++  displayName: string;
++  currentVersion: string;
++  previousVersion: string;
++  previousJobId: string;
++  groups: string[];
++  checkedAt: string;
++}
++
++/** Ties an approval to what was reviewed: the copy, both versions and the exact live groups. */
++export function rollbackToken(appId: string, currentVersion: string, previousJobId: string, groupKeys: string[]): string {
++  return createHash('sha256').update(JSON.stringify(['rollback', appId.toLowerCase(), currentVersion, previousJobId, [...groupKeys].sort()])).digest('hex');
++}
++
++type Config = Record<string, unknown>;
++const dependencies = (list: unknown) => Array.isArray(list)
++  ? (list as Array<{ relationshipType?: string }>).filter((r) => r.relationshipType === 'dependency') : undefined;
++
++/** The new job: the previous version's installer and settings, replacing the current copy. */
++export function buildRollbackJob(previous: PackagingJob, current: PackagingJob | null, currentAppId: string,
++  user: { userId: string; tenantId: string; userEmail?: string | null }, currentVersion: string): Partial<PackagingJob> {
++  const prev = (previous.package_config ?? {}) as Config;
++  const now = (current?.package_config ?? {}) as Config;
++  const {
++    pilotRolloutId: _pilot, autoUpdateHistoryId: _history, replacesIntuneAppId: _replaces, hrmRollback: _rollback,
++    ...rest
++  } = prev;
++  void _pilot; void _history; void _replaces; void _rollback;
++  return {
++    user_id: user.userId,
++    user_email: user.userEmail ?? null,
++    tenant_id: user.tenantId,
++    winget_id: previous.winget_id,
++    version: previous.version,
++    display_name: current?.display_name || previous.display_name,
++    publisher: previous.publisher,
++    architecture: previous.architecture,
++    installer_type: previous.installer_type,
++    installer_url: previous.installer_url,
++    installer_sha256: previous.installer_sha256,
++    install_command: previous.install_command,
++    uninstall_command: previous.uninstall_command,
++    install_scope: previous.install_scope,
++    detection_rules: previous.detection_rules,
++    package_config: {
++      ...rest,
++      // The workflow copies the current copy's live groups, so none are sent.
++      assignments: [],
++      categories: now.categories ?? prev.categories ?? [],
++      espProfiles: now.espProfiles ?? undefined,
++      relationships: dependencies(now.relationships) ?? dependencies(prev.relationships),
++      forceCreate: true,
++      sourceIntuneAppId: currentAppId,
++      autoSupersede: true,
++      supersedenceType: 'replace',
++      hrmRollback: { fromVersion: currentVersion, fromAppId: currentAppId, previousJobId: previous.id },
++    } as unknown as Json,
++    status: 'queued',
++    status_message: `Going back to v${previous.version} from v${currentVersion}`,
++    progress_percent: 0,
++    is_auto_update: false,
++  };
++}
+diff --git a/lib/hrm/update-dispatch.ts b/lib/hrm/update-dispatch.ts
+index 41cce5205..dc6c24f35 100644
+--- a/lib/hrm/update-dispatch.ts
++++ b/lib/hrm/update-dispatch.ts
+@@ -90,7 +90,8 @@ export function buildUpdateWorkflowInputs(job: PackagingJob, callbackUrl: string
+     carryOverAssignments: replacesApp && !pilot,
+     removeAssignmentsFromPreviousApp: replacesApp && !pilot,
+     autoSupersede: replacesApp,
+-    supersedenceType: replacesApp ? 'update' : undefined,
++    // HRM patch 0037: going back to a previous version uses Replace, which uninstalls the current version first.
++    supersedenceType: replacesApp ? (config.hrmRollback ? 'replace' : 'update') : undefined,
+   };
+ }
+ 
