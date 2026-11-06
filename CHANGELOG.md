@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Inventory: Go back to previous version. On the newest copy IntuneGet deployed, it redeploys the
+  older version IntuneGet used before (same installer), replacing the current copy so Intune
+  uninstalls the current version and installs the older one; the groups move over. Automatic updates
+  then skip the version gone back from; Allow again clears that (patch 0037, SQLite migration 16).
+- Inventory: Retire app. Every group changes to Uninstall, live counts show devices still reporting
+  the app, and Delete from Intune removes it when they're done (or when confirmed anyway). Cancel
+  retiring puts the groups back. Updates, pilots and deployments of the app are held while it is
+  retired, and it is set to Ignore in App updates once deleted (patch 0038, SQLite migration 17).
 - Help is now checked on every build. `scripts/check-help.mjs` fails the build, the weekly upstream
   check and PRs when Help names a button or heading the app no longer shows, or gives a time no VM
   timer runs at, and checks HRM's tooltips and hints for em dashes and "contact IT" (patch 0034 adds
