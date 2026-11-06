@@ -432,17 +432,17 @@ index 729dd4b0a..ee135ee3c 100644
      // Verify the app still exists in Intune
 diff --git a/components/hrm/RetirePanel.tsx b/components/hrm/RetirePanel.tsx
 new file mode 100644
-index 000000000..f0db884aa
+index 000000000..c4da7e459
 --- /dev/null
 +++ b/components/hrm/RetirePanel.tsx
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,151 @@
 +'use client';
 +// HRM patch 0038: retire an app. Change its groups to Uninstall, wait for devices to report it gone,
 +// then delete it from Intune. Cancel retiring puts the saved groups back. Counts only, never devices.
 +import { useState } from 'react';
 +import { Archive } from 'lucide-react';
 +import { Button } from '@/components/ui/button';
-+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
++import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 +import { useRetire } from '@/hooks/useRetire';
 +import type { RetirePreview } from '@/lib/hrm/retire';
 +
@@ -514,7 +514,12 @@ index 000000000..f0db884aa
 +            </Button>
 +          </div>
 +        )}
-+        <p className="mt-2 text-xs text-text-muted">Cancel retiring puts these groups back, so Required groups install it again: {retirement.savedGroups.join('; ') || 'none'}.</p>
++        <div className="mt-3 text-xs text-text-muted">
++          <p>Cancel retiring puts these groups back, so Required groups install it again:</p>
++          {retirement.savedGroups.length > 0
++            ? <ul className="mt-1 list-disc pl-5">{retirement.savedGroups.map((g) => <li key={g}>{g}</li>)}</ul>
++            : <p className="mt-1">No groups.</p>}
++        </div>
 +      </div>
 +    );
 +  }
@@ -544,6 +549,7 @@ index 000000000..f0db884aa
 +              Every group changes to Uninstall, so Intune removes the app from those devices and users. Updates and deployments for it are held until you delete it or cancel.
 +            </DialogDescription>
 +          </DialogHeader>
++          <div className="space-y-3 px-6 py-4">
 +          {action.isPending && !review && <p role="status" className="text-sm text-text-muted">Reading the app and its groups in Intune…</p>}
 +          {review && (
 +            <div className="space-y-3 text-sm">
@@ -567,17 +573,42 @@ index 000000000..f0db884aa
 +            </div>
 +          )}
 +          {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
++          </div>
 +          {review && (
++            <DialogFooter>
 +            <Button variant="destructive" disabled={(review.groups.length > 0 && !confirmed) || action.isPending}
 +              onClick={() => action.mutate({ action: 'start', token: review.token, confirmed: true }, { onSuccess: () => setOpen(false) })}>
 +              {action.isPending ? 'Changing groups…' : review.groups.length > 0 ? RETIRE_LABELS.start : RETIRE_LABELS.startEmpty}
 +            </Button>
++            </DialogFooter>
 +          )}
 +        </DialogContent>
 +      </Dialog>
 +    </div>
 +  );
 +}
+diff --git a/components/hrm/RollbackPanel.tsx b/components/hrm/RollbackPanel.tsx
+index 6038fec4b..94562b93b 100644
+--- a/components/hrm/RollbackPanel.tsx
++++ b/components/hrm/RollbackPanel.tsx
+@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
+ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+ import { useRollback } from '@/hooks/useRollback';
+ import type { RollbackPreview } from '@/lib/hrm/rollback';
++import { RETIRE_HOLD } from '@/lib/hrm/retire-hold';
+ 
+ export const ROLLBACK_LABELS = {
+   section: 'Previous version',
+@@ -39,7 +40,8 @@ export function RollbackPanel({ appId }: { appId: string }) {
+             If v{data.currentVersion} causes problems, go back to v{data.previousVersion}. Devices in this app&apos;s groups uninstall v{data.currentVersion} and install v{data.previousVersion}.
+           </p>
+           {data.hold ? (
+-            <p className="mt-2 text-sm text-status-warning">{data.hold}</p>
++            // HRM patch 0038: the retire hold names Inventory, which is where this panel already is.
++            <p className="mt-2 text-sm text-status-warning">{data.hold === RETIRE_HOLD ? 'Going back isn\u2019t available while this app is being retired.' : data.hold}</p>
+           ) : (
+             <Button variant="outline" size="sm" className="mt-2 border-overlay/10" onClick={openReview}>
+               <Undo2 className="w-4 h-4 mr-2" />
 diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
 index 191d75a7c..1e2ceaa14 100644
 --- a/components/inventory/InventoryAppDetails.tsx
@@ -656,6 +687,20 @@ index 000000000..39062f132
 +  });
 +  return { ...query, action };
 +}
+diff --git a/hooks/useRollback.ts b/hooks/useRollback.ts
+index c263f6bb7..ef47c0054 100644
+--- a/hooks/useRollback.ts
++++ b/hooks/useRollback.ts
+@@ -36,7 +36,8 @@ export function useRollback(appId: string | null) {
+     mutationFn: request,
+     onSuccess: async (data) => {
+       if (data.preview) return;
+-      await Promise.all([client.invalidateQueries({ queryKey: key }), client.invalidateQueries({ queryKey: ['availableUpdates'] })]);
++      // HRM patch 0038: a rollback holds Retire app too.
++      await Promise.all([client.invalidateQueries({ queryKey: key }), client.invalidateQueries({ queryKey: ['availableUpdates'] }), client.invalidateQueries({ queryKey: ['hrm', 'retire'] })]);
+     },
+   });
+   return { ...query, action };
 diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
 index 9960fa8de..9ef032486 100644
 --- a/lib/db/__tests__/job-create.test.ts
@@ -877,6 +922,14 @@ index 1e8f7ada9..5538e0f2b 100644
 +  try { retire = mod.sqliteRetirements; } catch { return null; }
 +  return retire?.holdsFamily(tenant, winget) ? RETIRE_HOLD : null;
  }
+diff --git a/lib/hrm/retire-hold.ts b/lib/hrm/retire-hold.ts
+new file mode 100644
+index 000000000..1c6477a88
+--- /dev/null
++++ b/lib/hrm/retire-hold.ts
+@@ -0,0 +1,2 @@
++/** HRM patch 0038: the message shown wherever an app being retired holds an action. Browser-safe. */
++export const RETIRE_HOLD = 'This app is being retired. See its details in Inventory.';
 diff --git a/lib/hrm/retire-store.ts b/lib/hrm/retire-store.ts
 new file mode 100644
 index 000000000..1653986dc
@@ -950,7 +1003,7 @@ index 000000000..1653986dc
 +}
 diff --git a/lib/hrm/retire.ts b/lib/hrm/retire.ts
 new file mode 100644
-index 000000000..3efd51fbc
+index 000000000..a0bdad854
 --- /dev/null
 +++ b/lib/hrm/retire.ts
 @@ -0,0 +1,45 @@
@@ -965,7 +1018,7 @@ index 000000000..3efd51fbc
 +import type { GraphAssignment } from './duplicates';
 +import { summarizeAssignments } from './app-insights';
 +
-+export const RETIRE_HOLD = 'This app is being retired. See its details in Inventory.';
++export { RETIRE_HOLD } from './retire-hold';
 +
 +const WIN32_SETTINGS = '#microsoft.graph.win32LobAppAssignmentSettings';
 +
