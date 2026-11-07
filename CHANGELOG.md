@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Old copies of an app are removed from Intune automatically. At each update check, once an app's
+  newest copy has been out for 7 days, has installed on at least one computer and has failures at
+  10% or less, IntuneGet takes the groups off the older copies it deployed and deletes them. Only
+  copies the newest one replaces and whose groups it already has are removed; nothing is
+  uninstalled from computers. Copies it can't remove are listed on Home with the reason. Copies
+  added in Intune by hand or deployed alongside are left alone. Help has a new How old copies are
+  removed section (patch 0042, SQLite migration 20).
 - Discovered apps: Remove from devices. A guided dialog checks whether IntuneGet can remove the app
   and, if not, says why and what to do instead. If it can, it adds a removal to the Deployment list
   (All devices or chosen groups, always Uninstall). Deploying adds "<name> (uninstall only)" to

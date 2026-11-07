@@ -1,0 +1,1041 @@
+diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
+index f71fbb860..902d0b1ba 100644
+--- a/app/(app)/dashboard/page.tsx
++++ b/app/(app)/dashboard/page.tsx
+@@ -137,6 +137,23 @@ export default function DashboardPage() {
+         color: 'warning',
+       });
+     }
++    // HRM patch 0042: old copies IntuneGet couldn't remove on its own after an update
++    const kept = home?.oldCopiesKept ?? [];
++    if (kept.length > 0) {
++      items.push({
++        id: 'old-copies-kept',
++        icon: AlertCircle,
++        title: kept.length === 1
++          ? `Old copy of ${kept[0].displayName} (v${kept[0].version}) needs a look`
++          : `${kept.length} old app copies need a look`,
++        description: kept.length === 1
++          ? kept[0].reason
++          : `IntuneGet couldn't remove these after an update: ${kept.slice(0, 3).map((c) => `${c.displayName} v${c.version}`).join(', ')}${kept.length > 3 ? ` and ${kept.length - 3} more` : ''}. Open each app in Inventory, use Keep this copy on the newest copy, then Delete from Intune on the old one.`,
++        href: kept.length === 1 ? `/dashboard/inventory?app=${kept[0].newestAppId}` : '/dashboard/inventory',
++        actionLabel: 'View',
++        color: 'warning',
++      });
++    }
+     const stuck = home?.attention?.stuck ?? 0;
+     if (stuck > 0) {
+       items.push({
+diff --git a/app/api/cron/check-updates/route.ts b/app/api/cron/check-updates/route.ts
+index b17d777e9..dc3a32b5a 100644
+--- a/app/api/cron/check-updates/route.ts
++++ b/app/api/cron/check-updates/route.ts
+@@ -13,6 +13,7 @@ import { listWin32AppIds } from '@/lib/hrm/intune-app-ids';
+ import { runSqliteAppInsightsCheck } from '@/lib/hrm/app-insights-check';
+ import { runSqliteInstallCheck } from '@/lib/hrm/install-status-check';
+ import { runSqliteRollbackReadinessCheck } from '@/lib/hrm/rollback-readiness';
++import { runSqliteOldCopyCleanup } from '@/lib/hrm/old-copy-cleanup';
+ import { alertPausedAutoUpdates } from '@/lib/hrm/paused-auto-update';
+ import { parseVersion, compareVersions } from '@/lib/version-compare';
+ import {
+@@ -292,7 +293,9 @@ export async function GET(request: Request) {
+       const pausedAutoUpdates = await alertPausedAutoUpdates(getDatabase()).catch(() => ({ paused: 0, alerted: 0, error: true }));
+       // HRM patch 0039: does each app's previous installer still download? Never fails the update check.
+       const rollbackReadiness = await runSqliteRollbackReadinessCheck().catch(() => ({ checked: 0, missing: 0, unreachable: 0, error: true }));
+-      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates, rollbackReadiness });
++      // HRM patch 0042: remove old copies once the newest has settled (after the fresh install counts above).
++      const oldCopies = await runSqliteOldCopyCleanup().catch(() => ({ checked: 0, removed: 0, kept: 0, errors: 1 }));
++      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates, rollbackReadiness, oldCopies });
+     } catch (error) {
+       return NextResponse.json(
+         { error: error instanceof Error ? error.message : 'Update check failed' },
+diff --git a/app/api/hrm/duplicates/route.ts b/app/api/hrm/duplicates/route.ts
+index ac2f837d7..70887f0ad 100644
+--- a/app/api/hrm/duplicates/route.ts
++++ b/app/api/hrm/duplicates/route.ts
+@@ -10,84 +10,13 @@ import { NextRequest, NextResponse } from 'next/server';
+ import { isSqliteMode } from '@/lib/db';
+ import { summarizeAssignments } from '@/lib/hrm/app-insights';
+ import { parseAccessToken } from '@/lib/auth-utils';
+-import { GRAPH_API_BASE, getServicePrincipalToken } from '@/lib/intune/graph-client';
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++// HRM patch 0042: the Intune calls moved to a shared module, used by the automatic old-copy removal too.
++import { assign, loadCopy, unlinkAndDelete, type GraphApp } from '@/lib/hrm/intune-copies';
+ import { duplicateKey, mergeAssignments, type GraphAssignment } from '@/lib/hrm/duplicates';
+ 
+ const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ const fail = (error: string, status = 400) => NextResponse.json({ error }, { status });
+-/** Intune's own reason, short (app names and IDs only; never client data). */
+-async function intuneReason(response: Response): Promise<string> {
+-  const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+-  const message = body?.error?.message?.split('\n')[0]?.trim();
+-  return message ? ` Intune said: ${message.slice(0, 200)}` : '';
+-}
+-
+-interface Relationship {
+-  '@odata.type'?: string;
+-  targetId: string;
+-  targetDisplayName?: string;
+-  targetType?: 'child' | 'parent';
+-  supersedenceType?: string;
+-  dependencyType?: string;
+-}
+-/** The fields Intune's updateRelationships accepts for a relationship this app owns. */
+-const toInput = (r: Relationship) => ({
+-  '@odata.type': r['@odata.type'],
+-  targetId: r.targetId,
+-  ...(r.supersedenceType ? { supersedenceType: r.supersedenceType } : {}),
+-  ...(r.dependencyType ? { dependencyType: r.dependencyType } : {}),
+-});
+-
+-interface GraphApp { id: string; displayName: string; displayVersion?: string; publisher: string | null; '@odata.type'?: string }
+-
+-async function graph(token: string, path: string, init: RequestInit = {}) {
+-  return fetch(`${GRAPH_API_BASE}${path}`, {
+-    ...init,
+-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+-    cache: 'no-store',
+-  });
+-}
+-
+-async function loadCopy(token: string, id: string): Promise<{ app: GraphApp; assignments: GraphAssignment[] } | null> {
+-  const [appResponse, assignmentsResponse] = await Promise.all([
+-    graph(token, `/deviceAppManagement/mobileApps/${id}`),
+-    graph(token, `/deviceAppManagement/mobileApps/${id}/assignments`),
+-  ]);
+-  if (!appResponse.ok || !assignmentsResponse.ok) return null;
+-  const app = (await appResponse.json()) as GraphApp;
+-  if (app['@odata.type'] !== '#microsoft.graph.win32LobApp') return null;
+-  const assignments = ((await assignmentsResponse.json()) as { value?: GraphAssignment[] }).value ?? [];
+-  return { app, assignments };
+-}
+-
+-// Relationships are a beta-only part of the Intune API.
+-const BETA = () => GRAPH_API_BASE.replace(/\/v1\.0$/, '/beta');
+-
+-async function relationships(token: string, id: string): Promise<Relationship[] | null> {
+-  const response = await fetch(`${BETA()}/deviceAppManagement/mobileApps/${id}/relationships`, {
+-    headers: { Authorization: `Bearer ${token}` },
+-    cache: 'no-store',
+-  });
+-  if (!response.ok) return null;
+-  return ((await response.json()) as { value?: Relationship[] }).value ?? [];
+-}
+-
+-async function setRelationships(token: string, id: string, owned: Relationship[]) {
+-  return fetch(`${BETA()}/deviceAppManagement/mobileApps/${id}/updateRelationships`, {
+-    method: 'POST',
+-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+-    body: JSON.stringify({ relationships: owned.map(toInput) }),
+-    cache: 'no-store',
+-  });
+-}
+-
+-async function assign(token: string, id: string, assignments: GraphAssignment[]) {
+-  const response = await graph(token, `/deviceAppManagement/mobileApps/${id}/assign`, {
+-    method: 'POST',
+-    body: JSON.stringify({ mobileAppAssignments: assignments }),
+-  });
+-  return response.ok;
+-}
+ 
+ export async function POST(request: NextRequest) {
+   const user = await parseAccessToken(request.headers.get('Authorization'));
+@@ -162,36 +91,12 @@ export async function POST(request: NextRequest) {
+       if (!loaded || duplicateKey(loaded.app) !== duplicateKey(keep.app)) copyIds.delete(other);
+     }
+ 
+-    const links = await relationships(token, id);
+-    if (!links) return fail("Couldn't read this copy's links in Intune. Nothing was changed.", 424);
+-    const isCopy = (targetId: string) => copyIds.has(targetId.toLowerCase());
+-    // Another app supersedes or depends on this copy: that's not ours to undo.
+-    const outside = links.filter((r) => r.targetType === 'parent' && !isCopy(r.targetId));
+-    if (outside.length > 0) {
+-      const names = [...new Set(outside.map((r) => r.targetDisplayName || 'another app'))].join(', ');
+-      return fail(`${names} replaces or depends on this copy, so Intune won't delete it. Remove that link in Intune first. Nothing was changed.`, 409);
+-    }
+-    const unlinked: string[] = [];
+-    // Copies that supersede (or depend on) this one: drop just that link, keep the rest.
+-    for (const parent of links.filter((r) => r.targetType === 'parent')) {
+-      const parentLinks = await relationships(token, parent.targetId);
+-      if (!parentLinks) return fail("Couldn't read the links on the other copy. Nothing was deleted.", 424);
+-      const owned = parentLinks.filter((r) => r.targetType === 'child');
+-      const kept = owned.filter((r) => r.targetId.toLowerCase() !== id.toLowerCase());
+-      if (kept.length === owned.length) continue;
+-      const response = await setRelationships(token, parent.targetId, kept);
+-      if (!response.ok) return fail(`Intune didn't remove the link from the other copy. Nothing was deleted.${await intuneReason(response)}`, 424);
+-      unlinked.push(parent.targetDisplayName || parent.targetId);
+-    }
+-    // This copy's own links (to older copies or other apps) go with it.
+-    if (links.some((r) => r.targetType === 'child')) {
+-      const response = await setRelationships(token, id, []);
+-      if (!response.ok) return fail(`Intune didn't remove this copy's links. Nothing was deleted.${await intuneReason(response)}`, 424);
+-    }
+-
+-    const response = await graph(token, `/deviceAppManagement/mobileApps/${id}`, { method: 'DELETE' });
+-    if (!response.ok) return fail(`Intune didn't delete it.${await intuneReason(response)}`, 424);
++    const deleted = await unlinkAndDelete(token, id, copyIds);
++    if (!deleted.ok) return fail(deleted.reason, deleted.status);
++    const unlinked = deleted.unlinked;
+     await note(copy.app, [], true, false);
++    // HRM patch 0042: an old copy Home listed as needing a look is gone now.
++    if (isSqliteMode()) { try { const { sqliteOldCopies } = await import('@/lib/db/sqlite'); sqliteOldCopies.clear(user.tenantId, id); } catch { /* optional */ } }
+     console.log(JSON.stringify({ route: '/api/hrm/duplicates', action, deleted: id, unlinked: unlinked.length }));
+     return NextResponse.json({ deleted: id, unlinked });
+   }
+diff --git a/app/api/hrm/home/route.test.ts b/app/api/hrm/home/route.test.ts
+index fc6fb3dc8..9184998e3 100644
+--- a/app/api/hrm/home/route.test.ts
++++ b/app/api/hrm/home/route.test.ts
+@@ -1,10 +1,17 @@
+ import { NextRequest } from 'next/server';
+ import { beforeEach, describe, expect, it, vi } from 'vitest';
+-const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn(), status: vi.fn(), installs: vi.fn(), history: vi.fn() }));
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn(), status: vi.fn(), installs: vi.fn(), history: vi.fn(), kept: vi.fn(), retiring: vi.fn() }));
+ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
+ vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getAnalyticsJobs: mocks.jobs }, uploadHistory: { listAll: mocks.history } }) }));
+ vi.mock('@/lib/hrm/install-status-check', () => ({ listInstallStatus: mocks.installs }));
+ vi.mock('@/lib/hrm/home', async (original) => ({ ...(await original<typeof import('@/lib/hrm/home')>()), readServerStatus: mocks.status }));
++// HRM patch 0042: only read when DATABASE_MODE is sqlite.
++vi.mock('@/lib/db/sqlite', () => ({
++  sqliteRetirements: { activeAppIds: mocks.retiring },
++  sqliteRollbackReadiness: { gaps: () => [] },
++  sqliteAppInsights: { tracked: () => [] },
++  sqliteOldCopies: { kept: mocks.kept },
++}));
+ import { GET } from './route';
+ 
+ const request = () => new NextRequest('http://localhost/api/hrm/home');
+@@ -29,7 +36,7 @@ describe('HRM home route', () => {
+     const response = await GET(request());
+     expect(mocks.jobs).toHaveBeenCalledWith({ tenantId: 'token-tenant' });
+     expect(response.headers.get('cache-control')).toBe('private, no-store');
+-    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [], rollbackGaps: [] });
++    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [], rollbackGaps: [], oldCopiesKept: [] });
+     expect(mocks.installs).toHaveBeenCalledWith('token-tenant');
+   });
+ 
+@@ -57,4 +64,22 @@ describe('HRM home route', () => {
+     ]);
+     expect((await (await GET(request())).json()).unreached).toEqual([{ displayName: 'App A', intuneAppId: 'app-a', deployedAt: old }]);
+   });
++
++  it('lists old copies IntuneGet could not remove, for the signed-in tenant only, leaving out copies being retired', async () => {
++    const before = process.env.DATABASE_MODE;
++    process.env.DATABASE_MODE = 'sqlite';
++    try {
++      const A = '00000000-0000-0000-0000-00000000000a', B = '00000000-0000-0000-0000-00000000000b', N = '00000000-0000-0000-0000-00000000000c';
++      mocks.retiring.mockReturnValue([B]);
++      mocks.kept.mockReturnValue([
++        { app_id: A, display_name: 'Example Reader', version: '1.0', newest_app_id: N, reason: 'This copy has a group the newest copy doesn\'t.' },
++        { app_id: B, display_name: 'Example Zip', version: '2.0', newest_app_id: N, reason: 'x' },
++      ]);
++      const body = await (await GET(request())).json();
++      expect(mocks.kept).toHaveBeenCalledWith('token-tenant');
++      expect(body.oldCopiesKept).toEqual([{ displayName: 'Example Reader', intuneAppId: A, version: '1.0', newestAppId: N, reason: 'This copy has a group the newest copy doesn\'t.' }]);
++    } finally {
++      if (before === undefined) delete process.env.DATABASE_MODE; else process.env.DATABASE_MODE = before;
++    }
++  });
+ });
+diff --git a/app/api/hrm/home/route.ts b/app/api/hrm/home/route.ts
+index 6218f479f..0c08d44cf 100644
+--- a/app/api/hrm/home/route.ts
++++ b/app/api/hrm/home/route.ts
+@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
+   // HRM patch 0038: an app being retired is meant to reach nobody, and its failures are uninstall failures.
+   let retiring = new Set<string>();
+   let rollbackGaps: Array<{ displayName: string; intuneAppId: string; previousVersion: string }> = [];
++  let oldCopiesKept: Array<{ displayName: string; intuneAppId: string; version: string; newestAppId: string; reason: string }> = [];
+   if (process.env.DATABASE_MODE?.toLowerCase() === 'sqlite') {
+     try { const { sqliteRetirements } = await import('@/lib/db/sqlite'); retiring = new Set(sqliteRetirements.activeAppIds(user.tenantId)); } catch { /* optional */ }
+     // HRM patch 0039: newest copies that can't go back, because their previous installer is gone or has changed.
+@@ -35,12 +36,19 @@ export async function GET(request: NextRequest) {
+         .filter((g) => newest.has(g.app_id.toLowerCase()) && !retiring.has(g.app_id.toLowerCase()))
+         .map((g) => ({ displayName: newest.get(g.app_id.toLowerCase())!, intuneAppId: g.app_id, previousVersion: g.previous_version }));
+     } catch { /* optional */ }
++    // HRM patch 0042: old copies IntuneGet couldn't remove after an update (still in Intune).
++    try {
++      const { sqliteOldCopies } = await import('@/lib/db/sqlite');
++      oldCopiesKept = sqliteOldCopies.kept(user.tenantId)
++        .filter((c) => !retiring.has(c.app_id.toLowerCase()))
++        .map((c) => ({ displayName: c.display_name, intuneAppId: c.app_id, version: c.version, newestAppId: c.newest_app_id, reason: c.reason ?? '' }));
++    } catch { /* optional */ }
+   }
+   const unreached = unreachedApps(installs, deployments).filter((app) => !retiring.has(app.intuneAppId.toLowerCase()));
+   // Its uninstall results show in its Inventory details, not as install failures.
+   const failing = installFailures.filter((app) => !retiring.has(app.intuneAppId.toLowerCase()));
+   return NextResponse.json(
+-    { attention: jobs ? attentionCounts(jobs) : null, server, installFailures: failing, unreached, rollbackGaps },
++    { attention: jobs ? attentionCounts(jobs) : null, server, installFailures: failing, unreached, rollbackGaps, oldCopiesKept },
+     { headers: { 'Cache-Control': 'private, no-store' } },
+   );
+ }
+diff --git a/components/hrm/PilotRollouts.tsx b/components/hrm/PilotRollouts.tsx
+index 9a03b1530..b9f900e77 100644
+--- a/components/hrm/PilotRollouts.tsx
++++ b/components/hrm/PilotRollouts.tsx
+@@ -89,7 +89,7 @@ export function PilotRollouts() {
+         <p className="text-xs text-text-muted">Results checked {new Date(review.preview.checkedAt).toLocaleString()}. These are app-wide reports, not a membership check for the pilot group.</p>
+         <div className="grid gap-3 sm:grid-cols-2"><Counts label={`Previous version ${review.row.previous_version}`} counts={review.preview.previousResults}/><Counts label={`Pilot version ${review.row.new_version}`} counts={review.preview.pilotResults}/></div>
+         <div className="grid gap-3 sm:grid-cols-2">{[{title:'New version currently reaches',rows:review.preview.newGroups},{title:'New version after approval',rows:review.preview.proposedGroups}].map((s)=><div key={s.title}><h4 className="text-sm font-medium">{s.title}</h4><ul className="mt-1 list-disc pl-4 text-sm text-text-secondary space-y-1 break-words">{s.rows.map((g,i)=><li key={i}>{g}</li>)}</ul></div>)}</div>
+-        <p className="text-sm text-text-secondary">The old copy stays in Intune with its groups, including if approval fails. After rollout, use Inventory’s duplicate cleanup to move groups and remove old copies when appropriate. Removing the temporary pilot assignment does not uninstall the app.</p>
++        <p className="text-sm text-text-secondary">The old copy stays in Intune with its groups, including if approval fails. After approval, IntuneGet removes it at an update check once the new version is at least 7 days old and installing well. Removing the temporary pilot assignment does not uninstall the app.</p>
+         <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={(e)=>setConfirmed(e.target.checked)}/>I reviewed the results and approve these wider groups.</label>
+         {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message} Close this review and refresh it before retrying.</p>}
+         <Button disabled={!confirmed||action.isPending} onClick={()=>action.mutate({action:'approve',id:review.row.id,token:review.preview.token,confirmed:true},{onSuccess:()=>setReview(null)})}>{action.isPending?'Approving…':'Approve wider rollout'}</Button>
+diff --git a/hooks/useHrmHome.ts b/hooks/useHrmHome.ts
+index 7d6242bf9..8703bef04 100644
+--- a/hooks/useHrmHome.ts
++++ b/hooks/useHrmHome.ts
+@@ -15,6 +15,8 @@ export interface HrmHomeData {
+   unreached?: Array<{ displayName: string; intuneAppId: string; deployedAt: string }>;
+   // HRM patch 0039: newest copies whose previous installer is gone or has changed
+   rollbackGaps?: Array<{ displayName: string; intuneAppId: string; previousVersion: string }>;
++  // HRM patch 0042: old copies IntuneGet couldn't remove after an update
++  oldCopiesKept?: Array<{ displayName: string; intuneAppId: string; version: string; newestAppId: string; reason: string }>;
+ }
+ 
+ export function useHrmHome() {
+diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
+index 21258012c..f6bcb2d85 100644
+--- a/lib/db/__tests__/job-create.test.ts
++++ b/lib/db/__tests__/job-create.test.ts
+@@ -50,7 +50,7 @@ function readStoredJob(id: string): Record<string, unknown> {
+   const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
+   try {
+     // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts, skipped versions, retirements, rollback readiness, removals) follow manual mappings, automatic update scope, and webhooks.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(19);
++    expect(stored.pragma('user_version', { simple: true })).toBe(20);
+     return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
+   } finally {
+     stored.close();
+diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
+index f8446e2b9..45bd040d7 100644
+--- a/lib/db/sqlite-migrations.ts
++++ b/lib/db/sqlite-migrations.ts
+@@ -488,6 +488,18 @@ export const MIGRATIONS: SqliteMigration[] = [
+       }
+     },
+   },
++  {
++    version: 20,
++    name: 'automatic removal of old copies (HRM patch 0042)',
++    up: db => {
++      db.exec(`CREATE TABLE IF NOT EXISTS hrm_old_copy_cleanup (
++        tenant_id TEXT NOT NULL, app_id TEXT NOT NULL, winget_id TEXT NOT NULL, display_name TEXT NOT NULL,
++        version TEXT NOT NULL, newest_app_id TEXT NOT NULL, newest_version TEXT NOT NULL,
++        outcome TEXT NOT NULL, reason TEXT, at TEXT NOT NULL,
++        PRIMARY KEY (tenant_id, app_id)
++      )`);
++    },
++  },
+ ];
+ 
+ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 3f0e98d62..be62bed6b 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -8,6 +8,7 @@ import { createPilotStore } from '@/lib/hrm/pilot-store';
+ import { createRollbackStore } from '@/lib/hrm/rollback-store';
+ import { createRetireStore } from '@/lib/hrm/retire-store';
+ import { createRollbackReadinessStore } from '@/lib/hrm/rollback-readiness-store';
++import { createOldCopyStore } from '@/lib/hrm/old-copy-store';
+ import { createUpdateScheduleStore } from '@/lib/hrm/update-schedule-store';
+ import { createInstallerBlockStore } from '@/lib/hrm/installer-block';
+ import { createPausedAlertStore } from '@/lib/hrm/paused-auto-update';
+@@ -320,6 +321,8 @@ export const sqliteAppInsights = createAppInsightsStore(getDb);
+ export const sqliteRollbacks = createRollbackStore(getDb);
+ export const sqliteRetirements = createRetireStore(getDb);
+ export const sqliteRollbackReadiness = createRollbackReadinessStore(getDb);
++// HRM patch 0042
++export const sqliteOldCopies = createOldCopyStore(getDb);
+ 
+ export const sqliteInstallStatus: InstallStatusStore = {
+   async get(tenantId, intuneAppId) {
+diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
+index bd4ce6e5d..865e3ea66 100644
+--- a/lib/hrm/__tests__/help-content.test.ts
++++ b/lib/hrm/__tests__/help-content.test.ts
+@@ -41,6 +41,15 @@ describe('help content', () => {
+     expect(section('alerts')).toContain('Auto-update turned off');
+   });
+ 
++  it('explains how old copies are removed and links to it (HRM patch 0042)', () => {
++    const section = HELP_SECTIONS.find((s) => s.id === 'old-copies')!;
++    const text = section.points.join(' ');
++    for (const fact of ['3:30 AM and 3:30 PM', 'at least 7 days ago', 'at least 1 successful install', '10%', 'No pilot, retirement, going back or deployment', 'supersedes the old copy', 'Nothing is uninstalled', 'by hand', '(uninstall only)', 'needs a look', 'Removed by IntuneGet: old copy after an update', 'Go back to previous version still works', 'HRM_OLD_COPY_CLEANUP=off']) expect(text).toContain(fact);
++    expect(section.flow).toEqual(['Update adds a new copy', 'Wait at least 7 days', 'Update check confirms conditions', 'Take groups off old copy', 'Remove links between copies', 'Delete the old copy']);
++    for (const id of ['deploying', 'updating']) expect(HELP_SECTIONS.find((s) => s.id === id)!.links?.map((l) => l.href)).toContain('/dashboard/help#old-copies');
++    expect(HELP_SECTIONS.find((s) => s.id === 'pilot-rollouts')!.points.join(' ')).not.toContain('use Inventory\'s duplicate cleanup when appropriate');
++  });
++
+   it('keeps Help flows short and accessible as ordered steps', () => {
+     for (const section of HELP_SECTIONS) {
+       if (!section.flow) continue;
+diff --git a/lib/hrm/__tests__/old-copy-cleanup.test.ts b/lib/hrm/__tests__/old-copy-cleanup.test.ts
+new file mode 100644
+index 000000000..cc31c93a3
+--- /dev/null
++++ b/lib/hrm/__tests__/old-copy-cleanup.test.ts
+@@ -0,0 +1,215 @@
++// HRM patch 0042: automatic removal of old copies after an update.
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import Database from 'better-sqlite3';
++import { runSqliteMigrations } from '@/lib/db/sqlite-migrations';
++import { createOldCopyStore } from '../old-copy-store';
++import { createPilotStore } from '../pilot-store';
++import { createRetireStore } from '../retire-store';
++import { createRollbackStore } from '../rollback-store';
++import { createAppInsightsStore } from '../app-insights-store';
++import type { GraphAssignment } from '../duplicates';
++
++const h = vi.hoisted(() => ({ db: null as unknown as import('better-sqlite3').Database, installs: new Map<string, { installed: number; failed: number }>() }));
++vi.mock('@/lib/intune/graph-client', () => ({ GRAPH_API_BASE: 'https://graph.microsoft.com/v1.0', getServicePrincipalToken: async () => 'token' }));
++vi.mock('@/lib/db/sqlite', async () => {
++  const getDb = () => h.db;
++  const { createOldCopyStore: oc } = await import('../old-copy-store');
++  const { createPilotStore: p } = await import('../pilot-store');
++  const { createRetireStore: r } = await import('../retire-store');
++  const { createRollbackStore: rb } = await import('../rollback-store');
++  const { createAppInsightsStore: ai } = await import('../app-insights-store');
++  return {
++    sqliteOldCopies: oc(getDb), sqlitePilotRollouts: p(getDb), sqliteRetirements: r(getDb), sqliteRollbacks: rb(getDb), sqliteAppInsights: ai(getDb),
++    sqliteInstallStatus: { get: async (_t: string, id: string) => h.installs.get(id.toLowerCase()) ?? null },
++  };
++});
++import { assignmentKey, installsSettled, judgeOldCopy, runSqliteOldCopyCleanup, SETTLE_MS } from '../old-copy-cleanup';
++
++const id = (n: number) => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
++const [V1, V2, V3, V4, OTHER] = [1, 2, 3, 4, 5].map(id);
++const G1 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
++const G2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
++const group = (groupId: string, intent = 'required', extra: Record<string, unknown> = {}): GraphAssignment =>
++  ({ id: `${intent}-${groupId}`, intent, target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId, ...extra } });
++const NOW = new Date('2026-11-20T08:30:00Z');
++const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86400000).toISOString();
++
++// A small Intune: apps, their groups, and the supersedence links each app owns (parent -> children).
++interface FakeApp { displayName: string; displayVersion: string; assignments: GraphAssignment[] }
++let apps: Map<string, FakeApp>;
++let links: Map<string, string[]>;
++let calls: string[];
++function relationshipsOf(appId: string) {
++  const owned = (links.get(appId) ?? []).map((t) => ({ '@odata.type': '#microsoft.graph.mobileAppSupersedence', targetId: t, targetType: 'child', supersedenceType: 'update', targetDisplayName: apps.get(t)?.displayName }));
++  const parents = [...links].filter(([, kids]) => kids.includes(appId)).map(([p]) => ({ '@odata.type': '#microsoft.graph.mobileAppSupersedence', targetId: p, targetType: 'parent', supersedenceType: 'update', targetDisplayName: apps.get(p)?.displayName }));
++  return [...owned, ...parents];
++}
++const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
++async function fakeGraph(input: RequestInfo | URL, init: RequestInit = {}) {
++  const url = String(input);
++  const method = init.method ?? 'GET';
++  calls.push(`${method} ${url.replace(/^https:\/\/graph\.microsoft\.com\/(v1\.0|beta)/, '')}`);
++  const m = url.match(/mobileApps\/([0-9a-f-]{36})(\/[a-zA-Z]+)?$/);
++  if (!m) return json({}, 404);
++  const [, appId, tail] = m;
++  const app = apps.get(appId);
++  if (!app) return json({ error: { message: 'Not found' } }, 404);
++  if (method === 'GET' && !tail) return json({ id: appId, '@odata.type': '#microsoft.graph.win32LobApp', publisher: 'Example', displayName: app.displayName, displayVersion: app.displayVersion });
++  if (method === 'GET' && tail === '/assignments') return json({ value: app.assignments });
++  if (method === 'GET' && tail === '/relationships') return json({ value: relationshipsOf(appId) });
++  if (method === 'POST' && tail === '/assign') { app.assignments = JSON.parse(String(init.body)).mobileAppAssignments; return new Response(null, { status: 204 }); }
++  if (method === 'POST' && tail === '/updateRelationships') { links.set(appId, JSON.parse(String(init.body)).relationships.map((r: { targetId: string }) => r.targetId)); return json({}); }
++  if (method === 'DELETE') {
++    if ([...links.values()].some((kids) => kids.includes(appId))) return json({ error: { message: 'App is superseded by another app' } }, 400);
++    apps.delete(appId); links.delete(appId); return new Response(null, { status: 204 });
++  }
++  return json({}, 400);
++}
++
++const deployed = (appId: string, version: string, at: string, wingetId = 'Example.PdfTool') =>
++  h.db.prepare(`INSERT INTO upload_history (id, user_id, winget_id, version, display_name, intune_app_id, intune_tenant_id, deployed_at) VALUES (?, 'staff', ?, ?, 'PDF tool', ?, 'tenant', ?)`)
++    .run(`h-${appId}-${version}`, wingetId, version, appId, at);
++
++beforeEach(() => {
++  h.db = new Database(':memory:'); runSqliteMigrations(h.db); h.installs.clear();
++  apps = new Map(); links = new Map(); calls = [];
++  vi.stubGlobal('fetch', vi.fn(fakeGraph));
++  delete process.env.HRM_OLD_COPY_CLEANUP;
++  // Four versions, each superseding the one before and keeping its group (what an update does).
++  [[V1, '0.17.0', 20], [V2, '0.18.0', 18], [V3, '0.18.2', 16], [V4, '0.19.0', 8]].forEach(([appId, version, days]) => {
++    apps.set(appId as string, { displayName: 'PDF tool', displayVersion: version as string, assignments: [group(G1)] });
++    deployed(appId as string, version as string, daysAgo(days as number));
++  });
++  links.set(V2, [V1]); links.set(V3, [V2]); links.set(V4, [V3]);
++  h.installs.set(V4, { installed: 40, failed: 1 });
++});
++afterEach(() => { vi.unstubAllGlobals(); h.db.close(); });
++
++describe('rules', () => {
++  it('compares target, group, filter and intent, ignoring case and assignment IDs', () => {
++    expect(assignmentKey(group(G1))).toBe(assignmentKey({ ...group(G1.toUpperCase()), id: 'x' }));
++    expect(assignmentKey(group(G1))).not.toBe(assignmentKey(group(G1, 'available')));
++    expect(assignmentKey(group(G1))).not.toBe(assignmentKey(group(G1, 'required', { deviceAndAppManagementAssignmentFilterId: G2, deviceAndAppManagementAssignmentFilterType: 'include' })));
++  });
++  it('needs at least one install and no more than 1 failure in 10', () => {
++    expect(installsSettled(null)).toBe(false);
++    expect(installsSettled({ installed: 0, failed: 0 })).toBe(false);
++    expect(installsSettled({ installed: 9, failed: 1 })).toBe(true);
++    expect(installsSettled({ installed: 8, failed: 2 })).toBe(false);
++  });
++  it('skips a copy the newest one does not supersede, and keeps one with groups the newest lacks', () => {
++    const newest = { assignments: [group(G1)], supersedes: new Set([V1]) };
++    expect(judgeOldCopy({ appId: V1.toUpperCase(), assignments: [group(G1)] }, newest)).toEqual({ action: 'remove' });
++    expect(judgeOldCopy({ appId: V1, assignments: [] }, newest)).toEqual({ action: 'remove' });
++    expect(judgeOldCopy({ appId: V2, assignments: [group(G1)] }, newest)).toEqual({ action: 'skip' });
++    expect(judgeOldCopy({ appId: V1, assignments: [group(G1), group(G2, 'available')] }, newest)).toMatchObject({ action: 'keep', reason: expect.stringMatching(/a group the newest copy doesn't/) });
++  });
++});
++
++describe('removing old copies at the update check', () => {
++  it('removes every older copy in the chain once the newest has settled, oldest first, and keeps the newest', async () => {
++    const result = await runSqliteOldCopyCleanup({ now: NOW });
++    expect(result).toMatchObject({ checked: 1, removed: 3, kept: 0, errors: 0 });
++    expect([...apps.keys()]).toEqual([V4]);
++    expect(apps.get(V4)!.assignments).toEqual([group(G1)]);
++    expect(links.get(V4)).toEqual([]);
++    const deletes = calls.filter((c) => c.startsWith('DELETE'));
++    expect(deletes).toEqual([V1, V2, V3].map((a) => `DELETE /deviceAppManagement/mobileApps/${a}`));
++    // Groups always come off before the delete, and never off the newest copy.
++    expect(calls.filter((c) => c.endsWith('/assign')).every((c) => !c.includes(V4))).toBe(true);
++    const store = createOldCopyStore(() => h.db);
++    expect(store.get('tenant', V1)).toMatchObject({ outcome: 'removed', newest_app_id: V4, newest_version: '0.19.0' });
++    expect(store.kept('tenant')).toEqual([]);
++    // The app's activity timeline says IntuneGet removed it.
++    const activity = createAppInsightsStore(() => h.db).activity('tenant', 'Example.PdfTool');
++    expect(activity.some((a) => a.actor.startsWith('Removed by IntuneGet'))).toBe(true);
++  });
++
++  it('waits 7 days after the newest copy deployed', async () => {
++    h.db.prepare('UPDATE upload_history SET deployed_at = ? WHERE intune_app_id = ?').run(new Date(NOW.getTime() - SETTLE_MS + 60000).toISOString(), V4);
++    expect(await runSqliteOldCopyCleanup({ now: NOW })).toMatchObject({ checked: 0, removed: 0 });
++    expect(apps.size).toBe(4);
++    expect(calls).toEqual([]);
++  });
++
++  it('waits for installs: none yet, no counts, or more than 1 failure in 10', async () => {
++    for (const counts of [{ installed: 0, failed: 0 }, undefined, { installed: 5, failed: 3 }]) {
++      if (counts) h.installs.set(V4, counts); else h.installs.delete(V4);
++      expect(await runSqliteOldCopyCleanup({ now: NOW })).toMatchObject({ removed: 0 });
++    }
++    expect(apps.size).toBe(4);
++  });
++
++  it('waits while a deployment, pilot or retirement of the app is under way', async () => {
++    h.db.prepare(`INSERT INTO packaging_jobs (id,user_id,tenant_id,winget_id,version,display_name,installer_type,installer_url,package_config,status) VALUES ('j1','staff','tenant','example.pdftool','0.20.0','PDF tool','exe','https://example.invalid/a.exe','{}','packaging')`).run();
++    expect(await runSqliteOldCopyCleanup({ now: NOW })).toMatchObject({ removed: 0 });
++    expect(apps.size).toBe(4);
++  });
++
++  it('is off with HRM_OLD_COPY_CLEANUP=off', async () => {
++    process.env.HRM_OLD_COPY_CLEANUP = 'off';
++    expect(await runSqliteOldCopyCleanup({ now: NOW })).toMatchObject({ disabled: true, removed: 0 });
++    expect(calls).toEqual([]);
++  });
++
++  it('keeps and lists a copy with a group the newest lacks, and still removes the others', async () => {
++    apps.get(V2)!.assignments = [group(G1), group(G2, 'available')];
++    const result = await runSqliteOldCopyCleanup({ now: NOW });
++    expect(result).toMatchObject({ removed: 2, kept: 1 });
++    expect([...apps.keys()].sort()).toEqual([V2, V4].sort());
++    expect(apps.get(V2)!.assignments).toHaveLength(2);
++    const kept = createOldCopyStore(() => h.db).kept('tenant');
++    expect(kept).toEqual([expect.objectContaining({ app_id: V2, version: '0.18.0', newest_app_id: V4, reason: expect.stringMatching(/Keep this copy/) })]);
++  });
++
++  it('leaves a copy deployed alongside (not superseded) alone, and does not list it on Home', async () => {
++    links.set(V2, []); // V1 is no longer reached from the newest copy.
++    const result = await runSqliteOldCopyCleanup({ now: NOW });
++    expect(result).toMatchObject({ removed: 2, kept: 0 });
++    expect(apps.has(V1)).toBe(true);
++    expect(apps.get(V1)!.assignments).toEqual([group(G1)]);
++    expect(createOldCopyStore(() => h.db).kept('tenant')).toEqual([]);
++  });
++
++  it("never deletes a copy another app supersedes, and says so on Home", async () => {
++    apps.set(OTHER, { displayName: 'Other tool', displayVersion: '1.0', assignments: [] });
++    links.set(OTHER, [V1]);
++    const result = await runSqliteOldCopyCleanup({ now: NOW });
++    expect(apps.has(V1)).toBe(true);
++    expect(links.get(OTHER)).toEqual([V1]);
++    expect(result.kept).toBe(1);
++    expect(createOldCopyStore(() => h.db).get('tenant', V1)).toMatchObject({ outcome: 'kept', reason: expect.stringMatching(/Other tool replaces or depends on this copy/) });
++  });
++
++  it('never touches apps added in Intune by hand, even when the newest copy supersedes them', async () => {
++    apps.set(OTHER, { displayName: 'PDF tool', displayVersion: '0.16.0', assignments: [group(G1)] });
++    links.set(V1, [OTHER]);
++    await runSqliteOldCopyCleanup({ now: NOW });
++    expect(apps.has(OTHER)).toBe(true);
++    expect(calls.some((c) => c.includes(OTHER) && !c.startsWith('GET'))).toBe(false);
++  });
++
++  it('never touches a removal copy (uninstall only) of the app', async () => {
++    apps.get(V1)!.displayName = 'PDF tool (uninstall only)';
++    await runSqliteOldCopyCleanup({ now: NOW });
++    expect(apps.has(V1)).toBe(true);
++    expect(calls.some((c) => c.includes(V1) && !c.startsWith('GET'))).toBe(false);
++  });
++
++  it('forgets a kept copy once someone has removed it', async () => {
++    apps.get(V2)!.assignments = [group(G1), group(G2, 'available')];
++    await runSqliteOldCopyCleanup({ now: NOW });
++    apps.delete(V2); links.set(V3, []);
++    await runSqliteOldCopyCleanup({ now: NOW });
++    expect(createOldCopyStore(() => h.db).kept('tenant')).toEqual([]);
++  });
++
++  it('does nothing when the newest copy is gone from Intune', async () => {
++    apps.delete(V4); links.delete(V4);
++    expect(await runSqliteOldCopyCleanup({ now: NOW })).toMatchObject({ removed: 0, kept: 0 });
++    expect(apps.size).toBe(3);
++  });
++});
++
++// The unused store imports keep the mocked module's factories type-checked against the real ones.
++void createPilotStore; void createRetireStore; void createRollbackStore;
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 8a0cb323f..946509cd5 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -28,6 +28,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Add a second copy anyway adds the app to Intune again as a separate copy, marked Second copy. Afterwards, open Inventory and use Keep this copy to move the groups onto one copy.',
+       'Everything else is under More settings and What staff see during install. Each row shows its current setting, so you only open the ones you want to change.',
+       'To see where an app is deployed, open it in Inventory: Groups lists each group and whether it is Required or Available. No groups means it installs nowhere.',
++      'IntuneGet removes old copies left by its own updates (see How old copies are removed). For other copies, such as a second copy or one added in Intune by hand, use duplicate cleanup in Inventory.',
+       'If Inventory finds more than one copy of an app in Intune, it lists them at the top. Keep this copy moves every group onto that copy and leaves the others with none. Nothing is uninstalled.',
+       'Then Delete from Intune removes an emptied copy, which can\'t be undone. If another copy of the same app replaces it, that link is removed first. If a different app replaces or depends on it, the delete stops and says which app.',
+       'For an app that is already deployed, Save to Intune applies changes to groups, categories and When a new version comes out straight away.',
+@@ -37,6 +38,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Assign to a user group when the app follows the person to any computer they use, or when it is offered as Available.',
+       'Follow HRM\'s Entra group naming convention, and make it clear in the name whether a group holds devices or users.',
+     ],
++    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
+   },
+   {
+     id: 'installation-timing',
+@@ -87,6 +89,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+     uiLabels: ['App updates', 'Update all', 'Auto-update on', 'Deployments', 'Failed at:', 'Validation', 'Details', 'Retry safely', 'Inventory', 'App catalog', 'Deploy again', 'Deploy new version', 'Custom app', 'Find in App catalog', 'is already in Intune', 'Supersedes', "Doesn't supersede", 'and replace', 'alongside', 'Save to Intune', 'Turn auto-update back on'],
+     points: [
+       'WinGet and curated apps: open App updates and press Update on the app, or Update all. The new version replaces the previous one in Intune and keeps its groups. The result posts to Teams.',
++      'The previous copy stays in Intune until IntuneGet removes it, at least 7 days after the update (see How old copies are removed).',
+       'Apps with auto-update on are updated by the 3:30 AM and 3:30 PM check, with the same safety checks. Outside the update schedule or during a blackout, they wait (see Update schedule and blackouts).',
+       'An active pilot holds other updates for that app until you approve wider rollout or safely end a failed pilot.',
+       'An ordinary update takes the groups the app has in Intune at that moment, so groups added later with Save to Intune carry over.',
+@@ -109,14 +112,45 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'A custom app\'s first version is added with Custom app in the App catalog.',
+       'Before deploying, IntuneGet warns if an app has no groups: it would be added to Intune but install nowhere.',
+       'If the deployment says the app is already in Intune and asks whether to deploy the new version as its replacement, that is the normal step for a new version.',
+-      'Check the groups it lists. If it says Supersedes, the button reads Deploy (new version) and replace (old version). If it says Doesn\'t supersede, the button reads alongside instead, and both versions stay in Intune.',
++      'Check the groups it lists. If it says Supersedes, the button reads Deploy (new version) and replace (old version). If it says Doesn\'t supersede, the button reads alongside instead.',
++      'Deployed alongside, both versions stay in Intune, and IntuneGet never removes the old one. Use duplicate cleanup in Inventory if you want only one.',
+       'For WinGet and curated apps, Find in App catalog in Inventory opens the App catalog already searching for the app, so you can deploy a newer version.',
+     ],
++    links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
++  },
++  {
++    id: 'old-copies',
++    title: 'How old copies are removed',
++    uiLabels: ['Needs attention', 'needs a look', 'old app copies need a look', 'View', 'Inventory', 'Keep this copy', 'Delete from Intune', 'Add a second copy anyway', 'App activity', 'Removed by IntuneGet: old copy after an update', 'Go back to previous version'],
++    flow: ['Update adds a new copy', 'Wait at least 7 days', 'Update check confirms conditions', 'Take groups off old copy', 'Remove links between copies', 'Delete the old copy'],
++    points: [
++      'Each update adds a new copy of the app to Intune. It replaces the previous copy and gets its groups, but the previous copy stays in Intune with its groups too.',
++      'At the 3:30 AM and 3:30 PM update checks (Maryland time), IntuneGet removes those old copies of apps it deployed, once the newest copy has settled.',
++      'It removes an old copy only when all 5 of these are true:',
++      'The newest copy was deployed at least 7 days ago.',
++      'The newest copy has at least 1 successful install, and no more than 10% of its install results are failures.',
++      'No pilot, retirement, going back or deployment of the app is under way.',
++      'The newest copy supersedes the old copy in Intune, directly or through the copies in between.',
++      'Every group on the old copy is also on the newest copy, with the same assignment type (Required, Available or Uninstall) and filter.',
++      'To remove a copy, IntuneGet takes its groups off, removes the links between it and the app\'s other copies, then deletes it from Intune. Deleting can\'t be undone.',
++      'Nothing is uninstalled from computers. The newest copy has already replaced the old one on them.',
++      'It removes at most 20 copies at each update check. The rest wait for the next check.',
++      'It never touches copies added in Intune by hand, or removal copies ending in (uninstall only). Use duplicate cleanup in Inventory for those (see Deploying an app).',
++      'If it can\'t remove a copy, the copy stays in Intune and Home lists it under Needs attention as Old copy of [app] (v[version]) needs a look, with the reason.',
++      'Reasons include: the old copy has groups the newest copy lacks, another app replaces or depends on it, or Intune refused the change.',
++      'A copy the newest one doesn\'t supersede, such as one deployed alongside or with Add a second copy anyway, is left alone and isn\'t listed on Home.',
++      'With more than one, Home shows [n] old app copies need a look and names up to 3 of them. Press View to open Inventory, then open each app.',
++      'To fix it, use Keep this copy on the newest copy in Inventory, then Delete from Intune on the old one. Once the copy is deleted, it drops off Home.',
++      'Each removal shows in the app\'s App activity, marked Removed by IntuneGet: old copy after an update.',
++      'Go back to previous version still works after old copies are removed. It deploys the earlier installer again as a new copy, and doesn\'t use the old copy in Intune.',
++      'IT can turn automatic removal off on the server with the setting HRM_OLD_COPY_CLEANUP=off. To ask for this, open a ticket with HRM Support.',
++    ],
++    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'HRM Support', href: HRM_SUPPORT_URL }],
+   },
+   {
+     id: 'pilot-rollouts',
+     title: 'Pilot rollouts',
+-    uiLabels: ['Test with a pilot group', 'Find a pilot group', 'Deploy to pilot group', 'Pilot rollouts', 'Review results and wider rollout', 'No successful installations reported', 'New version currently reaches', 'New version after approval', 'I reviewed the results and approve these wider groups', 'Approve wider rollout', 'Keep this copy', 'Delete from Intune', 'End failed pilot', 'End stalled start'],
++    uiLabels: ['Test with a pilot group', 'Find a pilot group', 'Deploy to pilot group', 'Pilot rollouts', 'Review results and wider rollout', 'No successful installations reported', 'New version currently reaches', 'New version after approval', 'I reviewed the results and approve these wider groups', 'Approve wider rollout', 'End failed pilot', 'End stalled start'],
+     flow: ['Open App updates', 'Choose pilot group', 'Deploy to pilot', 'Review both versions', 'Check wider groups', 'Approve wider rollout'],
+     points: [
+       'In App updates, choose Test with a pilot group on a deployed WinGet or curated app. Pilots are not available for custom apps or Microsoft Store apps.',
+@@ -131,7 +165,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Compare New version currently reaches with New version after approval. The proposed groups come from the previous copy in Intune, including Required or Available, exclusions, filters and assignment settings.',
+       'To proceed, select I reviewed the results and approve these wider groups, then press Approve wider rollout. Nothing reaches the wider groups on its own. If the groups changed after your review, close it and open a fresh review.',
+       'Approval replaces the temporary pilot group with the previous copy\'s current groups on the new version. It does not uninstall the app from pilot devices. The previous copy keeps its groups, including if approval fails.',
+-      'After wider rollout, use Inventory\'s duplicate cleanup when appropriate: Keep this copy moves the groups onto the chosen copy. Delete from Intune then removes an emptied old copy.',
++      'After wider rollout, IntuneGet removes the previous copy at an update check, once the new version is at least 7 days old and installing well (see How old copies are removed).',
+       'If packaging fails or is held, open Deployments to inspect it. End failed pilot releases the hold only after the server confirms an unsuccessful finished workflow and no copy from that pilot remains in Intune.',
+       'A pilot held by the installation test before packaging starts can also be ended, after checking no copy exists. If a failed pilot copy remains, inspect and remove that copy in Intune before pressing End failed pilot.',
+       'If a start stalls before packaging begins, wait 2 minutes, then press End stalled start. Packaging that arrives after that is refused.',
+@@ -189,6 +223,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'The version stays skipped even if going back fails.',
+       'To let automatic updates deploy a skipped version again, press Allow again next to it under Previous version.',
+       'Going back is refused while a pilot or another deployment for the app is running, or while the app is being retired.',
++      'Going back doesn\'t need the old copy in Intune, so it still works after IntuneGet removes old copies (see How old copies are removed).',
+     ],
+     links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open Deployments', href: '/dashboard/uploads' }],
+   },
+diff --git a/lib/hrm/intune-copies.ts b/lib/hrm/intune-copies.ts
+new file mode 100644
+index 000000000..4eaa81e5e
+--- /dev/null
++++ b/lib/hrm/intune-copies.ts
+@@ -0,0 +1,123 @@
++/**
++ * HRM patch 0042: Intune calls for copies of the same app, shared by duplicate cleanup (patches 0025 and
++ * 0026) and the automatic removal of old copies after an update.
++ *
++ * Intune won't delete an app that another app supersedes or depends on, so unlinkAndDelete first removes
++ * the links between copies of this same app (only those), and refuses if any other app links to it.
++ */
++import { GRAPH_API_BASE } from '@/lib/intune/graph-client';
++import type { GraphAssignment } from '@/lib/hrm/duplicates';
++
++/** Intune's own reason, short (app names and IDs only; never client data). */
++export async function intuneReason(response: Response): Promise<string> {
++  const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
++  const message = body?.error?.message?.split('\n')[0]?.trim();
++  return message ? ` Intune said: ${message.slice(0, 200)}` : '';
++}
++
++export interface Relationship {
++  '@odata.type'?: string;
++  targetId: string;
++  targetDisplayName?: string;
++  targetType?: 'child' | 'parent';
++  supersedenceType?: string;
++  dependencyType?: string;
++}
++
++/** The fields Intune's updateRelationships accepts for a relationship this app owns. */
++const toInput = (r: Relationship) => ({
++  '@odata.type': r['@odata.type'],
++  targetId: r.targetId,
++  ...(r.supersedenceType ? { supersedenceType: r.supersedenceType } : {}),
++  ...(r.dependencyType ? { dependencyType: r.dependencyType } : {}),
++});
++
++export interface GraphApp { id: string; displayName: string; displayVersion?: string; publisher: string | null; '@odata.type'?: string }
++
++export async function graph(token: string, path: string, init: RequestInit = {}) {
++  return fetch(`${GRAPH_API_BASE}${path}`, {
++    ...init,
++    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
++    cache: 'no-store',
++  });
++}
++
++/** A Win32 app copy and its assignments, or null when it's gone, isn't Win32, or couldn't be read. */
++export async function loadCopy(token: string, id: string): Promise<{ app: GraphApp; assignments: GraphAssignment[] } | null> {
++  const [appResponse, assignmentsResponse] = await Promise.all([
++    graph(token, `/deviceAppManagement/mobileApps/${id}`),
++    graph(token, `/deviceAppManagement/mobileApps/${id}/assignments`),
++  ]);
++  if (!appResponse.ok || !assignmentsResponse.ok) return null;
++  const app = (await appResponse.json()) as GraphApp;
++  if (app['@odata.type'] !== '#microsoft.graph.win32LobApp') return null;
++  const assignments = ((await assignmentsResponse.json()) as { value?: GraphAssignment[] }).value ?? [];
++  return { app, assignments };
++}
++
++// Relationships are a beta-only part of the Intune API.
++const BETA = () => GRAPH_API_BASE.replace(/\/v1\.0$/, '/beta');
++
++export async function relationships(token: string, id: string): Promise<Relationship[] | null> {
++  const response = await fetch(`${BETA()}/deviceAppManagement/mobileApps/${id}/relationships`, {
++    headers: { Authorization: `Bearer ${token}` },
++    cache: 'no-store',
++  });
++  if (!response.ok) return null;
++  return ((await response.json()) as { value?: Relationship[] }).value ?? [];
++}
++
++export async function setRelationships(token: string, id: string, owned: Relationship[]) {
++  return fetch(`${BETA()}/deviceAppManagement/mobileApps/${id}/updateRelationships`, {
++    method: 'POST',
++    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
++    body: JSON.stringify({ relationships: owned.map(toInput) }),
++    cache: 'no-store',
++  });
++}
++
++export async function assign(token: string, id: string, assignments: GraphAssignment[]) {
++  const response = await graph(token, `/deviceAppManagement/mobileApps/${id}/assign`, {
++    method: 'POST',
++    body: JSON.stringify({ mobileAppAssignments: assignments }),
++  });
++  return response.ok;
++}
++
++export type DeleteResult = { ok: true; unlinked: string[] } | { ok: false; reason: string; status: 409 | 424 };
++
++/**
++ * Delete an emptied copy. copyIds are the copies of the same app (checked by the caller): links to and from
++ * them are removed first; a link from any other app stops the delete with nothing changed.
++ */
++export async function unlinkAndDelete(token: string, id: string, copyIds: Set<string>): Promise<DeleteResult> {
++  const links = await relationships(token, id);
++  if (!links) return { ok: false, reason: "Couldn't read this copy's links in Intune. Nothing was changed.", status: 424 };
++  const isCopy = (targetId: string) => copyIds.has(targetId.toLowerCase());
++  // Another app supersedes or depends on this copy: that's not ours to undo.
++  const outside = links.filter((r) => r.targetType === 'parent' && !isCopy(r.targetId));
++  if (outside.length > 0) {
++    const names = [...new Set(outside.map((r) => r.targetDisplayName || 'another app'))].join(', ');
++    return { ok: false, reason: `${names} replaces or depends on this copy, so Intune won't delete it. Remove that link in Intune first. Nothing was changed.`, status: 409 };
++  }
++  const unlinked: string[] = [];
++  // Copies that supersede (or depend on) this one: drop just that link, keep the rest.
++  for (const parent of links.filter((r) => r.targetType === 'parent')) {
++    const parentLinks = await relationships(token, parent.targetId);
++    if (!parentLinks) return { ok: false, reason: "Couldn't read the links on the other copy. Nothing was deleted.", status: 424 };
++    const owned = parentLinks.filter((r) => r.targetType === 'child');
++    const kept = owned.filter((r) => r.targetId.toLowerCase() !== id.toLowerCase());
++    if (kept.length === owned.length) continue;
++    const response = await setRelationships(token, parent.targetId, kept);
++    if (!response.ok) return { ok: false, reason: `Intune didn't remove the link from the other copy. Nothing was deleted.${await intuneReason(response)}`, status: 424 };
++    unlinked.push(parent.targetDisplayName || parent.targetId);
++  }
++  // This copy's own links (to older copies or other apps) go with it.
++  if (links.some((r) => r.targetType === 'child')) {
++    const response = await setRelationships(token, id, []);
++    if (!response.ok) return { ok: false, reason: `Intune didn't remove this copy's links. Nothing was deleted.${await intuneReason(response)}`, status: 424 };
++  }
++  const response = await graph(token, `/deviceAppManagement/mobileApps/${id}`, { method: 'DELETE' });
++  if (!response.ok) return { ok: false, reason: `Intune didn't delete it.${await intuneReason(response)}`, status: 424 };
++  return { ok: true, unlinked };
++}
+diff --git a/lib/hrm/old-copy-cleanup.ts b/lib/hrm/old-copy-cleanup.ts
+new file mode 100644
+index 000000000..fa1b9b9f5
+--- /dev/null
++++ b/lib/hrm/old-copy-cleanup.ts
+@@ -0,0 +1,162 @@
++/**
++ * HRM patch 0042: remove old copies of an app from Intune after an update has settled.
++ *
++ * Every update deploys a new Intune copy that supersedes the previous one and gets its groups; the previous
++ * copy stays in Intune with its groups. At each update check (3:30 AM and 3:30 PM), for each app IntuneGet
++ * deployed, older copies IntuneGet deployed are removed when all of these hold:
++ *   - the newest copy was deployed at least 7 days ago,
++ *   - the newest copy has at least 1 successful install and failures are 10% or less,
++ *   - no pilot, retirement, going back or deployment of the app is under way,
++ *   - the newest copy supersedes the old copy (directly or through other copies of the app),
++ *   - every group on the old copy is on the newest copy with the same intent and filter.
++ * Removing a copy takes its groups off, removes the links between copies of the app, and deletes it.
++ * Nothing is uninstalled: the newest copy has already replaced it on computers.
++ * A copy the newest doesn't supersede (deployed alongside, or a second copy) is left alone and not listed.
++ * A replaced copy with groups the newest lacks, or that Intune won't delete, is kept and listed on Home.
++ * Copies added in Intune by hand, and removal copies ("(uninstall only)", patch 0040), are never touched. HRM_OLD_COPY_CLEANUP=off turns this off.
++ */
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++import { summarizeAssignments } from '@/lib/hrm/app-insights';
++import type { GraphAssignment } from '@/lib/hrm/duplicates';
++import { assign, loadCopy, relationships, unlinkAndDelete } from '@/lib/hrm/intune-copies';
++import { REMOVAL_SUFFIX } from '@/lib/hrm/removal';
++
++export const SETTLE_MS = 7 * 24 * 60 * 60 * 1000;
++export const MAX_REMOVALS_PER_RUN = 20;
++const RUN_BUDGET_MS = 90000;
++const CHAIN_LIMIT = 10;
++export const REMOVED_BY = 'Removed by IntuneGet: old copy after an update';
++
++/** One assignment as Intune applies it: target, group, filter and intent. */
++export function assignmentKey(a: GraphAssignment): string {
++  const t = a.target ?? {};
++  return [t['@odata.type'], t.groupId, t.deviceAndAppManagementAssignmentFilterId, t.deviceAndAppManagementAssignmentFilterType, a.intent]
++    .map((v) => String(v ?? '').toLowerCase()).join('|');
++}
++
++/** At least one computer installed the newest copy, and no more than 1 in 10 results are failures. */
++export function installsSettled(counts: { installed: number; failed: number } | null | undefined): boolean {
++  if (!counts || counts.installed < 1) return false;
++  return counts.failed * 10 <= counts.installed + counts.failed;
++}
++
++export type Verdict = { action: 'remove' } | { action: 'keep'; reason: string } | { action: 'skip' };
++
++/** Whether one older copy can go, given the newest copy's groups and the copies it supersedes. */
++export function judgeOldCopy(copy: { appId: string; assignments: GraphAssignment[] }, newest: { assignments: GraphAssignment[]; supersedes: Set<string> }): Verdict {
++  // Not replaced by the newest copy: deployed alongside or as a second copy on purpose. Left alone, not listed.
++  if (!newest.supersedes.has(copy.appId.toLowerCase())) return { action: 'skip' };
++  const newestKeys = new Set(newest.assignments.map(assignmentKey));
++  const extra = copy.assignments.filter((a) => !newestKeys.has(assignmentKey(a)));
++  if (extra.length > 0) {
++    return { action: 'keep', reason: `This copy has ${extra.length === 1 ? 'a group' : `${extra.length} groups`} the newest copy doesn't. In Inventory, press Keep this copy on the newest copy to move ${extra.length === 1 ? 'it' : 'them'}, then Delete from Intune on this one.` };
++  }
++  return { action: 'remove' };
++}
++
++/** The copies the newest one supersedes, following links only through these copies of the app; null if unreadable. */
++export async function supersededChain(token: string, newestId: string, copyIds: Set<string>): Promise<Set<string> | null> {
++  const found = new Set<string>();
++  let frontier = [newestId];
++  for (let depth = 0; depth < CHAIN_LIMIT && frontier.length > 0; depth++) {
++    const next: string[] = [];
++    for (const id of frontier) {
++      const links = await relationships(token, id);
++      if (!links) return null;
++      for (const r of links) {
++        const target = r.targetId.toLowerCase();
++        if (r.targetType !== 'child' || !String(r['@odata.type'] ?? '').toLowerCase().includes('supersedence')) continue;
++        if (!copyIds.has(target) || found.has(target)) continue;
++        found.add(target);
++        next.push(target);
++      }
++    }
++    frontier = next;
++  }
++  return found;
++}
++
++export interface CleanupSummary { checked: number; removed: number; kept: number; errors: number; disabled?: boolean }
++
++export async function runSqliteOldCopyCleanup(options: { now?: Date; token?: (tenantId: string) => Promise<string | null> } = {}): Promise<CleanupSummary> {
++  const summary: CleanupSummary = { checked: 0, removed: 0, kept: 0, errors: 0 };
++  if (process.env.HRM_OLD_COPY_CLEANUP?.trim().toLowerCase() === 'off') return { ...summary, disabled: true };
++  const { sqliteOldCopies, sqlitePilotRollouts, sqliteRetirements, sqliteRollbacks, sqliteInstallStatus, sqliteAppInsights } = await import('@/lib/db/sqlite');
++  const now = options.now ?? new Date();
++  const deadline = Date.now() + RUN_BUDGET_MS;
++  const tokens = new Map<string, Promise<string | null>>();
++  const note = (tenant: string, wingetId: string, app: { id: string; displayName: string; displayVersion?: string }, assignments: GraphAssignment[], exists: boolean) => {
++    try {
++      sqliteAppInsights.observe(tenant, { appId: app.id, wingetId, displayName: app.displayName, version: app.displayVersion ?? '', exists,
++        assignments: summarizeAssignments(assignments), checkedAt: new Date().toISOString() }, REMOVED_BY, true);
++    } catch { /* Activity is optional; the Intune change still stands. */ }
++  };
++
++  for (const newest of sqliteOldCopies.newest()) {
++    if (Date.now() > deadline || summary.removed >= MAX_REMOVALS_PER_RUN) break;
++    // Removal copies (patch 0040) uninstall an app; they are never part of an update chain.
++    const removal = (name: string) => name.toLowerCase().endsWith(REMOVAL_SUFFIX.toLowerCase());
++    if (removal(newest.displayName)) continue;
++    const older = sqliteOldCopies.older(newest.tenantId, newest.wingetId, newest.appId);
++    if (older.length === 0) continue;
++    // Settling: wait 7 days, for healthy installs, and while anything else is changing this app.
++    const deployed = Date.parse(newest.deployedAt.includes('T') ? newest.deployedAt : `${newest.deployedAt.replace(' ', 'T')}Z`);
++    if (!Number.isFinite(deployed) || now.getTime() - deployed < SETTLE_MS) continue;
++    if (sqlitePilotRollouts.active(newest.tenantId, newest.wingetId) || sqliteRetirements.holdsFamily(newest.tenantId, newest.wingetId)
++      || sqliteRollbacks.running(newest.tenantId, newest.wingetId)) continue;
++    if (!installsSettled(await sqliteInstallStatus.get(newest.tenantId, newest.appId))) continue;
++    if ([newest.appId, ...older.map((o) => o.appId)].some((id) => sqliteRetirements.holdsApp(newest.tenantId, id) || sqlitePilotRollouts.holdsApp(newest.tenantId, id))) continue;
++
++    summary.checked++;
++    try {
++      if (!tokens.has(newest.tenantId)) tokens.set(newest.tenantId, (options.token ?? getServicePrincipalToken)(newest.tenantId));
++      const token = await tokens.get(newest.tenantId);
++      if (!token) throw new Error('No token');
++      const current = await loadCopy(token, newest.appId);
++      if (!current) continue; // Deleted or unreadable: nothing to compare against.
++      const copies: Array<{ appId: string; version: string; app: NonNullable<Awaited<ReturnType<typeof loadCopy>>> }> = [];
++      for (const o of older) {
++        const loaded = await loadCopy(token, o.appId);
++        if (loaded && !removal(loaded.app.displayName)) copies.push({ appId: o.appId, version: o.version, app: loaded });
++        else if (loaded) continue;
++        else sqliteOldCopies.clear(newest.tenantId, o.appId); // Already gone (or not Win32): nothing to keep listing.
++      }
++      if (copies.length === 0) continue;
++      const family = new Set([newest.appId, ...copies.map((c) => c.appId)].map((id) => id.toLowerCase()));
++      const supersedes = await supersededChain(token, newest.appId, family);
++      if (!supersedes) throw new Error("Couldn't read supersedence");
++
++      const record = (c: (typeof copies)[number], outcome: 'removed' | 'kept', reason: string | null) => sqliteOldCopies.record({
++        tenant_id: newest.tenantId, app_id: c.appId, winget_id: newest.wingetId, display_name: c.app.app.displayName || newest.displayName,
++        version: c.app.app.displayVersion || c.version, newest_app_id: newest.appId, newest_version: newest.version, outcome, reason, at: now.toISOString() });
++
++      // Oldest first, so each delete only unlinks it from the next copy up the chain.
++      for (const c of copies) {
++        if (summary.removed >= MAX_REMOVALS_PER_RUN || Date.now() > deadline) break;
++        const verdict = judgeOldCopy({ appId: c.appId, assignments: c.app.assignments }, { assignments: current.assignments, supersedes });
++        if (verdict.action === 'skip') { sqliteOldCopies.clear(newest.tenantId, c.appId); continue; }
++        if (verdict.action === 'keep') { record(c, 'kept', verdict.reason); summary.kept++; continue; }
++        if (c.app.assignments.length > 0) {
++          if (!(await assign(token, c.appId, []))) {
++            record(c, 'kept', "Intune didn't accept removing this copy's groups. Nothing was changed. Try Keep this copy in Inventory.");
++            summary.kept++; continue;
++          }
++          note(newest.tenantId, newest.wingetId, c.app.app, [], true);
++        }
++        const deleted = await unlinkAndDelete(token, c.appId, family);
++        if (!deleted.ok) {
++          // Its groups are already on the newest copy, so leaving it empty changes nothing for computers.
++          record(c, 'kept', `Its groups were removed, but it wasn't deleted. ${deleted.reason.replace(/ Nothing was changed\.$/, '')}`);
++          summary.kept++; continue;
++        }
++        note(newest.tenantId, newest.wingetId, c.app.app, [], false);
++        record(c, 'removed', null);
++        summary.removed++;
++      }
++    } catch (error) {
++      summary.errors++;
++      console.warn(`[old copies] ${newest.wingetId}: ${error instanceof Error ? error.message.slice(0, 120) : 'failed'}`);
++    }
++  }
++  return summary;
++}
+diff --git a/lib/hrm/old-copy-store.ts b/lib/hrm/old-copy-store.ts
+new file mode 100644
+index 000000000..4e0016912
+--- /dev/null
++++ b/lib/hrm/old-copy-store.ts
+@@ -0,0 +1,48 @@
++/**
++ * HRM patch 0042: what the automatic removal of old copies did with each older copy IntuneGet deployed.
++ * 'removed' copies are gone from Intune; 'kept' copies need a person (the reason says why).
++ */
++import type Database from 'better-sqlite3';
++
++export type OldCopyOutcome = 'removed' | 'kept';
++export interface OldCopyRecord {
++  tenant_id: string; app_id: string; winget_id: string; display_name: string; version: string;
++  newest_app_id: string; newest_version: string; outcome: OldCopyOutcome; reason: string | null; at: string;
++}
++export interface NewestDeployment { tenantId: string; wingetId: string; appId: string; displayName: string; version: string; deployedAt: string }
++export interface OlderCopy { appId: string; version: string; deployedAt: string }
++
++export function createOldCopyStore(getDb: () => Database.Database) {
++  return {
++    record(row: OldCopyRecord) {
++      getDb().prepare(`INSERT INTO hrm_old_copy_cleanup (tenant_id, app_id, winget_id, display_name, version, newest_app_id, newest_version, outcome, reason, at)
++        VALUES (?,?,?,?,?,?,?,?,?,?)
++        ON CONFLICT (tenant_id, app_id) DO UPDATE SET winget_id = excluded.winget_id, display_name = excluded.display_name, version = excluded.version,
++          newest_app_id = excluded.newest_app_id, newest_version = excluded.newest_version, outcome = excluded.outcome, reason = excluded.reason, at = excluded.at`)
++        .run(row.tenant_id, row.app_id, row.winget_id, row.display_name, row.version, row.newest_app_id, row.newest_version, row.outcome, row.reason, row.at);
++    },
++    get(tenant: string, appId: string): OldCopyRecord | null {
++      return (getDb().prepare('SELECT * FROM hrm_old_copy_cleanup WHERE tenant_id = ? AND app_id = ? COLLATE NOCASE').get(tenant, appId) as OldCopyRecord) ?? null;
++    },
++    /** A copy that is no longer waiting to be removed (someone tidied it, or it became the newest). */
++    clear(tenant: string, appId: string) { getDb().prepare("DELETE FROM hrm_old_copy_cleanup WHERE tenant_id = ? AND app_id = ? COLLATE NOCASE AND outcome = 'kept'").run(tenant, appId); },
++    /** Older copies IntuneGet couldn't remove, newest first (for Home). */
++    kept(tenant: string): OldCopyRecord[] {
++      return getDb().prepare("SELECT * FROM hrm_old_copy_cleanup WHERE tenant_id = ? AND outcome = 'kept' ORDER BY at DESC LIMIT 50").all(tenant) as OldCopyRecord[];
++    },
++    /** The newest IntuneGet deployment of every app, in every tenant. */
++    newest(): NewestDeployment[] {
++      return getDb().prepare(`SELECT h.intune_tenant_id AS tenantId, h.winget_id AS wingetId, h.intune_app_id AS appId, h.display_name AS displayName,
++          h.version, h.deployed_at AS deployedAt FROM upload_history h
++        WHERE h.intune_tenant_id IS NOT NULL AND h.id = (SELECT n.id FROM upload_history n WHERE n.intune_tenant_id = h.intune_tenant_id
++          AND n.winget_id = h.winget_id ORDER BY n.deployed_at DESC, n.id DESC LIMIT 1)`).all() as NewestDeployment[];
++    },
++    /** Every other Intune copy IntuneGet deployed of this app (one row per copy, oldest first). */
++    older(tenant: string, wingetId: string, newestAppId: string): OlderCopy[] {
++      return getDb().prepare(`SELECT intune_app_id AS appId, version, MAX(deployed_at) AS deployedAt FROM upload_history
++        WHERE intune_tenant_id = ? AND winget_id = ? AND intune_app_id != ? COLLATE NOCASE
++        GROUP BY lower(intune_app_id) ORDER BY deployedAt ASC LIMIT 20`).all(tenant, wingetId, newestAppId) as OlderCopy[];
++    },
++  };
++}
++export type OldCopyStore = ReturnType<typeof createOldCopyStore>;
