@@ -10,6 +10,17 @@
   going back. Downloads only reach public https hosts, checked again at every redirect and connection,
   with size, time and two-at-a-time limits. Help explains the checks (patch 0039, SQLite migration 18).
 
+## 2026-11-07 (v0.8.5-hrm.17)
+
+Production runs v0.8.5-hrm.17.
+
+- Inventory: Installation timing edits existing Win32 Required and Available assignments without
+  repackaging. Set availability, a Required installation deadline, UTC or device-local time, and
+  restart grace/countdown/snooze where supported. Live reviews reject stale changes and preserve
+  other assignment settings. Save to Intune keeps live timing for unchanged group/intent pairs.
+  Dates apply to this copy; offline devices can install later, and this is not a recurring
+  after-hours window or startup/sign-in trigger. Help updated (patch 0041).
+
 ## 2026-11-06 (v0.8.5-hrm.16)
 
 Production runs v0.8.5-hrm.16.
