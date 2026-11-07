@@ -153,6 +153,15 @@ paths, query strings and fragments are never copied. Invalid or credential-beari
 Only strict release tags can appear as version text. Output text/item limits and the UTF-8 report
 size are enforced at a single boundary.
 
+## Old copies
+
+Patch 0042 removes older Intune copies of an app that IntuneGet deployed, at the update check, once the
+newest copy has been out 7 days with healthy installs, supersedes the old copy and already has all its
+groups. It deletes from Intune, so keep its rules strict: never widen it to copies added by hand or to
+copies whose groups differ. To turn it off, add `HRM_OLD_COPY_CLEANUP=off` to `.env.local`, pass it
+through `docker-compose.override.yml` (`- HRM_OLD_COPY_CLEANUP=${HRM_OLD_COPY_CLEANUP:-}`) and recreate
+`web` with `--env-file .env.local`.
+
 ## Deploys and rollback
 
 - Roll back by reverting the Deploy PR. Going to an older version restores the backup taken when the
