@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Inventory: Installation timing edits existing Win32 Required and Available assignments without
+  repackaging. Set availability, a Required installation deadline, UTC or device-local time, and
+  restart grace/countdown/snooze where supported. Live reviews reject stale changes and preserve
+  other assignment settings. Save to Intune keeps live timing for unchanged group/intent pairs.
+  Dates apply to this copy; offline devices can install later, and this is not a recurring
+  after-hours window or startup/sign-in trigger. Help updated (patch 0041).
+
 - Inventory: Go back to previous version. On the newest copy IntuneGet deployed, it redeploys the
   older version IntuneGet used before (same installer), replacing the current copy so Intune
   uninstalls the current version and installs the older one; the groups move over. Automatic updates
