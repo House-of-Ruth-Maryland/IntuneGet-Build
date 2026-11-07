@@ -1,0 +1,796 @@
+diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
+index 18011d6f5..f71fbb860 100644
+--- a/app/(app)/dashboard/page.tsx
++++ b/app/(app)/dashboard/page.tsx
+@@ -122,6 +122,21 @@ export default function DashboardPage() {
+         color: 'warning',
+       });
+     }
++    // HRM patch 0039: apps that can't go back, because the previous installer is gone or has changed
++    const gaps = home?.rollbackGaps ?? [];
++    if (gaps.length > 0) {
++      items.push({
++        id: 'rollback-gaps',
++        icon: AlertCircle,
++        title: gaps.length === 1
++          ? `${gaps[0].displayName} can't go back to v${gaps[0].previousVersion}`
++          : `${gaps.length} apps can't go back to their previous version`,
++        description: 'The earlier installer no longer downloads, has changed, or has a link IntuneGet can\'t use, so Go back to previous version is turned off. Fix a bad update with a newer version instead.',
++        href: gaps.length === 1 ? `/dashboard/inventory?app=${gaps[0].intuneAppId}` : '/dashboard/inventory',
++        actionLabel: 'View',
++        color: 'warning',
++      });
++    }
+     const stuck = home?.attention?.stuck ?? 0;
+     if (stuck > 0) {
+       items.push({
+diff --git a/app/api/cron/check-updates/route.ts b/app/api/cron/check-updates/route.ts
+index ef85da8b7..b17d777e9 100644
+--- a/app/api/cron/check-updates/route.ts
++++ b/app/api/cron/check-updates/route.ts
+@@ -12,6 +12,7 @@ import { runSqliteUpdateCheck } from '@/lib/auto-update/sqlite';
+ import { listWin32AppIds } from '@/lib/hrm/intune-app-ids';
+ import { runSqliteAppInsightsCheck } from '@/lib/hrm/app-insights-check';
+ import { runSqliteInstallCheck } from '@/lib/hrm/install-status-check';
++import { runSqliteRollbackReadinessCheck } from '@/lib/hrm/rollback-readiness';
+ import { alertPausedAutoUpdates } from '@/lib/hrm/paused-auto-update';
+ import { parseVersion, compareVersions } from '@/lib/version-compare';
+ import {
+@@ -289,7 +290,9 @@ export async function GET(request: Request) {
+       }));
+       // HRM patch 0032: tell IT Ops when auto-update turned itself off for an app.
+       const pausedAutoUpdates = await alertPausedAutoUpdates(getDatabase()).catch(() => ({ paused: 0, alerted: 0, error: true }));
+-      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates });
++      // HRM patch 0039: does each app's previous installer still download? Never fails the update check.
++      const rollbackReadiness = await runSqliteRollbackReadinessCheck().catch(() => ({ checked: 0, missing: 0, unreachable: 0, error: true }));
++      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates, rollbackReadiness });
+     } catch (error) {
+       return NextResponse.json(
+         { error: error instanceof Error ? error.message : 'Update check failed' },
+diff --git a/app/api/hrm/home/route.test.ts b/app/api/hrm/home/route.test.ts
+index 085ba2b1a..fc6fb3dc8 100644
+--- a/app/api/hrm/home/route.test.ts
++++ b/app/api/hrm/home/route.test.ts
+@@ -29,7 +29,7 @@ describe('HRM home route', () => {
+     const response = await GET(request());
+     expect(mocks.jobs).toHaveBeenCalledWith({ tenantId: 'token-tenant' });
+     expect(response.headers.get('cache-control')).toBe('private, no-store');
+-    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [] });
++    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [], rollbackGaps: [] });
+     expect(mocks.installs).toHaveBeenCalledWith('token-tenant');
+   });
+ 
+diff --git a/app/api/hrm/home/route.ts b/app/api/hrm/home/route.ts
+index d569e1b4b..6218f479f 100644
+--- a/app/api/hrm/home/route.ts
++++ b/app/api/hrm/home/route.ts
+@@ -24,14 +24,23 @@ export async function GET(request: NextRequest) {
+     .map((app) => ({ displayName: app.display_name, intuneAppId: app.intune_app_id, failed: app.failed }));
+   // HRM patch 0038: an app being retired is meant to reach nobody, and its failures are uninstall failures.
+   let retiring = new Set<string>();
++  let rollbackGaps: Array<{ displayName: string; intuneAppId: string; previousVersion: string }> = [];
+   if (process.env.DATABASE_MODE?.toLowerCase() === 'sqlite') {
+     try { const { sqliteRetirements } = await import('@/lib/db/sqlite'); retiring = new Set(sqliteRetirements.activeAppIds(user.tenantId)); } catch { /* optional */ }
++    // HRM patch 0039: newest copies that can't go back, because their previous installer is gone or has changed.
++    try {
++      const { sqliteRollbackReadiness, sqliteAppInsights } = await import('@/lib/db/sqlite');
++      const newest = new Map(sqliteAppInsights.tracked(user.tenantId).map((d) => [d.appId.toLowerCase(), d.displayName]));
++      rollbackGaps = sqliteRollbackReadiness.gaps(user.tenantId)
++        .filter((g) => newest.has(g.app_id.toLowerCase()) && !retiring.has(g.app_id.toLowerCase()))
++        .map((g) => ({ displayName: newest.get(g.app_id.toLowerCase())!, intuneAppId: g.app_id, previousVersion: g.previous_version }));
++    } catch { /* optional */ }
+   }
+   const unreached = unreachedApps(installs, deployments).filter((app) => !retiring.has(app.intuneAppId.toLowerCase()));
+   // Its uninstall results show in its Inventory details, not as install failures.
+   const failing = installFailures.filter((app) => !retiring.has(app.intuneAppId.toLowerCase()));
+   return NextResponse.json(
+-    { attention: jobs ? attentionCounts(jobs) : null, server, installFailures: failing, unreached },
++    { attention: jobs ? attentionCounts(jobs) : null, server, installFailures: failing, unreached, rollbackGaps },
+     { headers: { 'Cache-Control': 'private, no-store' } },
+   );
+ }
+diff --git a/app/api/hrm/rollback/route.test.ts b/app/api/hrm/rollback/route.test.ts
+index 0144e5c69..25ed1f980 100644
+--- a/app/api/hrm/rollback/route.test.ts
++++ b/app/api/hrm/rollback/route.test.ts
+@@ -1,14 +1,15 @@
+ // HRM patch 0037: going back to the previous version from Inventory.
+ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+ import {NextRequest} from 'next/server';
+-const state=vi.hoisted(()=>{vi.stubEnv('DATABASE_MODE','sqlite');vi.stubEnv('DATABASE_PATH',':memory:');return {auth:true,dispatch:vi.fn()};});
++const state=vi.hoisted(()=>{vi.stubEnv('DATABASE_MODE','sqlite');vi.stubEnv('DATABASE_PATH',':memory:');return {auth:true,dispatch:vi.fn(),reach:vi.fn(),verify:vi.fn()};});
+ vi.mock('@/lib/auth-utils',()=>({parseAccessToken:async()=>state.auth?{tenantId:'tenant',userId:'staff',userEmail:'staff@example.test'}:null}));
+ vi.mock('@/lib/db',async()=>{const {sqliteDb}=await import('@/lib/db/sqlite');return {isSqliteMode:()=>true,getDatabase:()=>sqliteDb};});
+ vi.mock('@/lib/features',()=>({getFeatureFlags:()=>({localPackager:false})}));
+ vi.mock('@/lib/github-actions',()=>({isGitHubActionsConfigured:()=>true}));
+ vi.mock('@/lib/intune/graph-client',()=>({getServicePrincipalToken:async()=>'token'}));
+ vi.mock('@/lib/hrm/update-dispatch',()=>({dispatchUpdateJob:state.dispatch}));
+-import {sqliteDb,sqliteRollbacks,sqlitePilotRollouts,sqliteRetirements,closeSqliteDb} from '@/lib/db/sqlite';
++vi.mock('@/lib/hrm/installer-check',()=>({checkInstallerReachable:state.reach,verifyInstallerChecksum:state.verify}));
++import {sqliteRollbackReadiness,sqliteDb,sqliteRollbacks,sqlitePilotRollouts,sqliteRetirements,closeSqliteDb} from '@/lib/db/sqlite';
+ import {GET,POST} from './route';
+ const OLD='11111111-1111-4111-8111-111111111111',NEW='22222222-2222-4222-8222-222222222222',GROUP='33333333-3333-4333-8333-333333333333';
+ let groups:unknown[];let writes:string[];
+@@ -23,6 +24,7 @@ async function deployed(version:string,appId:string,at:string,config:Record<stri
+ }
+ let previousJob:string;
+ beforeEach(async()=>{
++ state.reach.mockReset().mockResolvedValue({status:'ready',detail:null,finalUrl:'https://example.invalid/1.1.exe'}); state.verify.mockReset().mockResolvedValue({status:'match',detail:null});
+  closeSqliteDb();state.auth=true;groups=[group()];writes=[];state.dispatch.mockReset();state.dispatch.mockResolvedValue({dispatched:true});
+  previousJob=await deployed('1.1',OLD,'2026-01-01T00:00:00Z');
+  await deployed('2.0',NEW,'2026-01-02T00:00:00Z',{categories:[{id:'now'}]});
+@@ -81,4 +83,67 @@ describe('go back to the previous version',()=>{
+   expect(sqliteRollbacks.skipped('tenant','Example.App','2.1')).toBeNull();
+   expect((await post({action:'allow',appId:NEW,version:'2.1'})).status).toBe(409);
+  });
++ it('blocks a missing installer and a changed checksum before dispatch',async()=>{
++  state.reach.mockResolvedValue({status:'missing',detail:'File gone',finalUrl:null});
++  expect((await post({action:'preview',appId:NEW})).status).toBe(409);
++  expect((await (await get()).json()).readiness.status).toBe('missing');
++  state.reach.mockResolvedValue({status:'ready',detail:null,finalUrl:'https://example.invalid/1.1.exe'});
++  sqliteRollbackReadiness.checksum('tenant',NEW,previousJob,'mismatch','Changed');
++  expect((await post({action:'preview',appId:NEW})).status).toBe(409);
++  expect(state.dispatch).not.toHaveBeenCalled();
++ });
++ it('checks a new candidate instead of keeping the old candidate checksum',async()=>{
++  sqliteRollbackReadiness.record({tenant_id:'tenant',app_id:NEW,previous_job_id:'stale',previous_version:'0.9',status:'ready',detail:null,checked_at:new Date().toISOString()});
++  sqliteRollbackReadiness.checksum('tenant',NEW,'stale','mismatch','Changed');
++  expect((await post({action:'verify',appId:NEW})).status).toBe(202);
++  await vi.waitFor(()=>expect(sqliteRollbackReadiness.get('tenant',NEW)?.checksum_status).toBe('match'));
++  expect(sqliteRollbackReadiness.get('tenant',NEW)?.previous_job_id).toBe(previousJob);
++ });
++
++ it('scheduled checks persist missing links, keep checksum mismatches, and isolate tenants',async()=>{
++  const {runSqliteRollbackReadinessCheck}=await import('@/lib/hrm/rollback-readiness');
++  state.reach.mockResolvedValue({status:'missing',detail:'File gone',finalUrl:null});
++  expect(await runSqliteRollbackReadinessCheck()).toEqual({checked:1,missing:1,unreachable:0});
++  expect(sqliteRollbackReadiness.get('tenant',NEW)?.status).toBe('missing');
++  expect(sqliteRollbackReadiness.get('other-tenant',NEW)).toBeNull();
++  expect(sqliteRollbackReadiness.gaps('tenant').map((g)=>g.app_id)).toEqual([NEW]);
++  expect(sqliteRollbackReadiness.gaps('other-tenant')).toEqual([]);
++  sqliteRollbackReadiness.checksum('tenant',NEW,previousJob,'mismatch','Changed');
++  state.reach.mockResolvedValue({status:'ready',detail:null,finalUrl:'https://example.invalid/1.1.exe'});
++  await runSqliteRollbackReadinessCheck();
++  expect(sqliteRollbackReadiness.get('tenant',NEW)?.checksum_status).toBe('mismatch');
++ });
++ it('does not let a checksum check stopped by a restart block going back for ever',async()=>{
++  await post({action:'preview',appId:NEW});
++  sqliteRollbackReadiness.checksum('tenant',NEW,previousJob,'checking',null);
++  const later=Date.now()+30*60000;
++  const spy=vi.spyOn(Date,'now').mockReturnValue(later);
++  try {
++   expect((await post({action:'preview',appId:NEW})).status).toBe(200);
++   expect((await (await get()).json()).readiness.checksum).toBeNull();
++  } finally { spy.mockRestore(); }
++ });
++ it('refuses an unusable link for good, says whether a checksum can be checked, and a failed checksum check is not a fresh check',async()=>{
++  state.reach.mockResolvedValue({status:'unsupported',detail:'Not public.',finalUrl:null});
++  const refused=await post({action:'preview',appId:NEW});
++  expect(refused.status).toBe(409);expect((await refused.json()).error).toMatch(/can't be used/);
++  expect(sqliteRollbackReadiness.gaps('tenant').map((g)=>g.app_id)).toEqual([NEW]);
++  expect((await (await get()).json()).canVerify).toBe(true);
++  state.reach.mockResolvedValue({status:'ready',detail:null,finalUrl:'https://example.invalid/1.1.exe'});
++  let finish:(v:{status:string;detail:string})=>void=()=>{};
++  state.verify.mockReturnValue(new Promise((resolve)=>{finish=resolve;}));
++  expect((await post({action:'verify',appId:NEW})).status).toBe(202);
++  const before=sqliteRollbackReadiness.get('tenant',NEW)!.checked_at;
++  await new Promise((r)=>setTimeout(r,5));
++  finish({status:'unreachable',detail:'The download stopped before it finished.'});
++  await vi.waitFor(()=>expect(sqliteRollbackReadiness.get('tenant',NEW)?.checksum_status).toBe('unreachable'));
++  expect(sqliteRollbackReadiness.get('tenant',NEW)).toMatchObject({status:'ready',checked_at:before});
++ });
++ it('keeps rollback blocked while a replacement checksum check is running',async()=>{
++  await post({action:'preview',appId:NEW});
++  sqliteRollbackReadiness.checksum('tenant',NEW,previousJob,'checking',null);
++  expect((await post({action:'preview',appId:NEW})).status).toBe(409);
++  expect(state.dispatch).not.toHaveBeenCalled();
++ });
++
+ });
+diff --git a/app/api/hrm/rollback/route.ts b/app/api/hrm/rollback/route.ts
+index fdd40e79a..532fb1f29 100644
+--- a/app/api/hrm/rollback/route.ts
++++ b/app/api/hrm/rollback/route.ts
+@@ -3,6 +3,7 @@
+ //   POST { action: 'preview', appId }  read the copy and its live groups from Intune; returns a review token
+ //   POST { action: 'start', appId, previousJobId, token, confirmed: true }  start the rollback deployment
+ //   POST { action: 'allow', appId, version }  let automatic updates deploy a skipped version again
++//   POST { action: 'verify', appId }  download the previous installer once and compare its checksum (HRM patch 0039; runs in the background)
+ // The new deployment replaces the current copy (Replace supersedence: Intune uninstalls the current
+ // version, then installs the previous one) and takes over its live groups. Nothing changes in Intune
+ // until packaging finishes. Failures use 409/424, because Cloudflare replaces 502 with its own page.
+@@ -18,6 +19,7 @@ import { pilotGraph, PilotError } from '@/lib/hrm/pilot-graph';
+ import { pilotHold } from '@/lib/hrm/pilot-guard';
+ import { dispatchUpdateJob } from '@/lib/hrm/update-dispatch';
+ import { buildRollbackJob, rollbackToken, type RollbackPreview } from '@/lib/hrm/rollback';
++import { checkInstallerReachable, verifyInstallerChecksum } from '@/lib/hrm/installer-check';
+ import { RETIRE_HOLD } from '@/lib/hrm/retire';
+ 
+ export const maxDuration = 120;
+@@ -25,6 +27,9 @@ const reply = (body: unknown, status = 200) => NextResponse.json(body, { status,
+ const supported = () => isSqliteMode() && !getFeatureFlags().localPackager && isGitHubActionsConfigured();
+ // One rollback start at a time per app on this server (a double press can't create two copies).
+ const starting = new Set<string>();
++// HRM patch 0039: one checksum download at a time per app. A check older than 20 minutes is treated as stopped (server restart).
++const verifying = new Set<string>();
++const STALE_CHECK_MS = 20 * 60000;
+ 
+ type User = NonNullable<Awaited<ReturnType<typeof parseAccessToken>>>;
+ 
+@@ -58,6 +63,23 @@ async function preview(user: User, appId: string): Promise<RollbackPreview> {
+   const graph = pilotGraph(token, fetch, 'Could not read this app from Intune completely. Nothing was changed.');
+   const [app, rows] = await Promise.all([graph.app(found.deployment.appId), graph.assignments(found.deployment.appId)]);
+   if (app.displayVersion !== found.deployment.version) throw new PilotError('The version in Intune no longer matches IntuneGet. Refresh Inventory.');
++  // HRM patch 0039: the previous installer must still download, or the rollback would fail in packaging.
++  const reach = await checkInstallerReachable(found.previous.installer_url ?? '');
++  const { sqliteRollbackReadiness } = await import('@/lib/db/sqlite');
++  sqliteRollbackReadiness.record({ tenant_id: user.tenantId, app_id: found.deployment.appId, previous_job_id: found.previous.id, previous_version: found.previous.version,
++    status: reach.status, detail: reach.detail, checked_at: new Date().toISOString() });
++  if (reach.status === 'missing') throw new PilotError(`The v${found.previous.version} installer no longer downloads: ${reach.detail} Going back from IntuneGet isn't possible.`);
++  if (reach.status === 'unsupported') throw new PilotError(`The saved v${found.previous.version} download link can't be used: ${reach.detail} Going back from IntuneGet isn't possible.`);
++  if (reach.status === 'unreachable') throw new PilotError(`Couldn't reach the v${found.previous.version} installer just now: ${reach.detail} Try again later.`, 424);
++  const saved = sqliteRollbackReadiness.get(user.tenantId, found.deployment.appId);
++  const checksum = saved?.checksum_status;
++  // A check older than 20 minutes stopped (server restart) and no longer blocks.
++  if (checksum === 'checking' && Date.now() - Date.parse(saved?.checksum_checked_at ?? '') < STALE_CHECK_MS) {
++    throw new PilotError('Wait for the installer checksum check to finish before going back.');
++  }
++  if (checksum === 'mismatch') {
++    throw new PilotError(`The v${found.previous.version} installer has changed since IntuneGet used it, so going back would fail its checksum check.`);
++  }
+   const groups = summarizeAssignments(rows);
+   return {
+     token: rollbackToken(found.deployment.appId, found.deployment.version, found.previous.id, groups.map((g) => g.key)),
+@@ -79,8 +101,15 @@ export async function GET(request: NextRequest) {
+   if (!GUID.test(appId)) return reply({ error: 'Invalid app' }, 400);
+   const found = await candidate(user, appId);
+   if (!found) return reply({ supported: true, available: false });
+-  const { sqliteRollbacks } = await import('@/lib/db/sqlite');
++  const { sqliteRollbacks, sqliteRollbackReadiness } = await import('@/lib/db/sqlite');
++  const r = found.previous ? sqliteRollbackReadiness.get(user.tenantId, found.deployment.appId) : null;
++  const current = r && r.previous_job_id === found.previous?.id ? r : null;
++  const checking = current?.checksum_status === 'checking' && Date.now() - Date.parse(current.checksum_checked_at ?? '') < STALE_CHECK_MS;
+   return reply({
++    // HRM patch 0039: Check installer now needs the checksum IntuneGet saved.
++    canVerify: Boolean(found.previous?.installer_sha256),
++    readiness: current ? { status: current.status, detail: current.detail, checkedAt: current.checked_at,
++      checksum: current.checksum_status === 'checking' ? (checking ? 'checking' : null) : current.checksum_status, checksumCheckedAt: current.checksum_checked_at } : null,
+     supported: true,
+     available: Boolean(found.previous),
+     currentVersion: found.deployment.version,
+@@ -97,9 +126,32 @@ export async function POST(request: NextRequest) {
+   if (!supported()) return reply({ error: 'Going back to a previous version needs this server’s SQLite and GitHub packaging mode.' }, 409);
+   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+   const appId = typeof body?.appId === 'string' ? body.appId : '';
+-  if (!body || !['preview', 'start', 'allow'].includes(String(body.action)) || !GUID.test(appId)) return reply({ error: 'Invalid request' }, 400);
++  if (!body || !['preview', 'start', 'allow', 'verify'].includes(String(body.action)) || !GUID.test(appId)) return reply({ error: 'Invalid request' }, 400);
+   try {
+     if (body.action === 'preview') return reply({ preview: await preview(user, appId) });
++    if (body.action === 'verify') {
++      const found = await candidate(user, appId);
++      if (!found?.previous?.installer_url || !found.previous.installer_sha256) throw new PilotError('There is no earlier installer with a checksum to check.', 400);
++      const key = `${user.tenantId}|${found.deployment.appId.toLowerCase()}`;
++      if (verifying.has(key)) return reply({ verifying: true });
++      const { sqliteRollbackReadiness } = await import('@/lib/db/sqlite');
++      if (verifying.size >= 2) throw new PilotError('Two installer checks are running. Try again when one finishes.', 429);
++      // Hold the slot before the first await, so two quick presses can't start a third download.
++      verifying.add(key);
++      // Check the link first and record what it really says; the full download only starts when it answers.
++      let reach;
++      try { reach = await checkInstallerReachable(found.previous.installer_url); } catch (error) { verifying.delete(key); throw error; }
++      sqliteRollbackReadiness.record({ tenant_id: user.tenantId, app_id: found.deployment.appId, previous_job_id: found.previous.id,
++        previous_version: found.previous.version, status: reach.status, detail: reach.detail, checked_at: new Date().toISOString() });
++      if (reach.status !== 'ready') { verifying.delete(key); return reply({ verifying: false, readiness: reach.status }); }
++      sqliteRollbackReadiness.checksum(user.tenantId, found.deployment.appId, found.previous.id, 'checking', null);
++      const previous = found.previous;
++      void verifyInstallerChecksum(previous.installer_url!, previous.installer_sha256!)
++        .then((result) => { sqliteRollbackReadiness.checksum(user.tenantId, found.deployment.appId, previous.id, result.status, result.detail); })
++        .catch(() => { sqliteRollbackReadiness.checksum(user.tenantId, found.deployment.appId, previous.id, 'unreachable', 'The check stopped unexpectedly.'); })
++        .finally(() => verifying.delete(key));
++      return reply({ verifying: true }, 202);
++    }
+     if (body.action === 'allow') {
+       const found = await candidate(user, appId);
+       if (!found || typeof body.version !== 'string' || body.version.length > 100) throw new PilotError('Refresh Inventory and try again.', 400);
+diff --git a/components/hrm/RollbackPanel.tsx b/components/hrm/RollbackPanel.tsx
+index 94562b93b..908c34332 100644
+--- a/components/hrm/RollbackPanel.tsx
++++ b/components/hrm/RollbackPanel.tsx
+@@ -14,8 +14,11 @@ export const ROLLBACK_LABELS = {
+   open: 'Go back to previous version',
+   confirm: 'I checked the versions and groups',
+   allow: 'Allow again',
++  verify: 'Check installer now',
+ } as const;
+ 
++const when = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
++
+ export function RollbackPanel({ appId }: { appId: string }) {
+   const { data, action } = useRollback(appId);
+   const [open, setOpen] = useState(false);
+@@ -39,7 +42,9 @@ export function RollbackPanel({ appId }: { appId: string }) {
+           <p className="text-sm text-text-secondary">
+             If v{data.currentVersion} causes problems, go back to v{data.previousVersion}. Devices in this app&apos;s groups uninstall v{data.currentVersion} and install v{data.previousVersion}.
+           </p>
+-          {data.hold ? (
++          {action.error && !open && <p role="alert" className="mt-2 text-sm text-status-error">{action.error.message}</p>}
++          <Readiness data={data} onVerify={() => action.mutate({ action: 'verify' })} busy={action.isPending} />
++          {blocked(data) ? null : data.hold ? (
+             // HRM patch 0038: the retire hold names Inventory, which is where this panel already is.
+             <p className="mt-2 text-sm text-status-warning">{data.hold === RETIRE_HOLD ? 'Going back isn\u2019t available while this app is being retired.' : data.hold}</p>
+           ) : (
+@@ -108,3 +113,29 @@ export function RollbackPanel({ appId }: { appId: string }) {
+     </div>
+   );
+ }
++
++type Data = NonNullable<ReturnType<typeof useRollback>['data']>;
++/** HRM patch 0039: going back can't work when the previous installer is gone or has changed. */
++const blocked = (data: Data) => data.readiness?.status === 'missing' || data.readiness?.status === 'unsupported' || data.readiness?.checksum === 'mismatch' || data.readiness?.checksum === 'checking';
++
++/** HRM patch 0039: what the last check of the previous installer found. */
++function Readiness({ data, onVerify, busy }: { data: Data; onVerify: () => void; busy: boolean }) {
++  const r = data.readiness;
++  const v = data.previousVersion;
++  if (!r) return <p className="mt-2 text-xs text-text-muted">The v{v} installer hasn&apos;t been checked yet. It is checked at the 3:30 AM and 3:30 PM update checks, Maryland time. {data.canVerify !== false && <button className="text-accent-cyan hover:underline disabled:opacity-50" disabled={busy} onClick={onVerify}>{ROLLBACK_LABELS.verify}</button>}</p>;
++  const verify = r.checksum !== 'checking' && data.canVerify !== false && (
++    <button className="ml-1 text-accent-cyan hover:underline disabled:opacity-50" disabled={busy} onClick={onVerify}>{ROLLBACK_LABELS.verify}</button>
++  );
++  if (r.checksum === 'checking') return <p className="mt-2 text-xs text-text-muted">Checking the v{v} installer&apos;s checksum now. This can take a few minutes. Go back to previous version is hidden until it finishes.</p>;
++  if (r.status === 'unsupported') return <p className="mt-2 text-sm text-status-error">The saved v{v} download link can&apos;t be used. {r.detail} Going back from IntuneGet isn&apos;t possible.</p>;
++  if (r.status === 'missing') return <p className="mt-2 text-sm text-status-error">The v{v} installer no longer downloads. {r.detail} Checked {when(r.checkedAt)}. Going back from IntuneGet isn&apos;t possible. {verify}</p>;
++  if (r.checksum === 'mismatch') return <p className="mt-2 text-sm text-status-error">The v{v} installer has changed since IntuneGet used it, so going back would fail its checksum check. Checked {when(r.checksumCheckedAt!)}. {verify}</p>;
++  return (
++    <p className="mt-2 text-xs text-text-muted">
++      {r.status === 'ready' ? `The v${v} installer still downloads (checked ${when(r.checkedAt)}).` : <span className="text-status-warning">Couldn&apos;t reach the v{v} installer at the last check. {r.detail} The review checks it again before going back.</span>}
++      {r.checksum === 'match' && ` Its checksum matched on ${when(r.checksumCheckedAt!)}.`}
++      {r.checksum === 'unreachable' && r.status === 'ready' && ` The last checksum check couldn\u2019t finish. ${r.detail ?? ''}`}
++      {verify}
++    </p>
++  );
++}
+diff --git a/hooks/useHrmHome.ts b/hooks/useHrmHome.ts
+index 80c68939b..7d6242bf9 100644
+--- a/hooks/useHrmHome.ts
++++ b/hooks/useHrmHome.ts
+@@ -13,6 +13,8 @@ export interface HrmHomeData {
+   installFailures?: Array<{ displayName: string; intuneAppId: string; failed: number }>;
+   // HRM patch 0032
+   unreached?: Array<{ displayName: string; intuneAppId: string; deployedAt: string }>;
++  // HRM patch 0039: newest copies whose previous installer is gone or has changed
++  rollbackGaps?: Array<{ displayName: string; intuneAppId: string; previousVersion: string }>;
+ }
+ 
+ export function useHrmHome() {
+diff --git a/hooks/useRollback.ts b/hooks/useRollback.ts
+index ef47c0054..746ef38e8 100644
+--- a/hooks/useRollback.ts
++++ b/hooks/useRollback.ts
+@@ -12,6 +12,9 @@ export interface RollbackStatus {
+   reason?: string | null;
+   hold?: string | null;
+   skipped?: Array<{ version: string; rolledBackTo: string; at: string }>;
++  // HRM patch 0039: the last check of the previous installer
++  canVerify?: boolean;
++  readiness?: { status: 'ready' | 'missing' | 'unreachable' | 'unsupported'; detail: string | null; checkedAt: string; checksum: 'checking' | 'match' | 'mismatch' | 'missing' | 'unreachable' | null; checksumCheckedAt: string | null } | null;
+ }
+ 
+ export function useRollback(appId: string | null) {
+@@ -29,9 +32,11 @@ export function useRollback(appId: string | null) {
+     if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Your sign-in expired. Reload and sign in again.');
+     const data = await response.json();
+     if (!response.ok) throw new Error(data.error || 'Could not go back to the previous version.');
+-    return data as RollbackStatus & { preview?: RollbackPreview; started?: boolean; jobId?: string; allowed?: boolean };
++    return data as RollbackStatus & { preview?: RollbackPreview; started?: boolean; jobId?: string; allowed?: boolean; verifying?: boolean };
+   };
+-  const query = useQuery({ queryKey: key, queryFn: () => request(), enabled: isAuthenticated && Boolean(appId), staleTime: 15000 });
++  const query = useQuery({ queryKey: key, queryFn: () => request(), enabled: isAuthenticated && Boolean(appId), staleTime: 15000,
++    // HRM patch 0039: follow a checksum check while it runs
++    refetchInterval: (q) => (q.state.data?.readiness?.checksum === 'checking' ? 10000 : false) });
+   const action = useMutation({
+     mutationFn: request,
+     onSuccess: async (data) => {
+diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
+index 9ef032486..a214f423b 100644
+--- a/lib/db/__tests__/job-create.test.ts
++++ b/lib/db/__tests__/job-create.test.ts
+@@ -50,7 +50,7 @@ function readStoredJob(id: string): Record<string, unknown> {
+   const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
+   try {
+     // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts) follow manual mappings, automatic update scope, and webhooks.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(17);
++    expect(stored.pragma('user_version', { simple: true })).toBe(18);
+     return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
+   } finally {
+     stored.close();
+diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
+index 8027fdde1..c5ffa5cf0 100644
+--- a/lib/db/sqlite-migrations.ts
++++ b/lib/db/sqlite-migrations.ts
+@@ -466,6 +466,18 @@ export const MIGRATIONS: SqliteMigration[] = [
+       BEGIN SELECT RAISE(ABORT, 'This app is being retired. See its details in Inventory.'); END;`);
+     },
+   },
++  {
++    version: 18,
++    name: 'rollback readiness (HRM patch 0039)',
++    up: db => {
++      db.exec(`CREATE TABLE IF NOT EXISTS hrm_rollback_readiness (
++        tenant_id TEXT NOT NULL, app_id TEXT NOT NULL COLLATE NOCASE, previous_job_id TEXT NOT NULL, previous_version TEXT NOT NULL,
++        status TEXT NOT NULL, detail TEXT, checked_at TEXT NOT NULL,
++        checksum_status TEXT, checksum_checked_at TEXT,
++        PRIMARY KEY (tenant_id, app_id)
++      )`);
++    },
++  },
+ ];
+ 
+ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 35082adfd..3f0e98d62 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
+ import { createPilotStore } from '@/lib/hrm/pilot-store';
+ import { createRollbackStore } from '@/lib/hrm/rollback-store';
+ import { createRetireStore } from '@/lib/hrm/retire-store';
++import { createRollbackReadinessStore } from '@/lib/hrm/rollback-readiness-store';
+ import { createUpdateScheduleStore } from '@/lib/hrm/update-schedule-store';
+ import { createInstallerBlockStore } from '@/lib/hrm/installer-block';
+ import { createPausedAlertStore } from '@/lib/hrm/paused-auto-update';
+@@ -318,6 +319,7 @@ export const sqlitePausedAlerts = createPausedAlertStore(getDb);
+ export const sqliteAppInsights = createAppInsightsStore(getDb);
+ export const sqliteRollbacks = createRollbackStore(getDb);
+ export const sqliteRetirements = createRetireStore(getDb);
++export const sqliteRollbackReadiness = createRollbackReadinessStore(getDb);
+ 
+ export const sqliteInstallStatus: InstallStatusStore = {
+   async get(tenantId, intuneAppId) {
+diff --git a/lib/hrm/__tests__/installer-check.test.ts b/lib/hrm/__tests__/installer-check.test.ts
+new file mode 100644
+index 000000000..79ff7e41b
+--- /dev/null
++++ b/lib/hrm/__tests__/installer-check.test.ts
+@@ -0,0 +1,40 @@
++import { describe, expect, it, vi } from 'vitest';
++import { createHash } from 'node:crypto';
++import { checkInstallerReachable, verifyInstallerChecksum, isPublicAddress } from '../installer-check';
++const lookup = async () => [{ address: '93.184.216.34' }];
++const url = 'https://download.example.test/app.exe';
++describe('saved installer checks', () => {
++  it.each(['127.0.0.1', '10.1.1.1', '169.254.169.254', '100.64.0.1', '::1', 'fc00::1', 'fe80::1', '::ffff:7f00:1', '2002:7f00:1::'])('refuses nonpublic address %s', address => expect(isPublicAddress(address)).toBe(false));
++  it('refuses unsafe protocols and redirects without sending a second request', async () => {
++    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: { location: 'https://127.0.0.1/secret' } }));
++    expect((await checkInstallerReachable(url, { lookup, fetchImpl })).status).toBe('unsupported');
++    expect(fetchImpl).toHaveBeenCalledTimes(1);
++    expect((await checkInstallerReachable('http://download.example.test/app', { lookup, fetchImpl })).status).toBe('unsupported');
++    expect(fetchImpl).toHaveBeenCalledTimes(1);
++  });
++  it('distinguishes gone files from temporary failures and falls back from HEAD', async () => {
++    const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(null, { status: 405 })).mockResolvedValueOnce(new Response('x', { status: 206 }));
++    expect((await checkInstallerReachable(url, { lookup, fetchImpl })).status).toBe('ready');
++    expect(fetchImpl.mock.calls[1][1]).toMatchObject({ method: 'GET', headers: { Range: 'bytes=0-0' } });
++    for (const [status, result] of [[404, 'missing'], [410, 'missing'], [503, 'unreachable']] as const) {
++      expect((await checkInstallerReachable(url, { lookup, fetchImpl: vi.fn().mockResolvedValue(new Response(null, { status })) })).status).toBe(result);
++    }
++  });
++  it('compares actual bytes and stops oversized downloads', async () => {
++    const digest = createHash('sha256').update('installer').digest('hex');
++    const fetchImpl = vi.fn(async (_url, init) => new Response(init?.method === 'HEAD' ? null : 'installer')) as typeof fetch;
++    expect((await verifyInstallerChecksum(url, digest, { lookup, fetchImpl })).status).toBe('match');
++    expect((await verifyInstallerChecksum(url, 'a'.repeat(64), { lookup, fetchImpl })).status).toBe('mismatch');
++    expect((await verifyInstallerChecksum(url, digest, { lookup, fetchImpl, maxBytes: 2 })).status).toBe('unreachable');
++  });
++  it('marks links the server will never fetch as unsupported, and a missing host as unreachable', async () => {
++    const fetchImpl = vi.fn();
++    expect((await checkInstallerReachable('http://download.example.test/app.exe', { lookup, fetchImpl })).status).toBe('unsupported');
++    expect((await checkInstallerReachable(url, { lookup: async () => [{ address: '10.0.0.5' }], fetchImpl })).status).toBe('unsupported');
++    expect((await checkInstallerReachable(url, { lookup: async () => [], fetchImpl })).status).toBe('unreachable');
++    expect(fetchImpl).not.toHaveBeenCalled();
++  });
++  it('does not let a bad redirect throw out the scheduled run', async () => {
++    expect((await checkInstallerReachable(url, { lookup, fetchImpl: vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: { location: 'https://[' } })) })).status).toBe('unreachable');
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index af62b12ba..c464580f2 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -148,15 +148,24 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'rollback',
+     title: 'Going back to a previous version',
+-    uiLabels: ['Inventory', 'Previous version', 'Go back to previous version', 'I checked the versions and groups', 'Allow again', 'Deployments'],
++    uiLabels: ['Inventory', 'Previous version', 'Go back to previous version', 'I checked the versions and groups', 'Allow again', 'Check installer now', 'Needs attention', 'Deployments'],
+     flow: ['Open the app in Inventory', 'Press Go back to previous version', 'Check versions and groups', 'Press Go back'],
+     points: [
+       'If a new version causes problems, open the app in Inventory. Under Previous version, press Go back to previous version.',
+       'It appears on the newest copy IntuneGet deployed, when IntuneGet also deployed an older version of the app. Custom apps can go back too. Self-updating apps can\'t.',
+-      'The review reads the app and its groups from Intune. Check both versions and the groups, select I checked the versions and groups, then press Go back to v[version].',
++      'Under Previous version, a line shows whether the earlier installer still downloads and when it was checked. IntuneGet checks the saved link at the 3:30 AM and 3:30 PM update checks, Maryland time, without downloading the file.',
++      'Each of these checks stops after 1 minute and starts with the apps checked longest ago. With many apps, some are checked at the next update check instead.',
++      'Press Check installer now to check the link, then download the earlier installer once and compare it with the checksum IntuneGet saved. The file is not kept. The download starts only if the link answers.',
++      'Check installer now doesn\'t show when IntuneGet saved no checksum for the earlier installer.',
++      'A large installer can take several minutes. The line updates when the check finishes, and Go back to previous version is hidden until then. The server runs at most 2 of these checks at a time.',
++      'If the earlier installer no longer downloads, has changed, or its saved link can\'t be used, Go back to previous version is hidden and Home lists the app under Needs attention. Fix a bad update with a newer version instead.',
++      'IntuneGet only downloads https links on public internet hosts. If the saved link is anything else, going back to that version from IntuneGet isn\'t possible.',
++      'A changed installer stays blocked until Check installer now finds a match. A missing one clears when a later check finds the file again.',
++      'If the installer couldn\'t be reached, for example because the download site didn\'t answer or its name couldn\'t be found, you can still open the review. It checks the link again and stops if it still can\'t reach it.',
++      'The review checks the installer link again and reads the app and its groups from Intune. Check both versions and the groups, select I checked the versions and groups, then press Go back to v[version].',
+       'IntuneGet deploys the earlier version again from the installer it used before, as a new copy. It replaces the current copy, so Intune uninstalls the current version and then installs the earlier one.',
+       'The groups move from the current copy to the new one, as with an update. Nothing changes in Intune until packaging finishes, which takes a few minutes. Follow it in Deployments.',
+-      'Before going back, check that the earlier version is safe to reinstall. Some apps keep settings or data that an older version can\'t read.',
++      'Before going back, check that the earlier version is safe to reinstall. A matching checksum only shows the file is unchanged. Some apps keep settings or data that an older version can\'t read.',
+       'Automatic updates then skip the version you went back from. A newer version still updates automatically. Update or Update all on App updates can still deploy it on purpose.',
+       'The version stays skipped even if going back fails.',
+       'To let automatic updates deploy a skipped version again, press Allow again next to it under Previous version.',
+@@ -177,7 +186,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Retire app is refused while a pilot or a deployment for the app is running.',
+       'While a copy is being retired, Update, automatic updates, pilots, going back and deploying from the App catalog are held for every copy of the app. Save to Intune and duplicate cleanup are held for that copy.',
+       'Retiring this app shows how many devices still report it installed or pending. Devices check in over the next hours, so check back later.',
+-      'Devices that failed to uninstall don\'t stop the delete. Check them under Install results first. Home leaves an app being retired out of its install failures and apps that reach no devices.',
++      'Devices that failed to uninstall don\'t stop the delete. Check them under Install results first. Home leaves an app being retired out of its install failures, apps that reach no devices and apps that can\'t go back.',
+       'When none are left, press Delete from Intune, then press Delete from Intune again to confirm. Keep it for now closes the question.',
+       'If some devices never report, for example because they are offline for good, select Delete even though devices still report it before confirming.',
+       'Deleting first removes this app\'s links to apps it replaces or depends on. If another app replaces or depends on it, the delete stops and says which app. Deleting can\'t be undone.',
+diff --git a/lib/hrm/installer-check.ts b/lib/hrm/installer-check.ts
+new file mode 100644
+index 000000000..3b0b972df
+--- /dev/null
++++ b/lib/hrm/installer-check.ts
+@@ -0,0 +1,165 @@
++/**
++ * HRM patch 0039: does a saved installer still download?
++ *
++ * Going back to a previous version (patch 0037) reuses the installer IntuneGet used before, and
++ * vendors sometimes delete old downloads. These checks run on the server, so they only fetch https
++ * addresses on public hosts: every hop of a redirect is checked again, credentials and other ports
++ * are refused, and a host that resolves to a private, loopback or link-local address is refused, so a
++ * saved address can never reach the server's own network. Each connection resolves and validates its
++ * destination again in the socket's own lookup, so a changed DNS answer can't slip past the check.
++ */
++import { lookup as dnsLookup } from 'node:dns/promises';
++import { createHash } from 'node:crypto';
++import { isIP } from 'node:net';
++import { request as httpsRequest } from 'node:https';
++import { Readable } from 'node:stream';
++
++// 'unsupported': the link is not an https address on a public host, so the server will never fetch it.
++export type Reachability = { status: 'ready' | 'missing' | 'unreachable' | 'unsupported'; detail: string | null; finalUrl: string | null };
++type Lookup = (host: string) => Promise<Array<{ address: string }>>;
++export interface CheckOptions { fetchImpl?: typeof fetch; lookup?: Lookup; timeoutMs?: number }
++
++const MAX_REDIRECTS = 5;
++const defaultLookup: Lookup = (host) => dnsLookup(host, { all: true, verbatim: true });
++
++/** True only for addresses on the public internet. */
++export function isPublicAddress(address: string): boolean {
++  const v = isIP(address);
++  if (v === 4) {
++    const [a, b] = address.split('.').map(Number);
++    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
++    if (a === 169 && b === 254) return false;
++    if (a === 172 && b >= 16 && b <= 31) return false;
++    if (a === 192 && b === 168) return false;
++    if (a === 100 && b >= 64 && b <= 127) return false; // carrier-grade NAT
++    if (a === 192 && b === 0) return false;
++    if (a === 198 && (b === 18 || b === 19)) return false;
++    return true;
++  }
++  if (v === 6) {
++    const x = address.toLowerCase();
++    if (x === '::' || x === '::1') return false;
++    if (x.startsWith('::ffff:')) return isPublicAddress(x.slice(7));
++    if (/^f[cd]/.test(x) || /^fe[89ab]/.test(x) || x.startsWith('ff')) return false;
++    // Only global unicast; refuse transition, documentation and special-use ranges.
++    return /^[23]/.test(x) && !x.startsWith('2001:') && !x.startsWith('2002:');
++  }
++  return false;
++}
++
++/** An https address on port 443 with no credentials, or null. */
++export function safeHttpsUrl(raw: string): URL | null {
++  let url: URL;
++  try { url = new URL(raw); } catch { return null; }
++  if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443')) return null;
++  return url;
++}
++
++async function publicHost(url: URL, lookup: Lookup): Promise<'public' | 'private' | 'unresolved'> {
++  const host = url.hostname.replace(/^\[|\]$/g, '');
++  if (isIP(host)) return isPublicAddress(host) ? 'public' : 'private';
++  const answers = await lookup(host).catch(() => []);
++  if (answers.length === 0) return 'unresolved';
++  return answers.every((a) => isPublicAddress(a.address)) ? 'public' : 'private';
++}
++
++/** Native HTTPS keeps the validated DNS answer bound to the actual socket. */
++const publicFetch: typeof fetch = async (input, init) => {
++  const url = new URL(String(input));
++  if (!safeHttpsUrl(url.href)) throw new Error('Unsafe download address');
++  if (isIP(url.hostname.replace(/^\[|\]$/g, '')) && !isPublicAddress(url.hostname.replace(/^\[|\]$/g, ''))) throw new Error('Private address');
++  return new Promise<Response>((resolve, reject) => {
++    const req = httpsRequest(url, {
++      method: init?.method ?? 'GET', signal: init?.signal ?? undefined,
++      headers: Object.fromEntries(new Headers(init?.headers).entries()),
++      lookup(host, _options, callback) {
++        defaultLookup(host).then((answers) => {
++          if (!answers.length || answers.some(a => !isPublicAddress(a.address))) return callback(new Error('Private address'), '', 4);
++          // Node requests all answers when automatic family selection is enabled.
++          if (_options.all) callback(null, answers.map(a => ({ address: a.address, family: isIP(a.address) })) as never, 4);
++          else callback(null, answers[0].address, isIP(answers[0].address));
++        }).catch(error => callback(error, '', 4));
++      },
++    }, response => {
++      const headers = new Headers();
++      for (const [name, value] of Object.entries(response.headers)) {
++        if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
++      }
++      const status = response.statusCode ?? 500;
++      if (init?.method === 'HEAD' || [204, 205, 304].includes(status)) {
++        response.resume(); resolve(new Response(null, { status, headers }));
++      } else {
++        resolve(new Response(Readable.toWeb(response) as ReadableStream<Uint8Array>, { status, headers }));
++      }
++    });
++    req.on('error', reject); req.end();
++  });
++};
++
++/** Follow up to 5 redirects with HEAD (or a 1-byte GET where HEAD isn't allowed). Never downloads the file. */
++export async function checkInstallerReachable(raw: string, options: CheckOptions = {}): Promise<Reachability> {
++  const fetchImpl = options.fetchImpl ?? publicFetch;
++  const lookup = options.lookup ?? defaultLookup;
++  let current = raw;
++  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
++    const url = safeHttpsUrl(current);
++    if (!url) return { status: 'unsupported', detail: 'The download link is not an https address on the standard port.', finalUrl: null };
++    const host = await publicHost(url, lookup);
++    if (host === 'private') return { status: 'unsupported', detail: `${url.hostname} is not a public internet address.`, finalUrl: null };
++    if (host === 'unresolved') return { status: 'unreachable', detail: `${url.hostname} could not be found.`, finalUrl: null };
++    let response: Response;
++    try {
++      const signal = AbortSignal.timeout(options.timeoutMs ?? 15000);
++      response = await fetchImpl(url, { method: 'HEAD', redirect: 'manual', cache: 'no-store', signal });
++      if ([403, 405, 501].includes(response.status)) {
++        response = await fetchImpl(url, { method: 'GET', redirect: 'manual', cache: 'no-store', signal, headers: { Range: 'bytes=0-0' } });
++        await response.body?.cancel().catch(() => undefined);
++      }
++    } catch {
++      return { status: 'unreachable', detail: `${url.hostname} did not answer.`, finalUrl: null };
++    }
++    await response.body?.cancel().catch(() => undefined);
++    if (response.status >= 300 && response.status < 400) {
++      const location = response.headers.get('location');
++      if (!location) return { status: 'unreachable', detail: `${url.hostname} sent a redirect with no address.`, finalUrl: null };
++      try { current = new URL(location, url).href; } catch { return { status: 'unreachable', detail: 'The download sent an invalid redirect.', finalUrl: null }; }
++      continue;
++    }
++    if (response.ok) return { status: 'ready', detail: null, finalUrl: url.href };
++    if (response.status === 404 || response.status === 410) return { status: 'missing', detail: `${url.hostname} says the file is gone (${response.status}).`, finalUrl: null };
++    return { status: 'unreachable', detail: `${url.hostname} answered ${response.status}.`, finalUrl: null };
++  }
++  return { status: 'unreachable', detail: 'The download link redirects too many times.', finalUrl: null };
++}
++
++/** Download once (never saved) and compare the SHA-256 with the one IntuneGet recorded. */
++export async function verifyInstallerChecksum(raw: string, expectedSha256: string, options: CheckOptions & { maxBytes?: number } = {}):
++  Promise<{ status: 'match' | 'mismatch' | 'missing' | 'unreachable'; detail: string | null }> {
++  const reach = await checkInstallerReachable(raw, options);
++  if (reach.status !== 'ready' || !reach.finalUrl) return { status: reach.status === 'missing' ? 'missing' : 'unreachable', detail: reach.detail };
++  const fetchImpl = options.fetchImpl ?? publicFetch;
++  const maxBytes = options.maxBytes ?? 4 * 1024 ** 3;
++  try {
++    const response = await fetchImpl(reach.finalUrl, { redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(options.timeoutMs ?? 15 * 60000) });
++    if (!response.ok || !response.body) {
++      await response.body?.cancel().catch(() => undefined);
++      return { status: [404, 410].includes(response.status) ? 'missing' : 'unreachable', detail: `The download answered ${response.status}.` };
++    }
++    const hash = createHash('sha256');
++    let bytes = 0;
++    const reader = response.body.getReader();
++    for (;;) {
++      const { done, value } = await reader.read();
++      if (done) break;
++      bytes += value.byteLength;
++      if (bytes > maxBytes) { await reader.cancel(); return { status: 'unreachable', detail: 'The download is larger than IntuneGet checks (4 GB).' }; }
++      hash.update(value);
++    }
++    const actual = hash.digest('hex');
++    return actual.toLowerCase() === expectedSha256.trim().toLowerCase()
++      ? { status: 'match', detail: null }
++      : { status: 'mismatch', detail: 'The file at the saved link has changed since IntuneGet used it.' };
++  } catch {
++    return { status: 'unreachable', detail: 'The download stopped before it finished.' };
++  }
++}
+diff --git a/lib/hrm/rollback-readiness-store.ts b/lib/hrm/rollback-readiness-store.ts
+new file mode 100644
+index 000000000..1ccb4c0b5
+--- /dev/null
++++ b/lib/hrm/rollback-readiness-store.ts
+@@ -0,0 +1,43 @@
++/** HRM patch 0039: the last check of each copy's previous installer (one row per Intune app copy). */
++import type Database from 'better-sqlite3';
++
++export type ReadinessStatus = 'ready' | 'missing' | 'unreachable' | 'unsupported';
++export type ChecksumStatus = 'checking' | 'match' | 'mismatch' | 'missing' | 'unreachable';
++export interface Readiness {
++  tenant_id: string; app_id: string; previous_job_id: string; previous_version: string;
++  status: ReadinessStatus; detail: string | null; checked_at: string;
++  checksum_status: ChecksumStatus | null; checksum_checked_at: string | null;
++}
++
++export function createRollbackReadinessStore(getDb: () => Database.Database) {
++  return {
++    get(tenant: string, appId: string): Readiness | null {
++      return (getDb().prepare('SELECT * FROM hrm_rollback_readiness WHERE tenant_id = ? AND app_id = ?').get(tenant, appId) as Readiness) ?? null;
++    },
++    /** A new previous installer clears the old checksum result. */
++    record(row: Omit<Readiness, 'checksum_status' | 'checksum_checked_at'>) {
++      getDb().prepare(`INSERT INTO hrm_rollback_readiness (tenant_id, app_id, previous_job_id, previous_version, status, detail, checked_at) VALUES (?,?,?,?,?,?,?)
++        ON CONFLICT (tenant_id, app_id) DO UPDATE SET status = excluded.status, detail = excluded.detail, checked_at = excluded.checked_at,
++          checksum_status = CASE WHEN previous_job_id = excluded.previous_job_id THEN checksum_status END,
++          checksum_checked_at = CASE WHEN previous_job_id = excluded.previous_job_id THEN checksum_checked_at END,
++          previous_job_id = excluded.previous_job_id, previous_version = excluded.previous_version`)
++        .run(row.tenant_id, row.app_id, row.previous_job_id, row.previous_version, row.status, row.detail, row.checked_at);
++    },
++    checksum(tenant: string, appId: string, previousJobId: string, status: ChecksumStatus, detail: string | null) {
++      const now = new Date().toISOString();
++      return getDb().prepare(`UPDATE hrm_rollback_readiness SET checksum_status = ?, checksum_checked_at = ?,
++          status = CASE WHEN ? = 'missing' THEN 'missing' WHEN ? IN ('match','mismatch') THEN 'ready' ELSE status END,
++          -- Keep the link check's reason on a row whose link didn't answer.
++          detail = CASE WHEN ? = 'checking' OR (? = 'unreachable' AND status != 'ready') THEN detail ELSE ? END,
++          -- A check that couldn't finish says nothing new about the link, so it isn't a fresh check.
++          checked_at = CASE WHEN ? IN ('checking','unreachable') THEN checked_at ELSE ? END
++        WHERE tenant_id = ? AND app_id = ? AND previous_job_id = ?`)
++        .run(status, now, status, status, status, status, detail, status, now, tenant, appId, previousJobId).changes === 1;
++    },
++    remove(tenant: string, appId: string) { getDb().prepare('DELETE FROM hrm_rollback_readiness WHERE tenant_id = ? AND app_id = ?').run(tenant, appId); },
++    /** Copies whose previous installer is gone or has changed (for Home). */
++    gaps(tenant: string): Readiness[] {
++      return getDb().prepare("SELECT * FROM hrm_rollback_readiness WHERE tenant_id = ? AND (status IN ('missing','unsupported') OR checksum_status = 'mismatch') ORDER BY checked_at DESC LIMIT 50").all(tenant) as Readiness[];
++    },
++  };
++}
+diff --git a/lib/hrm/rollback-readiness.ts b/lib/hrm/rollback-readiness.ts
+new file mode 100644
+index 000000000..304c5ee25
+--- /dev/null
++++ b/lib/hrm/rollback-readiness.ts
+@@ -0,0 +1,35 @@
++/**
++ * HRM patch 0039: at each update check (3:30 AM and 3:30 PM), confirm that every app's previous
++ * installer still downloads, so Go back to previous version (patch 0037) works when it's needed.
++ * A light check only (no download); Check installer now compares the checksum on request.
++ */
++import { checkInstallerReachable, type CheckOptions } from './installer-check';
++import { isSelfUpdatingApp } from '@/lib/self-updating-apps';
++
++const CONCURRENCY = 4;
++const RUN_BUDGET_MS = 60000;
++
++export async function runSqliteRollbackReadinessCheck(options: CheckOptions = {}): Promise<{ checked: number; missing: number; unreachable: number }> {
++  const { sqliteAppInsights, sqliteRollbacks, sqliteRollbackReadiness, sqliteRetirements } = await import('@/lib/db/sqlite');
++  // Copies retired and deleted from Intune (patch 0038) can't go back.
++  const deployments = sqliteAppInsights.tracked().filter((d) => sqliteRetirements.latest(d.tenantId, d.appId)?.phase !== 'deleted').sort((a, b) => (sqliteRollbackReadiness.get(a.tenantId, a.appId)?.checked_at ?? '').localeCompare(sqliteRollbackReadiness.get(b.tenantId, b.appId)?.checked_at ?? ''));
++  const result = { checked: 0, missing: 0, unreachable: 0 };
++  let next = 0;
++  const deadline = Date.now() + RUN_BUDGET_MS;
++  const worker = async () => {
++    while (next < deployments.length && Date.now() < deadline) {
++      const d = deployments[next++];
++      const previous = sqliteRollbacks.previousJob(d.tenantId, d.wingetId, d.version, d.appId);
++      // Self-updating apps never go back from IntuneGet (patch 0037), so there is nothing to check.
++      if (!previous?.installer_url || isSelfUpdatingApp(d.wingetId)) { sqliteRollbackReadiness.remove(d.tenantId, d.appId); continue; }
++      const reach = await checkInstallerReachable(previous.installer_url, { timeoutMs: 5000, ...options });
++      sqliteRollbackReadiness.record({ tenant_id: d.tenantId, app_id: d.appId, previous_job_id: previous.id, previous_version: previous.version,
++        status: reach.status, detail: reach.detail, checked_at: new Date().toISOString() });
++      result.checked++;
++      if (reach.status === 'missing' || reach.status === 'unsupported') result.missing++;
++      if (reach.status === 'unreachable') result.unreachable++;
++    }
++  };
++  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
++  return result;
++}
