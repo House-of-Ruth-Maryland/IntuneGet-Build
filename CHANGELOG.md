@@ -2,12 +2,34 @@
 
 ## Unreleased
 
+- Discovered apps: Remove from devices. A guided dialog checks whether IntuneGet can remove the app
+  and, if not, says why and what to do instead. If it can, it adds a removal to the Deployment list
+  (All devices or chosen groups, always Uninstall). Deploying adds "<name> (uninstall only)" to
+  Intune, which uninstalls the program with exactly that name where devices have it, however it was
+  installed, and never installs anything. Inventory then shows Removing this app with live counts
+  and Delete from Intune (patch 0040, SQLite migration 19).
+- Discovered apps: a How Discovered apps works panel shows the install and remove paths and what
+  Claimed, To remove and each match status mean. Claim and Claim all say nothing changes on devices
+  until you deploy. Help's Retire app section is corrected: retiring only removes copies IntuneGet
+  installed (patch 0040).
+- Inventory: the previous version's installer is checked at the 3:30 AM and 3:30 PM update checks,
+  Maryland time (a light check of the link, never a download). Check installer now downloads it
+  once and compares its SHA-256 without keeping it. A missing installer, a changed checksum or a link
+  IntuneGet can't use (not https, or not a public host) hides Go back to previous version and lists
+  the app on Home; a link that didn't answer can be retried. The review checks the link again before
+  going back. Downloads only reach public https hosts, checked again at every redirect and connection,
+  with size, time and two-at-a-time limits. Help explains the checks (patch 0039, SQLite migration 18).
+
+## 2026-11-06 (v0.8.5-hrm.17)
+
 - Inventory: Installation timing edits existing Win32 Required and Available assignments without
   repackaging. Set availability, a Required installation deadline, UTC or device-local time, and
   restart grace/countdown/snooze where supported. Live reviews reject stale changes and preserve
   other assignment settings. Save to Intune keeps live timing for unchanged group/intent pairs.
   Dates apply to this copy; offline devices can install later, and this is not a recurring
   after-hours window or startup/sign-in trigger. Help updated (patch 0041).
+
+## 2026-11-06 (v0.8.5-hrm.16)
 
 - Inventory: Go back to previous version. On the newest copy IntuneGet deployed, it redeploys the
   older version IntuneGet used before (same installer), replacing the current copy so Intune
