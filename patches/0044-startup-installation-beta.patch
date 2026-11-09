@@ -1,0 +1,1879 @@
+diff --git a/.github/scripts/Prepare-StartupPackage.ps1 b/.github/scripts/Prepare-StartupPackage.ps1
+new file mode 100644
+index 000000000..10d83cc0a
+--- /dev/null
++++ b/.github/scripts/Prepare-StartupPackage.ps1
+@@ -0,0 +1,37 @@
++# Packages the opt-in startup installer Beta using the existing reviewed PSADT package.
++[CmdletBinding()]
++param([Parameter(Mandatory=$true)][string]$PackageDirectory)
++$ErrorActionPreference='Stop'
++$config=if ($env:PSADT_CONFIG) { $env:PSADT_CONFIG | ConvertFrom-Json } else { [pscustomobject]@{} }
++$flag=$config.PSObject.Properties['installAfterRestartBeta']
++if (-not $flag -or $flag.Value -eq $false) { return }
++if ($flag.Value -isnot [bool]) { throw 'Invalid startup installer Beta setting.' }
++if ($env:INSTALL_SCOPE -ne 'machine' -or $env:INSTALLER_TYPE -notin @('msi','wix','exe','inno','nullsoft','burn')) { throw 'Startup installer Beta supports machine-wide MSI and EXE apps only.' }
++if ($config.customDetection -eq $true -or ($env:ESP_PROFILES -and @($env:ESP_PROFILES | ConvertFrom-Json).Count -gt 0) -or $env:SUPERSEDENCE_TYPE -eq 'replace') { throw 'Startup installer Beta requires automatic detection, no setup profiles and update supersedence.' }
++if ($config.restartBehavior -and $config.restartBehavior -ne 'Suppress') { throw 'Startup installer Beta requires suppressed restarts.' }
++if ($env:RELATIONSHIPS) { foreach ($relationship in @($env:RELATIONSHIPS | ConvertFrom-Json)) { if ($relationship.relationshipType -eq 'supersedence' -and $relationship.supersedenceType -eq 'replace') { throw 'Startup installer Beta requires update supersedence.' } } }
++$job=[guid]::Empty
++if (-not [guid]::TryParse($env:JOB_ID,[ref]$job) -or $env:WINGET_ID -notmatch '^[A-Za-z0-9_.-]{1,256}$') { throw 'Invalid startup package identity.' }
++$root=if ($config.registryMarkerPath) { [string]$config.registryMarkerPath } else { 'SOFTWARE\IntuneGet\Apps' }
++$root=$root.Trim().Replace('/','\') -replace '\\+', '\'
++$root=$root.Trim('\') -replace '^(HKLM|HKCU|HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER):?(\\|$)', ''
++$root=$root -replace '[*?"''<>|\x00-\x1f]', ''
++$root=(@($root.Split('\') | ForEach-Object {$_.Trim()} | Where-Object {$_}) -join '\')
++if ($root -notmatch '^SOFTWARE\\') { throw 'Startup installer Beta requires a SOFTWARE registry marker.' }
++$sha=[Security.Cryptography.SHA256]::Create()
++try {$appKey=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($env:WINGET_ID.ToLowerInvariant())))).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()}
++$created=[DateTimeOffset]::MinValue
++if (-not [DateTimeOffset]::TryParse($env:JOB_CREATED_AT,[ref]$created)) { throw 'Startup packages require the original deployment creation time.' }
++$metadata=[ordered]@{v=1;createdAt=$created.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ss.fffZ');jobId=$job.ToString();appKey=$appKey;version=$env:VERSION;marker=$root+'\'+($env:WINGET_ID -replace '[.\-]','_')}
++$runner=Join-Path $PSScriptRoot 'IntuneGet-StartupInstall.ps1'
++if (-not (Test-Path -LiteralPath $runner)) { $runner=Join-Path $PSScriptRoot '..\..\packager\scripts\IntuneGet-StartupInstall.ps1' }
++Copy-Item -LiteralPath $runner -Destination (Join-Path $PackageDirectory 'IntuneGet-StartupInstall.ps1') -Force
++[IO.File]::WriteAllText((Join-Path $PackageDirectory 'startup-config.json'),($metadata | ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
++$uninstall=@'
++@echo off
++"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0IntuneGet-StartupInstall.ps1" -Mode Cancel
++if errorlevel 1 exit /b %errorlevel%
++"%~dp0Invoke-AppDeployToolkit.exe" -DeploymentType Uninstall -DeployMode Silent
++exit /b %errorlevel%
++'@
++[IO.File]::WriteAllText((Join-Path $PackageDirectory 'Uninstall-AfterRestart.cmd'),($uninstall -replace "`r?`n","`r`n"),[Text.Encoding]::ASCII)
+diff --git a/.github/workflows-reference/package-intunewin.yml b/.github/workflows-reference/package-intunewin.yml
+index 56084a96c..1172a39a4 100644
+--- a/.github/workflows-reference/package-intunewin.yml
++++ b/.github/workflows-reference/package-intunewin.yml
+@@ -20,6 +20,7 @@ jobs:
+       # Map client_payload to environment variables for use in steps
+       # Payload is grouped into: job, app, installer, config (GitHub limits to 10 top-level properties)
+       JOB_ID: ${{ github.event.client_payload.job.jobId }}
++      JOB_CREATED_AT: ${{ github.event.client_payload.job.createdAt }}
+       TENANT_ID: ${{ github.event.client_payload.job.tenantId }}
+       CALLBACK_URL: ${{ github.event.client_payload.job.callbackUrl }}
+       WINGET_ID: ${{ github.event.client_payload.app.wingetId }}
+@@ -1191,6 +1192,10 @@ jobs:
+             [System.IO.File]::WriteAllText($scriptPath, $content, [System.Text.UTF8Encoding]::new($true))
+           }
+ 
++      - name: Prepare startup installation Beta
++        run: |
++          & "$env:GITHUB_WORKSPACE\startup\Prepare-StartupPackage.ps1" -PackageDirectory "$env:GITHUB_WORKSPACE\package"
++
+       - name: Create IntuneWin package
+         env:
+           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+@@ -1704,8 +1709,8 @@ jobs:
+             description = $descriptionWithSource
+             largeIcon = $largeIcon
+             fileName = "$env:PACKAGE_FILENAME"
+-            installCommandLine = "Invoke-AppDeployToolkit.exe$deployModeFlag"
+-            uninstallCommandLine = "Invoke-AppDeployToolkit.exe -DeploymentType Uninstall$deployModeFlag"
++            installCommandLine = if ($psadtConfig.installAfterRestartBeta -eq $true) { 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\IntuneGet-StartupInstall.ps1 -Mode Stage' } else { "Invoke-AppDeployToolkit.exe$deployModeFlag" }
++            uninstallCommandLine = if ($psadtConfig.installAfterRestartBeta -eq $true) { 'cmd.exe /d /c Uninstall-AfterRestart.cmd' } else { "Invoke-AppDeployToolkit.exe -DeploymentType Uninstall$deployModeFlag" }
+             applicableArchitectures = $mappedApplicableArchitecture
+             installExperience = @{
+               runAsAccount = if ($env:INSTALL_SCOPE -eq "user") { "user" } else { "system" }
+diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
+index 8ec374871..aa5216879 100644
+--- a/app/(app)/dashboard/updates/page.tsx
++++ b/app/(app)/dashboard/updates/page.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import { StartupInstallations } from '@/components/hrm/StartupInstallations';
+ 
+ import type { AutoUpdateScope } from '@/types/update-policies';
+ import { isCustomAppId } from '@/lib/hrm/new-version';
+@@ -635,6 +636,7 @@ export default function UpdatesPage() {
+       {!mspTenantSelectionRequired && <>
+         <InstallationPolicyPanel key={tenantId || 'current'} apps={autoUpdatePolicies} />
+         <UpdateSchedule />
++        <StartupInstallations key={`startup:${tenantId || 'current'}`} />
+         <section aria-label="How automatic updates work" className="grid gap-4 rounded-xl border border-overlay/10 bg-bg-surface p-5 sm:grid-cols-3">
+           <div><h2 className="text-sm font-semibold text-text-primary">1. Find a new version</h2><p className="mt-1 text-xs text-text-secondary">The server checks twice daily. The publishing schedule holds new automatic releases until allowed.</p></div>
+           <div><h2 className="text-sm font-semibold text-text-primary">2. Publish to Intune</h2><p className="mt-1 text-xs text-text-secondary">Packaging and publishing appear in Publishing history. Published does not mean installed.</p></div>
+diff --git a/app/api/cron/collect-startup-installations/route.ts b/app/api/cron/collect-startup-installations/route.ts
+new file mode 100644
+index 000000000..32080a7c0
+--- /dev/null
++++ b/app/api/cron/collect-startup-installations/route.ts
+@@ -0,0 +1,12 @@
++import { NextResponse } from 'next/server';
++import { isSqliteMode } from '@/lib/db';
++import { GUID } from '@/lib/hrm/startup-report';
++export const maxDuration = 300;
++export async function GET(request: Request) {
++  if (!process.env.CRON_SECRET || request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
++  if (!isSqliteMode() || !GUID.test(process.env.HRM_STARTUP_REPORT_SCRIPT_ID ?? '')) return NextResponse.json({ skipped: true });
++  const { sqliteStartupReports: store } = await import('@/lib/db/sqlite');
++  const { refreshStartupReport } = await import('@/lib/hrm/startup-report-check');
++  for (const tenant of store.tenants()) await refreshStartupReport(tenant);
++  return NextResponse.json({ success: true });
++}
+diff --git a/app/api/hrm/installation-policy/route.test.ts b/app/api/hrm/installation-policy/route.test.ts
+index dc50fe530..a4f199f59 100644
+--- a/app/api/hrm/installation-policy/route.test.ts
++++ b/app/api/hrm/installation-policy/route.test.ts
+@@ -1,4 +1,5 @@
+ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++import type { DeploymentConfig } from '@/types/update-policies';
+ import { NextRequest } from 'next/server';
+ const state = vi.hoisted(() => { vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('DATABASE_PATH', ':memory:'); return { auth: true, tenant: 'one' }; });
+ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.auth ? { tenantId: state.tenant, userId: 'staff' } : null }));
+@@ -26,3 +27,31 @@ it('sets and removes an exception only for a matching auto-update app', async ()
+   state.tenant = 'two'; expect((await POST(request({ action: 'inherit', appId: 'Vendor.App' }))).status).toBe(404); state.tenant = 'one';
+   expect((await (await POST(request({ action: 'inherit', appId: 'Vendor.App' }))).json()).exceptions).toEqual([]);
+ });
++
++const baseConfig = { displayName: 'Fixture app', installScope: 'machine', installerType: 'msi' } as DeploymentConfig;
++const restartRequest = () => request({ action: 'save', appId: 'Vendor.App', policy: { mode: 'restart', days: 3 } });
++it.each([
++  [{ espProfiles: [{ id: 'fixture-profile', displayName: 'Fixture setup' }] }, 'New computer setup'],
++  [{ relationships: [{ relationshipType: 'supersedence', supersedenceType: 'replace' }] }, 'update supersedence'],
++  [{ supersedenceType: 'replace' }, 'update supersedence'],
++])('rejects an incompatible saved deployment before saving a restart exception: %j', async (fields, message) => {
++  await sqliteDb.updatePolicies.upsert({ user_id: 'staff', tenant_id: 'one', winget_id: 'Vendor.App', policy_type: 'auto_update', deployment_config: { ...baseConfig, ...fields } as DeploymentConfig });
++  const response = await POST(restartRequest());
++  expect(response.status).toBe(400); expect((await response.json()).error).toContain(message);
++  expect((await (await GET(request())).json()).exceptions).toEqual([]);
++});
++it('accepts an eligible update relationship and exposes its eligibility', async () => {
++  await sqliteDb.updatePolicies.upsert({ user_id: 'staff', tenant_id: 'one', winget_id: 'Vendor.App', policy_type: 'auto_update', deployment_config: { ...baseConfig, relationships: [{ relationshipType: 'supersedence', supersedenceType: 'update', targetId: 'fixture-app', targetDisplayName: 'Fixture' }] } });
++  const response = await POST(restartRequest());
++  expect(response.status).toBe(200);
++  expect((await response.json()).restartEligibility).toEqual([{ appId: 'vendor.app', problem: null }]);
++});
++it('checks setup profiles in the current deployed package, including an old deployment', async () => {
++  await sqliteDb.updatePolicies.upsert({ user_id: 'staff', tenant_id: 'one', winget_id: 'Vendor.App', policy_type: 'auto_update', deployment_config: baseConfig });
++  const job = await sqliteDb.jobs.create({ user_id: 'staff', tenant_id: 'one', winget_id: 'Vendor.App', display_name: 'Fixture app', installer_type: 'msi', installer_url: 'https://example.test/fixture.msi', version: '1.0', status: 'deployed', package_config: { espProfiles: [{ id: 'fixture-profile', displayName: 'Fixture setup' }] } });
++  await sqliteDb.jobs.update(job.id, { intune_app_id: 'fixture-current', completed_at: '2020-01-01T00:00:00.000Z' });
++  await sqliteDb.updateCheckResults.upsert({ user_id: 'staff', tenant_id: 'one', winget_id: 'Vendor.App', intune_app_id: 'fixture-current', display_name: 'Fixture app', current_version: '1.0', latest_version: '2.0' });
++  const response = await POST(restartRequest());
++  expect(response.status).toBe(400); expect((await response.json()).error).toContain('New computer setup');
++  expect((await (await GET(request())).json()).restartEligibility).toEqual([{ appId: 'vendor.app', problem: 'The startup installer Beta cannot be used for New computer setup.' }]);
++});
+diff --git a/app/api/hrm/installation-policy/route.ts b/app/api/hrm/installation-policy/route.ts
+index dbe70b9de..faf409c67 100644
+--- a/app/api/hrm/installation-policy/route.ts
++++ b/app/api/hrm/installation-policy/route.ts
+@@ -1,17 +1,46 @@
++import type { AppUpdatePolicy } from '@/types/update-policies';
++import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
+ import { NextRequest, NextResponse } from 'next/server';
+ import { parseAccessToken } from '@/lib/auth-utils';
+ import { isSqliteMode } from '@/lib/db';
+ import { installationPolicyError, type InstallationPolicy } from '@/lib/hrm/installation-policy';
+ const reply = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
+-async function view(tenant: string) {
++async function restartProblem(policy: AppUpdatePolicy): Promise<string | null> {
++  const config = policy.deployment_config;
++  const savedProblem = startupInstallationProblem({ ...config, customDetection: config?.psadtConfig?.customDetection });
++  if (savedProblem) return savedProblem;
++  const { sqliteDb } = await import('@/lib/db/sqlite');
++  // The auto-update snapshot can predate later setup-profile changes. Check the
++  // current published package as well, before accepting a restart exception.
++  const updates = await sqliteDb.updateCheckResults.list(policy.user_id, { tenantId: policy.tenant_id });
++  const appIds = [...new Set(updates.filter(row => row.winget_id.toLowerCase() === policy.winget_id.toLowerCase()).map(row => row.intune_app_id))];
++  const current = appIds.length
++    ? await Promise.all(appIds.map(appId => sqliteDb.jobs.getLatestDeployed(policy.user_id, policy.tenant_id, policy.winget_id, appId)))
++    : [await sqliteDb.jobs.getLatestDeployed(policy.user_id, policy.tenant_id, policy.winget_id)];
++  for (const job of current) {
++    const packageConfig = job?.package_config;
++    if (!job || !packageConfig || typeof packageConfig !== 'object' || Array.isArray(packageConfig)) continue;
++    const problem = startupInstallationProblem({ ...config,
++      espProfiles: Array.isArray(packageConfig.espProfiles) ? packageConfig.espProfiles : config?.espProfiles,
++      relationships: Array.isArray(packageConfig.relationships) ? packageConfig.relationships as unknown as NonNullable<typeof config>['relationships'] : config?.relationships,
++      supersedenceType: typeof packageConfig.supersedenceType === 'string' ? packageConfig.supersedenceType : config?.supersedenceType,
++      customDetection: config?.psadtConfig?.customDetection });
++    if (problem) return problem;
++  }
++  return null;
++}
++async function view(tenant: string, userId: string) {
+   const { sqliteInstallationPolicies: store } = await import('@/lib/db/sqlite');
+-  return { supported: true, shared: store.shared(tenant), exceptions: store.exceptions(tenant) };
++  const { sqliteDb } = await import('@/lib/db/sqlite');
++  const policies = (await sqliteDb.updatePolicies.list(userId, tenant)).filter(policy => policy.policy_type === 'auto_update');
++  const restartEligibility = await Promise.all(policies.map(async policy => ({ appId: policy.winget_id.toLowerCase(), problem: await restartProblem(policy) })));
++  return { supported: true, shared: store.shared(tenant), exceptions: store.exceptions(tenant), restartEligibility };
+ }
+ export async function GET(request: NextRequest) {
+   const user = await parseAccessToken(request.headers.get('Authorization'));
+   if (!user) return reply({ error: 'Authentication required' }, 401);
+   if (!isSqliteMode()) return reply({ supported: false });
+-  return reply(await view(user.tenantId));
++  return reply(await view(user.tenantId, user.userId));
+ }
+ export async function POST(request: NextRequest) {
+   const user = await parseAccessToken(request.headers.get('Authorization'));
+@@ -32,7 +61,13 @@ export async function POST(request: NextRequest) {
+     const problem = installationPolicyError(body.policy);
+     if (problem) return reply({ error: problem }, 400);
+     const { mode, days } = body.policy as InstallationPolicy;
++    if (mode === 'restart') {
++      if (!body.appId) return reply({ error: 'Install after next restart · Beta is available only as an app exception for pilot testing.' }, 400);
++      const policy = (await sqliteDb.updatePolicies.list(user.userId, user.tenantId)).find(p => p.winget_id.toLowerCase() === body.appId.toLowerCase());
++      const problem = policy ? await restartProblem(policy) : 'Choose an app with auto-update enabled for your account.';
++      if (problem) return reply({ error: problem }, 400);
++    }
+     store.save(user.tenantId, body.appId, { mode, days });
+   }
+-  return reply(await view(user.tenantId));
++  return reply(await view(user.tenantId, user.userId));
+ }
+diff --git a/app/api/hrm/startup-installations/route.test.ts b/app/api/hrm/startup-installations/route.test.ts
+new file mode 100644
+index 000000000..4112b9e4c
+--- /dev/null
++++ b/app/api/hrm/startup-installations/route.test.ts
+@@ -0,0 +1,39 @@
++import { beforeEach, afterEach, expect, it, vi } from 'vitest';
++import { NextRequest } from 'next/server';
++const state=vi.hoisted(()=>{vi.stubEnv('DATABASE_MODE','sqlite');vi.stubEnv('DATABASE_PATH',':memory:');return{auth:true,tenant:'one'}});
++vi.mock('@/lib/auth-utils',()=>({parseAccessToken:async()=>state.auth?{tenantId:state.tenant,userId:'staff'}:null}));
++vi.mock('@/lib/db',()=>({isSqliteMode:()=>true}));
++vi.mock('@/lib/hrm/startup-report-check',()=>({refreshStartupReport:vi.fn()}));
++import {closeSqliteDb,sqliteStartupReports} from '@/lib/db/sqlite';
++import {collectStartupReport} from '@/lib/hrm/startup-report';
++import {GET,POST} from './route';
++const request=()=>new NextRequest('http://localhost/api/hrm/startup-installations');
++beforeEach(()=>{closeSqliteDb();state.auth=true;state.tenant='one';vi.stubEnv('HRM_STARTUP_REPORT_SCRIPT_ID','11111111-1111-4111-8111-111111111111')});
++afterEach(()=>closeSqliteDb());
++it('requires sign-in for reads and refreshes',async()=>{state.auth=false;expect((await GET(request())).status).toBe(401);expect((await POST(request())).status).toBe(401)});
++it('keeps tenant snapshots isolated and preserves the last success after a read failure',async()=>{
++ const report=collectStartupReport([],[]);sqliteStartupReports.save('one',report);
++ const before=sqliteStartupReports.read('one');sqliteStartupReports.save('one',null,'access_denied');
++ const after=await(await GET(request())).json();expect(after.report).toEqual(report);expect(after.error).toBe('access_denied');expect(after.checkedAt).toBe(before.checkedAt);
++ state.tenant='two';expect((await(await GET(request())).json()).report).toBeUndefined();
++});
++it('reports not configured separately from zero installations',async()=>{vi.stubEnv('HRM_STARTUP_REPORT_SCRIPT_ID','');const result=await(await GET(request())).json();expect(result.configured).toBe(false);expect(result.report).toBeUndefined()});
++
++it('downloads cancellation only for an authenticated tenant-owned Beta package without embedding executable metadata',async()=>{
++ const {sqliteDb}=await import('@/lib/db/sqlite');
++ const id='33333333-3333-4333-8333-333333333333';
++ await sqliteDb.jobs.create({id,user_id:'staff',tenant_id:'one',winget_id:'Vendor.App',version:"2.0';Write-Output INJECTION",display_name:'Fixture app',installer_type:'msi',installer_url:'https://example.invalid/setup.msi',package_config:{psadtConfig:{installAfterRestartBeta:true}}});
++ const url='http://localhost/api/hrm/startup-installations?download=cancel&jobId='+id;
++ const response=await GET(new NextRequest(url));expect(response.status).toBe(200);
++ const script=await response.text();expect(script).toContain(id);expect(script).not.toContain('Write-Output INJECTION');expect(script).toContain('protected tombstone');
++ state.tenant='two';expect((await GET(new NextRequest(url))).status).toBe(404);
++});
++
++it('lists cancellable tenant packages even before optional reporting is configured',async()=>{
++ vi.stubEnv('HRM_STARTUP_REPORT_SCRIPT_ID','');
++ const {sqliteDb}=await import('@/lib/db/sqlite');
++ const id='44444444-4444-4444-8444-444444444444';
++ await sqliteDb.jobs.create({id,user_id:'staff',tenant_id:'one',winget_id:'Vendor.App',version:'2',display_name:'Fixture app',installer_type:'msi',installer_url:'https://example.invalid/setup.msi',package_config:{psadtConfig:{installAfterRestartBeta:true}}});
++ expect(await(await GET(request())).json()).toMatchObject({configured:false,packages:[{id,name:'Fixture app',version:'2'}]});
++ state.tenant='two';expect((await(await GET(request())).json()).packages).toEqual([]);
++});
+diff --git a/app/api/hrm/startup-installations/route.ts b/app/api/hrm/startup-installations/route.ts
+new file mode 100644
+index 000000000..c2415af65
+--- /dev/null
++++ b/app/api/hrm/startup-installations/route.ts
+@@ -0,0 +1,41 @@
++import { createHash } from 'node:crypto';
++import { readFile } from 'node:fs/promises';
++import path from 'node:path';
++import { NextRequest, NextResponse } from 'next/server';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { isSqliteMode } from '@/lib/db';
++import { GUID, STARTUP_FRESH_MS } from '@/lib/hrm/startup-report';
++export const maxDuration = 120;
++const reply = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
++async function read(tenant: string) {
++  const { sqliteStartupReports: store } = await import('@/lib/db/sqlite');
++  const configured = GUID.test(process.env.HRM_STARTUP_REPORT_SCRIPT_ID ?? '');
++  const packages = store.jobs(tenant);
++  if (!configured) return { supported: true, configured: false, packages };
++  const result = store.read(tenant);
++  return { supported: true, configured: true, packages, ...result, stale: !result.checkedAt || Date.now() - Date.parse(result.checkedAt) > STARTUP_FRESH_MS };
++}
++export async function GET(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return reply({ error: 'Authentication required' }, 401);
++  if (!isSqliteMode()) return reply({ supported: false, configured: false });
++  if (request.nextUrl.searchParams.get('download') === 'cancel') {
++    const jobId = request.nextUrl.searchParams.get('jobId') ?? '';
++    if (!GUID.test(jobId)) return reply({ error: 'Choose a startup Beta package.' }, 400);
++    const { sqliteStartupReports: store } = await import('@/lib/db/sqlite');
++    const job = store.cancellation(user.tenantId, jobId);
++    if (!job) return reply({ error: 'Startup Beta package not found.' }, 404);
++    const template = await readFile(path.join(process.cwd(), 'public/startup-beta/Cancel-StartupTemplate.ps1'), 'utf8');
++    const script = template.replaceAll('__JOB_ID__', job.id.toLowerCase()).replaceAll('__APP_KEY__', createHash('sha256').update(job.wingetId.toLowerCase()).digest('hex')).replaceAll('__VERSION_BASE64__', Buffer.from(job.version, 'utf8').toString('base64'));
++    return new NextResponse(script, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': 'attachment; filename="Cancel-startup-beta.ps1"', 'Cache-Control': 'private, no-store' } });
++  }
++  return reply(await read(user.tenantId));
++}
++export async function POST(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return reply({ error: 'Authentication required' }, 401);
++  if (!isSqliteMode()) return reply({ supported: false, configured: false });
++  const { refreshStartupReport } = await import('@/lib/hrm/startup-report-check');
++  await refreshStartupReport(user.tenantId);
++  return reply(await read(user.tenantId));
++}
+diff --git a/app/api/package/route.ts b/app/api/package/route.ts
+index a531ae9a4..c89f3b466 100644
+--- a/app/api/package/route.ts
++++ b/app/api/package/route.ts
+@@ -1,3 +1,4 @@
++import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
+ import { isQaMaintenanceMode } from '@/lib/qa/maintenance';
+ import { dispatchFailureFields } from '@/lib/hrm/dispatch-failure';
+ import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
+@@ -199,6 +200,12 @@ export async function POST(request: NextRequest) {
+       if (psadtConfig !== undefined && (psadtConfig === null || typeof psadtConfig !== 'object' || Array.isArray(psadtConfig))) {
+         return NextResponse.json({ error: 'Invalid PSADT settings' }, { status: 400 });
+       }
++      const startup = (psadtConfig as { installAfterRestartBeta?: unknown } | undefined)?.installAfterRestartBeta;
++      if (startup !== undefined && typeof startup !== 'boolean') return NextResponse.json({ error: 'Invalid startup installer Beta setting.' }, { status: 400 });
++      if (startup === true) {
++        const problem = isStoreCartItem(item) ? 'The startup installer Beta does not support Store apps.' : startupInstallationProblem({ installScope: item.installScope, installerType: item.installerType, customDetection: item.psadtConfig?.customDetection, relationships: item.relationships, espProfiles: item.espProfiles, removal: !!item.hrmRemoval });
++        if (problem) return NextResponse.json({ error: problem }, { status: 400 });
++      }
+       const flag = (item as unknown as { psadtConfig?: { customDetection?: unknown } }).psadtConfig?.customDetection;
+       if (flag !== undefined && typeof flag !== 'boolean') {
+         return NextResponse.json({ error: 'Invalid custom detection setting' }, { status: 400 });
+diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
+index c50a6c86b..80301a840 100644
+--- a/components/CartItemConfig.tsx
++++ b/components/CartItemConfig.tsx
+@@ -1,5 +1,7 @@
+ 'use client';
+ 
++import { StartupInstallChoice } from '@/components/hrm/StartupInstallChoice';
++import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
+ import { settingsSummaries } from '@/lib/hrm/settings-summary';
+ 
+ import { useEffect, useRef, useState } from 'react';
+@@ -564,6 +566,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                 onToggle={() => toggleSection('behavior')}
+               >
+                 <div className="space-y-4">
++                  <StartupInstallChoice value={config.installAfterRestartBeta === true} problem={startupInstallationProblem({ installScope: selectedScope, installerType: isWin32 ? item.installerType : '', customDetection: config.customDetection, relationships, espProfiles, removal })} onChange={value => updateConfig({ installAfterRestartBeta: value, ...(value ? { deployMode: 'Silent', allowDefer: false, restartBehavior: 'Suppress' } : {}) })} />
+                   {/* Deploy Mode */}
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
+index 5f9d647ae..ed58ff4f3 100644
+--- a/components/PackageConfig.tsx
++++ b/components/PackageConfig.tsx
+@@ -1,5 +1,7 @@
+ 'use client';
+ 
++import { StartupInstallChoice } from '@/components/hrm/StartupInstallChoice';
++import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
+ import { settingsSummaries } from '@/lib/hrm/settings-summary';
+ 
+ import { useState, useEffect, useRef, useMemo, useId } from 'react';
+@@ -1177,6 +1179,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                 onToggle={() => toggleSection('behavior')}
+               >
+                 <div className="space-y-4">
++                  <StartupInstallChoice value={config.installAfterRestartBeta === true} problem={startupInstallationProblem({ installScope: selectedScope, installerType: selectedInstaller?.type, customDetection: config.customDetection, relationships, espProfiles })} onChange={value => updateConfig({ installAfterRestartBeta: value, ...(value ? { deployMode: 'Silent', allowDefer: false, restartBehavior: 'Suppress' } : {}) })} />
+                   {/* Deploy Mode */}
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+diff --git a/components/hrm/InstallationPolicyPanel.test.ts b/components/hrm/InstallationPolicyPanel.test.ts
+index 8472e5a46..6046b19bb 100644
+--- a/components/hrm/InstallationPolicyPanel.test.ts
++++ b/components/hrm/InstallationPolicyPanel.test.ts
+@@ -2,15 +2,15 @@
+ import { act, createElement } from 'react';
+ import { createRoot, type Root } from 'react-dom/client';
+ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+-import type { AppUpdatePolicy } from '@/types/update-policies';
+-const state = vi.hoisted(() => ({ mutate: vi.fn(), reset: vi.fn() }));
+-vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { supported: true, shared: { mode: 'existing', days: 3 }, exceptions: [{ appId: 'vendor.app', mode: 'silent', days: 3 }] }, action: { mutate: state.mutate, reset: state.reset, isPending: false } }) }));
++import type { AppUpdatePolicy, DeploymentConfig } from '@/types/update-policies';
++const state = vi.hoisted(() => ({ mutate: vi.fn(), reset: vi.fn(), exceptionMode: 'silent', eligibility: undefined as { appId: string; problem: string | null }[] | undefined }));
++vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { supported: true, shared: { mode: 'existing', days: 3 }, exceptions: [{ appId: 'vendor.app', mode: state.exceptionMode, days: 3 }], restartEligibility: state.eligibility }, action: { mutate: state.mutate, reset: state.reset, isPending: false } }) }));
+ import { InstallationPolicyPanel } from './InstallationPolicyPanel';
+ let root: Root;
+ (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+ const apps = [{ id: 'policy', winget_id: 'Vendor.App', deployment_config: { displayName: 'Vendor App' } }] as AppUpdatePolicy[];
+ const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.textContent === label)!;
+-beforeEach(async () => { state.mutate.mockReset(); const node = document.createElement('div'); document.body.append(node); root = createRoot(node); await act(async () => root.render(createElement(InstallationPolicyPanel, { apps }))); });
++beforeEach(async () => { state.mutate.mockReset(); state.exceptionMode = 'silent'; state.eligibility = undefined; apps[0].deployment_config = { displayName: 'Vendor App', installScope: 'machine', installerType: 'msi' } as DeploymentConfig; const node = document.createElement('div'); document.body.append(node); root = createRoot(node); await act(async () => root.render(createElement(InstallationPolicyPanel, { apps }))); });
+ afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
+ it('opens a labeled right-side panel with a three-day draft without activating it until Save', async () => {
+   expect(document.querySelector('[role="dialog"]')).toBeNull();
+@@ -32,3 +32,38 @@ it('lets an app return to inheritance without rewriting the shared policy', asyn
+   await act(async () => button('Use shared policy').click());
+   expect(state.mutate.mock.calls[0][0]).toMatchObject({ action: 'inherit', appId: 'vendor.app' });
+ });
++
++it.each([
++  [{ espProfiles: [{ id: 'fixture-profile', displayName: 'Fixture setup' }] }, 'New computer setup'],
++  [{ relationships: [{ relationshipType: 'supersedence', supersedenceType: 'replace' }] }, 'update supersedence'],
++])('explains an incompatible restart setting and blocks resaving an existing exception: %j', async (fields, message) => {
++  state.exceptionMode = 'restart';
++  apps[0].deployment_config = { ...apps[0].deployment_config, ...fields } as DeploymentConfig;
++  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps })));
++  await act(async () => button('Edit app exception').click());
++  expect(document.querySelector<HTMLInputElement>('input[value="restart"]')!.disabled).toBe(true);
++  expect(document.body.textContent).toContain(message);
++  expect(button('Save app exception').disabled).toBe(true);
++  await act(async () => button('Save app exception').click());
++  expect(state.mutate).not.toHaveBeenCalled();
++  const automatic = document.querySelector<HTMLInputElement>('input[value="silent"]')!;
++  await act(async () => automatic.click());
++  expect(button('Save app exception').disabled).toBe(false);
++});
++it('shows restrictions found in the current package by the server', async () => {
++  state.eligibility = [{ appId: 'vendor.app', problem: 'The startup installer Beta cannot be used for New computer setup.' }];
++  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps })));
++  await act(async () => button('Edit app exception').click());
++  expect(document.querySelector<HTMLInputElement>('input[value="restart"]')!.disabled).toBe(true);
++  expect(document.body.textContent).toContain('New computer setup');
++});
++it('allows restart for an eligible saved update relationship', async () => {
++  apps[0].deployment_config = { ...apps[0].deployment_config, relationships: [{ relationshipType: 'supersedence', supersedenceType: 'update', targetId: 'fixture-app', targetDisplayName: 'Fixture' }] } as DeploymentConfig;
++  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps })));
++  await act(async () => button('Edit app exception').click());
++  const restart = document.querySelector<HTMLInputElement>('input[value="restart"]')!;
++  expect(restart.disabled).toBe(false);
++  await act(async () => restart.click());
++  await act(async () => button('Save app exception').click());
++  expect(state.mutate.mock.calls[0][0]).toMatchObject({ policy: { mode: 'restart' } });
++});
+diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
+index 9f3a4bfeb..83ddf1a41 100644
+--- a/components/hrm/InstallationPolicyPanel.tsx
++++ b/components/hrm/InstallationPolicyPanel.tsx
+@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
+ import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+ import { useInstallationPolicy } from '@/hooks/useInstallationPolicy';
+ import { installationPolicySummary, type InstallationPolicy } from '@/lib/hrm/installation-policy';
++import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
+ import type { AppUpdatePolicy } from '@/types/update-policies';
+ 
+ export function InstallationPolicyPanel({ apps }: { apps: AppUpdatePolicy[] }) {
+@@ -16,6 +17,11 @@ export function InstallationPolicyPanel({ apps }: { apps: AppUpdatePolicy[] }) {
+   const [saved, setSaved] = useState(false);
+   if (data?.supported === false) return null;
+   const exceptions = data?.exceptions ?? [];
++  const selectedConfig = apps.find(app => app.winget_id.toLowerCase() === selected.toLowerCase())?.deployment_config;
++  const restartProblem = data?.restartEligibility?.find(app => app.appId === selected.toLowerCase())?.problem
++    ?? startupInstallationProblem({ ...selectedConfig, customDetection: selectedConfig?.psadtConfig?.customDetection });
++  const invalidRestart = !!selected && !inherit && draft.mode === 'restart' && !!restartProblem;
++  const effectiveMode = selected && inherit && data?.shared ? data.shared.mode : draft.mode;
+   const choose = (appId: string) => {
+     setSelected(appId); setSaved(false); action.reset();
+     const exception = exceptions.find(p => p.appId.toLowerCase() === appId.toLowerCase());
+@@ -44,20 +50,22 @@ export function InstallationPolicyPanel({ apps }: { apps: AppUpdatePolicy[] }) {
+                 ['silent', 'Install automatically', 'Install when Intune runs the required assignment, without a postponement prompt.'],
+                 ['existing', 'Keep the app’s saved installation settings', 'Use the settings from the original deployment.'],
+               ] as const).map(([mode, label, hint]) => <label key={mode} className="flex items-start gap-3 rounded-lg border border-overlay/10 p-3 text-sm"><input className="mt-1" name="installation-behavior" type="radio" value={mode} checked={draft.mode === mode} onChange={() => { setDraft({ ...draft, mode }); setSaved(false); action.reset(); }} /><span><span className="block text-text-primary font-medium">{label}</span><span className="block text-xs text-text-muted mt-1">{hint}</span></span></label>)}
++              {selected && <label className="flex items-start gap-3 rounded-lg border border-status-warning/25 p-3 text-sm"><input type="radio" className="mt-1" name="installation-behavior" value="restart" checked={draft.mode === 'restart'} disabled={!!restartProblem} aria-describedby={restartProblem ? 'restart-installation-restriction' : undefined} onChange={() => { setDraft({ ...draft, mode: 'restart' }); setSaved(false); action.reset(); }} /><span><span className="block font-medium text-text-primary">Install after next restart · Beta</span><span className="block text-xs text-text-muted mt-1">Beta: Windows pilot testing required. Machine-wide MSI/EXE apps only. Use a Required assignment to pilot devices. Does not force a restart; no three-day deadline.</span></span></label>}
++              {selected && restartProblem && <p id="restart-installation-restriction" role={invalidRestart ? 'alert' : undefined} className="text-xs text-status-warning">{restartProblem} Review the app’s saved deployment configuration before choosing this Beta.</p>}
+               {draft.mode === 'prompt' && <label className="block text-sm text-text-secondary">Days users can postpone
+                 <select aria-label="Days users can postpone" className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={draft.days} onChange={e => { setDraft({ ...draft, days: Number(e.target.value) }); setSaved(false); action.reset(); }}>{Array.from({ length: 14 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n} {n === 1 ? 'day' : 'days'}</option>)}</select>
+               </label>}
+             </fieldset>
+             <div className="rounded-lg bg-overlay/5 p-4 text-sm text-text-secondary space-y-2"><h3 className="font-medium text-text-primary">What happens on devices</h3>
+               <p>{selected && inherit && data?.shared ? installationPolicySummary(data.shared) : installationPolicySummary(draft)}.</p>
+-              <p>Prompts use the app’s installer toolkit. If no user is signed in, or the app does not need to close, installation may run silently. After the choice period, the next Intune attempt installs the update.</p>
+-              <p>Reminders follow Intune’s retry checks. This does not schedule an exact installation time, a login, or a reboot.</p>
++              {effectiveMode === 'restart' ? <p>Beta: waits for a later Windows startup, without forcing a restart or applying a three-day deadline. Intune may report retry or failure while waiting. Startup installations shows separate device reports when connected.</p> : effectiveMode === 'prompt' ? <p>Prompts use the app’s installer toolkit. If no user is signed in, or the app does not need to close, installation may run silently. After the choice period, the next Intune attempt installs the update. Reminders follow Intune retry checks.</p> : effectiveMode === 'silent' ? <p>Installs when Intune runs the Required assignment, without a postponement prompt.</p> : <p>Uses the app’s saved installation behavior. Review its deployment configuration to see whether it installs silently, offers postponement or uses the startup Beta.</p>}
++              <p>No exact device installation time is guaranteed. Startup installation may continue after sign-in.</p>
+             </div>
+             <p className="text-xs text-text-muted">Manual Update, Update all and pilot deployments keep their saved settings. Changing this policy does not change a package already queued or published.</p>
+             {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
+             {saved && <p role="status" className="text-sm text-status-success">Installation policy saved for future automatic updates.</p>}
+           </div>
+-          <DialogFooter><Button variant="ghost" disabled={action.isPending} onClick={() => setOpen(false)}>Close</Button><Button disabled={action.isPending || saved} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save app exception' : 'Save shared policy'}</Button></DialogFooter>
++          <DialogFooter><Button variant="ghost" disabled={action.isPending} onClick={() => setOpen(false)}>Close</Button><Button disabled={action.isPending || saved || invalidRestart} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save app exception' : 'Save shared policy'}</Button></DialogFooter>
+         </DialogContent>
+       </Dialog>
+     </div>
+diff --git a/components/hrm/StartupInstallChoice.tsx b/components/hrm/StartupInstallChoice.tsx
+new file mode 100644
+index 000000000..bcf26ab04
+--- /dev/null
++++ b/components/hrm/StartupInstallChoice.tsx
+@@ -0,0 +1,10 @@
++'use client';
++import { STARTUP_BETA_LABEL } from '@/lib/hrm/startup-installation';
++export function StartupInstallChoice({ value, onChange, problem }: { value: boolean; onChange: (value: boolean) => void; problem: string | null }) {
++  return <div className="space-y-2 rounded-lg border border-status-warning/25 bg-status-warning/5 p-3">
++    <label className="flex items-start gap-2 text-sm font-medium text-text-primary"><input type="checkbox" className="mt-1" checked={value} disabled={!!problem && !value} onChange={e => onChange(e.target.checked)} /><span>{STARTUP_BETA_LABEL}</span></label>
++    <p className="text-xs text-text-secondary">Beta: Windows pilot testing required. When deployed, Intune stages the package for silent installation after a later Windows startup. Does not force a restart or block sign-in. The three-day postponement policy does not apply. This sets the current deployment; future automatic updates follow the shared policy or app exception in App updates.</p>
++    {value && <p className="text-xs text-status-warning">Intune may show retry or failure while waiting. App updates shows separate startup reports when reporting is configured. Use a Required assignment to a small pilot device group.</p>}
++    {problem && <p className="text-xs text-text-muted">{problem}</p>}
++  </div>;
++}
+diff --git a/components/hrm/StartupInstallations.test.ts b/components/hrm/StartupInstallations.test.ts
+new file mode 100644
+index 000000000..bd2829de5
+--- /dev/null
++++ b/components/hrm/StartupInstallations.test.ts
+@@ -0,0 +1,19 @@
++import { expect, it, vi } from 'vitest';
++import { createElement } from 'react';
++import { renderToStaticMarkup } from 'react-dom/server';
++import { emptyStartupCounts, type StartupReportView } from '@/lib/hrm/startup-report';
++const state=vi.hoisted(()=>({data:{supported:true,configured:false,packages:[{id:'fixture',name:'Pilot app',version:'2'}]} as StartupReportView}));
++vi.mock('@/hooks/useStartupInstallations',()=>({useStartupInstallations:()=>({data:state.data,isLoading:false,refresh:{isPending:false,mutate:vi.fn()},cancellation:{isPending:false,mutate:vi.fn()}})}));
++import { StartupInstallations } from './StartupInstallations';
++it('keeps cancellation visible when optional device reporting is unconfigured or denied',()=>{
++ for(const error of [undefined,'access_denied'] as const){
++  state.data={supported:true,configured:!!error,error,packages:[{id:'fixture',name:'Pilot app',version:'2'}]};
++  const html=renderToStaticMarkup(createElement(StartupInstallations));
++  expect(html).toContain('Pilot app');expect(html).toContain('Download cancellation script');expect(html).toContain('No reports yet');
++ }
++});
++it('shows a review indicator in the collapsed overview for incomplete reports',()=>{
++ state.data={supported:true,configured:true,report:{rows:[],summary:emptyStartupCounts(),reportingDevices:1,unknownDevices:1,omitted:20}};
++ const html=renderToStaticMarkup(createElement(StartupInstallations));
++ expect(html).toContain('Reports need review');expect(html).not.toContain('0 waiting for restart');
++});
+diff --git a/components/hrm/StartupInstallations.tsx b/components/hrm/StartupInstallations.tsx
+new file mode 100644
+index 000000000..84b258352
+--- /dev/null
++++ b/components/hrm/StartupInstallations.tsx
+@@ -0,0 +1,32 @@
++'use client';
++import { Button } from '@/components/ui/button';
++import { useStartupInstallations } from '@/hooks/useStartupInstallations';
++import { emptyStartupCounts, startupReportNeedsReview, type StartupState } from '@/lib/hrm/startup-report';
++const columns: { key: StartupState; label: string }[] = [{key:'waiting',label:'Waiting for restart'},{key:'installing',label:'Installing'},{key:'installed',label:'Installed'},{key:'failed',label:'Failed'},{key:'cancelled',label:'Cancelled'},{key:'outdated',label:'Status out of date'}];
++export function StartupInstallations() {
++  const { data, error, isLoading, refresh, cancellation } = useStartupInstallations();
++  if (data?.supported === false) return null;
++  const rows = data?.packages?.map(job => data.report?.rows.find(row => row.id === job.id) ?? { ...job, ...emptyStartupCounts(), lastActivityAt: undefined }) ?? data?.report?.rows ?? [];
++  return <section id="startup-installations" aria-label="Startup installations · Beta" className="space-y-4 rounded-xl border border-overlay/10 bg-bg-surface p-5">
++    <p className="text-xs text-status-warning">Beta: Windows pilot testing required. Validate staging, restart installation and cancellation on a pilot computer before wider rollout.</p>
++    <details><summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 text-sm text-text-primary"><span className="font-semibold">Startup installations · Beta</span><span className="text-xs text-text-muted">{isLoading ? 'Loading reports…' : data && startupReportNeedsReview(data) ? 'Reports need review' : data?.report ? `${data.report.summary.waiting} waiting for restart · ${data.report.summary.failed} failed` : data?.configured ? 'View device reports' : 'Reporting not configured'}</span></summary><div className="mt-4 space-y-4">
++    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold text-text-primary">Device installation results</h2><p className="mt-1 text-xs text-text-muted">Device-reported startup results, separate from publishing history.</p></div><Button variant="outline" disabled={!data?.configured || refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isPending ? 'Checking Intune…' : 'Check startup reports'}</Button></div>
++    {cancellation?.error && <p role="alert" className="text-sm text-status-error">Could not download the cancellation script. Try again.</p>}
++    {isLoading && <p className="text-sm text-text-muted">Loading startup installation reports…</p>}
++    {(error || refresh.error) && <p role="alert" className="text-sm text-status-error">Could not load startup installation reports. Try Check startup reports again.</p>}
++    {data && !data.configured && <p className="text-sm text-status-warning">Reporting not configured. Startup installation results will appear after the reporting script is assigned and connected.</p>}
++    {data?.error && <p role="alert" className="text-sm text-status-warning">{data.error === 'access_denied' ? 'Intune denied access to startup reports. Check the reporting permission and Remediations licensing.' : 'Could not refresh reports from Intune. The last successful snapshot, if available, is shown below.'}</p>}
++    {data?.configured && !data.report && !data.error && <p className="text-sm text-text-muted">No reports collected yet. Check startup reports after the reporting script has run on a pilot computer.</p>}
++    {data?.report && data.checkedAt && <p className="text-xs text-text-muted">Last successful collection: {new Date(data.checkedAt).toLocaleString()}.{data.stale ? ' This snapshot is out of date. Refresh before relying on its counts.' : ''} Checking reports does not force computers to check in.</p>}
++    {data?.report && <>
++      <p className="text-xs text-text-secondary">Counts cover received reports only. Computers that have not reported are not assumed installed. {data.report.reportingDevices} reporting computers; {data.report.unknownDevices} reports need review.{data.report.omitted ? ` ${data.report.omitted} additional local records were omitted to fit Intune’s output limit.` : ''}</p>
++      <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">{columns.map(column => <div key={column.key} className="rounded-lg border border-overlay/10 p-3"><p className="text-xl font-semibold tabular-nums text-text-primary">{data.report!.summary[column.key]}</p><p className="mt-1 text-xs text-text-muted">{column.label}</p></div>)}</div>
++    </>}
++      {data && (rows.length > 0 ? <div className="overflow-x-auto"><table className="w-full min-w-[56rem] text-left text-xs"><thead><tr className="border-b border-overlay/10 text-text-muted"><th className="py-3 pr-3 font-medium">App / version</th><th className="p-3 font-medium">Last device activity</th>{columns.map(c => <th key={c.key} className="p-3 font-medium">{c.label}</th>)}</tr></thead><tbody>{rows.map(row => {
++        const anyReports=columns.some(c => row[c.key] > 0);
++        return <tr key={row.id} className="border-b border-overlay/10"><td className="py-3 pr-3 text-text-primary">{row.name}<span className="mt-1 block text-text-muted">{row.version}{!anyReports ? ' · No reports yet' : ''}</span><details className="mt-2 text-xs"><summary className="cursor-pointer text-accent-cyan">Cancel before installation</summary><p className="mt-2 text-text-secondary">Remove the Required assignment first. Download this package’s cancellation script and deploy it as a SYSTEM platform script to the pilot group. It stops pending installation, including later retries, without uninstalling an installed app. If installation is already running, retry after it finishes.</p><Button size="sm" variant="outline" className="mt-2" disabled={cancellation?.isPending} onClick={() => cancellation.mutate(row.id)}>Download cancellation script</Button></details></td><td className="p-3 text-text-muted">{row.lastActivityAt ? new Date(row.lastActivityAt).toLocaleString() : 'No report'}</td>{columns.map(c => <td key={c.key} className="p-3 tabular-nums text-text-secondary">{anyReports ? row[c.key] : '—'}</td>)}</tr>;
++      })}</tbody></table></div> : <p className="text-sm text-text-muted">No startup Beta packages are recorded for this tenant.</p>)}
++    <details className="rounded-lg border border-overlay/10 p-3 text-sm"><summary className="cursor-pointer text-accent-cyan">Set up startup reporting</summary><ol className="mt-3 list-decimal space-y-2 pl-5 text-text-secondary"><li>Confirm that pilot users have an eligible Remediations license.</li><li><a className="text-accent-cyan hover:underline" href="/startup-beta/Detect-StartupInstallations.ps1" download>Download the startup reporting script</a> and create a detection-only Remediations package in Intune.</li><li>Run it as SYSTEM in 64-bit PowerShell, hourly, assigned only to the pilot device group.</li><li>Have the server administrator connect its script ID and grant the app the read-only DeviceManagementScripts.Read.All permission. The Help section has the server setup steps.</li><li>Use Check startup reports after the script runs. Waiting is not installation success; status can be delayed by offline devices and Intune reporting.</li></ol><a className="mt-3 inline-block text-accent-cyan hover:underline" href="/dashboard/help#startup-beta">Startup installation Beta help</a></details>
++    </div></details>
++  </section>;
++}
+diff --git a/hooks/useInstallationPolicy.ts b/hooks/useInstallationPolicy.ts
+index f3c77be71..d9a648764 100644
+--- a/hooks/useInstallationPolicy.ts
++++ b/hooks/useInstallationPolicy.ts
+@@ -2,7 +2,7 @@
+ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+ import { useMicrosoftAuth } from './useMicrosoftAuth';
+ import type { InstallationPolicy } from '@/lib/hrm/installation-policy';
+-export interface InstallationPolicyView { supported: boolean; shared?: InstallationPolicy; exceptions?: (InstallationPolicy & { appId: string })[] }
++export interface InstallationPolicyView { supported: boolean; restartEligibility?: { appId: string; problem: string | null }[]; shared?: InstallationPolicy; exceptions?: (InstallationPolicy & { appId: string })[] }
+ export function useInstallationPolicy() {
+   const { getAccessToken, isAuthenticated, account } = useMicrosoftAuth();
+   const client = useQueryClient();
+diff --git a/hooks/useStartupInstallations.ts b/hooks/useStartupInstallations.ts
+new file mode 100644
+index 000000000..d1027869a
+--- /dev/null
++++ b/hooks/useStartupInstallations.ts
+@@ -0,0 +1,28 @@
++'use client';
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
++import { useMicrosoftAuth } from './useMicrosoftAuth';
++import type { StartupReportView } from '@/lib/hrm/startup-report';
++export function useStartupInstallations() {
++  const { getAccessToken, isAuthenticated, account } = useMicrosoftAuth();
++  const client = useQueryClient();
++  const key = ['hrm', 'startup-installations', account?.tenantId, account?.localAccountId];
++  const request = async (refresh = false): Promise<StartupReportView> => {
++    const token = await getAccessToken();
++    if (!token) throw new Error('Sign in again to view startup installation reports.');
++    const response = await fetch('/api/hrm/startup-installations', { method: refresh ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}` } });
++    if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Your sign-in expired. Reload and sign in again.');
++    const value = await response.json();
++    if (!response.ok) throw new Error('Could not load startup installation reports.');
++    return value;
++  };
++  const query = useQuery({ queryKey: key, queryFn: () => request(), enabled: isAuthenticated, staleTime: 30000, refetchInterval: 60000 });
++  const refresh = useMutation({ mutationFn: () => request(true), onSuccess: data => client.setQueryData(key, data) });
++  const cancellation = useMutation({ mutationFn: async (jobId: string) => {
++    const token = await getAccessToken(); if (!token) throw new Error('Sign in again.');
++    const response = await fetch(`/api/hrm/startup-installations?download=cancel&jobId=${encodeURIComponent(jobId)}`, { headers: { Authorization: `Bearer ${token}` } });
++    if (!response.ok || response.redirected || !response.headers.get('content-type')?.includes('text/plain')) throw new Error('Could not download the cancellation script.');
++    const url = URL.createObjectURL(await response.blob());
++    const link = document.createElement('a'); link.href = url; link.download = 'Cancel-startup-beta.ps1'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
++  } });
++  return { ...query, refresh, cancellation };
++}
+diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
+index 1ecc46c7f..bbd43c0eb 100644
+--- a/lib/db/__tests__/job-create.test.ts
++++ b/lib/db/__tests__/job-create.test.ts
+@@ -50,7 +50,7 @@ function readStoredJob(id: string): Record<string, unknown> {
+   const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
+   try {
+     // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts, skipped versions, retirements, rollback readiness, removals) follow manual mappings, automatic update scope, and webhooks.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(21);
++    expect(stored.pragma('user_version', { simple: true })).toBe(22);
+     return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
+   } finally {
+     stored.close();
+diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
+index 9b8fad6dd..46606e9f4 100644
+--- a/lib/db/sqlite-migrations.ts
++++ b/lib/db/sqlite-migrations.ts
+@@ -508,6 +508,9 @@ export const MIGRATIONS: SqliteMigration[] = [
+       days INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (tenant_id, app_id)
+     )`); },
+   },
++  { version: 22, name: 'startup installation report snapshots (HRM patch 0044)', up: db => {
++    db.exec(`CREATE TABLE IF NOT EXISTS hrm_startup_reports (tenant_id TEXT PRIMARY KEY, payload TEXT, checked_at TEXT NOT NULL, error TEXT)`);
++  } },
+ ];
+ 
+ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 7e197946f..9f81128ed 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -1,3 +1,4 @@
++import { createStartupReportStore } from '@/lib/hrm/startup-report-store';
+ /**
+  * SQLite Database Implementation for Self-Hosted Mode
+  * Provides a simple, zero-dependency database for true self-hosting
+@@ -1353,3 +1354,5 @@ export function closeSqliteDb(): void {
+ }
+ 
+ export const sqliteInstallationPolicies = createInstallationPolicyStore(getDb);
++
++export const sqliteStartupReports = createStartupReportStore(getDb);
+diff --git a/lib/github-actions.test.ts b/lib/github-actions.test.ts
+index a715cc9f9..f09685f1c 100644
+--- a/lib/github-actions.test.ts
++++ b/lib/github-actions.test.ts
+@@ -41,6 +41,9 @@ vi.mock('./winget-dependencies', async (importOriginal) => {
+   };
+ });
+ 
++const startupJobMock = vi.hoisted(() => vi.fn());
++vi.mock('./db', () => ({ getDatabase: () => ({ jobs: { getById: startupJobMock } }) }));
++
+ const config: GitHubActionsConfig = {
+   token: 'test-token',
+   owner: 'example',
+@@ -1182,3 +1185,22 @@ describe('cancelWorkflowRun', () => {
+     expect(fetchMock).toHaveBeenCalledTimes(1);
+   });
+ });
++
++describe('startup Beta deployment ordering', () => {
++  it('dispatches the immutable saved deployment creation time outside the package profile', async () => {
++    const inputs = workflowInputs({ installScope: 'machine', psadtConfig: JSON.stringify({ installAfterRestartBeta: true, restartBehavior: 'Suppress' }) });
++    startupJobMock.mockResolvedValue({ id: inputs.jobId, tenant_id: inputs.tenantId, winget_id: inputs.wingetId, version: inputs.version, created_at: '2026-01-01T01:00:00+01:00' });
++    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
++    vi.stubGlobal('fetch', fetchMock);
++    await triggerPackagingWorkflow(inputs, config, { skipRunCapture: true });
++    const payload = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
++    expect(payload.client_payload.job.createdAt).toBe('2026-01-01T00:00:00.000Z');
++    expect(payload.client_payload.config.psadtConfig).not.toContain('createdAt');
++  });
++  it.each([null, { tenant_id: 'other', created_at: '2026-01-01' }, { tenant_id: '11111111-1111-1111-1111-111111111111', winget_id: 'Custom.Example.App', version: '1.0.0', created_at: 'invalid' }])('fails closed without trusted matching job order (%j)', async (job) => {
++    startupJobMock.mockResolvedValue(job);
++    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
++    await expect(triggerPackagingWorkflow(workflowInputs({ installScope: 'machine', psadtConfig: JSON.stringify({ installAfterRestartBeta: true }) }), config, { skipRunCapture: true })).rejects.toThrow('matching saved deployment');
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++});
+diff --git a/lib/github-actions.ts b/lib/github-actions.ts
+index 94c93b194..893d3a1a5 100644
+--- a/lib/github-actions.ts
++++ b/lib/github-actions.ts
+@@ -4,6 +4,7 @@
+  * Uses repository_dispatch to a private workflows repository
+  */
+ 
++import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
+ import { createHmac } from 'node:crypto';
+ import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
+ import { authorizeCuratedWorkflow } from '@/lib/curated-catalog/server';
+@@ -243,6 +244,19 @@ export async function triggerPackagingWorkflow(
+           effectiveInputs.installerSuccessCodes
+         ),
+       };
++  let startupConfig: Record<string, unknown> = {};
++  try { const value = JSON.parse(inputs.psadtConfig || '{}'); if (value && typeof value === 'object' && !Array.isArray(value)) startupConfig = value; } catch { /* Existing profile normalization handles malformed legacy settings. */ }
++  if (startupConfig.installAfterRestartBeta !== undefined && typeof startupConfig.installAfterRestartBeta !== 'boolean') throw new Error('Invalid startup installer Beta setting.');
++  let startupCreatedAt: string | undefined;
++  if (startupConfig.installAfterRestartBeta === true) {
++    const problem = startupInstallationProblem({ installScope: inputs.installScope, installerType: inputs.installerType, customDetection: startupConfig.customDetection === true, espProfiles: JSON.parse(inputs.espProfiles || '[]'), relationships: JSON.parse(inputs.relationships || '[]'), supersedenceType: inputs.supersedenceType });
++    if (problem) throw new Error(problem);
++    // Deployment order must survive delayed Intune delivery and workflow retries.
++    const { getDatabase } = await import('./db');
++    const job = await getDatabase().jobs.getById(inputs.jobId);
++    if (!job || job.tenant_id !== inputs.tenantId || job.winget_id.toLowerCase() !== inputs.wingetId.toLowerCase() || job.version !== inputs.version || !Number.isFinite(Date.parse(job.created_at))) throw new Error('Startup packages require a matching saved deployment and creation time.');
++    startupCreatedAt = new Date(job.created_at).toISOString();
++  }
+   // Final dispatch boundary: custom callers bypass catalog reconciliation, so
+   // they must still prove an unattended install contract before GitHub sees
+   // the installer URL or any tenant-scoped packaging request.
+@@ -324,6 +338,7 @@ export async function triggerPackagingWorkflow(
+       client_payload: {
+         job: {
+           jobId: inputs.jobId,
++          ...(startupCreatedAt ? { createdAt: startupCreatedAt } : {}),
+           tenantId: inputs.tenantId,
+           callbackUrl: inputs.callbackUrl,
+         },
+diff --git a/lib/hrm/__tests__/old-copy-cleanup.test.ts b/lib/hrm/__tests__/old-copy-cleanup.test.ts
+index cc31c93a3..be421411e 100644
+--- a/lib/hrm/__tests__/old-copy-cleanup.test.ts
++++ b/lib/hrm/__tests__/old-copy-cleanup.test.ts
+@@ -213,3 +213,8 @@ describe('removing old copies at the update check', () => {
+ 
+ // The unused store imports keep the mocked module's factories type-checked against the real ones.
+ void createPilotStore; void createRetireStore; void createRollbackStore;
++
++it('leaves a startup Beta family alone even after some devices installed the newest version',async()=>{
++ h.db.prepare(`INSERT INTO packaging_jobs (id,user_id,tenant_id,winget_id,version,display_name,installer_type,installer_url,package_config,status) VALUES ('startup','staff','tenant','example.pdftool','0.19.0','PDF tool','msi','https://example.invalid/a.msi',?,'deployed')`).run(JSON.stringify({psadtConfig:{installAfterRestartBeta:true}}));
++ expect(await runSqliteOldCopyCleanup({now:NOW})).toMatchObject({removed:0});expect(apps.size).toBe(4);expect(calls).toEqual([]);
++});
+diff --git a/lib/hrm/__tests__/startup-installation.test.ts b/lib/hrm/__tests__/startup-installation.test.ts
+new file mode 100644
+index 000000000..793ac561b
+--- /dev/null
++++ b/lib/hrm/__tests__/startup-installation.test.ts
+@@ -0,0 +1,14 @@
++import { expect, it } from 'vitest';
++import { startupInstallationProblem } from '../startup-installation';
++import { applyInstallationPolicy, installationPolicySummary } from '../installation-policy';
++const valid={installScope:'machine',installerType:'msi'};
++it('limits startup Beta to machine-wide MSI/EXE apps with automatic detection outside ESP',()=>{
++ expect(startupInstallationProblem(valid)).toBeNull();
++ for(const changes of [{installScope:'user'},{installerType:'msix'},{installerType:'zip'},{customDetection:true},{espProfiles:[{}]},{removal:true},{supersedenceType:'replace'}]) expect(startupInstallationProblem({...valid,...changes})).not.toBeNull();
++});
++it('marks the policy Beta, disables deferral and suppresses restarts without changing the installer',()=>{
++ const config=applyInstallationPolicy(undefined,{mode:'restart',days:3})!;
++ expect(config).toMatchObject({installAfterRestartBeta:true,allowDefer:false,deployMode:'Silent',restartBehavior:'Suppress'});
++ expect(installationPolicySummary({mode:'restart',days:3})).toContain('Beta');
++ expect(applyInstallationPolicy(config,{mode:'prompt',days:3})?.installAfterRestartBeta).toBeUndefined();
++});
+diff --git a/lib/hrm/__tests__/startup-report-check.test.ts b/lib/hrm/__tests__/startup-report-check.test.ts
+new file mode 100644
+index 000000000..037eb96ba
+--- /dev/null
++++ b/lib/hrm/__tests__/startup-report-check.test.ts
+@@ -0,0 +1,20 @@
++import { afterEach,beforeEach,expect,it,vi } from 'vitest';
++const state=vi.hoisted(()=>({save:vi.fn(),fetch:vi.fn()}));
++vi.mock('@/lib/intune/graph-client',()=>({getServicePrincipalToken:async()=> 'TOKEN_SENTINEL'}));
++vi.mock('@/lib/db/sqlite',()=>({sqliteStartupReports:{save:state.save,jobs:()=>[{id:'11111111-1111-4111-8111-111111111111',name:'Fixture app',version:'2'}]}}));
++import{refreshStartupReport}from'../startup-report-check';
++beforeEach(()=>{state.save.mockReset();state.fetch.mockReset();vi.stubGlobal('fetch',state.fetch);vi.stubEnv('HRM_STARTUP_REPORT_SCRIPT_ID','22222222-2222-4222-8222-222222222222')});
++afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs()});
++it('labels denied access without storing raw Graph errors',async()=>{
++ state.fetch.mockResolvedValue(new Response('PRIVATE_GRAPH_ERROR',{status:403}));await refreshStartupReport('tenant');
++ expect(state.save).toHaveBeenCalledWith('tenant',null,'access_denied');expect(JSON.stringify(state.save.mock.calls)).not.toContain('PRIVATE_GRAPH_ERROR');
++});
++it('never forwards the Graph token to an unexpected pagination host',async()=>{
++ state.fetch.mockResolvedValue(Response.json({value:[],'@odata.nextLink':'https://attacker.invalid/beta/deviceManagement/deviceHealthScripts/anything/deviceRunStates'}));
++ await refreshStartupReport('tenant');expect(state.fetch).toHaveBeenCalledTimes(1);expect(state.save).toHaveBeenCalledWith('tenant',null,'read_failed');
++});
++it('collects paged reports as known-job counts, omitting device identities',async()=>{
++ const root='https://graph.microsoft.com/beta/deviceManagement/deviceHealthScripts/22222222-2222-4222-8222-222222222222/deviceRunStates';
++ state.fetch.mockResolvedValueOnce(Response.json({value:[],'@odata.nextLink':root+'?$skiptoken=page2'})).mockResolvedValueOnce(Response.json({value:[{id:'private-device-id',preRemediationDetectionScriptOutput:JSON.stringify({v:1,at:Math.floor(Date.now()/1000),omitted:0,issues:0,items:[['11111111-1111-4111-8111-111111111111','w',Math.floor(Date.now()/1000)]]})}]}));
++ await refreshStartupReport('tenant');expect(state.save.mock.calls[0][1].summary.waiting).toBe(1);expect(JSON.stringify(state.save.mock.calls)).not.toContain('private-device-id');
++});
+diff --git a/lib/hrm/__tests__/startup-report-store.test.ts b/lib/hrm/__tests__/startup-report-store.test.ts
+new file mode 100644
+index 000000000..1bd332309
+--- /dev/null
++++ b/lib/hrm/__tests__/startup-report-store.test.ts
+@@ -0,0 +1,15 @@
++import Database from 'better-sqlite3';
++import { expect, it } from 'vitest';
++import { createStartupReportStore } from '../startup-report-store';
++it('retains older Beta packages despite thousands of newer ordinary jobs and isolates tenants', () => {
++ const db = new Database(':memory:');
++ try {
++  db.exec('CREATE TABLE packaging_jobs (id TEXT, display_name TEXT, version TEXT, package_config TEXT, tenant_id TEXT, created_at TEXT)');
++  const insert = db.prepare('INSERT INTO packaging_jobs VALUES (?,?,?,?,?,?)');
++  insert.run('pending', 'Pending app', '1', JSON.stringify({psadtConfig:{installAfterRestartBeta:true}}), 'one', '2020');
++  db.transaction(() => {for(let i=0;i<2100;i++) insert.run(String(i),'Ordinary','1','{}','one','2026')})();
++  insert.run('other', 'Other tenant', '1', JSON.stringify({psadtConfig:{installAfterRestartBeta:true}}), 'two', '2026');
++  insert.run('invalid','Malformed','1','{','one','2026');
++  expect(createStartupReportStore(() => db).jobs('one')).toEqual([{id:'pending',name:'Pending app',version:'1'}]);
++ } finally { db.close(); }
++});
+diff --git a/lib/hrm/__tests__/startup-report.test.ts b/lib/hrm/__tests__/startup-report.test.ts
+new file mode 100644
+index 000000000..29eb5ee86
+--- /dev/null
++++ b/lib/hrm/__tests__/startup-report.test.ts
+@@ -0,0 +1,37 @@
++import { expect, it } from 'vitest';
++import { collectStartupReport } from '../startup-report';
++const id = '11111111-1111-4111-8111-111111111111';
++const second = '22222222-2222-4222-8222-222222222222';
++const now = Date.parse('2026-11-10T12:00:00Z');
++const at = now / 1000;
++const jobs = [{ id, name: 'Fixture app', version: '2' }];
++const row = (device: string, items: unknown[], time = at) => ({ id: device, preRemediationDetectionScriptOutput: JSON.stringify({ v: 1, at: time, omitted: 0, issues: 0, items }) });
++it('counts only known-job outcomes and deduplicates device and job rows', () => {
++ const report = collectStartupReport([row('a', [[id,'w',at],[id,'s',at],[second,'s',at]]), row('a',[[id,'s',at]]), row('b',[[id,'s',at]])],jobs,now);
++ expect(report.summary).toEqual({ waiting:1, installed:1, installing:0, failed:0, cancelled:0, outdated:0 });
++ expect(report.reportingDevices).toBe(2);
++ expect(JSON.stringify(report)).not.toContain('device-private-name');
++});
++it('does not turn stale or timed-out installation reports into fresh success', () => {
++ const report = collectStartupReport([row('a',[[id,'s',at-86400]],at-86400),row('b',[[id,'i',at-10800]])],jobs,now);
++ expect(report.summary.outdated).toBe(2);expect(report.summary.installed).toBe(0);
++});
++it('rejects malformed, oversized, future, prototype-state and unknown-version output without echoing it', () => {
++ const outputs = ['device-private-name', 'x'.repeat(2049), JSON.stringify({v:2}), row('x',[[id,'__proto__',at]]).preRemediationDetectionScriptOutput, row('x',[[id,'s',at]],at+1000).preRemediationDetectionScriptOutput];
++ const report = collectStartupReport(outputs.map((output,i)=>({id:String(i),preRemediationDetectionScriptOutput:output})),jobs,now);
++ expect(report.unknownDevices).toBe(5);expect(report.summary.installed).toBe(0);expect(JSON.stringify(report)).not.toContain('device-private-name');
++});
++it('reports truncation and missing data explicitly, leaving unreported packages without invented success', () => {
++ const output=JSON.stringify({v:1,at,omitted:12,issues:1,items:[]});
++ const report=collectStartupReport([{id:'a',preRemediationDetectionScriptOutput:output}],jobs,now);
++ expect(report.omitted).toBe(12);expect(report.unknownDevices).toBe(1);expect(report.rows[0].installed).toBe(0);
++});
++
++it('marks incomplete and individually outdated reports for overview review',async()=>{
++ const {startupReportNeedsReview,emptyStartupCounts}=await import('../startup-report');
++ const report={rows:[],summary:emptyStartupCounts(),reportingDevices:0,unknownDevices:0,omitted:0};
++ expect(startupReportNeedsReview({report})).toBe(false);
++ expect(startupReportNeedsReview({report:{...report,unknownDevices:1}})).toBe(true);
++ expect(startupReportNeedsReview({report:{...report,omitted:1}})).toBe(true);
++ expect(startupReportNeedsReview({report:{...report,summary:{...report.summary,outdated:1}}})).toBe(true);
++});
+diff --git a/lib/hrm/__tests__/status-report-data.test.ts b/lib/hrm/__tests__/status-report-data.test.ts
+index 44d2db5fe..4b5166a48 100644
+--- a/lib/hrm/__tests__/status-report-data.test.ts
++++ b/lib/hrm/__tests__/status-report-data.test.ts
+@@ -68,3 +68,13 @@ describe('isolated report reads', () => {
+     await expect(readReportServerStatus(signal, NOW)).rejects.toThrow();
+   });
+ });
++
++it('reads only startup summary counts, never names or per-device output',async()=>{
++ await directory();const db=new Database(process.env.DATABASE_PATH!);
++ try{
++  db.exec('CREATE TABLE packaging_jobs (status TEXT, created_at TEXT, updated_at TEXT, archived_at TEXT); CREATE TABLE upload_history (deployed_at TEXT); CREATE TABLE hrm_startup_reports (payload TEXT, checked_at TEXT, error TEXT)');
++  db.prepare('INSERT INTO hrm_startup_reports VALUES (?,?,?)').run(JSON.stringify({summary:{waiting:2,failed:1,outdated:0},unknownDevices:7,omitted:20,rows:[{name:'FORBIDDEN_APP',deviceName:'FORBIDDEN_DEVICE',user:'FORBIDDEN_STAFF'}]}),NOW.toISOString(),null);
++  const result=await readSqliteReportCounts(new AbortController().signal,NOW);
++  expect(result.startup).toEqual({waiting:2,failed:1,outdated:0,unknown:7,omitted:20});expect(JSON.stringify(result)).not.toContain('FORBIDDEN');
++ }finally{db.close()}
++});
+diff --git a/lib/hrm/__tests__/status-report.test.ts b/lib/hrm/__tests__/status-report.test.ts
+index a198cc7b3..b1c26133e 100644
+--- a/lib/hrm/__tests__/status-report.test.ts
++++ b/lib/hrm/__tests__/status-report.test.ts
+@@ -219,3 +219,18 @@ describe('report key', () => {
+     expect(reportKeyMatches('Bearer short', 'short')).toBe(false);
+   });
+ });
++
++it('keeps startup Beta counts separate from publishing and links to the existing overview',()=>{
++ const counts={failedRecent:0,stuck:0,days:Array(14).fill(0),failed:[],deployed:[],startup:{waiting:4,failed:1,outdated:2}};
++ const report=build({counts});
++ expect(report.todos).toContainEqual(expect.objectContaining({id:'startup-waiting',title:'4 startup installations waiting for restart',link:ORIGIN+'/dashboard/updates#startup-installations'}));
++ expect(report.status).toBe('Startup installs failed');
++ expect(JSON.stringify(report)).not.toMatch(/tenant_id|deviceName|userPrincipalName/);
++});
++
++it('flags unknown or omitted startup reports without pretending installations failed',()=>{
++ const counts={failedRecent:0,stuck:0,days:Array(14).fill(0),failed:[],deployed:[],startup:{waiting:0,failed:0,outdated:0,unknown:7,omitted:20}};
++ const report=build({counts});
++ expect(report.status).toBe('Check startup reports');
++ expect(report.todos).toContainEqual(expect.objectContaining({id:'startup-outdated',title:'Startup installation reports need review'}));
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 44d59a537..9f0644b88 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -135,6 +135,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'To remove a copy, IntuneGet takes its groups off, removes the links between it and the app\'s other copies, then deletes it from Intune. Deleting can\'t be undone.',
+       'Nothing is uninstalled from computers. The newest copy has already replaced the old one on them.',
+       'It removes at most 20 copies at each update check. The rest wait for the next check.',
++      'Apps used with the startup installer Beta are excluded from automatic old-copy cleanup, because a staged device task may still refer to a copy. Confirm cancellation before manually cleaning up those copies.',
+       'It never touches copies added in Intune by hand, or removal copies ending in (uninstall only). Use duplicate cleanup in Inventory for those (see Deploying an app).',
+       'If it can\'t remove a copy, the copy stays in Intune and Home lists it under Needs attention as Old copy of [app] (v[version]) needs a look, with the reason.',
+       'Reasons include: the old copy has groups the newest copy lacks, another app replaces or depends on it, or Intune refused the change.',
+@@ -178,6 +179,40 @@ export const HELP_SECTIONS: HelpSection[] = [
+       { label: 'HRM Support', href: HRM_SUPPORT_URL },
+     ],
+   },
++  {
++    id: 'startup-beta',
++    title: 'Startup installation beta',
++    uiLabels: ['Install behaviour', 'Install after next restart · Beta', 'Startup installations', 'Beta', 'Check startup reports', 'Set up startup reporting', 'Edit shared policy', 'Apply to', 'Use shared policy', 'Save app exception', 'Reporting not configured', 'Cancel before installation', 'Download cancellation script', 'Reports need review'],
++    flow: ['Choose a pilot app', 'Open Install behaviour', 'Enable the startup Beta', 'Assign a Required pilot group', 'Deploy to Intune', 'Restart the pilot computer'],
++    points: [
++      "Beta: Windows pilot testing required. Local tests do not confirm real Intune delivery, Windows task permissions or restart installation. Validate staging, restart installation, reporting and cancellation on a pilot computer before wider rollout.",
++      "Install after next restart · Beta is opt-in for one app. Open Install behaviour in its deployment configuration sidebar, then enable the Beta. The same option is in the Deployment list editor. It is not enabled by default.",
++      "This sets the current deployment. Future automatic updates follow the shared policy or app exception in App updates.",
++      "For future automatic updates, open Edit shared policy in App updates. In Apply to choose the app, turn off Use shared policy, choose Install after next restart · Beta, then Save app exception. A tenant-wide restart rule is unavailable.",
++      "Choose a machine-wide MSI or EXE app and a Required assignment to a small pilot device group. Use a version not already detected as installed; an installed version is not installed again just to test the feature.",
++      "Store apps, per-user apps, ZIP/portable installers, custom detection, New computer setup and replacement of the previous version are excluded. The app explains restrictions before saving; the server also checks the saved and current deployment configuration.",
++      "The packaging workflow adds a startup coordinator to the selected package. GitHub Actions builds and publishes it; installation runs on the computer. Deploy the matching workflow and its startup scripts before using the Beta.",
++      "Intune stages the package in a protected SYSTEM-owned folder. A SYSTEM startup task runs silently after a later Windows startup, delayed by a minute. It verifies staged files before running the original installer. Same-boot retries do not start installation.",
++      "The Beta does not force a restart, apply the three-day postponement rule, or block sign-in until installation finishes. Use Windows Restart for the pilot; sleep and resume do not count. A vendor installer may need network access or another restart.",
++      "The computer remembers deployment order. A delayed older package cannot replace a newer staged deployment for the same app. Delivery time and app version spelling do not decide which pending deployment runs.",
++      "Intune has no native waiting-for-startup installation state. Staging returns retry, never success just for staging. Intune may temporarily display retry or failure while waiting. Automatic detection checks the actual installed version.",
++      "Startup installations in App updates lists Beta packages and offers cancellation even when reporting is not configured or cannot be read. Reporting not configured means central device outcomes are unavailable; it does not mean installation succeeded.",
++      "Open Set up startup reporting for the detection-only Remediations script. Reporting requires eligible Microsoft Remediations licensing. Assign it to the pilot group, running as SYSTEM in 64-bit PowerShell hourly.",
++      "Grant the server app DeviceManagementScripts.Read.All with admin consent. Set HRM_STARTUP_REPORT_SCRIPT_ID on the server to the reporting script package ID. Install and enable the hourly startup-report collection timer on the server.",
++      "Check startup reports reads the latest Intune results; it does not force computers to check in. Counts cover received reports only. Computers without a report are never assumed installed. Last device activity and last collection time are shown separately.",
++      "Reports distinguish Waiting for restart, Installing, Installed, Failed, Cancelled and Status out of date. Installed requires installer success and the version marker. It records an installation outcome, not live inventory. Short installations may finish between reporting runs.",
++      "Reports older than 6 hours, and Installing states older than 2 hours, need checking. Missing, malformed, omitted and unreadable results trigger Reports need review. A failed refresh keeps the last successful snapshot visible with the error.",
++      "The IT dashboard receives aggregate startup counts, including incomplete-report warnings. It never receives app, device or staff names.",
++      "A slow installer keeps running while the coordinator waits. It is not stopped after an hour. Other startup installations wait up to 30 minutes, then retry at a later restart. Investigate an Installing state older than 2 hours.",
++      "Changing a policy, removing assignments or deleting the Intune app does not recall a staged package. An Uninstall assignment may not run before installation. Automatic old-copy cleanup leaves app families used with the Beta alone.",
++      "The local record is under ProgramData in IntuneGet-Startup-Beta. Successful installations remove their task and try to remove the staged payload, keeping status and deployment order. Returned installation failures can retry on later restarts up to 3 attempts.",
++      "A hung installer can keep other startup installations waiting until it exits or the computer restarts. An integrity error stops the task. Review installer logs before retrying a failure.",
++      "To retry a failed or cancelled package, deploy a new package; do not edit the protected local status.",
++      "To cancel, open Startup installations in App updates, then Cancel before installation beside the package. Remove its Required assignment first. Press Download cancellation script and deploy it as a SYSTEM platform script to the pilot group.",
++      "The cancellation script blocks that exact pending package, including later delivery or retries, without uninstalling an installed app. If installation is running, wait for it to finish before retrying cancellation. Confirm Cancelled when reporting is connected.",
++    ],
++    links: [{ label: 'Open App updates', href: '/dashboard/updates#startup-installations' }, { label: 'Remediations licensing and setup', href: 'https://learn.microsoft.com/en-us/intune/device-management/tools/deploy-remediations' }],
++  },
+   {
+     id: 'automatic-installation-policy',
+     title: 'Automatic update installation timing',
+@@ -193,7 +228,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'If the app is in use after postponement expires, the package allows at least 5 minutes to close it. This is not a guarantee that the installer will preserve unsaved work or suppress a restart.',
+       'Manual Update, Update all and pilots keep their saved package settings. Changing this shared policy affects automatic releases only.',
+       'Publishing history records packaging and publishing. Published to Intune means the app reached Intune, not that devices installed it. Expand a published release for reported device installation results and their last check time; Inventory also shows them. Expand a release to see Installation policy for this release, the rule saved when packaging was queued. Device postponements and per-device deadlines are not reported in this history.',
+-      'Installation timing opens a separate right-side panel for dates on a version already published. Those dates are per assignment and do not become recurring rules for future versions. Login-only and reboot-only installation are not offered.',
++      'Installation timing opens a separate right-side panel for dates on a version already published. Those dates are per assignment and do not become recurring rules for future versions. Login-only installation is not offered. Install after next restart is available separately as a per-app Beta for pilot testing; see Startup installation beta.',
+     ],
+     links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'Open Inventory', href: '/dashboard/inventory' }],
+   },
+diff --git a/lib/hrm/installation-policy.ts b/lib/hrm/installation-policy.ts
+index 5c3386ea5..b676fc470 100644
+--- a/lib/hrm/installation-policy.ts
++++ b/lib/hrm/installation-policy.ts
+@@ -1,15 +1,16 @@
+ import { DEFAULT_PSADT_CONFIG, type PSADTConfig } from '@/types/psadt';
+ 
+-export interface InstallationPolicy { mode: 'existing' | 'prompt' | 'silent'; days: number }
++export interface InstallationPolicy { mode: 'existing' | 'prompt' | 'silent' | 'restart'; days: number }
+ export const DEFAULT_INSTALLATION_POLICY: InstallationPolicy = { mode: 'existing', days: 3 };
+ export function installationPolicyError(value: unknown): string | null {
+   if (!value || typeof value !== 'object' || Array.isArray(value)) return 'Choose an installation policy.';
+   const p = value as InstallationPolicy;
+-  if (!['existing', 'prompt', 'silent'].includes(p.mode)) return 'Choose a supported installation policy.';
++  if (!['existing', 'prompt', 'silent', 'restart'].includes(p.mode)) return 'Choose a supported installation policy.';
+   if (!Number.isInteger(p.days) || p.days < 1 || p.days > 14) return 'Choose 1 to 14 days.';
+   return null;
+ }
+ export function installationPolicySummary(p: InstallationPolicy): string {
++  if (p.mode === 'restart') return 'Install after next restart · Beta';
+   if (p.mode === 'existing') return 'Keep each app’s saved installation settings';
+   if (p.mode === 'silent') return 'Install automatically without a postponement prompt';
+   return `Allow postponement for ${p.days} ${p.days === 1 ? 'day' : 'days'} from the first installation attempt`;
+@@ -18,6 +19,8 @@ export function installationPolicySummary(p: InstallationPolicy): string {
+ export function applyInstallationPolicy(saved: PSADTConfig | undefined, policy: InstallationPolicy): PSADTConfig | undefined {
+   if (policy.mode === 'existing') return saved;
+   const result: PSADTConfig = { ...DEFAULT_PSADT_CONFIG, ...saved };
++  if (policy.mode === 'restart') return { ...result, installAfterRestartBeta: true, allowDefer: false, deferByDaysOnly: false, deployMode: 'Silent', restartBehavior: 'Suppress' };
++  delete result.installAfterRestartBeta;
+   // Old absolute deadlines and count limits must not shorten a new version's choice period.
+   delete result.deferDeadline;
+   delete result.forceCloseProcessesCountdown;
+diff --git a/lib/hrm/old-copy-cleanup.ts b/lib/hrm/old-copy-cleanup.ts
+index fa1b9b9f5..7b47043f2 100644
+--- a/lib/hrm/old-copy-cleanup.ts
++++ b/lib/hrm/old-copy-cleanup.ts
+@@ -97,6 +97,7 @@ export async function runSqliteOldCopyCleanup(options: { now?: Date; token?: (te
+     // Removal copies (patch 0040) uninstall an app; they are never part of an update chain.
+     const removal = (name: string) => name.toLowerCase().endsWith(REMOVAL_SUFFIX.toLowerCase());
+     if (removal(newest.displayName)) continue;
++    if (sqliteOldCopies.startupFamily(newest.tenantId, newest.wingetId)) continue;
+     const older = sqliteOldCopies.older(newest.tenantId, newest.wingetId, newest.appId);
+     if (older.length === 0) continue;
+     // Settling: wait 7 days, for healthy installs, and while anything else is changing this app.
+diff --git a/lib/hrm/old-copy-store.ts b/lib/hrm/old-copy-store.ts
+index 4e0016912..28e5619ef 100644
+--- a/lib/hrm/old-copy-store.ts
++++ b/lib/hrm/old-copy-store.ts
+@@ -14,6 +14,10 @@ export interface OlderCopy { appId: string; version: string; deployedAt: string
+ 
+ export function createOldCopyStore(getDb: () => Database.Database) {
+   return {
++    startupFamily(tenant: string, wingetId: string): boolean {
++      return !!getDb().prepare(`SELECT 1 FROM packaging_jobs WHERE tenant_id = ? AND winget_id = ? COLLATE NOCASE
++        AND CASE WHEN json_valid(package_config) THEN json_extract(package_config, '$.psadtConfig.installAfterRestartBeta') ELSE 0 END = 1 LIMIT 1`).get(tenant, wingetId);
++    },
+     record(row: OldCopyRecord) {
+       getDb().prepare(`INSERT INTO hrm_old_copy_cleanup (tenant_id, app_id, winget_id, display_name, version, newest_app_id, newest_version, outcome, reason, at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)
+diff --git a/lib/hrm/settings-summary.ts b/lib/hrm/settings-summary.ts
+index 66ecafc88..9917ea899 100644
+--- a/lib/hrm/settings-summary.ts
++++ b/lib/hrm/settings-summary.ts
+@@ -23,7 +23,7 @@ export function settingsSummaries({ config, espProfiles, relationships, categori
+     esp: espProfiles.length ? `Required on ${plural(espProfiles.length, 'setup profile', 'setup profiles')}` : 'Not required',
+     dependencies: relationships.length ? plural(relationships.length, 'linked app', 'linked apps') : 'None',
+     category: categories.map((c) => c.displayName).join(', ') || 'None',
+-    behavior: `${{ Silent: 'Silent', NonInteractive: 'Progress only', Auto: 'Installer decides' }[config.deployMode || 'Silent'] ?? 'Silent'}, ${
++    behavior: config.installAfterRestartBeta ? 'After next restart · Beta' : `${{ Silent: 'Silent', NonInteractive: 'Progress only', Auto: 'Installer decides' }[config.deployMode || 'Silent'] ?? 'Silent'}, ${
+       { Suppress: 'no restart', Prompt: 'asks to restart', Force: 'restarts' }[config.restartBehavior] ?? 'no restart'}`,
+     advanced: descriptionOrCommandsChanged || config.postInstallCommands?.length || config.postUninstallCommands?.length ? 'Changed' : 'Default',
+     deferral: config.allowDefer ? `Up to ${plural(config.deferTimes, 'time', 'times')}` : 'Off',
+diff --git a/lib/hrm/startup-installation.ts b/lib/hrm/startup-installation.ts
+new file mode 100644
+index 000000000..62f4f1e02
+--- /dev/null
++++ b/lib/hrm/startup-installation.ts
+@@ -0,0 +1,13 @@
++/** Browser-safe restrictions for the opt-in startup installer Beta. */
++export const STARTUP_BETA_LABEL = 'Install after next restart · Beta';
++export const STARTUP_BETA_COMMAND = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\\IntuneGet-StartupInstall.ps1 -Mode Stage';
++export const STARTUP_BETA_UNINSTALL = 'cmd.exe /d /c Uninstall-AfterRestart.cmd';
++export function startupInstallationProblem(input: { installScope?: string | null; installerType?: string; customDetection?: boolean; espProfiles?: unknown[]; removal?: boolean; supersedenceType?: string; relationships?: { relationshipType?: string; supersedenceType?: string }[] }): string | null {
++  if (input.installScope !== 'machine') return 'The startup installer Beta supports machine-wide apps only.';
++  if (!['msi','wix','exe','inno','nullsoft','burn'].includes((input.installerType ?? '').toLowerCase())) return 'The startup installer Beta supports MSI and EXE installers only.';
++  if (input.customDetection) return 'The startup installer Beta requires automatic detection rules.';
++  if (input.espProfiles?.length) return 'The startup installer Beta cannot be used for New computer setup.';
++  if (input.removal) return 'The startup installer Beta cannot be used for app removal.';
++  if (input.supersedenceType === 'replace' || input.relationships?.some(r => r.relationshipType === 'supersedence' && r.supersedenceType === 'replace')) return 'Use update supersedence for the startup installer Beta so the previous version is kept until restart.';
++  return null;
++}
+diff --git a/lib/hrm/startup-report-check.ts b/lib/hrm/startup-report-check.ts
+new file mode 100644
+index 000000000..765fbdbbe
+--- /dev/null
++++ b/lib/hrm/startup-report-check.ts
+@@ -0,0 +1,29 @@
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++import { collectStartupReport, GUID } from './startup-report';
++/** Read-only Graph collection. Credentials never go to devices or pagination hosts. */
++export async function refreshStartupReport(tenant: string) {
++  const { sqliteStartupReports: store } = await import('@/lib/db/sqlite');
++  const script = process.env.HRM_STARTUP_REPORT_SCRIPT_ID;
++  if (!script || !GUID.test(script)) return;
++  try {
++    const token = await getServicePrincipalToken(tenant);
++    if (!token) throw new Error('Token unavailable');
++    const base = `https://graph.microsoft.com/beta/deviceManagement/deviceHealthScripts/${script}/deviceRunStates`;
++    let url: string | undefined = `${base}?$select=id,preRemediationDetectionScriptOutput&$top=500`;
++    const states: { id?: string; preRemediationDetectionScriptOutput?: string }[] = [];
++    const deadline = Date.now() + 90000;
++    for (let page = 0; url && page < 40; page++) {
++      if (Date.now() > deadline) throw new Error('Collection timeout');
++      const next = new URL(url);
++      if (next.origin !== 'https://graph.microsoft.com' || next.pathname !== new URL(base).pathname || next.username || next.password) throw new Error('Invalid pagination');
++      const response: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000), cache: 'no-store' });
++      if (!response.ok) { store.save(tenant, null, response.status === 403 || response.status === 401 ? 'access_denied' : 'read_failed'); return; }
++      const body: { value?: unknown; '@odata.nextLink'?: string } = await response.json();
++      if (!Array.isArray(body.value) || states.length + body.value.length > 20000) throw new Error('Report limit');
++      states.push(...body.value as { id?: string; preRemediationDetectionScriptOutput?: string }[]);
++      url = body['@odata.nextLink'];
++    }
++    if (url) throw new Error('Incomplete report');
++    store.save(tenant, collectStartupReport(states, store.jobs(tenant)));
++  } catch { store.save(tenant, null, 'read_failed'); }
++}
+diff --git a/lib/hrm/startup-report-store.ts b/lib/hrm/startup-report-store.ts
+new file mode 100644
+index 000000000..b50703c82
+--- /dev/null
++++ b/lib/hrm/startup-report-store.ts
+@@ -0,0 +1,27 @@
++import type Database from 'better-sqlite3';
++import type { StartupJob, StartupReport, StartupReportView } from './startup-report';
++export function createStartupReportStore(getDb: () => Database.Database) {
++  return {
++    jobs(tenant: string): StartupJob[] {
++      const rows = getDb().prepare("SELECT id, display_name, version, package_config FROM packaging_jobs WHERE tenant_id = ? AND CASE WHEN json_valid(package_config) THEN json_extract(package_config, '$.psadtConfig.installAfterRestartBeta') END = 1 ORDER BY created_at DESC").all(tenant) as { id: string; display_name: string; version: string; package_config: string }[];
++      return rows.filter(row => { try { return JSON.parse(row.package_config || '{}').psadtConfig?.installAfterRestartBeta === true; } catch { return false; } }).map(row => ({ id: row.id, name: row.display_name, version: row.version }));
++    },
++    cancellation(tenant: string, job: string): { id: string; wingetId: string; version: string } | null {
++      const row = getDb().prepare('SELECT id, winget_id, version, package_config FROM packaging_jobs WHERE tenant_id = ? AND id = ?').get(tenant, job) as { id: string; winget_id: string; version: string; package_config: string } | undefined;
++      try { return row && JSON.parse(row.package_config || '{}').psadtConfig?.installAfterRestartBeta === true ? { id: row.id, wingetId: row.winget_id, version: row.version } : null; } catch { return null; }
++    },
++    tenants(): string[] {
++      return (getDb().prepare('SELECT DISTINCT tenant_id FROM packaging_jobs WHERE tenant_id IS NOT NULL LIMIT 100').all() as { tenant_id: string }[]).map(r => r.tenant_id);
++    },
++    read(tenant: string): Pick<StartupReportView, 'checkedAt' | 'report' | 'error'> {
++      const row = getDb().prepare('SELECT payload, checked_at, error FROM hrm_startup_reports WHERE tenant_id = ?').get(tenant) as { payload: string | null; checked_at: string; error: StartupReportView['error'] } | undefined;
++      if (!row) return {};
++      return { checkedAt: row.checked_at, ...(row.error ? { error: row.error } : {}), ...(row.payload ? { report: JSON.parse(row.payload) } : {}) };
++    },
++    save(tenant: string, report: StartupReport | null, error?: StartupReportView['error']) {
++      getDb().prepare(`INSERT INTO hrm_startup_reports (tenant_id, payload, checked_at, error) VALUES (?, ?, ?, ?)
++        ON CONFLICT(tenant_id) DO UPDATE SET payload=CASE WHEN excluded.error IS NULL THEN excluded.payload ELSE hrm_startup_reports.payload END, checked_at=CASE WHEN excluded.error IS NULL THEN excluded.checked_at ELSE hrm_startup_reports.checked_at END, error=excluded.error`)
++        .run(tenant, report ? JSON.stringify(report) : null, new Date().toISOString(), error ?? null);
++    },
++  };
++}
+diff --git a/lib/hrm/startup-report.ts b/lib/hrm/startup-report.ts
+new file mode 100644
+index 000000000..7f97bd8c2
+--- /dev/null
++++ b/lib/hrm/startup-report.ts
+@@ -0,0 +1,47 @@
++export type StartupState = 'waiting' | 'installing' | 'installed' | 'failed' | 'cancelled' | 'outdated';
++export interface StartupCounts { waiting: number; installing: number; installed: number; failed: number; cancelled: number; outdated: number }
++export interface StartupJob { id: string; name: string; version: string }
++export interface StartupReport { rows: (StartupJob & StartupCounts & { lastActivityAt?: string })[]; summary: StartupCounts; reportingDevices: number; unknownDevices: number; omitted: number }
++export const emptyStartupCounts = (): StartupCounts => ({ waiting: 0, installing: 0, installed: 0, failed: 0, cancelled: 0, outdated: 0 });
++export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++export const STARTUP_FRESH_MS = 6 * 60 * 60 * 1000;
++/** Parses only bounded, known-job identifiers and states; never returns raw Intune/device output. */
++export function collectStartupReport(states: { id?: string; preRemediationDetectionScriptOutput?: string }[], jobs: StartupJob[], now = Date.now()): StartupReport {
++  const rows = new Map<string, StartupJob & StartupCounts & { lastActivityAt?: string }>(jobs.map(j => [j.id.toLowerCase(), { ...j, ...emptyStartupCounts() }]));
++  const result: StartupReport = { rows: [], summary: emptyStartupCounts(), reportingDevices: 0, unknownDevices: 0, omitted: 0 };
++  const seen = new Set<string>();
++  const phases: Record<string, StartupState> = { w: 'waiting', i: 'installing', s: 'installed', f: 'failed', c: 'cancelled' };
++  for (const state of states) {
++    if (!state.id || seen.has(state.id)) continue;
++    seen.add(state.id);
++    try {
++      const text = state.preRemediationDetectionScriptOutput;
++      if (typeof text !== 'string' || text.length > 2048) throw new Error();
++      const value = JSON.parse(text);
++      if (value.v !== 1 || !Number.isSafeInteger(value.at) || value.at * 1000 > now + 300000 || value.at * 1000 < now - 30 * 86400000 || !Array.isArray(value.items) || value.items.length > 24 || !Number.isSafeInteger(value.omitted) || value.omitted < 0 || value.omitted > 100000 || !Number.isSafeInteger(value.issues) || value.issues < 0 || value.issues > 100000) throw new Error();
++      if (!value.items.every((item: unknown) => Array.isArray(item) && item.length === 3 && typeof item[0] === 'string' && GUID.test(item[0]) && typeof item[1] === 'string' && Object.hasOwn(phases, item[1]) && Number.isSafeInteger(item[2]) && item[2] * 1000 <= now + 300000 && item[2] >= 0)) throw new Error();
++      result.reportingDevices++;
++      result.omitted += value.omitted;
++      if (value.issues) result.unknownDevices++;
++      const deviceJobs = new Set<string>();
++      for (const item of value.items) {
++
++        const row = rows.get(item[0].toLowerCase());
++        if (!row || deviceJobs.has(item[0].toLowerCase())) continue;
++        deviceJobs.add(item[0].toLowerCase());
++        const outdated = now - value.at * 1000 > STARTUP_FRESH_MS || (item[1] === 'i' && now - item[2] * 1000 > 2 * 3600000);
++        const phase = outdated ? 'outdated' : phases[item[1]];
++        row[phase]++; result.summary[phase]++;
++        if (!row.lastActivityAt || item[2] * 1000 > Date.parse(row.lastActivityAt)) row.lastActivityAt = new Date(item[2] * 1000).toISOString();
++      }
++    } catch { result.unknownDevices++; }
++  }
++  result.rows = [...rows.values()];
++  return result;
++}
++export interface StartupReportView { supported: boolean; configured: boolean; packages?: StartupJob[]; checkedAt?: string; error?: 'access_denied' | 'read_failed'; stale?: boolean; report?: StartupReport }
++
++/** Used in the collapsed overview so incomplete device reports never look healthy. */
++export function startupReportNeedsReview(view: Pick<StartupReportView, 'error' | 'stale' | 'report'>): boolean {
++  return !!(view.error || view.stale || (view.report && (view.report.unknownDevices > 0 || view.report.omitted > 0 || view.report.summary.outdated > 0)));
++}
+diff --git a/lib/hrm/status-report-data.ts b/lib/hrm/status-report-data.ts
+index 78f5b65e8..10bb8f8fc 100644
+--- a/lib/hrm/status-report-data.ts
++++ b/lib/hrm/status-report-data.ts
+@@ -38,7 +38,24 @@ try {
+     .map(row => ({ at: new Date(Math.round((row.at - 2440587.5) * day)).toISOString(), count: row.count }));
+   const failed = groups('packaging_jobs', 'COALESCE(updated_at, created_at)', "status = 'failed' AND archived_at IS NULL");
+   const deployed = groups('upload_history', 'deployed_at', '1 = 1');
+-  parentPort.postMessage({ failedRecent, stuck, days, failed, deployed });
++  let startup;
++  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hrm_startup_reports'").get()) {
++    const snapshots = db.prepare(\`SELECT checked_at, error,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.summary.waiting') END AS waiting,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.summary.failed') END AS failed,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.summary.outdated') END AS outdated,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.unknownDevices') END AS unknown,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.omitted') END AS omitted
++      FROM hrm_startup_reports LIMIT 100\`).all();
++    if (snapshots.length) {
++      startup = { waiting: 0, failed: 0, outdated: 0, unknown: 0, omitted: 0 };
++      for (const row of snapshots) {
++        if (row.error || !Number.isFinite(Date.parse(row.checked_at)) || now - Date.parse(row.checked_at) > 6 * 3600000) { startup.outdated++; continue; }
++        for (const key of ['waiting','failed','outdated','unknown','omitted']) if (Number.isSafeInteger(row[key]) && row[key] >= 0 && row[key] <= 1000000) startup[key] += row[key];
++      }
++    }
++  }
++  parentPort.postMessage({ failedRecent, stuck, days, failed, deployed, ...(startup ? {startup} : {}) });
+ } catch {
+   parentPort.postMessage(null);
+ } finally {
+diff --git a/lib/hrm/status-report.ts b/lib/hrm/status-report.ts
+index 14d5d8333..f7d8a426d 100644
+--- a/lib/hrm/status-report.ts
++++ b/lib/hrm/status-report.ts
+@@ -138,6 +138,14 @@ export function buildStatusReport({ server, jobs, deploys, origin, counts, now =
+     }
+   }
+ 
++  // Startup Beta uses only cached aggregate counts; no app/device identifiers enter this report.
++  if (counts?.startup) {
++    const startup = counts.startup;
++    if (startup.waiting > 0) todos.push({ id: 'startup-waiting', title: `${plural(startup.waiting, 'startup installation')} waiting for restart`, detail: 'Beta: device reports, separate from publishing', ...link('/dashboard/updates#startup-installations') });
++    if (startup.failed > 0) { flag('Startup installs failed'); todos.push({ id: 'startup-failed', title: `${plural(startup.failed, 'startup installation')} failed`, detail: 'Beta: review the device reports', ...link('/dashboard/updates#startup-installations') }); }
++    if (startup.outdated > 0 || (startup.unknown ?? 0) > 0 || (startup.omitted ?? 0) > 0) { flag('Check startup reports'); todos.push({ id: 'startup-outdated', title: 'Startup installation reports need review', detail: 'Beta: outdated, unreadable or omitted results need a check', ...link('/dashboard/updates#startup-installations') }); }
++  }
++
+   const values = (counts ?? countsFromRecords(jobs ?? [], deploys ?? [], now)).days;
+ 
+   const foot: string[] = [];
+@@ -178,6 +186,7 @@ export function buildStatusReport({ server, jobs, deploys, origin, counts, now =
+ 
+ 
+ export interface ReportCounts {
++  startup?: { waiting: number; failed: number; outdated: number; unknown?: number; omitted?: number };
+   failedRecent: number;
+   stuck: number;
+   days: number[];
+diff --git a/packager/scripts/IntuneGet-StartupInstall.ps1 b/packager/scripts/IntuneGet-StartupInstall.ps1
+new file mode 100644
+index 000000000..918da9776
+--- /dev/null
++++ b/packager/scripts/IntuneGet-StartupInstall.ps1
+@@ -0,0 +1,235 @@
++# IntuneGet: Install after next restart (Beta). Runs as SYSTEM in Windows PowerShell 5.1.
++[CmdletBinding()]
++param([ValidateSet('Stage','Run','Cancel')][string]$Mode = 'Stage')
++$ErrorActionPreference = 'Stop'
++Set-StrictMode -Version 2
++
++function Test-IntuneGetNewBoot([string]$Before, [string]$Now) {
++    return -not [string]::IsNullOrWhiteSpace($Before) -and -not [string]::IsNullOrWhiteSpace($Now) -and $Before -ne $Now
++}
++function Get-IntuneGetBoot {
++    return (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime().ToString('o')
++}
++function Assert-IntuneGetSystem {
++    if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne 'S-1-5-18') { throw 'Startup installation requires SYSTEM.' }
++}
++function Assert-IntuneGetPlainPath([string]$Path) {
++    $current = [IO.Path]::GetFullPath($Path)
++    while ($current) {
++        if (Test-Path -LiteralPath $current) {
++            if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse points are not allowed.' }
++        }
++        $parent = [IO.Directory]::GetParent($current)
++        $current = if ($parent) { $parent.FullName } else { $null }
++    }
++}
++function Assert-IntuneGetOwnedPath([string]$Path) {
++    Assert-IntuneGetPlainPath $Path
++    $acl = Get-Acl -LiteralPath $Path
++    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-18') { throw 'Startup cache must be owned by SYSTEM.' }
++    foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
++        if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin @('S-1-5-18','S-1-5-32-544')) { throw 'Startup cache grants access to an unexpected principal.' }
++    }
++}
++function New-IntuneGetSecureDirectory([string]$Path) {
++    Assert-IntuneGetPlainPath $Path
++    if (-not (Test-Path -LiteralPath $Path)) {
++        $acl = New-Object Security.AccessControl.DirectorySecurity
++        $acl.SetAccessRuleProtection($true, $false)
++        $acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-18'))
++        foreach ($sid in @('S-1-5-18','S-1-5-32-544')) {
++            $rule = [Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid), 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
++            $acl.AddAccessRule($rule)
++        }
++        # Windows PowerShell 5.1 / .NET Framework creates the directory with its DACL atomically.
++        $null = [IO.Directory]::CreateDirectory($Path, $acl)
++    }
++    Assert-IntuneGetOwnedPath $Path
++}
++function Copy-IntuneGetPlainTree([string]$Source, [string]$Destination) {
++    foreach ($entry in Get-ChildItem -LiteralPath $Source -Force) {
++        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Package links are not allowed.' }
++        $target = Join-Path $Destination $entry.Name
++        if ($entry.PSIsContainer) {
++            New-IntuneGetSecureDirectory $target
++            Copy-IntuneGetPlainTree $entry.FullName $target
++        } else { [IO.File]::Copy($entry.FullName, $target, $false) }
++    }
++}
++function Read-IntuneGetJson([string]$Path) {
++    Assert-IntuneGetPlainPath $Path
++    if ((Get-Item -LiteralPath $Path).Length -gt 1048576) { throw 'Startup metadata exceeds its limit.' }
++    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
++}
++function Write-IntuneGetJson([string]$Path, $Value) {
++    $temporary = $Path + '.new'
++    Assert-IntuneGetPlainPath $temporary
++    [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json -Depth 8 -Compress), [Text.UTF8Encoding]::new($false))
++    Move-Item -LiteralPath $temporary -Destination $Path -Force
++}
++function Write-IntuneGetState([string]$Directory, $Config, [string]$State, [string]$Boot, [int]$Attempts, $Code = $null) {
++    Write-IntuneGetJson (Join-Path $Directory 'state.json') ([ordered]@{ v=1; job=$Config.jobId; app=$Config.appKey; version=$Config.version; createdAt=$Config.createdAt; state=$State; boot=$Boot; attempts=$Attempts; updated=[DateTime]::UtcNow.ToString('o'); code=$Code })
++}
++# Compare immutable server deployment order, never arrival time or vendor version syntax.
++function Compare-IntuneGetIntent($Left, $Right) {
++    $leftDate=[DateTimeOffset]::Parse([string]$Left.createdAt).UtcDateTime.Ticks
++    $rightDate=[DateTimeOffset]::Parse([string]$Right.createdAt).UtcDateTime.Ticks
++    if ($leftDate -lt $rightDate) { return -1 }
++    if ($leftDate -gt $rightDate) { return 1 }
++    return [StringComparer]::Ordinal.Compare([string]$Left.jobId,[string]$Right.jobId)
++}
++function Set-IntuneGetSuperseded([string]$App, [string]$Directory) {
++    foreach ($old in Get-ChildItem -LiteralPath $App -Directory) {
++        if ($old.FullName -eq $Directory) { continue }
++        Assert-IntuneGetOwnedPath $old.FullName
++        $oldFile = Join-Path $old.FullName 'state.json'
++        if (Test-Path -LiteralPath $oldFile) {
++            $oldState = Read-IntuneGetJson $oldFile
++            if ($oldState.state -in @('waiting','installing')) {
++                $oldState.state='superseded';$oldState.updated=[DateTime]::UtcNow.ToString('o')
++                Write-IntuneGetJson $oldFile $oldState
++            }
++        }
++    }
++}
++function Test-IntuneGetInstalled($Config) {
++    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry64')
++    try {
++        $key = $base.OpenSubKey([string]$Config.marker)
++        if (-not $key) { return $false }
++        try {
++            $actual = [string]$key.GetValue('Version','')
++            if ($actual -eq [string]$Config.version) { return $true }
++            $left = $null; $right = $null
++            return [version]::TryParse($actual,[ref]$left) -and [version]::TryParse([string]$Config.version,[ref]$right) -and $left -ge $right
++        } finally { $key.Dispose() }
++    } finally { $base.Dispose() }
++}
++function Register-IntuneGetStartupTask($Config, [string]$Directory) {
++    $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
++    $script = Join-Path $Directory 'payload\IntuneGet-StartupInstall.ps1'
++    $action = New-ScheduledTaskAction -Execute $exe -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $script + '" -Mode Run') -WorkingDirectory (Join-Path $Directory 'payload')
++    $trigger = New-ScheduledTaskTrigger -AtStartup
++    $trigger.Delay = 'PT1M'
++    $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
++    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
++    # No StartWhenAvailable, immediate start, logon trigger, or forced restart.
++    Register-ScheduledTask -TaskName ('IntuneGet-Startup-Beta-' + $Config.appKey) -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
++}
++function Remove-IntuneGetStartupTask($Config) {
++    Unregister-ScheduledTask -TaskName ('IntuneGet-Startup-Beta-' + $Config.appKey) -Confirm:$false -ErrorAction SilentlyContinue
++}
++function Assert-IntuneGetManifest([string]$Payload, $Manifest) {
++    foreach ($entry in $Manifest.files) {
++        $path = [IO.Path]::GetFullPath((Join-Path $Payload ([string]$entry.path)))
++        if (-not $path.StartsWith($Payload.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid package manifest path.' }
++        Assert-IntuneGetPlainPath $path
++        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $entry.sha256) { throw 'Staged package failed integrity verification.' }
++    }
++}
++function Invoke-IntuneGetStartup {
++    Assert-IntuneGetSystem
++    $config = Read-IntuneGetJson (Join-Path $PSScriptRoot 'startup-config.json')
++    if ($config.v -ne 1 -or $config.jobId -notmatch '^[0-9a-f-]{36}$' -or $config.appKey -notmatch '^[0-9a-f]{64}$') { throw 'Invalid startup package identity.' }
++    $created=[DateTimeOffset]::MinValue
++    if (-not $config.PSObject.Properties['createdAt'] -or -not [DateTimeOffset]::TryParse([string]$config.createdAt,[ref]$created)) { throw 'Missing deployment order.' }
++    $root = Join-Path $env:ProgramData 'IntuneGet-Startup-Beta'
++    New-IntuneGetSecureDirectory $root
++    $app = Join-Path $root $config.appKey
++    New-IntuneGetSecureDirectory $app
++    $directory = Join-Path $app $config.jobId
++    $mutex = [Threading.Mutex]::new($false, ('Global\IntuneGetStartup-' + $config.appKey))
++    $locked = $false
++    try {
++        try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
++        if (-not $locked) { return 1618 }
++        if ($Mode -eq 'Cancel') {
++            if (Test-Path -LiteralPath $directory) {
++                Assert-IntuneGetOwnedPath $directory
++                $state = Read-IntuneGetJson (Join-Path $directory 'state.json')
++                Write-IntuneGetState $directory $config 'cancelled' $state.boot $state.attempts
++                # Do not cancel a newer version's task when Intune uninstalls an older copy.
++                $task = Get-ScheduledTask -TaskName ('IntuneGet-Startup-Beta-' + $config.appKey) -ErrorAction SilentlyContinue
++                if ($task -and ($task.Actions.Arguments -like ('*' + $config.jobId + '*'))) { Remove-IntuneGetStartupTask $config }
++            }
++            return 0
++        }
++        $intentFile = Join-Path $app 'intent.json'
++        $intent = if (Test-Path -LiteralPath $intentFile) { Read-IntuneGetJson $intentFile } else { $null }
++        if ($intent -and (Compare-IntuneGetIntent $config $intent) -lt 0) {
++            New-IntuneGetSecureDirectory $directory
++            Write-IntuneGetState $directory $config 'superseded' (Get-IntuneGetBoot) 0
++            return 60010
++        }
++        if ($Mode -eq 'Stage') {
++            if (Test-IntuneGetInstalled $config) { Set-IntuneGetSuperseded $app $directory; New-IntuneGetSecureDirectory $directory; Write-IntuneGetState $directory $config 'installed' (Get-IntuneGetBoot) 0 0; Write-IntuneGetJson $intentFile @{jobId=$config.jobId;createdAt=$config.createdAt}; Remove-IntuneGetStartupTask $config; return 0 }
++            if (Test-Path -LiteralPath $directory) {
++                Assert-IntuneGetOwnedPath $directory
++                $state = Read-IntuneGetJson (Join-Path $directory 'state.json')
++                if ($state.state -in @('failed','cancelled','superseded')) { return 60010 }
++                # Retries keep the original boot boundary and never execute the installer.
++                Set-IntuneGetSuperseded $app $directory
++                Write-IntuneGetJson $intentFile @{jobId=$config.jobId;createdAt=$config.createdAt}
++                Register-IntuneGetStartupTask $config $directory
++                return 1618
++            }
++            New-IntuneGetSecureDirectory $directory
++            try {
++                $payload = Join-Path $directory 'payload'
++                New-IntuneGetSecureDirectory $payload
++                Copy-IntuneGetPlainTree $PSScriptRoot $payload
++                $files = @(Get-ChildItem -LiteralPath $payload -Recurse -File | ForEach-Object { [ordered]@{path=$_.FullName.Substring($payload.Length+1);sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash} })
++                Write-IntuneGetJson (Join-Path $directory 'manifest.json') @{v=1;files=$files}
++                Set-IntuneGetSuperseded $app $directory
++                Write-IntuneGetState $directory $config 'waiting' (Get-IntuneGetBoot) 0
++                Write-IntuneGetJson $intentFile @{jobId=$config.jobId;createdAt=$config.createdAt}
++                Register-IntuneGetStartupTask $config $directory
++                return 1618
++            } catch {
++                Write-IntuneGetState $directory $config 'failed' (Get-IntuneGetBoot) 0 60010
++                throw
++            }
++        }
++        Assert-IntuneGetOwnedPath $directory
++        $expectedPayload = Join-Path $directory 'payload'
++        if ([IO.Path]::GetFullPath($PSScriptRoot) -ne [IO.Path]::GetFullPath($expectedPayload)) { throw 'Startup execution must use the protected cache.' }
++        $state = Read-IntuneGetJson (Join-Path $directory 'state.json')
++        if ($state.state -in @('cancelled','superseded')) { return 60010 }
++        if (-not (Test-IntuneGetNewBoot $state.boot (Get-IntuneGetBoot))) { return 1618 }
++        if (Test-IntuneGetInstalled $config) {
++            Write-IntuneGetState $directory $config 'installed' $state.boot $state.attempts 0
++            Remove-IntuneGetStartupTask $config
++            return 0
++        }
++        if ($state.attempts -ge 3) { Write-IntuneGetState $directory $config 'failed' $state.boot $state.attempts 60010;Remove-IntuneGetStartupTask $config;return 60010 }
++        $global = [Threading.Mutex]::new($false, 'Global\IntuneGetStartupInstaller')
++        $globalLocked = $false
++        try {
++            try { $globalLocked=$global.WaitOne([TimeSpan]::FromMinutes(30)) } catch [Threading.AbandonedMutexException] { $globalLocked=$true }
++            if (-not $globalLocked) { return 1618 }
++            $manifest = Read-IntuneGetJson (Join-Path $directory 'manifest.json')
++            Assert-IntuneGetManifest $expectedPayload $manifest
++            $attempts = [int]$state.attempts + 1
++            Write-IntuneGetState $directory $config 'installing' $state.boot $attempts
++            $process = Start-Process -FilePath (Join-Path $expectedPayload 'Invoke-AppDeployToolkit.exe') -ArgumentList @('-DeploymentType','Install','-DeployMode','Silent','-SuppressRebootPassThru') -WorkingDirectory $expectedPayload -PassThru
++            # Never kill just the launcher and release locks while its installer may still run.
++            # The task has no execution time limit. Keep both mutexes until PSADT completes;
++            # reporting flags an Installing record older than 2 hours for investigation.
++            while (-not $process.WaitForExit(60000)) { }
++            $code=$process.ExitCode
++            $installed=($code -in @(0,1707,3010,1641)) -and (Test-IntuneGetInstalled $config)
++            Write-IntuneGetState $directory $config $(if ($installed) {'installed'} else {'failed'}) $state.boot $attempts $code
++            if ($installed -or $attempts -ge 3) { Remove-IntuneGetStartupTask $config }
++            if ($installed) { try { Assert-IntuneGetOwnedPath $expectedPayload; Remove-Item -LiteralPath $expectedPayload -Recurse -Force } catch { } }
++            return $(if ($installed) {0} else {60010})
++        } catch {
++            Write-IntuneGetState $directory $config 'failed' $state.boot ([int]$state.attempts+1) 60010
++            Remove-IntuneGetStartupTask $config
++            throw
++        } finally { if ($globalLocked) {$global.ReleaseMutex()};$global.Dispose() }
++    } finally { if ($locked) {$mutex.ReleaseMutex()};$mutex.Dispose() }
++}
++# Dot-sourcing is reserved for the local test harness; no installation is started.
++if ($MyInvocation.InvocationName -ne '.') {
++    try { exit (Invoke-IntuneGetStartup) } catch { [Console]::Error.WriteLine('IntuneGet startup installation Beta failed. Review the protected local state and installer logs.');exit 60010 }
++}
+diff --git a/packager/src/intune-uploader.ts b/packager/src/intune-uploader.ts
+index 553089e6c..3d51cdc24 100644
+--- a/packager/src/intune-uploader.ts
++++ b/packager/src/intune-uploader.ts
+@@ -1,3 +1,4 @@
++import { startupEnabled, startupPackageProblem } from './startup-install.js';
+ /**
+  * Intune Uploader - Uploads .intunewin packages to Microsoft Intune
+  */
+@@ -314,6 +315,8 @@ export class IntuneUploader {
+    * to Auto mode and show UI to logged-in users. Explicit 'Auto' adds no flag.
+    */
+   private buildCommandLines(job: PackagingJob): { install: string; uninstall: string } {
++    const problem = startupPackageProblem(job); if (problem) throw new Error(problem);
++    if (startupEnabled(job)) return { install: 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\\IntuneGet-StartupInstall.ps1 -Mode Stage', uninstall: 'cmd.exe /d /c Uninstall-AfterRestart.cmd' };
+     const packageConfig = this.asRecord(job.package_config);
+     let deployModeFlag = ' -DeployMode Silent';
+ 
+diff --git a/packager/src/job-processor.ts b/packager/src/job-processor.ts
+index 412ae9e35..4680e5ccb 100644
+--- a/packager/src/job-processor.ts
++++ b/packager/src/job-processor.ts
+@@ -2,6 +2,7 @@
+  * Job Processor - Orchestrates the packaging and upload steps
+  */
+ 
++import { prepareStartupPackage } from './startup-install.js';
+ import * as fs from 'fs';
+ import * as path from 'path';
+ import * as crypto from 'crypto';
+@@ -413,6 +414,7 @@ export class JobProcessor {
+       'utf8'
+     );
+ 
++    await prepareStartupPackage(job, packageDir, this.getRegistryMarkerPath(job));
+     this.logger.debug('PSADT package created', { packageDir });
+     return packageDir;
+   }
+diff --git a/packager/src/startup-install.ts b/packager/src/startup-install.ts
+new file mode 100644
+index 000000000..db00cacf7
+--- /dev/null
++++ b/packager/src/startup-install.ts
+@@ -0,0 +1,28 @@
++import * as fs from 'fs';
++import * as path from 'path';
++import { createHash } from 'crypto';
++import type { PackagingJob } from './job-poller.js';
++const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
++export function startupEnabled(job: PackagingJob): boolean { return record(record(job.package_config).psadtConfig).installAfterRestartBeta === true; }
++export function startupPackageProblem(job: PackagingJob): string | null {
++  const config = record(job.package_config), psadt = record(config.psadtConfig);
++  if (psadt.installAfterRestartBeta !== undefined && typeof psadt.installAfterRestartBeta !== 'boolean') return 'Invalid startup installer Beta setting.';
++  if (!startupEnabled(job)) return null;
++  if (job.install_scope !== 'machine') return 'The startup installer Beta supports machine-wide apps only.';
++  if (!['msi','wix','exe','inno','nullsoft','burn'].includes(job.installer_type.toLowerCase())) return 'The startup installer Beta supports MSI and EXE installers only.';
++  if (psadt.restartBehavior && psadt.restartBehavior !== 'Suppress') return 'The startup installer Beta requires suppressed restarts.';
++  if (psadt.customDetection || (Array.isArray(config.espProfiles) && config.espProfiles.length) || (config.supersedenceType === 'replace' || (Array.isArray(config.relationships) && config.relationships.some(r => record(r).relationshipType === 'supersedence' && record(r).supersedenceType === 'replace')))) return 'The startup installer Beta requires automatic detection, no setup profiles and update supersedence.';
++  return null;
++}
++export async function prepareStartupPackage(job: PackagingJob, directory: string, markerRoot: string): Promise<void> {
++  const problem = startupPackageProblem(job); if (problem) throw new Error(problem);
++  if (!startupEnabled(job)) return;
++  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(job.id) || !/^[A-Za-z0-9_.-]{1,256}$/.test(job.winget_id)) throw new Error('Invalid startup package identity.');
++  if (!/^SOFTWARE\\/i.test(markerRoot)) throw new Error('The startup installer Beta requires a SOFTWARE registry marker.');
++  if (!Number.isFinite(Date.parse(job.created_at))) throw new Error('Startup packages require the original deployment creation time.');
++  const metadata = { v: 1, createdAt: new Date(job.created_at).toISOString(), jobId: job.id.toLowerCase(), appKey: createHash('sha256').update(job.winget_id.toLowerCase()).digest('hex'), version: job.version,
++    marker: `${markerRoot}\\${job.winget_id.replace(/[.\-]/g, '_')}` };
++  await fs.promises.copyFile(path.join(__dirname, '..', 'scripts', 'IntuneGet-StartupInstall.ps1'), path.join(directory, 'IntuneGet-StartupInstall.ps1'));
++  await fs.promises.writeFile(path.join(directory, 'startup-config.json'), JSON.stringify(metadata), 'utf8');
++  await fs.promises.writeFile(path.join(directory, 'Uninstall-AfterRestart.cmd'), '@echo off\r\n"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0IntuneGet-StartupInstall.ps1" -Mode Cancel\r\nif errorlevel 1 exit /b %errorlevel%\r\n"%~dp0Invoke-AppDeployToolkit.exe" -DeploymentType Uninstall -DeployMode Silent\r\nexit /b %errorlevel%\r\n', 'ascii');
++}
+diff --git a/packager/tests/startup-install.test.ts b/packager/tests/startup-install.test.ts
+new file mode 100644
+index 000000000..68f861a55
+--- /dev/null
++++ b/packager/tests/startup-install.test.ts
+@@ -0,0 +1,50 @@
++import { afterEach, expect, it } from 'vitest';
++import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'fs';
++import { tmpdir } from 'os';
++import { join, resolve } from 'path';
++import { spawnSync } from 'child_process';
++import { prepareStartupPackage, startupPackageProblem } from '../src/startup-install';
++import type { PackagingJob } from '../src/job-poller';
++const dirs:string[]=[];
++afterEach(()=>{for(const dir of dirs.splice(0))rmSync(dir,{recursive:true,force:true})});
++const job={created_at:'2026-01-01T00:00:00.000Z',id:'11111111-1111-4111-8111-111111111111',winget_id:'Vendor.App',display_name:'Fixture app',version:'2.0',install_scope:'machine',installer_type:'msi',package_config:{psadtConfig:{installAfterRestartBeta:true,restartBehavior:'Suppress'}}} as unknown as PackagingJob;
++it('packages a startup coordinator with a stable app key and real-version detection metadata',async()=>{
++ const dir=mkdtempSync(join(tmpdir(),'startup-package-'));dirs.push(dir);
++ await prepareStartupPackage(job,dir,'SOFTWARE\\IntuneGet\\Apps');
++ const config=JSON.parse(readFileSync(join(dir,'startup-config.json'),'utf8'));
++ expect(config).toMatchObject({v:1,jobId:job.id,version:'2.0',marker:'SOFTWARE\\IntuneGet\\Apps\\Vendor_App'});
++ expect(config.appKey).toMatch(/^[0-9a-f]{64}$/);
++ expect(readFileSync(join(dir,'IntuneGet-StartupInstall.ps1'),'utf8')).toContain('Test-IntuneGetNewBoot');
++ expect(readFileSync(join(dir,'Uninstall-AfterRestart.cmd'),'utf8')).toContain('-Mode Cancel');
++ expect(startupPackageProblem({...job,install_scope:'user'})).not.toBeNull();
++});
++const pwsh = spawnSync('pwsh',['-NoProfile','-Command','exit 0'],{timeout:10000}).status===0;
++it.runIf(pwsh)('parses Windows scripts and proves same-boot retries cannot authorize installation',()=>{
++ const script=resolve('packager/scripts/IntuneGet-StartupInstall.ps1');
++ const reporter=resolve('public/startup-beta/Detect-StartupInstallations.ps1');
++ const prepare=resolve('.github/scripts/Prepare-StartupPackage.ps1');
++ const cancellation=resolve('public/startup-beta/Cancel-StartupTemplate.ps1');
++ const command=`$ErrorActionPreference='Stop'; foreach($path in @('${script}','${reporter}','${prepare}','${cancellation}')) {$tokens=$null;$errors=$null;$null=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors);if($errors.Count){throw ($errors | Out-String)}}; . '${script}'; if(Test-IntuneGetNewBoot 'boot-1' 'boot-1'){throw 'Same boot admitted'};if(Test-IntuneGetNewBoot '' 'boot-2'){throw 'Missing boundary admitted'};if(-not (Test-IntuneGetNewBoot 'boot-1' 'boot-2')){throw 'New boot rejected'};Write-Output 'PASS'`;
++ const result=spawnSync('pwsh',['-NoProfile','-Command',command],{encoding:'utf8',timeout:25000});
++ expect(result.status,result.stderr).toBe(0);expect(result.stdout).toContain('PASS');
++},30000);
++
++it.runIf(pwsh)('prepares equivalent metadata through the GitHub Actions helper without executing an installer', async()=>{
++ const dir=mkdtempSync(join(tmpdir(),'startup-actions-'));dirs.push(dir);
++ const result=spawnSync('pwsh',['-NoProfile','-File',resolve('.github/scripts/Prepare-StartupPackage.ps1'),'-PackageDirectory',dir],{encoding:'utf8',timeout:25000,env:{...process.env,PSADT_CONFIG:JSON.stringify({installAfterRestartBeta:true,restartBehavior:'Suppress'}),INSTALL_SCOPE:'machine',INSTALLER_TYPE:'msi',JOB_ID:job.id,JOB_CREATED_AT:job.created_at,WINGET_ID:job.winget_id,VERSION:job.version,ESP_PROFILES:'[]',SUPERSEDENCE_TYPE:'update'}});
++ expect(result.status,result.stderr).toBe(0);
++ const config=JSON.parse(readFileSync(join(dir,'startup-config.json'),'utf8'));
++ const node=mkdtempSync(join(tmpdir(),'startup-node-'));dirs.push(node);await prepareStartupPackage(job,node,'SOFTWARE\\IntuneGet\\Apps');
++ expect(config).toEqual(JSON.parse(readFileSync(join(node,'startup-config.json'),'utf8')));
++ expect(readFileSync(join(dir,'IntuneGet-StartupInstall.ps1'),'utf8')).toContain('Assert-IntuneGetManifest');
++},30000);
++
++it.runIf(pwsh)('exercises staging, retry and post-boot completion with mocked Windows primitives',()=>{
++ const result=spawnSync('pwsh',['-NoProfile','-File',resolve('packager/tests/startup-lifecycle.fixture.ps1'),'-Runner',resolve('packager/scripts/IntuneGet-StartupInstall.ps1'),'-TempRoot',realpathSync(tmpdir())],{encoding:'utf8',timeout:25000});
++ expect(result.status,result.stderr).toBe(0);expect(result.stdout).toContain('PASS: staging');
++},30000);
++
++it('rejects missing deployment order before producing a startup package', async () => {
++ const dir=mkdtempSync(join(tmpdir(),'startup-no-order-'));dirs.push(dir);
++ await expect(prepareStartupPackage({...job,created_at:''},dir,'SOFTWARE\\IntuneGet\\Apps')).rejects.toThrow('original deployment creation time');
++});
+diff --git a/packager/tests/startup-lifecycle.fixture.ps1 b/packager/tests/startup-lifecycle.fixture.ps1
+new file mode 100644
+index 000000000..12ae01cec
+--- /dev/null
++++ b/packager/tests/startup-lifecycle.fixture.ps1
+@@ -0,0 +1,123 @@
++param([Parameter(Mandatory=$true)][string]$Runner,[Parameter(Mandatory=$true)][string]$TempRoot)
++$ErrorActionPreference='Stop'
++$testRoot=Join-Path $TempRoot ('intuneget-startup-test-'+[guid]::NewGuid().ToString())
++$originalProgramData=$env:ProgramData
++$script:boot='boot-a';$script:installed=$false;$script:starts=0;$script:removed=0;$script:registered=$null;$script:waits=0;$script:slow=$false
++function Set-TestMocks {
++    # OS security and scheduler primitives are tested in the Windows pilot, not emulated as real Windows APIs here.
++    function script:Assert-IntuneGetSystem {}
++    function script:Assert-IntuneGetOwnedPath {param($Path)}
++    function script:New-IntuneGetSecureDirectory {param($Path);$null=[IO.Directory]::CreateDirectory($Path)}
++    function script:Get-IntuneGetBoot {return $script:boot}
++    function script:Test-IntuneGetInstalled {param($Config);return $script:installed}
++    function script:Register-IntuneGetStartupTask {param($Config,$Directory);$script:registered=$Directory}
++    function script:Remove-IntuneGetStartupTask {param($Config);$script:removed++}
++    function script:Get-ScheduledTask {param($TaskName,$ErrorAction);return [pscustomobject]@{Actions=[pscustomobject]@{Arguments=$script:registered}}}
++    function script:Assert-IntuneGetManifest {param($Payload,$Manifest);if(-not $Manifest.files){throw 'Manifest missing'}}
++    function script:Start-Process {
++        param($FilePath,$ArgumentList,$WorkingDirectory,[switch]$PassThru)
++        $script:starts++;$script:installed=$true
++        $p=[pscustomobject]@{ExitCode=0;Id=123;Directory=$WorkingDirectory}
++        $p | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
++            param($Milliseconds)
++            $script:waits++
++            if ($script:slow -and $script:waits -le 2) {
++                $record=Read-IntuneGetJson (Join-Path (Split-Path $this.Directory) 'state.json')
++                if($record.state -ne 'installing'){throw 'Slow installer was marked failed before completion'}
++                return $false
++            }
++            return $true
++        }
++        return $p
++    }
++}
++try {
++    $null=[IO.Directory]::CreateDirectory($testRoot)
++    $env:ProgramData=Join-Path $testRoot 'data'
++    $null=[IO.Directory]::CreateDirectory($env:ProgramData)
++    $source=Join-Path $testRoot 'source';$null=[IO.Directory]::CreateDirectory($source)
++    $copy=Join-Path $source 'IntuneGet-StartupInstall.ps1';Copy-Item -LiteralPath $Runner -Destination $copy
++    $metadata=@{v=1;createdAt='2026-01-01T00:00:00.000Z';jobId='11111111-1111-4111-8111-111111111111';appKey=('a'*64);version='2.0';marker='SOFTWARE\IntuneGet\Apps\Fixture_App'}
++    $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source 'startup-config.json')
++    Set-Content -LiteralPath (Join-Path $source 'Invoke-AppDeployToolkit.exe') -Value 'not executable: lifecycle test fixture'
++    . $copy -Mode Stage
++    Set-TestMocks
++    $code=Invoke-IntuneGetStartup
++    if($code -ne 1618 -or $script:starts -ne 0){throw 'Staging started an installer or reported success'}
++    $directory=$script:registered
++    $state=Read-IntuneGetJson (Join-Path $directory 'state.json')
++    if($state.state -ne 'waiting' -or $state.boot -ne 'boot-a'){throw 'Missing boot boundary'}
++    $payload=Join-Path $directory 'payload'
++    $originalHash=(Get-FileHash -LiteralPath (Join-Path $payload 'Invoke-AppDeployToolkit.exe')).Hash
++    Set-Content -LiteralPath (Join-Path $source 'Invoke-AppDeployToolkit.exe') -Value 'changed source'
++    $null=Invoke-IntuneGetStartup
++    if((Get-FileHash -LiteralPath (Join-Path $payload 'Invoke-AppDeployToolkit.exe')).Hash -ne $originalHash){throw 'Retry replaced staged bytes'}
++    . (Join-Path $payload 'IntuneGet-StartupInstall.ps1') -Mode Run
++    Set-TestMocks
++    if((Invoke-IntuneGetStartup) -ne 1618 -or $script:starts -ne 0){throw 'Same-boot run installed early'}
++    $script:slow=$true
++    $script:boot='boot-b'
++    if((Invoke-IntuneGetStartup) -ne 0){throw 'New boot did not complete the mocked install'}
++    $state=Read-IntuneGetJson (Join-Path $directory 'state.json')
++    if($script:waits -ne 3){throw 'Coordinator did not keep waiting for the slow installer'}
++    if($script:starts -ne 1 -or $state.state -ne 'installed' -or $script:removed -ne 1){throw 'Incorrect installation outcome'}
++    $script:installed=$false
++    $metadata.jobId='22222222-2222-4222-8222-222222222222'
++    $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source 'startup-config.json')
++    . $copy -Mode Stage
++    Set-TestMocks
++    $null=Invoke-IntuneGetStartup
++    $cancelled=$script:registered
++    . $copy -Mode Cancel
++    Set-TestMocks
++    if((Invoke-IntuneGetStartup) -ne 0){throw 'Cancellation failed'}
++    $state=Read-IntuneGetJson (Join-Path $cancelled 'state.json')
++    if($state.state -ne 'cancelled' -or $script:removed -ne 2){throw 'Cancellation did not clear its task'}
++    . (Join-Path $cancelled 'payload/IntuneGet-StartupInstall.ps1') -Mode Run
++    Set-TestMocks
++    $script:boot='boot-c'
++    if((Invoke-IntuneGetStartup) -ne 60010 -or $script:starts -ne 1){throw 'Cancelled deployment installed later'}
++    # Delayed older packages, including deliveries after newer completion/cancellation,
++    # must never take over the task. Version text is intentionally not sortable.
++    $metadata.jobId='33333333-3333-4333-8333-333333333333'
++    $metadata.createdAt='2026-01-03T00:00:00.000Z';$metadata.version='release-new'
++    $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source 'startup-config.json')
++    . $copy -Mode Stage
++    Set-TestMocks
++    if((Invoke-IntuneGetStartup) -ne 1618){throw 'New deployment was not staged'}
++    $newer=$script:registered
++    $metadata.jobId='44444444-4444-4444-8444-444444444444'
++    $metadata.createdAt='2026-01-02T00:00:00.000Z';$metadata.version='release-old'
++    $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source 'startup-config.json')
++    . $copy -Mode Stage
++    Set-TestMocks
++    if((Invoke-IntuneGetStartup) -ne 60010 -or $script:registered -ne $newer){throw 'Older delivery took over the newer task'}
++    if((Read-IntuneGetJson (Join-Path $newer 'state.json')).state -ne 'waiting'){throw 'Older delivery superseded newer state'}
++    # The durable intent still protects a completed package after its payload is removed.
++    $newState=Read-IntuneGetJson (Join-Path $newer 'state.json');$newState.state='installed'
++    Write-IntuneGetJson (Join-Path $newer 'state.json') $newState
++    if((Invoke-IntuneGetStartup) -ne 60010){throw 'Older delivery bypassed completed intent'}
++    $left=[pscustomobject]@{createdAt='2026-01-03T00:00:00Z';jobId='b'}
++    $right=[pscustomobject]@{createdAt='2026-01-03T00:00:00Z';jobId='a'}
++    if((Compare-IntuneGetIntent $left $right) -le 0){throw 'Equal-time order was not deterministic'}
++    # Detection of a later package also clears earlier waiting records, not only its task.
++    $metadata.jobId='55555555-5555-4555-8555-555555555555';$metadata.createdAt='2026-01-05T00:00:00.000Z'
++    $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source 'startup-config.json')
++    . $copy -Mode Stage
++    Set-TestMocks
++    $null=Invoke-IntuneGetStartup;$waiting=$script:registered
++    $metadata.jobId='66666666-6666-4666-8666-666666666666';$metadata.createdAt='2026-01-06T00:00:00.000Z'
++    $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source 'startup-config.json')
++    $script:installed=$true
++    if((Invoke-IntuneGetStartup) -ne 0){throw 'Detected current version did not finish'}
++    if((Read-IntuneGetJson (Join-Path $waiting 'state.json')).state -ne 'superseded'){throw 'Detected newer package left phantom waiting work'}
++    # Missing server creation time fails closed rather than using delivery time.
++    $metadata.Remove('createdAt');$metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source 'startup-config.json')
++    $rejected=$false
++    try {$null=Invoke-IntuneGetStartup} catch {$rejected=$true}
++    if(-not $rejected){throw 'Missing deployment order was accepted'}
++    Write-Output 'PASS: staging, idempotent retry, boot gate, installation detection, cleanup and cancellation'
++} finally {
++    $env:ProgramData=$originalProgramData
++    Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
++}
+diff --git a/public/startup-beta/Cancel-StartupTemplate.ps1 b/public/startup-beta/Cancel-StartupTemplate.ps1
+new file mode 100644
+index 000000000..82a1c0ca6
+--- /dev/null
++++ b/public/startup-beta/Cancel-StartupTemplate.ps1
+@@ -0,0 +1,51 @@
++# Generated by IntuneGet for one startup-installation Beta package.
++# Deploy through Intune as a SYSTEM platform script to the same pilot group.
++# Remove this package's Required assignment first. This does not uninstall an installed app.
++$ErrorActionPreference='Stop'
++$job='__JOB_ID__'
++$app='__APP_KEY__'
++$version=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__VERSION_BASE64__'))
++if($job -notmatch '^[0-9a-f-]{36}$' -or $app -notmatch '^[0-9a-f]{64}$'){throw 'Invalid cancellation identity'}
++if([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne 'S-1-5-18'){throw 'Run cancellation as SYSTEM'}
++function Assert-Plain([string]$Path){
++ $current=[IO.Path]::GetFullPath($Path)
++ while($current){
++  if((Test-Path -LiteralPath $current) -and ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Reparse point refused'}
++  $parent=[IO.Directory]::GetParent($current);$current=if($parent){$parent.FullName}else{$null}
++ }
++}
++function Secure-Directory([string]$Path){
++ Assert-Plain $Path
++ if(-not(Test-Path -LiteralPath $Path)){
++  $acl=New-Object Security.AccessControl.DirectorySecurity;$acl.SetAccessRuleProtection($true,$false);$acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-18'))
++  foreach($sid in @('S-1-5-18','S-1-5-32-544')){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
++  $null=[IO.Directory]::CreateDirectory($Path,$acl)
++ }
++ $acl=Get-Acl -LiteralPath $Path
++ if($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-18'){throw 'Unexpected cache owner'}
++ foreach($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){if($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin @('S-1-5-18','S-1-5-32-544')){throw 'Unexpected cache permission'}}
++}
++$root=Join-Path $env:ProgramData 'IntuneGet-Startup-Beta';Secure-Directory $root
++$family=Join-Path $root $app;Secure-Directory $family
++$directory=Join-Path $family $job
++$mutex=[Threading.Mutex]::new($false,('Global\IntuneGetStartup-'+$app));$locked=$false
++try{
++ try{$locked=$mutex.WaitOne(0)} catch [Threading.AbandonedMutexException]{$locked=$true}
++ if(-not $locked){throw 'Installation or staging is running. Retry cancellation after it finishes.'}
++ Secure-Directory $directory
++ $statePath=Join-Path $directory 'state.json';Assert-Plain $statePath
++ if(Test-Path -LiteralPath $statePath){
++  if((Get-Item -LiteralPath $statePath).Length -gt 8192){throw 'Invalid local status'}
++  $existing=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
++  if($existing.state -eq 'installed'){Write-Output 'Already installed. Use an Intune Uninstall assignment to remove the app.';exit 0}
++ }
++ $name='IntuneGet-Startup-Beta-'+$app
++ $task=Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
++ if($task -and ($task.Actions.Arguments -like ('*'+$job+'*'))){Unregister-ScheduledTask -TaskName $name -Confirm:$false}
++ # A protected tombstone also blocks future delivery/retry of this exact package.
++ $state=[ordered]@{v=1;job=$job;app=$app;version=$version;state='cancelled';boot='';attempts=0;updated=[DateTime]::UtcNow.ToString('o');code=$null}
++ $temporary=$statePath+'.new';Assert-Plain $temporary
++ [IO.File]::WriteAllText($temporary,($state|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
++ Move-Item -LiteralPath $temporary -Destination $statePath -Force
++ Write-Output 'Cancelled this startup package. Later reports will confirm the cancellation.'
++} finally {if($locked){$mutex.ReleaseMutex()};$mutex.Dispose()}
+diff --git a/public/startup-beta/Detect-StartupInstallations.ps1 b/public/startup-beta/Detect-StartupInstallations.ps1
+new file mode 100644
+index 000000000..65a976d26
+--- /dev/null
++++ b/public/startup-beta/Detect-StartupInstallations.ps1
+@@ -0,0 +1,54 @@
++# IntuneGet startup installation reporting (Beta).
++# Deploy as a detection-only Intune Remediations script, SYSTEM, 64-bit, hourly.
++# Does not install software, restart Windows, or transmit credentials/device/user names.
++$ErrorActionPreference='Stop'
++$root=Join-Path $env:ProgramData 'IntuneGet-Startup-Beta'
++$items=New-Object 'Collections.Generic.List[object]'
++$issues=0
++function Test-PlainOwnedDirectory([string]$Path) {
++    $entry=Get-Item -LiteralPath $Path -Force
++    if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {return $false}
++    $acl=Get-Acl -LiteralPath $Path
++    return $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-18'
++}
++try {
++    if (Test-Path -LiteralPath $root) {
++        if (-not (Test-PlainOwnedDirectory $root)) {throw 'Invalid report root'}
++        foreach ($app in Get-ChildItem -LiteralPath $root -Directory) {
++            if ($app.Name -notmatch '^[0-9a-f]{64}$' -or -not (Test-PlainOwnedDirectory $app.FullName)) {$issues++;continue}
++            foreach ($package in Get-ChildItem -LiteralPath $app.FullName -Directory) {
++                if ($package.Name -notmatch '^[0-9a-f-]{36}$' -or -not (Test-PlainOwnedDirectory $package.FullName)) {$issues++;continue}
++                $path=Join-Path $package.FullName 'state.json'
++                if (-not (Test-Path -LiteralPath $path)) {continue}
++                try {
++                    $file=Get-Item -LiteralPath $path -Force
++                    if ($file.Length -gt 8192 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Invalid status file'}
++                    $s=Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
++                    $id=[guid]::Empty
++                    if ($s.v -ne 1 -or -not [guid]::TryParse([string]$s.job,[ref]$id) -or $id.ToString() -ne $package.Name -or $s.app -ne $app.Name) {throw 'Invalid status identity'}
++                    $codes=@{waiting='w';installing='i';installed='s';failed='f';cancelled='c'}
++                    if (-not $codes.ContainsKey([string]$s.state)) {continue}
++                    $at=[DateTimeOffset]::Parse([string]$s.updated).ToUnixTimeSeconds()
++                    # Keep all pending/failed records, plus seven days of completed installations.
++                    if ($s.state -in @('installed','cancelled') -and $at -lt [DateTimeOffset]::UtcNow.AddDays(-7).ToUnixTimeSeconds()) {continue}
++                    $items.Add([pscustomobject]@{job=$id.ToString();state=$codes[[string]$s.state];at=$at})
++                } catch {$issues++}
++            }
++        }
++    }
++    # Active/failed records first. Bound output below Intune's 2048-character limit.
++    $ordered=@($items | Sort-Object @{Expression={if ($_.state -eq 's') {1} else {0}}},@{Expression='at';Descending=$true})
++    $selected=New-Object 'Collections.Generic.List[object]'
++    foreach ($item in $ordered) {
++        if ($selected.Count -ge 24) {break}
++        $selected.Add(@($item.job,$item.state,$item.at))
++    }
++    $result=[ordered]@{v=1;at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds();omitted=($ordered.Count-$selected.Count);issues=$issues;items=@($selected.ToArray())}
++    $json=$result | ConvertTo-Json -Depth 5 -Compress
++    if ($json.Length -gt 1950) {throw 'Output limit'}
++    Write-Output $json
++    exit 0
++} catch {
++    Write-Output ('{"v":1,"at":'+[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+',"omitted":0,"issues":1,"items":[]}')
++    exit 0
++}
+diff --git a/types/psadt.ts b/types/psadt.ts
+index da36058f9..da17d82c5 100644
+--- a/types/psadt.ts
++++ b/types/psadt.ts
+@@ -124,6 +124,7 @@ export interface BalloonTipConfig {
+  * Comprehensive support for all PSADT v4 UI elements
+  */
+ export interface PSADTConfig {
++  installAfterRestartBeta?: boolean; // Opt-in SYSTEM startup installer; never changes detection to staged.
+   // Process management
+   processesToClose: ProcessToClose[];
+ 
+diff --git a/types/update-policies.ts b/types/update-policies.ts
+index 5b5f25e5e..f65f3d6c9 100644
+--- a/types/update-policies.ts
++++ b/types/update-policies.ts
+@@ -4,6 +4,7 @@
+  */
+ 
+ import type { Json } from './database';
++import type { EspProfileSelection } from './esp';
+ import type { AppRelationship, DetectionRule, RequirementRule } from './intune';
+ import type { PSADTConfig } from './psadt';
+ import type { IntuneAppCategorySelection, PackageAssignment } from './upload';
+@@ -59,6 +60,8 @@ export interface DeploymentConfig {
+   // App relationships (dependencies / supersedence) carried over from the
+   // original deployment (optional)
+   relationships?: AppRelationship[];
++  espProfiles?: EspProfileSelection[];
++  supersedenceType?: 'update' | 'replace';
+ 
+   // Update deployment behavior (optional)
+   forceCreateNewApp?: boolean;

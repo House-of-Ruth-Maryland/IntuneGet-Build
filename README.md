@@ -53,6 +53,16 @@ Build settings mirror upstream's release workflow (pinned actions, provenance, S
 | `0040-remove-discovered-apps.patch` | Discovered apps offered only Claim, and an Uninstall assignment on an IntuneGet copy does nothing where the app was installed another way, because IntuneGet detects its apps by its own registry marker. Every row gets **Remove from devices**: a guided dialog checks the matched package (EXE-type, machine-wide installers only; MSI, MSIX, portable, ZIP, per-user and Store apps get the reason and what to do instead), then adds a removal to the Deployment list (All devices or chosen groups, Uninstall only). The server enforces the shape: a script detection for the exact program name devices reported (machine-wide installed programs, removable entries only), the packager's exact-name uninstall for that name, a separate copy named "<name> (uninstall only)", updates set to Ignore. Once deployed it is tracked like a retirement (`purpose = 'removal'`, SQLite migration 19): Inventory shows Removing this app with live counts and Delete from Intune, and Cancel is refused. The page gets a How Discovered apps works panel, Claimed is explained everywhere it appears, and Help's Retire app section no longer claims it removes copies installed another way. Help updated. | Upstream adds removal of unmanaged apps. |
 | `0041-installation-timing.patch` | Existing Win32 deployments get **Installation timing** in Inventory. **Reload timing** reads live Required and Available assignments; edit availability, a Required installation deadline, UTC or device-local time, and restart grace/countdown/snooze when the app supports it. Saves PATCH only the selected assignment settings, retaining notifications, download priority, filters and all other groups. A review token rejects changed assignments, versions or restart behavior; pilot/retirement holds and tenant checks apply. The general Save to Intune form preserves live timing for unchanged group/intent pairs. Dates apply to the current copy, not a recurring after-hours window or startup/sign-in trigger; offline devices may install later. Help updated. | Upstream adds editing of existing assignment timing. |
 | `0042-old-copy-cleanup.patch` | Every update adds a new Intune copy that supersedes the previous one, and the previous copy stayed in Intune with its groups, so apps that update often piled up copies (one app had four in five days). At each update check, older copies IntuneGet deployed are removed once the newest copy has settled: deployed 7 or more days ago, at least 1 install with failures at 10% or less, no pilot, retirement, going back or deployment under way, the newest copy supersedes the old one, and every group on the old copy is on the newest with the same intent and filter. Groups come off, the links between copies of the app are removed, then the copy is deleted; nothing is uninstalled. At most 20 per run. Copies added in Intune by hand, removal copies and copies the newest doesn't supersede (deployed alongside or as a second copy) are never touched. Replaced copies it can't remove are listed on Home with the reason (SQLite migration 20). The Intune calls duplicate cleanup used moved to `lib/hrm/intune-copies.ts`, shared by both. `HRM_OLD_COPY_CLEANUP=off` in `.env.local` turns it off. Help updated. | Upstream removes superseded copies after an update. |
+| `0043-update-overview-and-installation-policy.patch` | App updates becomes the overview for automatic update timing and publishing results, with accessible right-side editors and no new sidebar menu. A tenant-wide installation policy has per-app exceptions and suggests a 3-day postponement period. Future automatic packages snapshot the effective policy into their PSADT configuration; manual updates, pilots and queued/published packages keep their reviewed settings. Day-only postponement has no reminder-count limit, preserves installer/detection/restart settings and gives at least 5 minutes to close running apps after expiry. The toolkit can install silently when no user is signed in or no app needs closing; retries follow Intune checks, and device deadlines/deferrals are not reported centrally. Publishing history labels success Published to Intune, displays the release’s policy snapshot and expands to reported installation results with their check time. Publishing schedule is clearly separate from device timing; current-version Installation timing opens from Inventory and App updates. Migration 21 stores shared policies and exceptions. The packaging workflow maps postponement code 1602 to retry and enforces day-only output from its pinned upstream generator. Help updated. | Upstream provides shared automatic installation policies, exceptions and clear scheduling/reporting UI. |
+| `0044-startup-installation-beta.patch` | Opt-in **Install after next restart · Beta** in both deployment configuration sidebars and per-app automatic-update exceptions (never the global default). Packages include a SYSTEM startup coordinator that stages a protected local copy, verifies file hashes, refuses same-boot execution, preserves actual-app detection, installs on a later boot, and records outcomes. MSI/EXE machine-wide apps only; no Store, user scope, custom detection, ESP or replace supersedence. Staging returns Retry; Intune can temporarily report failure while waiting. App updates gets a compact **Startup installations · Beta** report with last activity, outcome counts, stale/unknown/truncated reporting and per-package cancellation-script downloads. A detection-only Intune Remediations script supplies bounded credential-free status via Graph; migration 22 stores tenant-isolated aggregate snapshots. The public IT dashboard receives counts only. Startup Beta families are excluded from automatic old-copy cleanup. Help explains the reporting setup, the cancellation edge case and the Windows pilot. | Upstream ships a tested startup coordinator and matching reporting. |
+
+Before enabling prompted installation, deploy the matching `package-intunewin.yml` change in
+IntuneGet-Workflows. This repository's reference workflow includes the same return-code and
+day-only deferral changes. Run a Windows pilot to verify prompts, postponement, retry, deadline
+expiry and installation results before enabling the shared policy for all apps. Existing settings
+remain in effect until staff save a shared policy or app exception. The three-day period begins
+on each device's first installation attempt, not at the server's publishing time. These rules do
+not implement a recurring device maintenance window or a login/reboot-only trigger.
 
 ## Branding
 
@@ -80,3 +90,90 @@ To rebuild by hand: Actions → "Build patched IntuneGet image" → Run workflow
 
 When upstream fixes the issue, switch the server back to `ghcr.io/ugurkocde/intuneget:<tag>`
 and archive this repo.
+
+## Startup installation Beta rollout
+
+The code is opt-in and is not a native Intune scheduling feature. It must be tested on Windows
+before broad use. Choose the pilot app and small Required device group later; no tasks are
+created merely by deploying the IntuneGet server image.
+
+1. In IntuneGet-Workflows, deploy the matching workflow and both `startup/` scripts. Their sources
+   are `packager/scripts/IntuneGet-StartupInstall.ps1` and
+   `.github/scripts/Prepare-StartupPackage.ps1` in the patched tree. The shared GitHub Actions
+   workflow wraps only packages explicitly marked for the Beta; no per-app workflow is needed.
+2. Deploy the app image through the usual reviewed build/deploy flow. Existing packages keep
+   their settings. The Beta is available in Install behaviour for an individual deployment, or
+   as an App updates exception for future automatic updates. It cannot be made the global rule.
+3. For central reporting, confirm Remediations eligibility and grant the server app the read-only
+   Microsoft Graph application permission `DeviceManagementScripts.Read.All` with admin consent.
+   Download `/startup-beta/Detect-StartupInstallations.ps1` from the app and deploy it as a
+   detection-only Remediations script, SYSTEM, 64-bit, hourly, assigned to the pilot group.
+4. Set `HRM_STARTUP_REPORT_SCRIPT_ID` in the server's root-only `.env.local` to the reporting
+   package ID and pass it into `web` in the Compose override. Install
+   `deploy/systemd/intuneget-startup-reports.timer` alongside the existing `intuneget-cron@.service`
+   and enable it. This hourly timer collects reports; Check startup reports can also refresh them.
+   No new timer or environment setting is installed automatically by a patch change.
+5. Pilot a new app/version, verify it stays uninstalled before Restart, restart Windows, then check
+   the real version detection, task cleanup, local status and Intune reporting. Test offline startup
+   with a self-contained installer, a failed install, out-of-order/repeated delivery, multiple queued
+   apps, a long-running or hung installer and cancellation without configured reporting. Startup
+   does not block sign-in and vendor bootstrappers can still require a network connection.
+
+Intune may show retry or failure while a package waits for a restart; staging is never reported as
+an installed app. Reporting shows only received outcomes, with old and missing data distinguished.
+The reporting script needs no server credentials and does not install software or restart Windows.
+
+To cancel before installation, remove the Required assignment, download the exact package's
+cancellation script from its package row in Startup installations (available without reporting) and deploy it as a SYSTEM platform script to the same
+pilot group. A protected tombstone blocks late delivery as well as removing the waiting task.
+An Uninstall assignment alone is insufficient for a package Intune does not yet detect as installed.
+A running installation must finish before cancellation can acquire its lock. Confirm cancellation
+in a later report; downloading the script alone does not cancel anything. Automatic old-copy
+cleanup skips any app family used with the Beta, so it cannot silently delete a pending copy.
+
+
+Startup packages carry their original server deployment creation time. A protected per-app intent
+record prevents a delayed older deployment from replacing newer work, even after task cleanup.
+The coordinator does not kill the toolkit launcher on a timer: it keeps its installation locks until
+completion, and an Installing report older than 2 hours needs review. Other startup apps wait up to
+30 minutes for the shared lock, then wait for a later restart. A hung installer requires investigation;
+real Windows task, installer-process and Intune behavior still require the pilot above.
+
+
+## Verification and delivery checks
+
+Install app and packager dependencies when their lockfiles change. From this repo, use:
+
+```bash
+scripts/check-app.sh /path/to/patched-intuneget related lib/hrm/startup-report.ts
+scripts/check-app.sh /path/to/patched-intuneget full
+```
+
+Related mode is for quick iteration. Full mode checks Help, app types, packager types with its own
+compiler, and the whole test suite; run it after the final relevant edits. Both modes use a private temporary directory and clean it afterwards. External PowerShell
+fixtures have bounded process waits and a separate 30-second test budget; ordinary tests retain
+their existing timeout. Neither command builds, publishes or deploys. PowerShell must be installed to exercise the portable startup fixtures; actual
+Windows-only checks still require the Beta pilot.
+
+| Stage | Checks | Repetition |
+|---|---|---|
+| Local development | Focused/related tests while editing; one final full check | Repeat only after relevant edits or failures. |
+| Code PR revision | Clean pinned patch application, Help, app/packager types, full regression suite | Once per revision; earlier runs cancel. Description edits and Deploy-only PRs skip the suite. |
+| Help sign-off | Labels/timer consistency and PR description sign-off | May repeat on description edits; cheap and separate from regression tests. |
+| Upstream release candidate | Patch compatibility, migrations, types, full tests, live WinGet mappings and Help | Checks a different upstream candidate. A later code change needs a new check. |
+| Image build | Help for the exact inputs and production compilation | Uses cached image layers. Does not rerun unit tests. |
+| Deployment | Image digest, backup, container health and rollback | Validates the deployed environment; keep these checks. |
+| Windows pilot | Real installer, startup task, ACLs, reboot, cancellation and Intune reports | Different from mocked or server-side tests; still required for the Beta. |
+
+The regression workflow uses a read-only token and no deployment credentials, and caches npm
+downloads using both lockfiles. Bot-created upstream PRs may need a manual Patched app checks run.
+GitHub currently requires a pull request but has no required automated checks for this branch.
+The new Patched app checks passed job should become a required branch check once the workflow
+has run on GitHub; this local change does not alter remote branch protection. Help validation stays
+in the image build: its measured repeat took about 1 second, so removing it would save little.
+
+
+A local worker benchmark passed once at about 48 seconds with threads versus 66 seconds with
+forks, but the follow-up thread run crashed in native code. The process-worker default and
+per-file isolation are retained. Prefer targeted tests during editing over an unreliable global
+runner optimization; do not remove regression cases or turn off isolation for speed.

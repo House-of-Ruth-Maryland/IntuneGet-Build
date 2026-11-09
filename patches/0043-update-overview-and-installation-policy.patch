@@ -1,0 +1,1131 @@
+diff --git a/.github/scripts/Create-PSADTPackage.ps1 b/.github/scripts/Create-PSADTPackage.ps1
+index 3add9f986..25cbf6a39 100644
+--- a/.github/scripts/Create-PSADTPackage.ps1
++++ b/.github/scripts/Create-PSADTPackage.ps1
+@@ -1916,6 +1916,7 @@ if ($psadtConfig.ContainsKey('closeCountdown') -and $null -ne $psadtConfig.close
+     $closeCountdown = [int]$parsedCloseCountdown
+ }
+ $allowDefer = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'allowDefer'
++$deferByDaysOnly = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'deferByDaysOnly'
+ $deferTimes = 3
+ if ($psadtConfig.ContainsKey('deferTimes') -and $null -ne $psadtConfig.deferTimes) {
+     $parsedDeferTimes = 0L
+@@ -2022,6 +2023,8 @@ if ($processesToClose.Count -gt 0) {
+     $processesArrayStr = "@(`n    $($processEntries -join ",`n    ")`n)"
+ }
+ 
++if ($deferByDaysOnly -and (-not $allowDefer -or $null -eq $deferDays)) { throw 'Day-based postponement requires a positive day limit and allowDefer.' }
++
+ # Build Show-ADTInstallationWelcome call if enabled
+ $welcomeCall = ''
+ if ($allowDefer -or $processesToClose.Count -gt 0 -or $checkDiskSpace) {
+@@ -2039,7 +2042,7 @@ if ($allowDefer -or $processesToClose.Count -gt 0 -or $checkDiskSpace) {
+         } else {
+             $welcomeParams += "-CloseProcessesCountdown $closeCountdown"
+         }
+-        $welcomeParams += "-DeferTimes $deferTimes"
++        if (-not $deferByDaysOnly) { $welcomeParams += "-DeferTimes $deferTimes" }
+         if ($deferDeadline) { $welcomeParams += "-DeferDeadline '$(ConvertTo-PSSingleQuotedContent $deferDeadline)'" }
+         if ($null -ne $deferDays) { $welcomeParams += "-DeferDays $deferDays" }
+         if ($blockExecution) { $welcomeParams += '-BlockExecution' }
+@@ -2058,7 +2061,7 @@ if ($allowDefer -or $processesToClose.Count -gt 0 -or $checkDiskSpace) {
+     } elseif ($allowDefer) {
+         # Only deferrals, no close prompts
+         $welcomeParams += '-AllowDefer'
+-        $welcomeParams += "-DeferTimes $deferTimes"
++        if (-not $deferByDaysOnly) { $welcomeParams += "-DeferTimes $deferTimes" }
+         if ($deferDeadline) { $welcomeParams += "-DeferDeadline '$(ConvertTo-PSSingleQuotedContent $deferDeadline)'" }
+         if ($null -ne $deferDays) { $welcomeParams += "-DeferDays $deferDays" }
+     }
+diff --git a/.github/workflows-reference/package-intunewin.yml b/.github/workflows-reference/package-intunewin.yml
+index 9dba05d19..56084a96c 100644
+--- a/.github/workflows-reference/package-intunewin.yml
++++ b/.github/workflows-reference/package-intunewin.yml
+@@ -1176,6 +1176,21 @@ jobs:
+         run: |
+           & "$env:GITHUB_WORKSPACE\intuneget\.github\scripts\Create-PSADTPackage.ps1"
+ 
++          # HRM: the pinned upstream generator predates day-only automatic update policies.
++          $choice = if ($env:PSADT_CONFIG) { $env:PSADT_CONFIG | ConvertFrom-Json -AsHashtable } else { @{} }
++          if ($choice.deferByDaysOnly -eq $true) {
++            if ($choice.allowDefer -ne $true -or [double]$choice.deferDays -lt 1 -or [double]$choice.deferDays -gt 14) {
++              throw 'Day-only postponement requires allowDefer and 1 to 14 days.'
++            }
++            $scriptPath = Join-Path $env:GITHUB_WORKSPACE 'package\Invoke-AppDeployToolkit.ps1'
++            $content = Get-Content -LiteralPath $scriptPath -Raw
++            if ($content -notmatch '(?m)^\s*Show-ADTInstallationWelcome[^\r\n]* -DeferTimes 1000\b') {
++              throw 'The pinned generator no longer matches the reviewed day-only postponement rule.'
++            }
++            $content = $content -replace '(?m)(^\s*Show-ADTInstallationWelcome[^\r\n]*?) -DeferTimes 1000\b', '$1'
++            [System.IO.File]::WriteAllText($scriptPath, $content, [System.Text.UTF8Encoding]::new($true))
++          }
++
+       - name: Create IntuneWin package
+         env:
+           CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+@@ -1702,6 +1717,10 @@ jobs:
+               @{ returnCode = 3010; type = "softReboot" }
+               @{ returnCode = 1641; type = "hardReboot" }
+               @{ returnCode = 1618; type = "retry" }
++              # HRM: PSADT postponement is a retry, never an installation failure.
++              if ($psadtConfig -and $psadtConfig.allowDefer -eq $true) {
++                @{ returnCode = 1602; type = "retry" }
++              }
+               @{ returnCode = 60012; type = "retry" }  # No user logged in - retry later for per-user installs
+             )
+             rules = $graphRules
+diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
+index ad49cad4a..8ec374871 100644
+--- a/app/(app)/dashboard/updates/page.tsx
++++ b/app/(app)/dashboard/updates/page.tsx
+@@ -45,6 +45,7 @@ import {
+ } from '@/components/ui/dropdown-menu';
+ import { PageHeader, AnimatedStatCard, StatCardGrid, AnimatedEmptyState } from '@/components/dashboard';
+ import { PilotRollouts } from '@/components/hrm/PilotRollouts';
++import { InstallationPolicyPanel } from '@/components/hrm/InstallationPolicyPanel';
+ import { UpdateSchedule } from '@/components/hrm/UpdateSchedule';
+ import { UpdateCard, UpdateCardSkeleton, AutoUpdateHistory } from '@/components/updates';
+ import { AutoUpdateAppsModal } from '@/components/updates/AutoUpdateAppsModal';
+@@ -416,7 +417,7 @@ export default function UpdatesPage() {
+       {/* Header */}
+       <PageHeader
+         title={<T>App updates</T>}
+-        description={<T>Manage app updates and auto-update policies</T>}
++        description={<T>Review automatic updates, installation timing and publishing results</T>}
+         gradient
+         gradientColors="cyan"
+         actions={
+@@ -631,7 +632,15 @@ export default function UpdatesPage() {
+       />
+ 
+       {/* HRM patch 0036: the schedule and any running pilots sit under the page title */}
+-      <UpdateSchedule />
++      {!mspTenantSelectionRequired && <>
++        <InstallationPolicyPanel key={tenantId || 'current'} apps={autoUpdatePolicies} />
++        <UpdateSchedule />
++        <section aria-label="How automatic updates work" className="grid gap-4 rounded-xl border border-overlay/10 bg-bg-surface p-5 sm:grid-cols-3">
++          <div><h2 className="text-sm font-semibold text-text-primary">1. Find a new version</h2><p className="mt-1 text-xs text-text-secondary">The server checks twice daily. The publishing schedule holds new automatic releases until allowed.</p></div>
++          <div><h2 className="text-sm font-semibold text-text-primary">2. Publish to Intune</h2><p className="mt-1 text-xs text-text-secondary">Packaging and publishing appear in Publishing history. Published does not mean installed.</p></div>
++          <div><h2 className="text-sm font-semibold text-text-primary">3. Install on devices</h2><p className="mt-1 text-xs text-text-secondary">Intune runs the assignments. Open Inventory for reported installation results and dates for a published version.</p><Link className="mt-2 inline-block text-xs text-accent-cyan hover:underline" href="/dashboard/inventory">View device installation results</Link></div>
++        </section>
++      </>}
+       <PilotRollouts />
+ 
+       {/* New App Info Dialog */}
+@@ -814,7 +823,7 @@ export default function UpdatesPage() {
+           onClick={() => setAutoUpdateModalOpen(true)}
+         />
+         <AnimatedStatCard
+-          title={<T>Updated (7 days)</T>}
++          title={<T>Published (7 days)</T>}
+           value={recentAutoUpdates}
+           icon={CheckCircle2}
+           color="violet"
+@@ -834,7 +843,7 @@ export default function UpdatesPage() {
+           <TabsList className="glass-light border border-overlay/5">
+             <TabsTrigger value="available" className="data-[state=active]:bg-overlay/10">
+               <Package className="w-4 h-4 mr-2" />
+-              <T>Available</T>
++              <T>Available updates</T>
+               {!isLoadingUpdates && availableCount > 0 && (
+                 <span className="ml-1.5 text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
+                   {availableCount}
+@@ -843,7 +852,7 @@ export default function UpdatesPage() {
+             </TabsTrigger>
+             <TabsTrigger value="history" className="data-[state=active]:bg-overlay/10">
+               <History className="w-4 h-4 mr-2" />
+-              <T>History</T>
++              <T>Publishing history</T>
+               {!isLoadingHistory && history.length > 0 && (
+                 <span className="ml-1.5 text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
+                   {history.length}
+@@ -1085,6 +1094,7 @@ export default function UpdatesPage() {
+ 
+         {/* History Tab */}
+         <TabsContent value="history" className="mt-0">
++          <p className="mb-4 text-sm text-text-secondary">This history tracks packaging and publishing to Intune. Expand a published release for device installation results and the policy used. Device deadlines start on each device and are not reported here.</p>
+           {mspTenantSelectionRequired ? (
+             <AnimatedEmptyState
+               icon={History}
+diff --git a/app/api/hrm/installation-policy/route.test.ts b/app/api/hrm/installation-policy/route.test.ts
+new file mode 100644
+index 000000000..dc50fe530
+--- /dev/null
++++ b/app/api/hrm/installation-policy/route.test.ts
+@@ -0,0 +1,28 @@
++import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++import { NextRequest } from 'next/server';
++const state = vi.hoisted(() => { vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('DATABASE_PATH', ':memory:'); return { auth: true, tenant: 'one' }; });
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.auth ? { tenantId: state.tenant, userId: 'staff' } : null }));
++vi.mock('@/lib/db', () => ({ isSqliteMode: () => true }));
++import { closeSqliteDb, sqliteDb } from '@/lib/db/sqlite';
++import { GET, POST } from './route';
++const request = (body?: unknown) => new NextRequest('http://localhost/api/hrm/installation-policy', { method: body ? 'POST' : 'GET', ...(body ? { body: JSON.stringify(body) } : {}) });
++beforeEach(() => { closeSqliteDb(); state.auth = true; state.tenant = 'one'; });
++afterEach(() => closeSqliteDb());
++it('requires authentication before reading or saving', async () => {
++  state.auth = false; expect((await GET(request())).status).toBe(401); expect((await POST(request({}))).status).toBe(401);
++});
++it('saves only the signed-in tenant and rejects unknown apps and invalid rules', async () => {
++  expect((await POST(request({ action: 'save', appId: '', tenantId: 'two', policy: { mode: 'prompt', days: 3 } }))).status).toBe(200);
++  expect((await (await GET(request())).json()).shared).toEqual({ mode: 'prompt', days: 3 });
++  state.tenant = 'two'; expect((await (await GET(request())).json()).shared.mode).toBe('existing'); state.tenant = 'one';
++  expect((await POST(request({ action: 'save', appId: 'Unknown.App', policy: { mode: 'silent', days: 3 } }))).status).toBe(404);
++  expect((await POST(request({ action: 'save', appId: '', policy: { mode: 'prompt', days: 0 } }))).status).toBe(400);
++  expect((await POST(request({ action: 'inherit', appId: '' }))).status).toBe(400);
++});
++it('sets and removes an exception only for a matching auto-update app', async () => {
++  await sqliteDb.updatePolicies.upsert({ user_id: 'staff', tenant_id: 'one', winget_id: 'Vendor.App', policy_type: 'auto_update', is_enabled: true });
++  const saved = await POST(request({ action: 'save', appId: 'vendor.APP', policy: { mode: 'silent', days: 3, ignored: 'value' } }));
++  expect(saved.status).toBe(200); expect((await saved.json()).exceptions).toEqual([{ appId: 'vendor.app', mode: 'silent', days: 3 }]);
++  state.tenant = 'two'; expect((await POST(request({ action: 'inherit', appId: 'Vendor.App' }))).status).toBe(404); state.tenant = 'one';
++  expect((await (await POST(request({ action: 'inherit', appId: 'Vendor.App' }))).json()).exceptions).toEqual([]);
++});
+diff --git a/app/api/hrm/installation-policy/route.ts b/app/api/hrm/installation-policy/route.ts
+new file mode 100644
+index 000000000..dbe70b9de
+--- /dev/null
++++ b/app/api/hrm/installation-policy/route.ts
+@@ -0,0 +1,38 @@
++import { NextRequest, NextResponse } from 'next/server';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { isSqliteMode } from '@/lib/db';
++import { installationPolicyError, type InstallationPolicy } from '@/lib/hrm/installation-policy';
++const reply = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
++async function view(tenant: string) {
++  const { sqliteInstallationPolicies: store } = await import('@/lib/db/sqlite');
++  return { supported: true, shared: store.shared(tenant), exceptions: store.exceptions(tenant) };
++}
++export async function GET(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return reply({ error: 'Authentication required' }, 401);
++  if (!isSqliteMode()) return reply({ supported: false });
++  return reply(await view(user.tenantId));
++}
++export async function POST(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return reply({ error: 'Authentication required' }, 401);
++  if (!isSqliteMode()) return reply({ error: 'Installation policies need this server’s SQLite mode.' }, 409);
++  const body = await request.json().catch(() => null);
++  if (!body || !['save', 'inherit'].includes(body.action) || typeof body.appId !== 'string' || body.appId.length > 256) return reply({ error: 'Choose the shared policy or an auto-update app.' }, 400);
++  const { sqliteDb, sqliteInstallationPolicies: store } = await import('@/lib/db/sqlite');
++  // A signed-in tenant may only change its own apps. Never trust a supplied tenant id.
++  if (body.appId) {
++    const policies = await sqliteDb.updatePolicies.list(user.userId, user.tenantId);
++    if (!policies.some(p => p.winget_id.toLowerCase() === body.appId.toLowerCase() && p.policy_type === 'auto_update')) return reply({ error: 'Choose an app with auto-update enabled for your account.' }, 404);
++  }
++  if (body.action === 'inherit') {
++    if (!body.appId) return reply({ error: 'Only an app exception can be removed.' }, 400);
++    store.remove(user.tenantId, body.appId);
++  } else {
++    const problem = installationPolicyError(body.policy);
++    if (problem) return reply({ error: problem }, 400);
++    const { mode, days } = body.policy as InstallationPolicy;
++    store.save(user.tenantId, body.appId, { mode, days });
++  }
++  return reply(await view(user.tenantId));
++}
+diff --git a/components/hrm/AppTimingPanel.tsx b/components/hrm/AppTimingPanel.tsx
+index ea97a20e8..1b8e1eb72 100644
+--- a/components/hrm/AppTimingPanel.tsx
++++ b/components/hrm/AppTimingPanel.tsx
+@@ -3,10 +3,17 @@ import { useState } from 'react';
+ import { useQueryClient } from '@tanstack/react-query';
+ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+ import { useMspOptional } from '@/hooks/useMspOptional';
++import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
++import { InstallStatusBar } from './InstallStatusBar';
+ import { Button } from '@/components/ui/button';
+ import { timingInput, timingTimestamp, timingProblem, type TimingRow, type TimingEdit } from '@/lib/hrm/app-timing';
+ 
+ export function AppTimingPanel({ appId, groupNames = {} }: { appId: string; groupNames?: Record<string, string> }) {
++  return <Dialog><DialogTrigger asChild><Button size="sm" variant="outline">Installation timing</Button></DialogTrigger>
++    <DialogContent side="right"><DialogHeader className="pr-12"><DialogTitle>Installation timing</DialogTitle><DialogDescription>Dates for this published version. These settings are separate from the shared policy for future automatic updates.</DialogDescription></DialogHeader>
++    <div className="flex-1 min-h-0 overflow-y-auto p-6"><AppTimingContent appId={appId} groupNames={groupNames} /><div className="mt-5"><InstallStatusBar appId={appId} /></div></div></DialogContent></Dialog>;
++}
++function AppTimingContent({ appId, groupNames }: { appId: string; groupNames: Record<string, string> }) {
+   const { getAccessToken } = useMicrosoftAuth();
+   const { isMspUser, selectedTenantId } = useMspOptional();
+   const client = useQueryClient();
+diff --git a/components/hrm/InstallStatusBar.tsx b/components/hrm/InstallStatusBar.tsx
+index 90cd75c3f..2e89a6566 100644
+--- a/components/hrm/InstallStatusBar.tsx
++++ b/components/hrm/InstallStatusBar.tsx
+@@ -15,8 +15,8 @@ const SEGMENTS = [
+ ] as const;
+ 
+ export function InstallStatusBar({ appId }: { appId: string }) {
+-  const { data: status } = useInstallStatus(appId);
+-  if (!status) return null;
++  const { data: status, isLoading, error } = useInstallStatus(appId);
++  if (!status) return <div><h4 className="text-sm font-semibold text-text-secondary mb-2">Install results</h4><p className="text-sm text-text-muted" role={error ? 'alert' : undefined}>{isLoading ? 'Loading installation results…' : error ? 'Could not load installation results. Reopen this panel to try again.' : 'No installation results recorded for this version.'}</p></div>;
+   const total = status.installed + status.failed + status.pending + status.notApplicable + status.other;
+   const checked = new Date(status.checkedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+   // HRM patch 0036: shared helper; the ID is now URL-encoded like the other Intune links.
+diff --git a/components/hrm/InstallationPolicyPanel.test.ts b/components/hrm/InstallationPolicyPanel.test.ts
+new file mode 100644
+index 000000000..8472e5a46
+--- /dev/null
++++ b/components/hrm/InstallationPolicyPanel.test.ts
+@@ -0,0 +1,34 @@
++// @vitest-environment happy-dom
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++import type { AppUpdatePolicy } from '@/types/update-policies';
++const state = vi.hoisted(() => ({ mutate: vi.fn(), reset: vi.fn() }));
++vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { supported: true, shared: { mode: 'existing', days: 3 }, exceptions: [{ appId: 'vendor.app', mode: 'silent', days: 3 }] }, action: { mutate: state.mutate, reset: state.reset, isPending: false } }) }));
++import { InstallationPolicyPanel } from './InstallationPolicyPanel';
++let root: Root;
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++const apps = [{ id: 'policy', winget_id: 'Vendor.App', deployment_config: { displayName: 'Vendor App' } }] as AppUpdatePolicy[];
++const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.textContent === label)!;
++beforeEach(async () => { state.mutate.mockReset(); const node = document.createElement('div'); document.body.append(node); root = createRoot(node); await act(async () => root.render(createElement(InstallationPolicyPanel, { apps }))); });
++afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
++it('opens a labeled right-side panel with a three-day draft without activating it until Save', async () => {
++  expect(document.querySelector('[role="dialog"]')).toBeNull();
++  await act(async () => button('Edit shared policy').click());
++  const panel = document.querySelector('[role="dialog"]')!;
++  expect(panel.className).toContain('right-0'); expect(panel.getAttribute('aria-labelledby')).toBeTruthy();
++  expect(document.querySelector<HTMLSelectElement>('[aria-label="Days users can postpone"]')!.value).toBe('3');
++  expect(state.mutate).not.toHaveBeenCalled();
++  await act(async () => button('Save shared policy').click());
++  expect(state.mutate.mock.calls[0][0]).toEqual({ action: 'save', appId: '', policy: { mode: 'prompt', days: 3 } });
++  expect(document.body.textContent).toContain('may run silently');
++  await act(async () => button('Close').click());
++  expect(document.querySelector('[role="dialog"]')).toBeNull();
++});
++it('lets an app return to inheritance without rewriting the shared policy', async () => {
++  await act(async () => button('Edit app exception').click());
++  const inherit = [...document.querySelectorAll('input')].find(i => i.type === 'checkbox')!;
++  await act(async () => inherit.click());
++  await act(async () => button('Use shared policy').click());
++  expect(state.mutate.mock.calls[0][0]).toMatchObject({ action: 'inherit', appId: 'vendor.app' });
++});
+diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
+new file mode 100644
+index 000000000..9f3a4bfeb
+--- /dev/null
++++ b/components/hrm/InstallationPolicyPanel.tsx
+@@ -0,0 +1,77 @@
++'use client';
++import { useState } from 'react';
++import Link from 'next/link';
++import { Button } from '@/components/ui/button';
++import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
++import { useInstallationPolicy } from '@/hooks/useInstallationPolicy';
++import { installationPolicySummary, type InstallationPolicy } from '@/lib/hrm/installation-policy';
++import type { AppUpdatePolicy } from '@/types/update-policies';
++
++export function InstallationPolicyPanel({ apps }: { apps: AppUpdatePolicy[] }) {
++  const { data, isLoading, error, action } = useInstallationPolicy();
++  const [open, setOpen] = useState(false);
++  const [selected, setSelected] = useState('');
++  const [inherit, setInherit] = useState(false);
++  const [draft, setDraft] = useState<InstallationPolicy>({ mode: 'prompt', days: 3 });
++  const [saved, setSaved] = useState(false);
++  if (data?.supported === false) return null;
++  const exceptions = data?.exceptions ?? [];
++  const choose = (appId: string) => {
++    setSelected(appId); setSaved(false); action.reset();
++    const exception = exceptions.find(p => p.appId.toLowerCase() === appId.toLowerCase());
++    setInherit(!!appId && !exception);
++    setDraft(exception ?? (data?.shared?.mode === 'existing' && !appId ? { mode: 'prompt', days: 3 } : data?.shared) ?? { mode: 'prompt', days: 3 });
++  };
++  return <section className="rounded-xl border border-overlay/10 bg-bg-surface p-5 space-y-3" aria-label="Auto-update installation timing">
++    <div className="flex flex-wrap items-center justify-between gap-3">
++      <div><h2 className="font-semibold text-text-primary">Auto-update installation timing</h2><p className="text-xs text-text-muted mt-1">Shared across auto-update apps, with app exceptions.</p></div>
++      <Dialog open={open} onOpenChange={value => { if (!action.isPending) { setOpen(value); if (value) choose(''); } }}>
++        <DialogTrigger asChild><Button variant="outline" disabled={!data?.shared}>Edit shared policy</Button></DialogTrigger>
++        <DialogContent side="right" onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }} hideCloseButton={action.isPending}>
++          <DialogHeader className="pr-12"><DialogTitle>{selected ? 'Edit app exception' : 'Edit shared policy'}</DialogTitle><DialogDescription>Applies to future automatic update packages. Published versions keep the settings they were built with.</DialogDescription></DialogHeader>
++          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
++            <label className="block text-sm text-text-secondary">Apply to
++              <select className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={selected} disabled={action.isPending} onChange={e => choose(e.target.value)}>
++                <option value="">All auto-update apps · Shared policy</option>
++                {apps.map(app => <option key={app.id} value={app.winget_id}>{app.deployment_config?.displayName || app.winget_id}{exceptions.some(p => p.appId.toLowerCase() === app.winget_id.toLowerCase()) ? ' · App exception' : ' · Uses shared policy'}</option>)}
++              </select>
++            </label>
++            {selected && <label className="flex items-center gap-2 text-sm text-text-primary"><input type="checkbox" checked={inherit} disabled={action.isPending} onChange={e => { setInherit(e.target.checked); setSaved(false); action.reset(); }} />Use shared policy</label>}
++            <fieldset disabled={action.isPending || (!!selected && inherit)} className="space-y-4 disabled:opacity-50">
++              <legend className="mb-2 text-sm font-medium text-text-primary">Installation behavior</legend>
++              {([
++                ['prompt', 'Let users install now or postpone', 'The choice period starts with the first installation attempt on each device.'],
++                ['silent', 'Install automatically', 'Install when Intune runs the required assignment, without a postponement prompt.'],
++                ['existing', 'Keep the app’s saved installation settings', 'Use the settings from the original deployment.'],
++              ] as const).map(([mode, label, hint]) => <label key={mode} className="flex items-start gap-3 rounded-lg border border-overlay/10 p-3 text-sm"><input className="mt-1" name="installation-behavior" type="radio" value={mode} checked={draft.mode === mode} onChange={() => { setDraft({ ...draft, mode }); setSaved(false); action.reset(); }} /><span><span className="block text-text-primary font-medium">{label}</span><span className="block text-xs text-text-muted mt-1">{hint}</span></span></label>)}
++              {draft.mode === 'prompt' && <label className="block text-sm text-text-secondary">Days users can postpone
++                <select aria-label="Days users can postpone" className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={draft.days} onChange={e => { setDraft({ ...draft, days: Number(e.target.value) }); setSaved(false); action.reset(); }}>{Array.from({ length: 14 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n} {n === 1 ? 'day' : 'days'}</option>)}</select>
++              </label>}
++            </fieldset>
++            <div className="rounded-lg bg-overlay/5 p-4 text-sm text-text-secondary space-y-2"><h3 className="font-medium text-text-primary">What happens on devices</h3>
++              <p>{selected && inherit && data?.shared ? installationPolicySummary(data.shared) : installationPolicySummary(draft)}.</p>
++              <p>Prompts use the app’s installer toolkit. If no user is signed in, or the app does not need to close, installation may run silently. After the choice period, the next Intune attempt installs the update.</p>
++              <p>Reminders follow Intune’s retry checks. This does not schedule an exact installation time, a login, or a reboot.</p>
++            </div>
++            <p className="text-xs text-text-muted">Manual Update, Update all and pilot deployments keep their saved settings. Changing this policy does not change a package already queued or published.</p>
++            {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
++            {saved && <p role="status" className="text-sm text-status-success">Installation policy saved for future automatic updates.</p>}
++          </div>
++          <DialogFooter><Button variant="ghost" disabled={action.isPending} onClick={() => setOpen(false)}>Close</Button><Button disabled={action.isPending || saved} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save app exception' : 'Save shared policy'}</Button></DialogFooter>
++        </DialogContent>
++      </Dialog>
++    </div>
++    {isLoading && <p className="text-sm text-text-muted">Loading installation timing…</p>}
++    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
++    {data?.shared && <><p className="text-sm text-text-primary">{installationPolicySummary(data.shared)}.</p><div className="flex flex-wrap items-center gap-3 text-xs text-text-muted"><span>Future automatic updates only</span><span>{exceptions.length} app {exceptions.length === 1 ? 'exception' : 'exceptions'}</span><Link href="/dashboard/inventory" className="text-accent-cyan hover:underline">View device installation results</Link></div></>}
++    {exceptions.length > 0 && <ul className="divide-y divide-overlay/10">{exceptions.map(exception => <li key={exception.appId} className="flex flex-wrap justify-between gap-2 py-2 text-sm"><div><span className="text-text-primary">{apps.find(a => a.winget_id.toLowerCase() === exception.appId.toLowerCase())?.deployment_config?.displayName || exception.appId}</span><p className="text-xs text-text-muted">{installationPolicySummary(exception)}</p></div><button className="text-xs text-accent-cyan hover:underline" onClick={() => { choose(exception.appId); setOpen(true); }}>Edit app exception</button></li>)}</ul>}
++  </section>;
++}
++
++/** Reuses the shared query cache so cards name their actual inherited rule. */
++export function AutoUpdateTimingSummary({ appId }: { appId: string }) {
++  const { data } = useInstallationPolicy();
++  if (!data?.shared) return null;
++  const exception = data.exceptions?.find(p => p.appId.toLowerCase() === appId.toLowerCase());
++  return <p className="mt-2 text-xs text-text-secondary"><span className="font-medium">{exception ? 'App exception' : 'Shared policy'}:</span> {installationPolicySummary(exception ?? data.shared)}. Applies to the next automatic release.</p>;
++}
+diff --git a/components/hrm/UpdateSchedule.tsx b/components/hrm/UpdateSchedule.tsx
+index 6dc9767e1..7987b9383 100644
+--- a/components/hrm/UpdateSchedule.tsx
++++ b/components/hrm/UpdateSchedule.tsx
+@@ -1,6 +1,7 @@
+ 'use client';
+ import { useEffect, useState } from 'react';
+ import { useUpdateSchedule } from '@/hooks/useUpdateSchedule';
++import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+ import { Button } from '@/components/ui/button';
+ import { BLACKOUT_LABEL_MAX, DAY_NAMES, type UpdateSchedule as Schedule } from '@/lib/hrm/update-window';
+ 
+@@ -33,15 +34,7 @@ export function UpdateSchedule() {
+   if (data?.supported === false) return null;
+   const w = data?.window;
+   const hours = Array.from({ length: 25 }, (_, h) => h);
+-  return <section aria-label="Update schedule" className="rounded-xl border border-overlay/10 bg-bg-surface p-4 space-y-3">
+-    <div className="flex items-center justify-between"><h2 className="font-semibold text-text-primary">Update schedule</h2>
+-      {data?.schedule && !editing && <button className={secondary} onClick={() => { action.reset(); setDraft(data.schedule!); setEditing(true); }}>Change schedule</button>}</div>
+-    {isLoading && <p className="text-sm text-text-muted">Loading the update schedule…</p>}
+-    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
+-    {/* HRM patch 0036: say the state once. "Can start now" only adds something when a schedule limits the times. */}
+-    {w && (!w.open || data?.schedule?.enabled) && <p className={`text-sm font-medium ${w.open ? 'text-status-success' : 'text-status-warning'}`}>{w.open ? 'Automatic updates and pilots can start now.' : w.reason}</p>}
+-    {data?.schedule && !editing && <p className="text-sm text-text-secondary">{scheduleSummary(data.schedule)}{data.schedule.enabled ? ' Updates found outside these times wait and start within an hour of the schedule opening.' : ''} Update and Update all still work at any time.</p>}
+-    {editing && draft && <div className="space-y-3 rounded-lg border border-overlay/10 p-3 text-sm">
++  const editor = draft && (<div className="space-y-3 rounded-lg border border-overlay/10 p-3 text-sm">
+       <label className="flex gap-2"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />Only start automatic updates and pilots at these times</label>
+       <fieldset disabled={!draft.enabled} className="space-y-3 disabled:opacity-50">
+         <legend className="sr-only">Days and hours</legend>
+@@ -52,11 +45,10 @@ export function UpdateSchedule() {
+           <span className="text-text-muted">Maryland time. An end before the start runs past midnight.</span>
+         </div>
+       </fieldset>
+-      {action.error && <p role="alert" className="text-status-error">{action.error.message}</p>}
+-      <div className="flex gap-3"><Button disabled={action.isPending} onClick={() => action.mutate({ action: 'save', schedule: draft }, { onSuccess: () => setEditing(false) })}>{action.isPending ? 'Saving…' : 'Save schedule'}</Button>
++      <div className="flex gap-3"><Button disabled={action.isPending} onClick={() => action.mutate({ action: 'save', schedule: draft }, { onSuccess: () => setEditing(false) })}>{action.isPending ? 'Saving…' : 'Save publishing schedule'}</Button>
+         <button className={secondary} disabled={action.isPending} onClick={() => { action.reset(); setEditing(false); }}>Cancel</button></div>
+-    </div>}
+-    {data?.blackouts && <div className="space-y-2">
++    </div>);
++  const blackouts = data?.blackouts && <div className="space-y-2">
+       <h3 className="text-sm font-medium text-text-primary">Blackouts</h3>
+       <p className="text-sm text-text-secondary">No automatic updates or pilots start on these dates, whatever the schedule says. Use them for busy periods such as month-end.</p>
+       {data.blackouts.length === 0 && <p className="text-sm text-text-muted">No current or upcoming blackouts.</p>}
+@@ -68,7 +60,24 @@ export function UpdateSchedule() {
+         <label className="flex flex-col gap-1">Last day<input type="date" className={field} value={blackout.endsOn} onChange={(e) => setBlackout({ ...blackout, endsOn: e.target.value })} /></label>
+         <Button type="submit" variant="outline" disabled={action.isPending}>Add blackout</Button>
+       </form>
+-      {!editing && action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
+-    </div>}
++      {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
++    </div>;
++  return <section aria-label="Publishing schedule" className="rounded-xl border border-overlay/10 bg-bg-surface p-4 space-y-3">
++    <div className="flex items-center justify-between"><h2 className="font-semibold text-text-primary">Publishing schedule</h2>
++      {data?.schedule && <Dialog open={editing} onOpenChange={value => { if (!action.isPending) { if (value) { action.reset(); setDraft(data.schedule!); } setEditing(value); } }}>
++        <DialogTrigger asChild><Button variant="outline">Edit publishing schedule</Button></DialogTrigger>
++        <DialogContent side="right" hideCloseButton={action.isPending} onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }}>
++          <DialogHeader className="pr-12"><DialogTitle>Edit publishing schedule</DialogTitle><DialogDescription>One shared schedule for when automatic updates and pilots can start publishing to Intune. Device installations follow their own settings.</DialogDescription></DialogHeader>
++          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">{editor}{blackouts}{action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}</div>
++        </DialogContent>
++      </Dialog>}</div>
++    {isLoading && <p className="text-sm text-text-muted">Loading the publishing schedule…</p>}
++    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
++    {/* HRM patch 0036: say the state once. "Can start now" only adds something when a schedule limits the times. */}
++    {w && (!w.open || data?.schedule?.enabled) && <p className={`text-sm font-medium ${w.open ? 'text-status-success' : 'text-status-warning'}`}>{w.open ? 'Automatic updates and pilots can start now.' : w.reason}</p>}
++    {data?.schedule && !editing && <p className="text-sm text-text-secondary">{scheduleSummary(data.schedule)}{data.schedule.enabled ? ' Updates found outside these times wait and start within an hour of the schedule opening.' : ''} Update and Update all still work at any time.</p>}
++    <p className="text-xs text-text-muted">Controls publishing, not device installation. Shared across all apps in this tenant. Blackouts hold new publishing; installations already assigned to devices can continue.</p>
++    {data?.blackouts && <p className="text-xs text-text-muted">{data.blackouts.length} current or upcoming {data.blackouts.length === 1 ? 'blackout' : 'blackouts'}. Manage dates in Edit publishing schedule.</p>}
++
+   </section>;
+ }
+diff --git a/components/ui/dialog.tsx b/components/ui/dialog.tsx
+index 0bfadb0c2..022aa1827 100644
+--- a/components/ui/dialog.tsx
++++ b/components/ui/dialog.tsx
+@@ -31,18 +31,20 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
+ const DialogContent = React.forwardRef<
+   React.ElementRef<typeof DialogPrimitive.Content>,
+   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
++    side?: 'right';
+     hideCloseButton?: boolean;
+     overlayClassName?: string;
+     onInteractOutside?: (event: Event) => void;
+   }
+->(({ className, children, hideCloseButton, overlayClassName, ...props }, ref) => (
++>(({ className, children, side, hideCloseButton, overlayClassName, ...props }, ref) => (
+   <DialogPortal>
+     <DialogOverlay className={overlayClassName} />
+     <DialogPrimitive.Content
+       ref={ref}
+       className={cn(
+-        'fixed left-[50%] top-[50%] z-50 w-full max-w-lg translate-x-[-50%] translate-y-[-50%] bg-bg-surface rounded-2xl border border-overlay/10 shadow-2xl overflow-hidden duration-200',
+-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]',
++        side === 'right'
++          ? 'fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col bg-bg-surface border-l border-overlay/10 shadow-2xl overflow-hidden motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:slide-in-from-right motion-safe:data-[state=closed]:animate-out motion-safe:data-[state=closed]:slide-out-to-right duration-200'
++          : 'fixed left-[50%] top-[50%] z-50 w-full max-w-lg translate-x-[-50%] translate-y-[-50%] bg-bg-surface rounded-2xl border border-overlay/10 shadow-2xl overflow-hidden duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+         className
+       )}
+       {...props}
+diff --git a/components/updates/AutoUpdateHistory.tsx b/components/updates/AutoUpdateHistory.tsx
+index 0d08b23e9..bff154ec4 100644
+--- a/components/updates/AutoUpdateHistory.tsx
++++ b/components/updates/AutoUpdateHistory.tsx
+@@ -1,5 +1,7 @@
+ 'use client';
+ 
++import { InstallStatusBar } from '@/components/hrm/InstallStatusBar';
++import { installationPolicySummary } from '@/lib/hrm/installation-policy';
+ import { T } from "gt-next";
+ import { useState, useMemo } from 'react';
+ import { motion, useReducedMotion, AnimatePresence } from 'framer-motion';
+@@ -43,7 +45,7 @@ const statusConfig: Record<
+     color: 'text-text-muted',
+     bgColor: 'bg-overlay/[0.06]',
+     borderColor: 'border-l-overlay/20',
+-    label: 'Pending',
++    label: 'Queued for packaging',
+   },
+   packaging: {
+     icon: Loader2,
+@@ -58,7 +60,7 @@ const statusConfig: Record<
+     color: 'text-accent-violet',
+     bgColor: 'bg-accent-violet/10',
+     borderColor: 'border-l-accent-violet',
+-    label: 'Deploying',
++    label: 'Publishing to Intune',
+     animate: true,
+   },
+   completed: {
+@@ -66,7 +68,7 @@ const statusConfig: Record<
+     color: 'text-status-success',
+     bgColor: 'bg-status-success/10',
+     borderColor: 'border-l-status-success',
+-    label: 'Completed',
++    label: 'Published to Intune',
+   },
+   failed: {
+     icon: XCircle,
+@@ -151,8 +153,8 @@ export function AutoUpdateHistory({
+         <div className="w-12 h-12 rounded-xl bg-overlay/5 flex items-center justify-center mx-auto mb-3">
+           <Clock className="w-6 h-6 text-text-muted" />
+         </div>
+-        <p className="text-sm font-medium text-text-secondary mb-1"><T>No update history yet</T></p>
+-        <p className="text-xs text-text-muted"><T>Updates you trigger or auto-updates will appear here</T></p>
++        <p className="text-sm font-medium text-text-secondary mb-1"><T>No publishing history yet</T></p>
++        <p className="text-xs text-text-muted"><T>Manual and automatic publishing attempts will appear here</T></p>
+       </div>
+     );
+   }
+@@ -312,7 +314,7 @@ export function AutoUpdateHistory({
+                                 </div>
+                                 {item.completed_at && (
+                                   <div>
+-                                    <span className="text-text-muted text-[11px] font-medium uppercase tracking-wide"><T>Completed</T></span>
++                                    <span className="text-text-muted text-[11px] font-medium uppercase tracking-wide"><T>Publishing finished</T></span>
+                                     <p className="text-text-primary text-xs mt-0.5">
+                                       {new Date(item.completed_at).toLocaleString()}
+                                     </p>
+@@ -320,6 +322,8 @@ export function AutoUpdateHistory({
+                                 )}
+                               </div>
+ 
++                              {item.installation_policy && <div className="mt-2.5 rounded-lg border border-overlay/10 p-3 text-xs text-text-secondary"><span className="font-medium text-text-primary">Installation policy for this release</span><p className="mt-1">{installationPolicySummary(item.installation_policy)}.</p><p className="mt-1 text-text-muted">Saved when packaging was queued. Device deadlines and postponements are not reported here.</p></div>}
++                              {item.status === 'completed' && item.intune_app_id && <div className="mt-3 rounded-lg border border-overlay/10 p-3"><p className="mb-2 text-xs text-text-muted">Device results for this published version</p><InstallStatusBar appId={item.intune_app_id} /></div>}
+                               {item.error_message && (
+                                 <div className="mt-2.5 p-3 bg-status-error/[0.06] border border-status-error/20 rounded-lg">
+                                   <p className="text-xs text-status-error font-mono leading-relaxed">
+diff --git a/components/updates/UpdateCard.test.ts b/components/updates/UpdateCard.test.ts
+index 41198fb43..aeb5a0676 100644
+--- a/components/updates/UpdateCard.test.ts
++++ b/components/updates/UpdateCard.test.ts
+@@ -16,6 +16,7 @@ vi.mock('@/components/hrm/PilotRollouts', () => ({ StartPilot: () => null }));
+ vi.mock('@/components/hrm/AppGroupsLine', () => ({ AppGroupsLine: () => null }));
+ vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
+ vi.mock('./UpdatePolicySelector', () => ({ UpdatePolicySelector: () => null }));
++vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { shared: { mode: 'prompt', days: 3 }, exceptions: [] } }) }));
+ import { UpdateCard } from './UpdateCard';
+ import type { AvailableUpdate } from '@/types/update-policies';
+ 
+diff --git a/components/updates/UpdateCard.tsx b/components/updates/UpdateCard.tsx
+index 25d7e939f..4442e2007 100644
+--- a/components/updates/UpdateCard.tsx
++++ b/components/updates/UpdateCard.tsx
+@@ -21,6 +21,8 @@ import Link from 'next/link';
+ import { Button } from '@/components/ui/button';
+ import { isCustomAppId } from '@/lib/hrm/new-version';
+ import { StartPilot } from '@/components/hrm/PilotRollouts';
++import { AutoUpdateTimingSummary } from '@/components/hrm/InstallationPolicyPanel';
++import { AppTimingPanel } from '@/components/hrm/AppTimingPanel';
+ import { AppGroupsLine } from '@/components/hrm/AppGroupsLine';
+ import { AppIcon } from '@/components/AppIcon';
+ import { UpdatePolicySelector } from './UpdatePolicySelector';
+@@ -275,6 +277,8 @@ export function UpdateCard({
+         {update.is_managed !== false && (
+           <div className="pb-3">
+             <AppGroupsLine intuneAppId={update.intune_app_id} />
++            {isAutoUpdateEnabled && <AutoUpdateTimingSummary appId={update.winget_id} />}
++            {update.intune_app_id && <div className="mt-2"><AppTimingPanel appId={update.intune_app_id} /><p className="mt-1 text-xs text-text-muted">Dates for the current published version. Future automatic updates use the shared policy or app exception.</p></div>}
+         {!isCustomAppId(update.winget_id) && <StartPilot update={update} />}
+           </div>
+         )}
+diff --git a/hooks/useInstallationPolicy.ts b/hooks/useInstallationPolicy.ts
+new file mode 100644
+index 000000000..f3c77be71
+--- /dev/null
++++ b/hooks/useInstallationPolicy.ts
+@@ -0,0 +1,23 @@
++'use client';
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
++import { useMicrosoftAuth } from './useMicrosoftAuth';
++import type { InstallationPolicy } from '@/lib/hrm/installation-policy';
++export interface InstallationPolicyView { supported: boolean; shared?: InstallationPolicy; exceptions?: (InstallationPolicy & { appId: string })[] }
++export function useInstallationPolicy() {
++  const { getAccessToken, isAuthenticated, account } = useMicrosoftAuth();
++  const client = useQueryClient();
++  const key = ['hrm', 'installation-policy', account?.tenantId, account?.localAccountId];
++  const request = async (body?: Record<string, unknown>): Promise<InstallationPolicyView> => {
++    const token = await getAccessToken();
++    if (!token) throw new Error('Sign in again to view installation timing.');
++    const response = await fetch('/api/hrm/installation-policy', { method: body ? 'POST' : 'GET',
++      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
++    if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Your sign-in expired. Reload and sign in again.');
++    const data = await response.json();
++    if (!response.ok) throw new Error(data.error || 'Could not load installation timing.');
++    return data;
++  };
++  const query = useQuery({ queryKey: key, queryFn: () => request(), enabled: isAuthenticated, staleTime: 30000 });
++  const action = useMutation({ mutationFn: request, onSuccess: data => { client.setQueryData(key, data); } });
++  return { ...query, action };
++}
+diff --git a/hooks/useUpdateSchedule.ts b/hooks/useUpdateSchedule.ts
+index e9171e045..70f8f7590 100644
+--- a/hooks/useUpdateSchedule.ts
++++ b/hooks/useUpdateSchedule.ts
+@@ -12,11 +12,11 @@ export function useUpdateSchedule() {
+   const key = ['hrm', 'update-schedule', account?.tenantId, account?.localAccountId];
+   const request = async (body?: Record<string, unknown>) => {
+     const token = await getAccessToken();
+-    if (!token) throw new Error('Sign in again to view the update schedule.');
++    if (!token) throw new Error('Sign in again to view the publishing schedule.');
+     const response = await fetch('/api/hrm/update-schedule', { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+     if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Your sign-in expired. Reload and sign in again.');
+     const data = await response.json();
+-    if (!response.ok) throw new Error(data.error || 'Could not load the update schedule.');
++    if (!response.ok) throw new Error(data.error || 'Could not load the publishing schedule.');
+     return data as UpdateScheduleView;
+   };
+   const query = useQuery({ queryKey: key, queryFn: () => request(), enabled: isAuthenticated, staleTime: 30000, refetchInterval: 60000 });
+diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
+index b4f6a1d91..2fb2848ae 100644
+--- a/lib/auto-update/__tests__/sqlite.test.ts
++++ b/lib/auto-update/__tests__/sqlite.test.ts
+@@ -569,3 +569,28 @@ describe('failure cutoff (HRM patch 0032)', () => {
+     expect((await runSqliteUpdateCheck(db)).triggered).toBe(0);
+   });
+ });
++
++describe('installation policy on automatic releases (HRM patch 0043)', () => {
++  it('snapshots the shared rule into a new automatic package but keeps manual packages unchanged', async () => {
++    vi.stubEnv('DATABASE_MODE', 'sqlite');
++    try {
++      const { db, triggerSqliteAutoUpdate } = await load();
++      const { sqliteInstallationPolicies } = await import('@/lib/db/sqlite');
++      const policy = await seedDeployment(db);
++      sqliteInstallationPolicies.save('t1', '', { mode: 'prompt', days: 3 });
++      const automatic = await triggerSqliteAutoUpdate(db, policy, { ...installerResolution().info, currentVersion: '1.0.0' }, { skipRateLimits: true });
++      expect(automatic.success).toBe(true);
++      const job = await db.jobs.getById(automatic.packagingJobId!);
++      expect(job?.package_config).toMatchObject({ installationPolicy: { mode: 'prompt', days: 3 }, psadtConfig: { allowDefer: true, deferDays: 3, deployMode: 'Auto' } });
++      expect((await db.autoUpdateHistory.list('u1', { tenantId: 't1', limit: 10, offset: 0 }))[0].installation_policy).toEqual({ mode: 'prompt', days: 3 });
++      // Save a different shared rule: the already-created package keeps its snapshot.
++      sqliteInstallationPolicies.save('t1', '', { mode: 'silent', days: 3 });
++      expect((await db.jobs.getById(automatic.packagingJobId!))?.package_config).toMatchObject({ installationPolicy: { mode: 'prompt', days: 3 } });
++      await db.jobs.update(automatic.packagingJobId!, { status: 'deployed', intune_app_id: 'new-copy' });
++      expect((await db.autoUpdateHistory.list('u1', { tenantId: 't1', limit: 10, offset: 0 }))[0].intune_app_id).toBe('new-copy');
++      const manual = await triggerSqliteAutoUpdate(db, policy, { ...installerResolution().info, currentVersion: '1.0.0', latestVersion: '1.2.0' }, { skipRateLimits: true, bypassUpdateScope: true });
++      expect(manual.success).toBe(true);
++      expect((await db.jobs.getById(manual.packagingJobId!))?.package_config).not.toHaveProperty('installationPolicy');
++    } finally { vi.unstubAllEnvs(); }
++  });
++});
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index 05c723ec5..0bc6f3260 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -18,6 +18,7 @@
+  * dispatch. Those remain hosted behaviour.
+  */
+ 
++import { applyInstallationPolicy } from '@/lib/hrm/installation-policy';
+ import { pilotHold } from '@/lib/hrm/pilot-guard';
+ import { skippedVersionHold } from '@/lib/hrm/rollback-guard';
+ import type { DatabaseAdapter, UploadHistoryRecord } from '@/lib/db/types';
+@@ -245,6 +246,10 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+       const dependencies = (list: unknown) =>
+         Array.isArray(list) ? (list as Array<{ relationshipType?: string }>).filter((r) => r.relationshipType === 'dependency') : undefined;
+ 
++      // Manual Update / Update all and pilots retain their reviewed package settings.
++      const automatic = !options?.bypassUpdateScope && !options?.pilot;
++      const installationPolicy = automatic && (await import('@/lib/db')).isSqliteMode()
++        ? (await import('@/lib/db/sqlite')).sqliteInstallationPolicies.effective(policy.tenant_id, policy.winget_id) : null;
+       const job = await db.jobs.create({
+         user_id: policy.user_id,
+         tenant_id: policy.tenant_id,
+@@ -271,7 +276,8 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+           assignedGroups: config.assignedGroups,
+           requirementRules: config.requirementRules,
+           relationships: sourceIntuneAppId ? (dependencies(currentConfig.relationships) ?? dependencies(config.relationships)) : config.relationships,
+-          psadtConfig: config.psadtConfig,
++          psadtConfig: installationPolicy ? applyInstallationPolicy(config.psadtConfig, installationPolicy) : config.psadtConfig,
++          installationPolicy: installationPolicy ?? undefined,
+           nestedInstallerType: updateInfo.nestedInstallerType,
+           nestedInstallerPath: updateInfo.nestedInstallerPath,
+           installerSuccessCodes: updateInfo.installerSuccessCodes,
+diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
+index f6bcb2d85..1ecc46c7f 100644
+--- a/lib/db/__tests__/job-create.test.ts
++++ b/lib/db/__tests__/job-create.test.ts
+@@ -50,7 +50,7 @@ function readStoredJob(id: string): Record<string, unknown> {
+   const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
+   try {
+     // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts, skipped versions, retirements, rollback readiness, removals) follow manual mappings, automatic update scope, and webhooks.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(20);
++    expect(stored.pragma('user_version', { simple: true })).toBe(21);
+     return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
+   } finally {
+     stored.close();
+diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
+index 45bd040d7..9b8fad6dd 100644
+--- a/lib/db/sqlite-migrations.ts
++++ b/lib/db/sqlite-migrations.ts
+@@ -500,6 +500,14 @@ export const MIGRATIONS: SqliteMigration[] = [
+       )`);
+     },
+   },
++  {
++    version: 21,
++    name: 'shared automatic installation policy and app exceptions (HRM patch 0043)',
++    up: db => { db.exec(`CREATE TABLE IF NOT EXISTS hrm_installation_policies (
++      tenant_id TEXT NOT NULL, app_id TEXT NOT NULL COLLATE NOCASE, mode TEXT NOT NULL,
++      days INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (tenant_id, app_id)
++    )`); },
++  },
+ ];
+ 
+ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index be62bed6b..7e197946f 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -9,6 +9,8 @@ import { createRollbackStore } from '@/lib/hrm/rollback-store';
+ import { createRetireStore } from '@/lib/hrm/retire-store';
+ import { createRollbackReadinessStore } from '@/lib/hrm/rollback-readiness-store';
+ import { createOldCopyStore } from '@/lib/hrm/old-copy-store';
++import { installationPolicyError, type InstallationPolicy } from '@/lib/hrm/installation-policy';
++import { createInstallationPolicyStore } from '@/lib/hrm/installation-policy-store';
+ import { createUpdateScheduleStore } from '@/lib/hrm/update-schedule-store';
+ import { createInstallerBlockStore } from '@/lib/hrm/installer-block';
+ import { createPausedAlertStore } from '@/lib/hrm/paused-auto-update';
+@@ -1045,10 +1047,12 @@ export const sqliteDb: DatabaseAdapter = {
+           h.*,
+           p.winget_id AS policy_winget_id,
+           p.tenant_id AS policy_tenant_id,
+-          j.display_name AS packaging_display_name
++          j.display_name AS packaging_display_name,
++          j.package_config AS packaging_config,
++          j.intune_app_id AS packaging_intune_app_id
+         FROM auto_update_history h
+         JOIN app_update_policies p ON h.policy_id = p.id
+-        LEFT JOIN packaging_jobs j ON h.packaging_job_id = j.id
++        LEFT JOIN packaging_jobs j ON h.packaging_job_id = j.id AND j.tenant_id = p.tenant_id
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY h.triggered_at DESC
+         LIMIT ? OFFSET ?
+@@ -1071,6 +1075,13 @@ export const sqliteDb: DatabaseAdapter = {
+           tenant_id: row.policy_tenant_id as string,
+         },
+         display_name: (row.packaging_display_name as string | null) ?? undefined,
++        intune_app_id: (row.packaging_intune_app_id as string | null) ?? undefined,
++        installation_policy: (() => {
++          try {
++            const value = JSON.parse(String(row.packaging_config ?? '{}')).installationPolicy;
++            return !installationPolicyError(value) ? { mode: value.mode, days: value.days } as InstallationPolicy : undefined;
++          } catch { return undefined; }
++        })(),
+       }));
+     },
+ 
+@@ -1340,3 +1351,5 @@ export function closeSqliteDb(): void {
+     db = null;
+   }
+ }
++
++export const sqliteInstallationPolicies = createInstallationPolicyStore(getDb);
+diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
+index 865e3ea66..629eb005e 100644
+--- a/lib/hrm/__tests__/help-content.test.ts
++++ b/lib/hrm/__tests__/help-content.test.ts
+@@ -22,15 +22,15 @@ describe('help content', () => {
+     expect(pilot!.links?.map((link) => link.href)).toEqual(['/dashboard/updates', '/dashboard/uploads', '/dashboard/inventory', 'https://support.hruthmd.org']);
+   });
+ 
+-  it('explains the update schedule, blackouts and what they do not block (HRM patch 0030)', () => {
++  it('explains the publishing schedule, blackouts and what they do not block (HRM patch 0030)', () => {
+     const section = HELP_SECTIONS.find((s) => s.id === 'update-schedule');
+     const text = section!.points.join(' ');
+-    for (const label of ['Change schedule', 'Only start automatic updates and pilots at these times', 'Save schedule', 'Add blackout', 'Remove blackout']) expect(text).toContain(label);
++    for (const label of ['Edit publishing schedule', 'Only start automatic updates and pilots at these times', 'Save publishing schedule', 'Add blackout', 'Remove blackout']) expect(text).toContain(label);
+     expect(text).toContain('Maryland time');
+     expect(text).toContain('Never put client or staff details');
+     expect(text).toMatch(/Update all .* still work at any time/);
+-    expect(section!.flow).toEqual(['Open App updates', 'Press Change schedule', 'Turn the schedule on', 'Choose days and hours', 'Press Save schedule']);
+-    expect(HELP_SECTIONS.find((s) => s.id === 'pilot-rollouts')!.points.join(' ')).toContain('update schedule allows updates');
++    expect(section!.flow).toEqual(['Open App updates', 'Edit publishing schedule', 'Turn the schedule on', 'Choose days and hours', 'Save publishing schedule']);
++    expect(HELP_SECTIONS.find((s) => s.id === 'pilot-rollouts')!.points.join(' ')).toContain('publishing schedule allows updates');
+   });
+ 
+   it('explains Intune checks, unreached apps and auto-update turning off (HRM patch 0032)', () => {
+diff --git a/lib/hrm/__tests__/installation-policy.test.ts b/lib/hrm/__tests__/installation-policy.test.ts
+new file mode 100644
+index 000000000..b7854799d
+--- /dev/null
++++ b/lib/hrm/__tests__/installation-policy.test.ts
+@@ -0,0 +1,38 @@
++import { describe, expect, it } from 'vitest';
++import Database from 'better-sqlite3';
++import { runSqliteMigrations } from '@/lib/db/sqlite-migrations';
++import { applyInstallationPolicy, installationPolicyError } from '../installation-policy';
++import { createInstallationPolicyStore } from '../installation-policy-store';
++import { DEFAULT_PSADT_CONFIG } from '@/types/psadt';
++describe('automatic installation policy', () => {
++  it('resolves tenant-wide inheritance, case-insensitive exceptions and reverting an exception', () => {
++    const db = new Database(':memory:'); runSqliteMigrations(db);
++    const store = createInstallationPolicyStore(() => db);
++    expect(store.effective('one', 'Vendor.App').mode).toBe('existing');
++    store.save('one', '', { mode: 'prompt', days: 3 });
++    store.save('one', 'Vendor.App', { mode: 'silent', days: 3 });
++    expect(store.effective('one', 'vendor.APP').mode).toBe('silent');
++    expect(store.effective('one', 'Other.App')).toEqual({ mode: 'prompt', days: 3 });
++    expect(store.effective('two', 'Vendor.App').mode).toBe('existing');
++    store.remove('two', 'Vendor.App');
++    expect(store.exceptions('one')).toHaveLength(1);
++    store.remove('one', 'VENDOR.APP');
++    expect(store.effective('one', 'Vendor.App')).toEqual({ mode: 'prompt', days: 3 });
++    expect(() => store.remove('one', '')).toThrow(); db.close();
++  });
++  it('keeps installer safety settings while replacing old deadlines and giving a fresh day-based choice period', () => {
++    const original = { ...DEFAULT_PSADT_CONFIG, installCommand: 'trusted install', restartBehavior: 'Suppress' as const,
++      deferDays: 1, deferTimes: 1, deferDeadline: '2025-01-01', forceCloseProcessesCountdown: 10,
++      processesToClose: [{ name: 'example', description: 'Example' }], customDetection: true };
++    expect(applyInstallationPolicy(original, { mode: 'existing', days: 3 })).toBe(original);
++    const config = applyInstallationPolicy(original, { mode: 'prompt', days: 3 })!;
++    expect(config).toMatchObject({ installCommand: 'trusted install', restartBehavior: 'Suppress', customDetection: true,
++      allowDefer: true, deferDays: 3, deferTimes: 1000, deployMode: 'Auto', closeCountdown: 300, processesToClose: original.processesToClose });
++    expect(config.deferDeadline).toBeUndefined(); expect(config.forceCloseProcessesCountdown).toBeUndefined();
++    expect(original.deferDeadline).toBe('2025-01-01');
++    expect(applyInstallationPolicy(config, { mode: 'silent', days: 3 })).toMatchObject({ allowDefer: false, deployMode: 'Silent', deferDays: undefined });
++  });
++  it.each([null, [], {}, { mode: 'prompt', days: 0 }, { mode: 'prompt', days: 1.5 }, { mode: 'prompt', days: 15 }, { mode: 'login', days: 3 }])('rejects invalid policy %j', value => {
++    expect(installationPolicyError(value)).not.toBeNull();
++  });
++});
+diff --git a/lib/hrm/__tests__/update-window.test.ts b/lib/hrm/__tests__/update-window.test.ts
+index ad65f5ca6..71d068f33 100644
+--- a/lib/hrm/__tests__/update-window.test.ts
++++ b/lib/hrm/__tests__/update-window.test.ts
+@@ -21,7 +21,7 @@ describe('update window (HRM patch 0030)', () => {
+     expect(updateWindowState(evenings, [], at('2026-11-05T03:00:00Z')).open).toBe(false); // Wed 10 PM
+     const closed = updateWindowState(evenings, [], at('2026-11-06T23:00:00Z')); // Fri 6 PM
+     expect(closed).toMatchObject({ open: false, blackout: null, nextOpen: '2026-11-09T23:00:00.000Z' });
+-    expect(closed.reason).toMatch(/outside the update schedule until Monday, November 9.*6:00 PM Maryland time/);
++    expect(closed.reason).toMatch(/outside the publishing schedule until Monday, November 9.*6:00 PM Maryland time/);
+   });
+   it('gives the early hours of an overnight window to the day it started', () => {
+     expect(updateWindowState(overnight, [], at('2026-11-05T03:00:00Z')).open).toBe(true); // Wed 10 PM
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 946509cd5..44d59a537 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -46,7 +46,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+     uiLabels: ['Inventory', 'Installation timing', 'Reload timing', 'App availability', 'Installation deadline', 'Restart grace period', 'Save timing to Intune'],
+     flow: ['Open Inventory', 'Open the app', 'Press Reload timing', 'Choose assignment and dates', 'Save timing to Intune'],
+     points: [
+-      'In Inventory, open an app, then Installation timing. Press Reload timing to read its current Required and Available groups from Intune. Uninstall groups, exclusions and assignments managed by policy sets cannot be edited here.',
++      'In Inventory or App updates, open Installation timing for an app. The panel opens on the right. Press Reload timing to read its current Required and Available groups from Intune. Uninstall groups, exclusions and assignments managed by policy sets cannot be edited here.',
+       'Choose one assignment. App availability controls when Required apps can download or Available apps appear in Company Portal. Leave the date blank for as soon as possible.',
+       'For Required groups, Installation deadline controls when installation starts. Leave it blank to install after availability. Another assignment with an earlier deadline can take priority.',
+       'Choose device local time for each device’s clock, or UTC for one shared time. Changing the time zone keeps the entered clock times, so check the dates before saving.',
+@@ -90,7 +90,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+     points: [
+       'WinGet and curated apps: open App updates and press Update on the app, or Update all. The new version replaces the previous one in Intune and keeps its groups. The result posts to Teams.',
+       'The previous copy stays in Intune until IntuneGet removes it, at least 7 days after the update (see How old copies are removed).',
+-      'Apps with auto-update on are updated by the 3:30 AM and 3:30 PM check, with the same safety checks. Outside the update schedule or during a blackout, they wait (see Update schedule and blackouts).',
++      'Apps with auto-update on are updated by the 3:30 AM and 3:30 PM check, with the same safety checks. Outside the publishing schedule or during a blackout, they wait (see Publishing schedule and blackouts).',
+       'An active pilot holds other updates for that app until you approve wider rollout or safely end a failed pilot.',
+       'An ordinary update takes the groups the app has in Intune at that moment, so groups added later with Save to Intune carry over.',
+       'If an update can\'t start, for example because the installation test held it, a failed-deployment alert posts to IT Ops.',
+@@ -155,7 +155,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+     points: [
+       'In App updates, choose Test with a pilot group on a deployed WinGet or curated app. Pilots are not available for custom apps or Microsoft Store apps.',
+       'In Find a pilot group, type at least 2 characters, select 1 small security group, then press Deploy to pilot group.',
+-      'Deploy to pilot group and Approve wider rollout work only while the update schedule allows updates and no blackout applies (see Update schedule and blackouts).',
++      'Deploy to pilot group and Approve wider rollout work only while the publishing schedule allows updates and no blackout applies (see Publishing schedule and blackouts).',
+       'The new version is Required for that group only. The previous copy keeps its groups. Apps with saved New computer setup profiles cannot use pilots yet.',
+       'During an active pilot, other updates and deployments for the app are held, including Update all, automatic updates and deploying it from the App catalog. Save to Intune and duplicate cleanup are held for its copies too. Self-updating apps can still update themselves.',
+       'Retire app and Go back to previous version are refused during a pilot too.',
+@@ -178,15 +178,34 @@ export const HELP_SECTIONS: HelpSection[] = [
+       { label: 'HRM Support', href: HRM_SUPPORT_URL },
+     ],
+   },
++  {
++    id: 'automatic-installation-policy',
++    title: 'Automatic update installation timing',
++    uiLabels: ['App updates', 'Auto-update installation timing', 'Edit shared policy', 'Apply to', 'Use shared policy', 'Days users can postpone', 'Save shared policy', 'Save app exception', 'Publishing history', 'Published to Intune', 'Inventory', 'Installation timing', 'Installation policy for this release'],
++    flow: ['Open App updates', 'Edit shared policy', 'Choose installation behavior', 'Choose days to postpone', 'Save shared policy'],
++    points: [
++      'App updates is the overview. Auto-update installation timing describes the shared device policy and lists app exceptions. The Publishing schedule below it controls when the server can publish; it does not control when devices install.',
++      'Press Edit shared policy to open the panel on the right. In Apply to, leave All auto-update apps selected to change the shared policy, or select one app to set an exception.',
++      'Choose Let users install now or postpone, then Days users can postpone. The form suggests 3 days. Save shared policy applies to future automatic update packages; Save app exception applies only to that app. Select Use shared policy to remove an exception.',
++      'Until a shared policy is saved, each app keeps its saved installation settings. Silent installation and keeping saved settings are also available. Saving does not change queued or published packages, or devices that already have that version.',
++      'The choice period begins on each device at its first installation attempt, not when the server finds or publishes a version. Offline devices begin later. After the period ends, the next Intune attempt installs the update; this is not an exact appointment.',
++      'Postponement uses the installer toolkit. It may install silently when nobody is signed in, during new-computer setup, or when the app does not need to close. A postponement is returned to Intune as retry; reminder times follow Intune checks, not a time chosen in this app.',
++      'If the app is in use after postponement expires, the package allows at least 5 minutes to close it. This is not a guarantee that the installer will preserve unsaved work or suppress a restart.',
++      'Manual Update, Update all and pilots keep their saved package settings. Changing this shared policy affects automatic releases only.',
++      'Publishing history records packaging and publishing. Published to Intune means the app reached Intune, not that devices installed it. Expand a published release for reported device installation results and their last check time; Inventory also shows them. Expand a release to see Installation policy for this release, the rule saved when packaging was queued. Device postponements and per-device deadlines are not reported in this history.',
++      'Installation timing opens a separate right-side panel for dates on a version already published. Those dates are per assignment and do not become recurring rules for future versions. Login-only and reboot-only installation are not offered.',
++    ],
++    links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'Open Inventory', href: '/dashboard/inventory' }],
++  },
+   {
+     id: 'update-schedule',
+-    title: 'Update schedule and blackouts',
+-    uiLabels: ['Update schedule', 'Change schedule', 'Only start automatic updates and pilots at these times', 'Save schedule', 'Add blackout', 'Remove blackout', 'Deploy to pilot group', 'Approve wider rollout', 'Update all', 'Deploy new version'],
+-    flow: ['Open App updates', 'Press Change schedule', 'Turn the schedule on', 'Choose days and hours', 'Press Save schedule'],
++    title: 'Publishing schedule and blackouts',
++    uiLabels: ['Publishing schedule', 'Edit publishing schedule', 'Only start automatic updates and pilots at these times', 'Save publishing schedule', 'Add blackout', 'Remove blackout', 'Deploy to pilot group', 'Approve wider rollout', 'Update all', 'Deploy new version'],
++    flow: ['Open App updates', 'Edit publishing schedule', 'Turn the schedule on', 'Choose days and hours', 'Save publishing schedule'],
+     points: [
+-      'The Update schedule card, under the App updates title, says when automatic updates and pilots start. If they can\'t start now, for example during a blackout, it says when they can.',
++      'The Publishing schedule card on App updates says when automatic updates and pilots can start publishing to Intune. It is shared across the tenant and does not set device installation times. If they can\'t start now, for example during a blackout, it says when they can.',
+       'Without a schedule, automatic updates start at the 3:30 AM and 3:30 PM checks (Maryland time). Pilots start when you choose.',
+-      'To choose when they start, press Change schedule and select Only start automatic updates and pilots at these times. Choose the days and the hours (Maryland time), then press Save schedule.',
++      'To choose when they start, press Edit publishing schedule and select Only start automatic updates and pilots at these times. Choose the days and the hours (Maryland time), then press Save publishing schedule.',
+       'An end hour before the start hour runs past midnight, for example 8 PM to 6 AM.',
+       'Updates found outside the schedule wait. Within an hour of the schedule opening, the server starts them, with the same safety checks.',
+       'Without a schedule, updates held by a blackout start at the first 3:30 AM or 3:30 PM check after it ends.',
+@@ -368,7 +387,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Off-site backup turns red if the last nightly copy to Azure failed or is more than 36 hours old.',
+       'Intune reads shows Failing when install results or app activity could not be read at the last 2 update checks (3:30 AM and 3:30 PM).',
+       'Intune self-test tests every Intune read the server relies on, daily at 7:15 AM (Maryland time), without changing anything in Intune. It shows Failing if a read fails or the test is more than 26 hours old.',
+-      'Scheduled updates is the hourly run that starts updates held for the update schedule. It shows Failing if the last run failed or none ran for 2 hours.',
++      'Scheduled updates is the hourly run that starts updates held for the publishing schedule. It shows Failing if the last run failed or none ran for 2 hours.',
+       'Each of these shows Working, or Failing with a short reason, and a Teams alert posts to IT Ops. If Failing lasts, open a ticket with HRM Support.',
+       'HRM\'s IT dashboard shows Server status problems, failed or stuck deployments, and counts of apps deployed each day. Open Home here for details.',
+       'The summary refreshes at most once a minute. If the server is slow, the IT dashboard keeps the last safe summary and its original time.',
+diff --git a/lib/hrm/installation-policy-store.ts b/lib/hrm/installation-policy-store.ts
+new file mode 100644
+index 000000000..3adc375e0
+--- /dev/null
++++ b/lib/hrm/installation-policy-store.ts
+@@ -0,0 +1,24 @@
++import type Database from 'better-sqlite3';
++import { DEFAULT_INSTALLATION_POLICY, type InstallationPolicy } from './installation-policy';
++export function createInstallationPolicyStore(getDb: () => Database.Database) {
++  const read = (tenant: string, app: string): InstallationPolicy | null => {
++    const row = getDb().prepare('SELECT mode, days FROM hrm_installation_policies WHERE tenant_id = ? AND app_id = ? COLLATE NOCASE').get(tenant, app) as InstallationPolicy | undefined;
++    return row ?? null;
++  };
++  return {
++    shared: (tenant: string) => read(tenant, '') ?? { ...DEFAULT_INSTALLATION_POLICY },
++    effective: (tenant: string, app: string) => read(tenant, app) ?? read(tenant, '') ?? { ...DEFAULT_INSTALLATION_POLICY },
++    exceptions(tenant: string) {
++      return getDb().prepare('SELECT app_id AS appId, mode, days FROM hrm_installation_policies WHERE tenant_id = ? AND app_id != ? ORDER BY app_id').all(tenant, '') as (InstallationPolicy & { appId: string })[];
++    },
++    save(tenant: string, app: string, policy: InstallationPolicy) {
++      getDb().prepare(`INSERT INTO hrm_installation_policies (tenant_id, app_id, mode, days, updated_at) VALUES (?, ?, ?, ?, ?)
++        ON CONFLICT(tenant_id, app_id) DO UPDATE SET mode = excluded.mode, days = excluded.days, updated_at = excluded.updated_at`)
++        .run(tenant, app.toLowerCase(), policy.mode, policy.days, new Date().toISOString());
++    },
++    remove(tenant: string, app: string) {
++      if (!app) throw new Error('The shared policy cannot be removed.');
++      getDb().prepare('DELETE FROM hrm_installation_policies WHERE tenant_id = ? AND app_id = ? COLLATE NOCASE').run(tenant, app);
++    },
++  };
++}
+diff --git a/lib/hrm/installation-policy.ts b/lib/hrm/installation-policy.ts
+new file mode 100644
+index 000000000..5c3386ea5
+--- /dev/null
++++ b/lib/hrm/installation-policy.ts
+@@ -0,0 +1,27 @@
++import { DEFAULT_PSADT_CONFIG, type PSADTConfig } from '@/types/psadt';
++
++export interface InstallationPolicy { mode: 'existing' | 'prompt' | 'silent'; days: number }
++export const DEFAULT_INSTALLATION_POLICY: InstallationPolicy = { mode: 'existing', days: 3 };
++export function installationPolicyError(value: unknown): string | null {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'Choose an installation policy.';
++  const p = value as InstallationPolicy;
++  if (!['existing', 'prompt', 'silent'].includes(p.mode)) return 'Choose a supported installation policy.';
++  if (!Number.isInteger(p.days) || p.days < 1 || p.days > 14) return 'Choose 1 to 14 days.';
++  return null;
++}
++export function installationPolicySummary(p: InstallationPolicy): string {
++  if (p.mode === 'existing') return 'Keep each app’s saved installation settings';
++  if (p.mode === 'silent') return 'Install automatically without a postponement prompt';
++  return `Allow postponement for ${p.days} ${p.days === 1 ? 'day' : 'days'} from the first installation attempt`;
++}
++/** Only automatic releases use this rule. Keep installer commands, detection and restart behavior. */
++export function applyInstallationPolicy(saved: PSADTConfig | undefined, policy: InstallationPolicy): PSADTConfig | undefined {
++  if (policy.mode === 'existing') return saved;
++  const result: PSADTConfig = { ...DEFAULT_PSADT_CONFIG, ...saved };
++  // Old absolute deadlines and count limits must not shorten a new version's choice period.
++  delete result.deferDeadline;
++  delete result.forceCloseProcessesCountdown;
++  if (policy.mode === 'silent') return { ...result, allowDefer: false, deferByDaysOnly: false, deferDays: undefined, deployMode: 'Silent' };
++  return { ...result, allowDefer: true, deferByDaysOnly: true, deferDays: policy.days, deferTimes: 1000, deployMode: 'Auto',
++    closeCountdown: Math.max(saved?.closeCountdown ?? 60, 300), showClosePrompt: true, promptToSave: true, persistPrompt: false, minimizeWindows: false };
++}
+diff --git a/lib/hrm/update-window.ts b/lib/hrm/update-window.ts
+index 7e7ea63fa..9b8051d8f 100644
+--- a/lib/hrm/update-window.ts
++++ b/lib/hrm/update-window.ts
+@@ -111,6 +111,6 @@ export function updateWindowState(schedule: UpdateSchedule, blackouts: UpdateBla
+   const until = nextOpen ? ` until ${formatMarylandTime(nextOpen)} Maryland time` : '';
+   const reason = blackout
+     ? `Updates are paused for the blackout "${blackout.label}"${until}.`
+-    : `Updates are outside the update schedule${until}.`;
++    : `Updates are outside the publishing schedule${until}.`;
+   return { open: false, reason, blackout, nextOpen };
+ }
+diff --git a/packager/src/intune-uploader.ts b/packager/src/intune-uploader.ts
+index fd6905bc2..553089e6c 100644
+--- a/packager/src/intune-uploader.ts
++++ b/packager/src/intune-uploader.ts
+@@ -377,6 +377,8 @@ export class IntuneUploader {
+         { returnCode: 3010, type: 'softReboot' },
+         { returnCode: 1641, type: 'hardReboot' },
+         { returnCode: 1618, type: 'retry' },
++        ...(this.asRecord(this.asRecord(job.package_config)?.psadtConfig)?.allowDefer === true
++          ? [{ returnCode: 1602, type: 'retry' }] : []),
+       ],
+       rules: this.buildDetectionRules(job),
+     };
+diff --git a/packager/src/job-processor.ts b/packager/src/job-processor.ts
+index 60accaedc..412ae9e35 100644
+--- a/packager/src/job-processor.ts
++++ b/packager/src/job-processor.ts
+@@ -684,6 +684,7 @@ catch
+       86_400
+     );
+     const allowDefer = strictBoolean('allowDefer');
++    const deferByDaysOnly = strictBoolean('deferByDaysOnly');
+     const deferTimes = boundedInteger(config?.deferTimes, 'deferTimes', 3, 1_000)!;
+     const blockExecution = strictBoolean('blockExecution');
+     const promptToSave = strictBoolean('promptToSave');
+@@ -709,6 +710,7 @@ catch
+       // v4.1 rejects an explicitly supplied -DeferDays 0 value.
+       if (deferDays === 0) deferDays = null;
+     }
++    if (deferByDaysOnly && (!allowDefer || deferDays === null)) throw new Error('Day-based postponement requires a positive day limit and allowDefer.');
+     let deferDeadline: string | null = null;
+     if (config?.deferDeadline !== undefined && config.deferDeadline !== null) {
+       if (typeof config.deferDeadline !== 'string') {
+@@ -749,7 +751,7 @@ catch
+         installParameters.push(forceCloseCountdown !== null
+           ? `-ForceCloseProcessesCountdown ${forceCloseCountdown}`
+           : `-CloseProcessesCountdown ${closeCountdown}`);
+-        installParameters.push(`-DeferTimes ${deferTimes}`);
++        if (!deferByDaysOnly) installParameters.push(`-DeferTimes ${deferTimes}`);
+         if (deferDeadline) installParameters.push(`-DeferDeadline '${psSingleQuotedContent(deferDeadline)}'`);
+         if (deferDays !== null) installParameters.push(`-DeferDays ${deferDays}`);
+       } else if (showClosePrompt) {
+@@ -761,7 +763,8 @@ catch
+       }
+       if (blockExecution) installParameters.push('-BlockExecution');
+     } else if (allowDefer) {
+-      installParameters.push('-AllowDefer', `-DeferTimes ${deferTimes}`);
++      installParameters.push('-AllowDefer');
++      if (!deferByDaysOnly) installParameters.push(`-DeferTimes ${deferTimes}`);
+       if (deferDeadline) installParameters.push(`-DeferDeadline '${psSingleQuotedContent(deferDeadline)}'`);
+       if (deferDays !== null) installParameters.push(`-DeferDays ${deferDays}`);
+     }
+diff --git a/packager/tests/intune-uploader-payload.test.ts b/packager/tests/intune-uploader-payload.test.ts
+index 892c4ea63..0e7d5a1bb 100644
+--- a/packager/tests/intune-uploader-payload.test.ts
++++ b/packager/tests/intune-uploader-payload.test.ts
+@@ -164,3 +164,13 @@ describe('IntuneUploader Win32 app payload', () => {
+     expect(graph.patch).not.toHaveBeenCalled();
+   });
+ });
++
++it('maps an enabled postponement to retry while leaving silent packages unchanged', async () => {
++  for (const allowDefer of [true, false]) {
++    const graph = graphMock(); const uploader = new IntuneUploader(config) as unknown as TestableUploader;
++    await uploader.createWin32App(graph, packagingJob({ package_config: { psadtConfig: { allowDefer, deployMode: allowDefer ? 'Auto' : 'Silent' } } }), 'app.intunewin');
++    const body = graph.post.mock.calls[0][1] as { returnCodes: { returnCode: number; type: string }[]; installCommandLine: string };
++    expect(body.returnCodes.some(code => code.returnCode === 1602 && code.type === 'retry')).toBe(allowDefer);
++    expect(body.installCommandLine.includes('-DeployMode Silent')).toBe(!allowDefer);
++  }
++});
+diff --git a/packager/tests/psadt-nested-portable.test.ts b/packager/tests/psadt-nested-portable.test.ts
+index 363c383f5..d7646c8e5 100644
+--- a/packager/tests/psadt-nested-portable.test.ts
++++ b/packager/tests/psadt-nested-portable.test.ts
+@@ -1228,3 +1228,14 @@ describe('self-hosted MSIX PSADT generation', () => {
+     ).toContain('refusing an ambiguous removal');
+   });
+ });
++
++it('emits a day-only user choice period without showing an arbitrary remaining-reminder count', () => {
++  const script = generator.generateDeployScript.call(generator, packagingJob({ package_config: {
++    psadtConfig: { allowDefer: true, deferByDaysOnly: true, deferDays: 3, deferTimes: 1000, deployMode: 'Auto' },
++  } }), 'piicrawler.zip');
++  expect(script).toContain('Show-ADTInstallationWelcome -AllowDefer -DeferDays 3');
++  expect(script).not.toContain('-DeferTimes');
++  expect(() => generator.generateDeployScript.call(generator, packagingJob({ package_config: {
++    psadtConfig: { allowDefer: true, deferByDaysOnly: true, deferTimes: 1000 },
++  } }), 'piicrawler.zip')).toThrow('positive day limit');
++});
+diff --git a/types/psadt.ts b/types/psadt.ts
+index 18ff46ff8..da36058f9 100644
+--- a/types/psadt.ts
++++ b/types/psadt.ts
+@@ -148,6 +148,7 @@ export interface PSADTConfig {
+ 
+   // Deferral handling
+   allowDefer: boolean;
++  deferByDaysOnly?: boolean;       // Automatic update policy: no reminder-count limit
+   deferTimes: number;              // How many times user can defer (default 3)
+   deferDeadline?: string;          // ISO date string deadline for deferrals
+   deferDays?: number;              // Number of days user can defer
+diff --git a/types/update-policies.ts b/types/update-policies.ts
+index 302ec3102..5b5f25e5e 100644
+--- a/types/update-policies.ts
++++ b/types/update-policies.ts
+@@ -134,6 +134,8 @@ export interface AutoUpdateHistory {
+  * Extended auto-update history with policy details
+  */
+ export interface AutoUpdateHistoryWithPolicy extends AutoUpdateHistory {
++  intune_app_id?: string;
++  installation_policy?: import('@/lib/hrm/installation-policy').InstallationPolicy;
+   policy: {
+     winget_id: string;
+     tenant_id: string;

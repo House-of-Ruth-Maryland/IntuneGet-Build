@@ -17,7 +17,7 @@ HRM IT notes.
 | `patches/*.patch` | HRM changes, applied in name order with `git apply`. Why each exists: README. |
 | `deploy/version` | Image tag the server should run (for example `v0.8.2-hrm.1`) and, on the second line, the image digest the build recorded. The VM refuses the tag if it no longer points at that digest. **Changing it on `main` deploys to production.** |
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
-| `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day, scheduled update start hourly (patch 0030), Intune self-test daily at 7:15 AM New York (patch 0032). |
+| `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day, scheduled update start hourly (patch 0030), optional startup Beta report collection hourly (patch 0044), Intune self-test daily at 7:15 AM New York (patch 0032). |
 | `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
 | `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. Its `checks` section holds verdicts the app, watchdog and IT dashboard report all read as-is: Intune reads (install results or app activity failed at the last 2 update checks), the daily Intune self-test, and the hourly scheduled-update run. |
 | `deploy/intuneget-watchdog.py` | Every 5 minutes (installed as `/usr/local/sbin/intuneget-watchdog`, run by `intuneget-watchdog.timer`): checks the app's health and the status file and posts to IT Ops in Teams when a problem is confirmed, daily while it lasts, and when it clears. `intuneget-watchdog status` lists current problems; `intuneget-watchdog test` sends a test post. |
@@ -25,6 +25,8 @@ HRM IT notes.
 | `deploy/intuneget-backup.py` | Nightly at 1:30 AM New York (installed as `/usr/local/sbin/intuneget-backup`, run by `intuneget-backup.timer`): copies the SQLite database while the app runs, checks it, compresses it and uploads it to the Azure Storage container in `BACKUP_CONTAINER_URL` as the VM's managed identity. `intuneget-backup status` shows the last result. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
 | `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: check Help (below), build `<tag>-hrm.<n>` and open the "Deploy" PR. |
+| `.github/workflows/tests.yml` | For code PR revisions: apply pinned patches, cache npm downloads, check Help and both app/packager types, then run the full regression suite once. Deploy-only PRs and description edits do not run the suite. Manual dispatch covers bot-created upgrade PRs. |
+| `scripts/check-app.sh` | Shared local/PR validation entry point for a patched tree with dependencies installed. `related` runs affected tests during iteration; `full` checks Help, both compiler configurations and all tests. |
 | `.github/workflows/help-check.yml` | On PRs that change patches, `upstream-ref` or `deploy/` (not `deploy/version`): run the Help check and require "Help and tooltips checked" ticked in the PR description. |
 | `scripts/check-help.mjs` | The Help check: every on-screen label a Help section lists in `uiLabels` (patch 0034) still exists in the app, every time Help gives matches a timer in `deploy/systemd/`, and HRM's tooltips and hints keep the writing rules. Run by the build, the weekly upstream check and PRs. |
 
@@ -65,8 +67,20 @@ HRM IT notes.
   New files must be staged (`git add -N`) to appear in the diff.
 - Check every patch applies, in order, to a clean checkout of the tag in `upstream-ref`, the same way
   the build does (`git apply`).
-- Run upstream's checks on the patched tree: `npm ci`, `(cd packager && npm ci --ignore-scripts)`,
-  `npx tsc --noEmit -p .`, `npm test`. Compare any failures with unpatched upstream before blaming a patch.
+- Install dependencies once per lockfile change: `npm ci --no-audit --no-fund` and
+  `(cd packager && npm ci --ignore-scripts --no-audit --no-fund)` in the patched tree.
+- During implementation, use focused tests or `scripts/check-app.sh <patched tree> related <source files>`.
+  Run `scripts/check-app.sh <patched tree> full` once after the final changes, and again only after
+  new relevant changes, a failure or an unresolved concern. Full mode checks Help, app types,
+  packager types with its own compiler, and all tests. Compare failures with upstream when needed.
+- Keep the default process workers and per-file test isolation enabled. A thread-pool benchmark
+  was faster but failed follow-up native-code validation; do not disable isolation or drop database,
+  authorization, timeout or installer regressions for speed.
+- Code PRs run the full suite in Patched app regression checks. Description edits do not rerun it;
+  Deploy PRs reuse the tested code and built image. The build still checks Help against its exact
+  app/timer inputs and compiles the production image. VM health and Windows installer QA are
+  different checks and stay in place. Bot-created upgrade PRs may need a manual workflow dispatch
+  because GitHub does not trigger another workflow from a PR opened with the Actions token.
 - When a patch calls something new from a module that upstream tests mock with `vi.mock`, add it to
   that mock in the same patch.
 - **Migration numbers:** patches that add SQLite migrations take the next number after upstream's

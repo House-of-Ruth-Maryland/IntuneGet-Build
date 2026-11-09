@@ -35,6 +35,7 @@ jobs:
       migrations: ${{ steps.migrations.outputs.result }}
       packaging_workflow: ${{ steps.workflow.outputs.result }}
       tsc: ${{ steps.tests.outputs.tsc }}
+      packager_tsc: ${{ steps.tests.outputs.packager_tsc }}
       tests: ${{ steps.tests.outputs.tests }}
       mappings: ${{ steps.mappings.outputs.result }}
       help: ${{ steps.help.outputs.result }}
@@ -143,6 +144,10 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.node.outputs.version }}
+          cache: npm
+          cache-dependency-path: |
+            upstream/package-lock.json
+            upstream/packager/package-lock.json
 
       - name: Type check and tests
         id: tests
@@ -151,10 +156,11 @@ jobs:
         run: |
           # Same install as upstream's CI test job.
           if ! { npm ci --no-audit --no-fund && (cd packager && npm ci --ignore-scripts --no-audit --no-fund); }; then
-            { echo "tsc=not run (install failed)"; echo "tests=not run (install failed)"; } >> "$GITHUB_OUTPUT"
+            { echo "tsc=not run (install failed)"; echo "packager_tsc=not run (install failed)"; echo "tests=not run (install failed)"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if npx tsc --noEmit -p .; then echo "tsc=passed" >> "$GITHUB_OUTPUT"; else echo "tsc=failed" >> "$GITHUB_OUTPUT"; fi
+          if (cd packager && npx tsc --noEmit -p .); then echo "packager_tsc=passed" >> "$GITHUB_OUTPUT"; else echo "packager_tsc=failed" >> "$GITHUB_OUTPUT"; fi
           if npm test 2>&1 | tee ../test.log; [ "${PIPESTATUS[0]}" = 0 ]; then
             echo "tests=passed" >> "$GITHUB_OUTPUT"
           else
@@ -209,6 +215,7 @@ jobs:
       MIGRATIONS: ${{ needs.test.outputs.migrations }}
       PACKAGING_WORKFLOW: ${{ needs.test.outputs.packaging_workflow }}
       TSC: ${{ needs.test.outputs.tsc }}
+      PACKAGER_TSC: ${{ needs.test.outputs.packager_tsc }}
       TESTS: ${{ needs.test.outputs.tests }}
       MAPPINGS: ${{ needs.test.outputs.mappings }}
       HELP: ${{ needs.test.outputs.help }}
@@ -249,7 +256,8 @@ jobs:
           | Check | Result |
           |---|---|
           | HRM patches apply | $PATCHES |
-          | Type check | $TSC |
+          | App type check | $TSC |
+          | Packager type check | $PACKAGER_TSC |
           | Upstream tests | $TESTS |
           | App mapping IDs | $MAPPINGS |
           | Help labels and times | $HELP |
