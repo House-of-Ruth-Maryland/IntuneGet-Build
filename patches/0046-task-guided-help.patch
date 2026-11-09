@@ -122,7 +122,7 @@ index 7987b9383..5d8608a18 100644
          <DialogContent side="right" hideCloseButton={action.isPending} onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }}>
 diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
 new file mode 100644
-index 000000000..b153c6728
+index 000000000..fded9e2da
 --- /dev/null
 +++ b/components/hrm/help/HelpVisual.tsx
 @@ -0,0 +1,65 @@
@@ -176,7 +176,7 @@ index 000000000..b153c6728
 +            {step.screen === 'updates' && <>{row('Publishing schedule', 'Starts update packages')}{row('Auto-update installation timing', 'Controls future device installs')}</>}
 +            {step.screen === 'inventory' && <>{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}{row('Device results', 'Check received reports')}</>}
 +            {step.screen === 'discovered' && row('App found on devices', 'Review match and eligibility')}
-+            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">Published to Intune</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Device installation is a separate result.</p></div>}
++            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">Deployment outcome</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Device installation is a separate result.</p></div>}
 +            {step.screen === 'settings' && <>{row('Appearance', 'Your preference')}{row('Notifications', 'Review configuration')}</>}
 +            {step.screen === 'server' && <>{row('Server status', 'Check each result')}{row('Intune reads', 'Review latest check')}</>}
 +            {step.screen === 'support' && <div className="my-4 space-y-3 rounded-lg border border-overlay/10 p-3 text-xs text-text-muted"><p>App and version</p><p>What you tried</p><p>Result or error code</p></div>}
@@ -381,10 +381,10 @@ index 000000000..87dad8db3
 +}
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 new file mode 100644
-index 000000000..e2b5235c7
+index 000000000..f3d26c711
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-guides.test.ts
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,98 @@
 +import { existsSync, readFileSync, readdirSync } from 'node:fs';
 +import path from 'node:path';
 +import { describe, expect, it } from 'vitest';
@@ -476,6 +476,10 @@ index 000000000..e2b5235c7
 +    expect(prose('remove-discovered')).toContain('inspect execution results in Intune');
 +    expect(prose('remove-discovered')).toContain('does not prove a separate removal script ran');
 +    expect(guide('reports').steps[0].screen).toBe('reports');
++    expect(prose('reports')).toContain('Choose Cancelled for cancellations; these are not counted as Failed');
++    expect(prose('reports')).toContain('Active has no clear action');
++    expect(prose('reports')).toContain('Only your matching finished deployments are hidden; audit and update records remain');
++    expect(prose('reports')).toContain('History controls do not stop active deployments or hide other staff’s records');
 +    expect(guide('install-results').steps.find(step => step.focus === 'Check groups')?.screen).toBe('server');
 +  });
 +});
@@ -529,10 +533,10 @@ index 9f0644b88..1a4c8d600 100644
      id: 'alerts',
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..d956bc387
+index 000000000..5fb72a399
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,378 @@
 +/** Task-first Help. Detailed rules remain in help-content; indexes are zero-based. */
 +export type HelpScreen = 'catalog' | 'deployment-list' | 'updates' | 'inventory' | 'deployments' | 'discovered' | 'settings' | 'server' | 'support' | 'reports';
 +export type HelpCategory = 'deploy' | 'updates' | 'devices' | 'troubleshoot' | 'settings';
@@ -880,19 +884,21 @@ index 000000000..d956bc387
 +    referenceGroups: [reference('Search and keyboard navigation', [0, 1]), reference('Appearance and saved preferences', [2, 3, 4])],
 +  },
 +  {
-+    id: 'reports', category: 'devices', title: 'Review deployment trends',
-+    summary: 'Understand your deployment reports and switch to tenant-wide history when needed.', keywords: ['reports', 'trends', 'all in tenant', 'history', 'staff'],
-+    start: { label: 'Open Reports', href: '/dashboard/reports' }, before: ['Reports includes only deployments you started.'],
++    id: 'reports', category: 'devices', title: 'Review deployment results and history',
++    summary: 'Check deployment trends, distinguish failed and cancelled outcomes, and hide only the finished history you own.', keywords: ['reports', 'trends', 'all in tenant', 'history', 'staff', 'failed', 'cancelled', 'dismiss', 'clear history'],
++    start: { label: 'Open Reports', href: '/dashboard/reports' }, before: ['Reports includes only deployments you started.', 'Dismiss and clear-history controls are available only for your finished deployments.'],
 +    steps: [
 +      step('Read your report', 'Open Reports to review the outcomes and trends for deployments you started.', 'reports', 'Reports', 'The report’s personal scope is clear.'),
-+      step('Check a deployment', 'Open Deployments to inspect the relevant job and its recorded outcome.', 'deployments', 'Deployments', 'A report total can be traced to deployment details.'),
-+      step('Include everyone when needed', 'In Deployments, choose All in tenant to see deployments started by other staff.', 'deployments', 'All in tenant', 'The deployment list includes tenant-wide history.'),
++      step('Choose whose history to view', 'Open Deployments to inspect recorded outcomes. Choose All in tenant when you need deployments started by other staff.', 'deployments', 'All in tenant', 'The deployment list shows the selected personal or tenant-wide scope.'),
++      step('Separate failed and cancelled outcomes', 'Choose Failed for failures, including failed installation checks. Choose Cancelled for cancellations; these are not counted as Failed.', 'deployments', 'Cancelled', 'Cancelled deployments have their own outcome instead of appearing as failures.'),
++      step('Dismiss one finished deployment', 'For one of your finished deployments, press Dismiss and confirm. This hides the card without deleting its deployment audit or update records.', 'deployments', 'Dismiss', 'Your finished deployment is hidden; other staff’s deployments are unchanged.'),
++      step('Clear the matching history', 'Choose Completed, Failed or Cancelled, then clear that history. All clears your finished history. Active has no clear action.', 'deployments', 'Clear cancelled history', 'Only your matching finished deployments are hidden; audit and update records remain.'),
 +    ],
-+    success: 'You know whether you are viewing your own activity or all deployments in the tenant.',
-+    caution: 'Deployment trends describe packaging and publishing outcomes, not proof of installation on each computer.',
++    success: 'You can distinguish failed and cancelled outcomes and hide only the finished history you own, with audit records preserved.',
++    caution: 'History controls do not stop active deployments or hide other staff’s records. Deployment trends describe publishing outcomes, not proof of installation on each computer.',
 +    related: ['install-results', 'app-activity', 'support'],
-+    troubleshoot: [{ problem: 'Another staff member’s deployment is absent', action: 'Use All in tenant in Deployments; Reports is scoped to your own deployments.' }],
-+    referenceGroups: [reference('Personal reports and tenant-wide history', [0, 1])],
++    troubleshoot: [{ problem: 'Another staff member’s deployment is absent', action: 'Use All in tenant in Deployments; Reports is scoped to your own deployments.' }, { problem: 'There is no clear-history action', action: 'Active has no clear action. Choose a finished-outcome filter with at least one of your own deployments; other staff’s history cannot be cleared.' }],
++    referenceGroups: [reference('Personal reports, outcomes and history controls', [0, 1])],
 +  },
 +  {
 +    id: 'support', category: 'troubleshoot', title: 'Investigate a failed deployment',

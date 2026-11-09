@@ -10,6 +10,10 @@
   illustration labels against the real app and rejects broken related links; maintenance rules
   and navigation/mobile tests are included. No new dependencies (patch 0046).
 
+- Deployment history separates Cancelled from Failed and allows cancelled jobs to be dismissed.
+  Clear history respects the selected outcome and only clears the signed-in user’s finished jobs;
+  audit records remain. Dashboard activity uses a distinct cancelled outcome (patch 0047).
+
 - Discovered-apps SQLite regression test uses a mocked catalog lookup instead of downloading
   the live catalog on clean CI runners. No application behavior changed (patch 0045).
 
