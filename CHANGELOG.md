@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- App updates puts results first, then connected Automatic publishing and Device installation cards.
+  State rows, expandable details and compact Beta reporting replace the stacked explanation panels.
+  The overview explains the 3:30 version checks and distinguishes per-app Auto-update from shared
+  publishing-hour restrictions. A separate Pause/Resume control holds new automatic publishing and
+  pilot starts/approvals without disabling discovery, clearing the schedule or stopping already
+  queued work. Manual Update and Update all remain overrides. Help and illustrations match;
+  SQLite migration 23 stores the tenant pause flag (patch 0048).
+
 - Help redesigned around tasks: 22 searchable guides in five categories, with one workflow open
   at a time. Short steps drive an annotated example illustration, with prerequisites, expected
   outcomes, troubleshooting and related links. Detailed rules are grouped and collapsed.
