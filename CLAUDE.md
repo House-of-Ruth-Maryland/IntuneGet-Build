@@ -282,8 +282,9 @@ line: older copies of the script can't read the two-line file and stop deploying
 - **Help and tooltips stay true to every build.** Run the `help-writer` agent
   (`.claude/agents/help-writer.md`) before committing any change to a patch, a deploy script or a VM
   timer, and on every "Build upstream" PR (against upstream's changes). When the app's logic changes,
-  it rewrites the Help sections and the tooltips and hints that describe it, rather than adding to
-  them. Fold its edits into the patch that changes the behaviour (or a Help-only patch), run
+  it rewrites the task guides, their visual focus labels, grouped reference rules, and the
+  tooltips and hints that describe it. Keep primary workflows short; preserve existing guide IDs
+  and related links. Details belong in named collapsed groups, not new unstructured paragraphs. Fold its edits into the patch that changes the behaviour (or a Help-only patch), run
   `node scripts/check-help.mjs <patched tree> .`, and tick `- [x] Help and tooltips checked: <what
   changed>` in the PR description. The PR check and the build fail without them.
 

@@ -13,7 +13,7 @@
 // Usage: node scripts/check-help.mjs <patched upstream tree> [<IntuneGet-Build checkout>]
 // Needs Node.js 22.18 or later (reads the TypeScript Help file directly).
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -26,7 +26,7 @@ const { HELP_SECTIONS } = await import(pathToFileURL(join(tree, 'lib/hrm/help-co
 // --- 1. Labels --------------------------------------------------------------
 
 const SOURCE_DIRS = ['app', 'components', 'lib', 'hooks', 'contexts', 'stores'];
-const SKIP = /(^|\/)(node_modules|__tests__|\.next)(\/|$)|\.test\.[jt]sx?$|^lib\/hrm\/help-content\.ts$/;
+const SKIP = /(^|\/)(node_modules|__tests__|\.next)(\/|$)|\.test\.[jt]sx?$|^lib\/hrm\/help-(?:content|guides|navigation)\.ts$|^components\/hrm\/help\/|^app\/\(app\)\/dashboard\/help\//;
 
 function* sourceFiles(dir) {
   let entries;
@@ -72,6 +72,27 @@ for (const section of HELP_SECTIONS) {
   }
 }
 
+// Task guides must point at controls outside Help. An illustration repeating a
+// renamed control must never make its own label check pass.
+const guideFile = join(tree, 'lib/hrm/help-guides.ts');
+const guideTexts = [];
+let guideCount = 0;
+let focusCount = 0;
+if (existsSync(guideFile)) {
+  const { HELP_GUIDES } = await import(pathToFileURL(guideFile).href);
+  guideCount = HELP_GUIDES.length;
+  focusCount = HELP_GUIDES.reduce((count, guide) => count + guide.steps.length, 0);
+  const ids = new Set(HELP_GUIDES.map(guide => guide.id));
+  for (const section of HELP_SECTIONS) if (!ids.has(section.id)) problems.push(`Help guide missing for existing link #${section.id}.`);
+  for (const guide of HELP_GUIDES) {
+    if (!HELP_SECTIONS.some(section => section.id === guide.id)) problems.push(`Help guide "${guide.id}" has no reference section.`);
+    for (const link of HELP_SECTIONS.find(section => section.id === guide.id)?.links ?? []) if (link.href.startsWith('/dashboard/help#') && !ids.has(link.href.split('#')[1])) problems.push(`Help guide "${guide.id}" references missing guide ${link.href}.`);
+    for (const step of guide.steps) if (!shows(source, step.focus)) problems.push(`Help guide "${guide.id}" highlights "${step.focus}", but that label is absent outside Help.`);
+    for (const id of [...guide.related, ...guide.troubleshoot.flatMap(issue => issue.guide ? [issue.guide] : [])]) if (!ids.has(id)) problems.push(`Help guide "${guide.id}" links to missing guide #${id}.`);
+    guideTexts.push([guide.title, guide.summary, ...guide.before, guide.success, guide.caution ?? '', ...guide.steps.flatMap(step => [step.title, step.instruction, step.result]), ...guide.troubleshoot.flatMap(issue => [issue.problem, issue.action])].join(' '));
+  }
+}
+
 // --- 2. Times ---------------------------------------------------------------
 
 const timerDir = join(repo, 'deploy/systemd');
@@ -82,7 +103,7 @@ for (const name of readdirSync(timerDir).filter((n) => n.endsWith('.timer'))) {
   }
 }
 const to24 = (h, m, ap) => `${(Number(h) % 12) + (ap === 'PM' ? 12 : 0)}:${m}`;
-for (const section of HELP_SECTIONS) {
+for (const section of [...HELP_SECTIONS, ...guideTexts.map((text, index) => ({ id: `guide-${index}`, title: text, points: [] }))]) {
   const text = [section.title, ...section.points, ...(section.flow ?? [])].join(' ');
   // "3:30 AM and 3:30 PM", and the shorthand "3:30 AM or 3:30 PM".
   for (const m of text.matchAll(/\b(\d{1,2}):(\d{2})\s?(AM|PM)\b/g)) {
@@ -111,4 +132,4 @@ if (problems.length) {
   console.error(`Help check found ${problems.length} problem(s):\n- ${problems.join('\n- ')}`);
   process.exit(1);
 }
-console.log(`Help check passed: ${HELP_SECTIONS.length} sections, ${HELP_SECTIONS.reduce((n, s) => n + s.uiLabels.length, 0)} on-screen labels found in the app, times match the timers (${[...timerTimes].sort().join(', ')}).`);
+console.log(`Help check passed: ${HELP_SECTIONS.length} sections${guideCount ? `, ${guideCount} task guides and ${focusCount} visual focus labels` : ''}, ${HELP_SECTIONS.reduce((n, s) => n + s.uiLabels.length, 0)} on-screen labels found in the app, times match the timers (${[...timerTimes].sort().join(', ')}).`);

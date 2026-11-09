@@ -14,9 +14,19 @@ wrong, and never leave a "previously..." note behind.
 
 ## Where Help lives
 
-- `lib/hrm/help-content.ts`: the sections, as data (`HELP_SECTIONS`). Most changes are here.
+- `lib/hrm/help-guides.ts`: primary task guides (`HELP_GUIDES`): concise steps, exact control labels,
+  before-start checks, expected results, troubleshooting, related guide IDs and grouped references.
+  Rewrite these first when behavior changes. Keep existing IDs so shared/bookmarked links work.
+- `lib/hrm/help-content.ts`: detailed rules (`HELP_SECTIONS`) available in the guide’s collapsed
+  reference groups. When changing these points, update the guide’s reference indexes so every point
+  belongs to exactly one useful, named group. Do not add an unstructured wall of text.
+- `components/hrm/help/HelpWorkspace.tsx`: search, categories and one selected workflow at a time.
+- `components/hrm/help/HelpVisual.tsx`: synchronized illustrations using synthetic example data.
+  Verify the selected step highlights the real current control and names the correct screen.
 - `app/(app)/dashboard/help/page.tsx`: renders the sections.
-- `lib/hrm/__tests__/help-content.test.ts`: checks ids, links and writing rules.
+- `lib/hrm/__tests__/help-content.test.ts`, `help-guides.test.ts`, `help-navigation.test.ts` and
+  `components/hrm/help/HelpWorkspace.test.ts`: check rules, stable IDs, reference coverage, real
+  labels/routes, search, deep links, step/visual synchronization and browser navigation.
 - Tooltips and hints: hover text and short help on screens, in HRM-changed components
   (`<TooltipContent>`, `title=`, `description=`, `placeholder=`, and the helper line under a field
   or setting row, as in the deploy settings rows of patch 0022). `grep -lE 'TooltipContent|title=|description=' patches/*`
@@ -62,11 +72,14 @@ wrong, and never leave a "previously..." note behind.
    badges, sidebar names) exactly as the app shows it. Add labels a new point names, remove ones it no
    longer names. Text the app doesn't show itself (an Intune page, a Teams card made by the alert
    relay) stays out of the list.
-6. **Diagrams where a process has steps.** See below.
+6. **Task-first workflows and visual references.** Each guide needs 3–6 steps, at most 35 words
+   per instruction, an expected result, and a synthetic illustration focus label. Never present
+   illustrative device results as actual measurements. Detailed exceptions belong under named,
+   collapsed reference groups. Keep prerequisites short and distinguish publishing from installation.
 7. **Links where they save a search.** See below.
 8. **Run the checks** in the tree: `node <IntuneGet-Build>/scripts/check-help.mjs <tree> <IntuneGet-Build>`
    (labels still on screen, times match the timers, tooltip writing rules; the build runs the same
-   check), `npx vitest run lib/hrm/__tests__/help-content.test.ts` and `npx tsc --noEmit -p .`
+   check), `npx vitest run lib/hrm/__tests__/help-content.test.ts lib/hrm/__tests__/help-guides.test.ts lib/hrm/__tests__/help-navigation.test.ts components/hrm/help/HelpWorkspace.test.ts` and `npx tsc --noEmit -p .`
    (after `npm ci` if `node_modules` is missing). Add tests when you add a field. If the label check
    fails, find what the screen says now and rewrite the point; don't just delete the label.
 
@@ -90,7 +103,7 @@ Use these exactly; sentence case, as the screen shows them.
 | pilot group | test group, ring, canary |
 | Pilot rollouts | staged rollouts, rings |
 | wider rollout | full rollout, promotion, broad deployment |
-| Update schedule, blackout | maintenance window, change freeze, quiet hours |
+| Publishing schedule, blackout | maintenance window, change freeze, quiet hours |
 | groups (people and devices an app is assigned to) | targets, audiences |
 | device group, user group | device-based group |
 | Required, Available | Mandatory, Optional |
@@ -124,7 +137,7 @@ Help is for people following a process, so a short step diagram beats a paragrap
 three or more steps in a fixed order (deploying an app, updating a custom app, how a server update
 rolls out, what happens when an update alert arrives).
 
-- Draw them as data, not images: a `flow` field on the section, an ordered list of short step
+- Legacy overview flows remain as data: a `flow` field on the section, an ordered list of short step
   labels (2 to 6 words each, at most 6 steps), rendered by the Help page as numbered boxes joined by
   arrows that wrap on narrow screens. If `HelpSection` has no `flow` field yet, add it to the type,
   render it in `page.tsx` with the existing Tailwind tokens (`border-overlay/10`, `bg-bg-elevated`,
@@ -132,7 +145,11 @@ rolls out, what happens when an update alert arrives).
   underneath so screen readers get the same steps. Check it in light and dark themes.
 - Never add a package (Mermaid, a chart library) for diagrams; if you think one is needed, say why in
   your report and stop. HRM asks before every new package.
-- No screenshots in Help: they go stale and may show real app or device names.
+- Prefer the synchronized code-based illustrations: update their control labels and screen
+  context when the app changes. They must say they are illustrations and never run app actions.
+- Screenshots, if requested, must come from sanitized preview fixtures and show the current UI.
+  Never capture real tenant, staff, device or client details. No screenshots are needed when a
+  clearer illustration explains the same path.
 
 ## Links
 

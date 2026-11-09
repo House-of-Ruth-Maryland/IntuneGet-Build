@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Help redesigned around tasks: 22 searchable guides in five categories, with one workflow open
+  at a time. Short steps drive an annotated example illustration, with prerequisites, expected
+  outcomes, troubleshooting and related links. Detailed rules are grouped and collapsed.
+  Existing bookmarks work, and app links open separately so users can follow along. Publishing
+  and automatic-installation controls link directly to their guides. The Help checker validates
+  illustration labels against the real app and rejects broken related links; maintenance rules
+  and navigation/mobile tests are included. No new dependencies (patch 0046).
+
 - Discovered-apps SQLite regression test uses a mocked catalog lookup instead of downloading
   the live catalog on clean CI runners. No application behavior changed (patch 0045).
 

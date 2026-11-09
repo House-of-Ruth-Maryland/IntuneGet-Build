@@ -39,7 +39,7 @@ jobs:
             echo 'code=true' >> "$GITHUB_OUTPUT"
           else
             changed=$(git diff --name-only "$BASE...$HEAD")
-            if printf '%s\n' "$changed" | grep -qE '^(patches/|upstream-ref$|scripts/check-(app\.sh|help\.mjs)$|\.github/workflows/tests\.yml$)'; then
+            if printf '%s\n' "$changed" | grep -qE '^(patches/|upstream-ref$|scripts/check-(app\.sh|help(\.test)?\.mjs)$|\.github/workflows/tests\.yml$)'; then
               echo 'code=true' >> "$GITHUB_OUTPUT"
             else
               echo 'code=false' >> "$GITHUB_OUTPUT"
