@@ -165,6 +165,8 @@ jobs:
           context: upstream
           platforms: linux/amd64
           push: true
+          cache-from: type=gha,scope=intuneget-amd64
+          cache-to: type=gha,mode=max,scope=intuneget-amd64
           tags: ${{ env.IMAGE }}:${{ steps.rev.outputs.tag }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}

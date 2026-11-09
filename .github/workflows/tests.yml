@@ -1,0 +1,122 @@
+name: Patched app checks
+
+# One regression run for each code revision. Description edits and Deploy PRs
+# do not rerun the suite. The image build and VM do not run it a second time.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patched-app-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+    steps:
+      - name: Check out HRM patches
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select checks
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          bash -n scripts/check-app.sh deploy/intuneget-deploy.sh
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+          else
+            changed=$(git diff --name-only "$BASE...$HEAD")
+            if printf '%s\n' "$changed" | grep -qE '^(patches/|upstream-ref$|scripts/check-(app\.sh|help\.mjs)$|\.github/workflows/tests\.yml$)'; then
+              echo 'code=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'code=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  tests:
+    name: Patched app regression checks
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out HRM patches
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: hrm
+          persist-credentials: false
+      - name: Read pinned upstream
+        id: ref
+        run: |
+          set -euo pipefail
+          ref=$(sed -n 1p hrm/upstream-ref | tr -d '[:space:]')
+          commit=$(sed -n 2p hrm/upstream-ref | tr -d '[:space:]')
+          [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          { echo "ref=$ref"; echo "commit=$commit"; } >> "$GITHUB_OUTPUT"
+      - name: Check out upstream
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ugurkocde/IntuneGet
+          ref: ${{ steps.ref.outputs.ref }}
+          path: upstream
+          persist-credentials: false
+      - name: Check upstream identity and apply patches
+        working-directory: upstream
+        env:
+          COMMIT: ${{ steps.ref.outputs.commit }}
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$COMMIT" ] || { echo '::error::Upstream tag moved; review upstream-ref.'; exit 1; }
+          for patch in ../hrm/patches/*.patch; do git apply --whitespace=error "$patch"; done
+      - name: Read upstream Node.js version
+        id: node
+        run: |
+          version=$(sed -nE 's/^ +NODE_VERSION: "?([0-9.]+)"?.*/\1/p' upstream/.github/workflows/ci.yml | head -n 1)
+          echo "version=${version:-24}" >> "$GITHUB_OUTPUT"
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+          cache: npm
+          cache-dependency-path: |
+            upstream/package-lock.json
+            upstream/packager/package-lock.json
+      - name: Install dependencies
+        working-directory: upstream
+        run: |
+          npm ci --no-audit --no-fund
+          npm ci --prefix packager --ignore-scripts --no-audit --no-fund
+      - name: Require PowerShell for startup Beta fixtures
+        run: pwsh -NoProfile -NonInteractive -Command 'exit 0'
+      - name: Check Help, app and packager types, and regressions
+        run: bash hrm/scripts/check-app.sh upstream full
+
+  checks:
+    name: Patched app checks passed
+    needs: [scope, tests]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the selected checks to succeed
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          CODE: ${{ needs.scope.outputs.code }}
+          TEST_RESULT: ${{ needs.tests.result }}
+        run: |
+          if [ "$SCOPE_RESULT" != success ]; then exit 1; fi
+          if [ "$CODE" = true ] && [ "$TEST_RESULT" != success ]; then exit 1; fi

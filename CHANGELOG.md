@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+- Discovered-apps SQLite regression test uses a mocked catalog lookup instead of downloading
+  the live catalog on clean CI runners. No application behavior changed (patch 0045).
+
+- Test and delivery workflow: code PR revisions get one full patched-app check with
+  app and packager compiler checks; description edits and Deploy-only PRs skip the suite.
+  Added one local validation entry point with related/full modes, isolated scratch directories
+  and bounded PowerShell fixture processes. Upstream checks cache npm
+  downloads and include packager types; image builds cache layers. VM health and Windows Beta
+  pilot checks remain separate. No production deployment settings changed.
+
+- Install after next restart · Beta: an opt-in option in the deployment sidebars and per-app
+  update exceptions. The shared packaging workflow stages a verified, protected local package and
+  registers a SYSTEM task for a later startup, without forcing a restart or declaring staging an
+  installation success. Restricted to machine-wide MSI/EXE apps outside new-computer setup.
+  Startup reports in App updates distinguish waiting, installing, installed, failed, cancelled and
+  outdated results; show last activity; preserve old snapshots on read failure; and generate a
+  cancellation script for the exact package. The Intune Remediations reporting bridge requires
+  eligible licensing, read permission and setup. IT dashboard summaries contain counts only.
+  Cancellation remains available without reporting; incomplete reports show a warning. Original
+  deployment order prevents older deliveries from replacing newer work. Startup eligibility checks
+  include current deployment settings, and long-running installers retain coordination locks rather
+  than being stopped by a launcher-only timeout.
+  Startup Beta families are excluded from automatic old-copy cleanup. Help, rollout steps and
+  the hourly reporting timer are included (patch 0044, SQLite migration 22). Windows pilot testing
+  and deployment are still required; no users' tasks are created by this code change.
+
+- App updates: an overview with right-side editors for a shared automatic installation policy,
+  per-app exceptions, and the separate Publishing schedule. A new policy suggests 3 days to
+  postpone; future automatic packages use the chosen rule, while manual updates, pilots and
+  queued/published versions keep their settings. Postponement uses the installer toolkit and
+  Intune retries, with no promise of an exact installation time. The toolkit may install silently
+  without an active user or an app to close. Publishing history says Published to Intune and
+  records the policy used for each release; expand a published release for device results, also available in Inventory. Installation timing
+  for an existing version opens on the right from Inventory and App updates. Help explains setup,
+  scope, inheritance and reporting limits (patch 0043, SQLite migration 21). The matching packaging
+  workflow change and a Windows pilot are required before enabling prompted updates.
+
 - Old copies of an app are removed from Intune automatically. At each update check, once an app's
   newest copy has been out for 7 days, has installed on at least one computer and has failures at
   10% or less, IntuneGet takes the groups off the older copies it deployed and deletes them. Only

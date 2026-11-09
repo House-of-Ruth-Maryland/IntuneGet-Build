@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect IntuneGet startup installation Beta reports (hourly)
+
+[Timer]
+OnCalendar=*-*-* *:15:00 America/New_York
+RandomizedDelaySec=60
+Persistent=true
+Unit=intuneget-cron@collect-startup-installations.service
+
+[Install]
+WantedBy=timers.target
