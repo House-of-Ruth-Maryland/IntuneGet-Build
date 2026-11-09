@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- App updates separates Automatic publishing from Device installation in the order they happen.
+- App updates puts results first, then connected Automatic publishing and Device installation cards.
+  State rows, expandable details and compact Beta reporting replace the stacked explanation panels.
   The overview explains the 3:30 version checks and distinguishes per-app Auto-update from shared
   publishing-hour restrictions. A separate Pause/Resume control holds new automatic publishing and
   pilot starts/approvals without disabling discovery, clearing the schedule or stopping already
