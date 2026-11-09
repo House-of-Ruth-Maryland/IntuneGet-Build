@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Discovered-apps SQLite regression test uses a mocked catalog lookup instead of downloading
+  the live catalog on clean CI runners. No application behavior changed (patch 0045).
+
 - Test and delivery workflow: code PR revisions get one full patched-app check with
   app and packager compiler checks; description edits and Deploy-only PRs skip the suite.
   Added one local validation entry point with related/full modes, isolated scratch directories
