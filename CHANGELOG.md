@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- App updates, Home's count and the sidebar badge show the new version as soon as a deployment
+  finishes, instead of listing the app as out of date until the next 3:30 check. This works for
+  every way of deploying: Update, Update all, Auto-update, App catalog, Deploy new version and
+  pilots. Dismissed apps stay dismissed. Deployments refreshes App updates, Home and Inventory when
+  a job finishes, App updates re-reads when you come back to the tab and every 45 seconds while a
+  deployment runs, and Inventory re-reads when you come back after a minute. Refresh in App updates
+  now cleans out-of-date entries for everyone in the tenant. Inventory still lists the previous
+  copy until it is removed. Help says when each screen changes (patch 0049).
+
 - Weekly upstream check picks the highest app release tag (vX.Y.Z) instead of GitHub's Latest
   release. Upstream now also publishes IntuneGet Packager releases (packager-vX.Y.Z) marked Latest,
   which made the check fail since November 9 and would have hidden the next app release.
