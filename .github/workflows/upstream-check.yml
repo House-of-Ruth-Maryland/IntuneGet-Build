@@ -52,8 +52,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           current=$(sed -n 1p hrm/upstream-ref | tr -d '[:space:]')
-          latest=$(gh release view --repo "$UPSTREAM" --json tagName --jq .tagName)
-          [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Unexpected upstream tag '$latest'"; exit 1; }
+          # Upstream also publishes packager-vX.Y.Z releases and marks them Latest, so pick the
+          # highest app release tag (vX.Y.Z) instead of GitHub's Latest release.
+          latest=$(gh release list --repo "$UPSTREAM" --exclude-drafts --exclude-pre-releases --limit 100 \
+            --json tagName --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+          [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::No upstream app release (vX.Y.Z) found"; exit 1; }
           new=false
           if [ "$latest" != "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)" = "$latest" ]; then
             if gh api "repos/$GITHUB_REPOSITORY/branches/upstream/$latest" >/dev/null 2>&1; then
