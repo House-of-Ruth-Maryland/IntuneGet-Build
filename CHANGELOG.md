@@ -14,6 +14,7 @@
   deadline's button is now Reload dates. Status and error messages are shorter and never show raw
   error text. The IT dashboard report adds a "Limit IntuneGet sign-in to IT-Admins" to-do until
   the IT admins group is set. Home's Intune self-test reason now names the failed read only.
+  On a phone, the menu button shows again; the page header was covering it.
   David must reinstall `intuneget-status` on the VM (CLAUDE.md, "VM setup"). Remove and Retire
   screens say computers instead of devices (Remove from computers), and the deploy review says
   Updates: Auto-update. Help adds that groups carried to a new copy don't keep their availability

@@ -613,7 +613,7 @@ index 19e9af54f..bbd02aba8 100644
                        </AlertDialogHeader>
                        <AlertDialogFooter>
 diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
-index ac305a6ea..8eac961b3 100644
+index ac305a6ea..92c974146 100644
 --- a/components/dashboard/Sidebar.tsx
 +++ b/components/dashboard/Sidebar.tsx
 @@ -134,7 +134,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
@@ -640,6 +640,50 @@ index ac305a6ea..8eac961b3 100644
                {/* Section divider/label */}
                {group.label && (
                  <div className={cn('pt-4 pb-2', isCollapsed ? 'px-0' : 'px-3')}>
+@@ -270,10 +276,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+ 
+   return (
+     <TooltipProvider delayDuration={0}>
+-      {/* Mobile hamburger */}
++      {/* Mobile hamburger. HRM patch 0058: z-40 keeps it above the sticky z-30 page header; the
++          backdrop (z-40, later) and the open menu (z-50) still cover it. */}
+       <button
+         onClick={() => setMobileOpen(true)}
+-        className="fixed top-4 left-4 z-30 lg:hidden text-text-secondary hover:text-text-primary transition-colors"
++        className="fixed top-4 left-4 z-40 lg:hidden text-text-secondary hover:text-text-primary transition-colors"
+         aria-label="Open sidebar"
+       >
+         <Menu className="w-6 h-6" />
+diff --git a/components/dashboard/__tests__/mobile-menu-layering.test.ts b/components/dashboard/__tests__/mobile-menu-layering.test.ts
+new file mode 100644
+index 000000000..bec4f6545
+--- /dev/null
++++ b/components/dashboard/__tests__/mobile-menu-layering.test.ts
+@@ -0,0 +1,24 @@
++// HRM patch 0058: at phone width the menu button must sit above the sticky page header,
++// and the open menu's backdrop and panel must still cover it.
++import { readFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++
++const root = join(__dirname, '..', '..', '..');
++const sidebar = readFileSync(join(root, 'components/dashboard/Sidebar.tsx'), 'utf8');
++const layout = readFileSync(join(root, 'app/(app)/dashboard/layout.tsx'), 'utf8');
++const z = (classes: string) => Number(/\bz-(\d+)\b/.exec(classes)?.[1]);
++const classesOf = (source: string, pattern: RegExp) => pattern.exec(source)?.[1] ?? '';
++
++describe('phone menu layering', () => {
++  it('keeps the menu button above the header and below the open menu', () => {
++    const button = z(classesOf(sidebar, /className="([^"]*)"\s*aria-label="Open sidebar"/));
++    const header = z(classesOf(layout, /<header className="([^"]*sticky[^"]*)"/));
++    const backdrop = z(classesOf(sidebar, /className="(fixed inset-0[^"]*)"/));
++    const panel = z(classesOf(sidebar, /'(fixed top-0 left-0[^']*lg:hidden)'/));
++    expect(header).toBeGreaterThan(0);
++    expect(button).toBeGreaterThan(header);
++    expect(backdrop).toBeGreaterThanOrEqual(button);
++    expect(panel).toBeGreaterThan(backdrop);
++  });
++});
 diff --git a/components/hrm/AccessDenied.test.ts b/components/hrm/AccessDenied.test.ts
 new file mode 100644
 index 000000000..cc2e48153
