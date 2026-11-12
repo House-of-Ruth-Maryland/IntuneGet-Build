@@ -10,7 +10,7 @@ All examples use fake data.
 ## Rules for every endpoint
 
 - **GET only.** No endpoint changes Intune, the database or any setting. Other methods get `405`.
-- **One tenant.** Every answer is about the Intune tenant in `MCP_TENANT_ID`, never another.
+- **One tenant.** Every answer is about the Intune tenant in `HRM_TENANT_ID` (or `MCP_TENANT_ID` when that is unset), never another.
 - **Base path:** `/api/hrm/mcp`. Paths are below.
 - **No caching:** every response has `Cache-Control: no-store`.
 - **Deadline:** the server answers within 6 seconds (the Worker waits 8). If it can't, it
@@ -52,7 +52,9 @@ server reads nothing.
 
 The API is off (always `401`) unless all five settings are present and well formed:
 `MCP_API_KEY`, `ACCESS_TEAM_DOMAIN` (must end in `.cloudflareaccess.com`), `ACCESS_AUD`,
-`MCP_ACCESS_CLIENT_ID` and `MCP_TENANT_ID` (a GUID).
+`MCP_ACCESS_CLIENT_ID` and the tenant (a GUID). The tenant is `HRM_TENANT_ID`, which sign-in
+also uses (patch 0056); a server set up before that can keep `MCP_TENANT_ID`, which is read when
+`HRM_TENANT_ID` is unset.
 
 Optional header `X-HRM-Requested-By: <email>` names the person who asked the Worker. The server
 writes it to its own log with the endpoint name (`[mcp-api] GET jobs for person@example.test`),
@@ -375,4 +377,4 @@ The Worker's `src/intuneget/contract.ts` was written before this API. These answ
 | `/pilots` | `updatedAt` | always `null` | Not recorded. |
 | `/update-schedule` | `paused` required | without SQLite, `supported: false` and `paused: false` | HRM's server always runs SQLite; this only covers a future move. |
 | all | extra fields | `statusFile`, `diskPercentUsed`, `newestAppId`, `previousVersion`, `checkedAt`, `detectedAt`, `errorCategory`, `automatic`, `total`, `pilotId`, `wingetId`, `previousAppId`, `newAppId`, `jobStatus`, `enabled`, `supported` | Safe to drop. Add them to the Worker's schema to show them. |
-| all | four settings on the server | five: `MCP_TENANT_ID` too | The Access service token carries no Intune tenant, and the server can serve more than one, so the tenant is set on purpose. |
+| all | four settings on the server | five: the tenant too (`HRM_TENANT_ID`) | The Access service token carries no Intune tenant, and the server can serve more than one, so the tenant is set on purpose. |

@@ -19,7 +19,7 @@ HRM IT notes.
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
 | `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day, scheduled update start hourly (patch 0030), optional startup Beta report collection hourly (patch 0044), Intune self-test daily at 7:15 AM New York (patch 0032). |
 | `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
-| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. Its `checks` section holds verdicts the app, watchdog and IT dashboard report all read as-is: Intune reads (install results or app activity failed at the last 2 update checks), the daily Intune self-test, and the hourly scheduled-update run. |
+| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. Its `checks` section holds verdicts the app, watchdog and IT dashboard report all read as-is: Intune reads (install results or app activity failed at the last 2 update checks), the daily Intune self-test, the hourly scheduled-update run, and whether sign-in is limited to the IT admins group (patch 0056). |
 | `deploy/intuneget-watchdog.py` | Every 5 minutes (installed as `/usr/local/sbin/intuneget-watchdog`, run by `intuneget-watchdog.timer`): checks the app's health and the status file and posts to IT Ops in Teams when a problem is confirmed, daily while it lasts, and when it clears. `intuneget-watchdog status` lists current problems; `intuneget-watchdog test` sends a test post. |
 | `deploy/intuneget-curated-refresh.sh` | Daily at 2:15 AM New York (installed as `/usr/local/sbin/intuneget-curated-refresh`, run by `intuneget-curated-refresh.timer`): downloads upstream's latest signed curated catalog into the app's data volume for patch 0011. |
 | `deploy/intuneget-backup.py` | Nightly at 1:30 AM New York (installed as `/usr/local/sbin/intuneget-backup`, run by `intuneget-backup.timer`): copies the SQLite database while the app runs, checks it, compresses it and uploads it to the Azure Storage container in `BACKUP_CONTAINER_URL` as the VM's managed identity. `intuneget-backup status` shows the last result. |
@@ -126,6 +126,65 @@ HRM IT notes.
   report the VM itself being down, so a Cloudflare **Tunnel Health Alert** (Notifications, free on
   every plan) emails the IT Ops channel's email address when the tunnel goes degraded or down.
 
+## Access to the app
+
+Patch 0056 lets only HRM's IT admins Entra security group use IntuneGet, inside the app, behind
+Cloudflare Access. Two settings on the VM, never in this repo:
+
+- `HRM_ADMIN_GROUP_IDS`: the group's object ID (several separated by commas, at most 20).
+- `HRM_TENANT_ID`: HRM's Entra tenant ID. It is the one tenant setting: the MCP read API reads it
+  too. A server set up with `MCP_TENANT_ID` keeps working, since that is read when
+  `HRM_TENANT_ID` is unset; move it to `HRM_TENANT_ID` when convenient.
+
+With the group set, every staff API route (through `parseAccessToken`, and the request proxy for a
+clear `403`) checks the token's tenant and asks Graph `POST /me/checkMemberGroups` with the user's
+own sign-in token. User.Read covers it and nested groups count, so no new permission or consent is
+needed. Each decision is kept in memory for 5 minutes per user, so adding or removing someone takes
+up to 5 minutes. A failed check refuses (`503`, Try again) and is not kept. Refused staff see "You
+don't have access to IntuneGet. Ask HRM Support (https://support.hruthmd.org) to add you to the IT
+admins group." Cron, the status report, workflow callbacks, the packager, QA and the MCP read API
+never go through this check.
+
+Unset (or no well-formed group ID), nothing changes and Home's Server status shows "Access isn't
+limited to a group yet". The status file records it as `checks.appAccess`; the watchdog doesn't
+post about it.
+
+Setup, once the image with patch 0056 is deployed:
+
+1. Find the group's object ID and the tenant ID (signed in to the Azure CLI as an admin):
+
+   ```bash
+   az ad group show --group "<IT admins group name>" --query id -o tsv
+   az account show --query tenantId -o tsv
+   ```
+2. On the VM, add both to `.env.local` without echoing them into the shell history or logs:
+   `sudoedit /opt/intuneget/.env.local` and add `HRM_ADMIN_GROUP_IDS=<group object ID>` and
+   `HRM_TENANT_ID=<tenant ID>`. If `MCP_TENANT_ID` is already there with the same value, rename it
+   to `HRM_TENANT_ID` (and in the override below) rather than keeping both.
+3. Pass both through `docker-compose.override.yml`, then recreate `web` with `--env-file .env.local`:
+
+   ```yaml
+         - HRM_ADMIN_GROUP_IDS=${HRM_ADMIN_GROUP_IDS:-}
+         - HRM_TENANT_ID=${HRM_TENANT_ID:-}
+   ```
+
+   ```bash
+   cd /opt/intuneget && sudo docker compose --env-file .env.local up -d web
+   ```
+4. Sign in as a group member (the app loads) and check Home's Server status shows Who can sign
+   in: IT admins group. If possible, try a test account outside the group and expect the No access page.
+
+Keep Entra and Cloudflare Access matching the same group (recommended):
+
+- Entra ID → Enterprise applications → IntuneGet's app → Properties: set **Assignment required**
+  to Yes, and under Users and groups assign only the IT admins group. Others then can't get a
+  sign-in token at all.
+- Cloudflare Access: limit the IntuneGet application's Allow policy to the same group (an Entra
+  group include rule; the Entra login method needs group support turned on), not the whole tenant. Leave the status report
+  Bypass and the MCP Service Auth policy as they are.
+
+To turn the limit off again, remove `HRM_ADMIN_GROUP_IDS` from `.env.local` and recreate `web`.
+
 ## IT dashboard status report
 
 Patch 0027 serves `GET /api/status-report` for HRM's IT dashboard (format: hrm-it-dashboard
@@ -181,8 +240,8 @@ out as a normalized code and HRM's own category. GET only; it never writes.
 Every request needs both a bearer key (`MCP_API_KEY`, same rules as `STATUS_REPORT_KEY`) and a
 Cloudflare Access JWT for the Worker's service token. The server checks the JWT signature against
 the team's keys, the issuer, the audience (`ACCESS_AUD`), the expiry and that `common_name` is the
-service token's client ID (`MCP_ACCESS_CLIENT_ID`). `MCP_TENANT_ID` names the one Intune tenant it
-reads. If any setting is missing or malformed, the API is off and answers an empty `401`. The
+service token's client ID (`MCP_ACCESS_CLIENT_ID`). `HRM_TENANT_ID` (or the older `MCP_TENANT_ID`)
+names the one Intune tenant it reads. If any setting is missing or malformed, the API is off and answers an empty `401`. The
 Worker's `X-HRM-Requested-By` email goes to the server log only.
 
 Setup, once the image with patch 0055 is deployed:
@@ -199,16 +258,17 @@ Setup, once the image with patch 0055 is deployed:
 
    Then add `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`), `ACCESS_AUD` (the Access
    application's audience tag), `MCP_ACCESS_CLIENT_ID` (the service token's client ID, not its
-   secret) and `MCP_TENANT_ID` (the Intune tenant ID) with `sudoedit /opt/intuneget/.env.local`.
+   secret) and, if it isn't there yet, `HRM_TENANT_ID` (the Intune tenant ID, shared with
+   "Access to the app") with `sudoedit /opt/intuneget/.env.local`.
    None of these go in this repo.
-3. Pass all five through `docker-compose.override.yml`, then recreate `web` with `--env-file .env.local`:
+3. Pass all five through `docker-compose.override.yml` (skip `HRM_TENANT_ID` if "Access to the app" already added it), then recreate `web` with `--env-file .env.local`:
 
    ```yaml
          - MCP_API_KEY=${MCP_API_KEY:-}
          - ACCESS_TEAM_DOMAIN=${ACCESS_TEAM_DOMAIN:-}
          - ACCESS_AUD=${ACCESS_AUD:-}
          - MCP_ACCESS_CLIENT_ID=${MCP_ACCESS_CLIENT_ID:-}
-         - MCP_TENANT_ID=${MCP_TENANT_ID:-}
+         - HRM_TENANT_ID=${HRM_TENANT_ID:-}
    ```
 
    ```bash

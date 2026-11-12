@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Only HRM's IT admins group can use IntuneGet. With the group set on the VM (CLAUDE.md, "Access
+  to the app"), staff outside the group, or from another tenant, see No access to IntuneGet and
+  are asked to contact HRM Support. Every staff API call refuses them too. Adding or removing
+  someone can take up to 5 minutes to apply. If the server can't check, the page says so and has
+  a Try again button. No new Microsoft permission is needed. Until the group is set, nothing
+  changes and Home's Server status shows "Access isn't limited to a group yet" under Who can sign
+  in. Cron jobs, the IT dashboard report, workflow callbacks and the MCP read API are not affected.
+  The tenant setting is now `HRM_TENANT_ID` for both sign-in and the MCP read API;
+  `MCP_TENANT_ID` still works when it is unset. Help matches (patch 0056).
+
 - Read-only API for HRM's MCP server. The server answers questions from HRM's MCP server about
   server status, Needs attention, apps in Intune, App updates, the Update schedule, Deployments,
   install failures and Pilot rollouts. It sends app names, IDs, versions, counts, group names and

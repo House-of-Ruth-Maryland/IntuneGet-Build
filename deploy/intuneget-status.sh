@@ -3,7 +3,8 @@
 #
 # Writes hrm-status.json into the app's data volume: the running version, the
 # last deploy and backup, disk space, the update-check and notification timers,
-# cloudflared, and whether the server's Intune reads work (patch 0032). The app reads it through /api/hrm/status; it never gets
+# cloudflared, whether the server's Intune reads work (patch 0032) and whether sign-in is
+# limited to the IT admins group (patch 0056). The app reads it through /api/hrm/status; it never gets
 # access to the host. Nothing secret goes in the file.
 set -euo pipefail
 
@@ -30,6 +31,9 @@ unit_json() {
 container=$(docker ps -q --filter "label=com.docker.compose.service=$SERVICE" | head -n 1 || true)
 image=$([ -n "$container" ] && docker inspect -f '{{.Config.Image}}' "$container" 2>/dev/null || true)
 started=$([ -n "$container" ] && docker inspect -f '{{.State.StartedAt}}' "$container" 2>/dev/null || true)
+# Patch 0056: whether the running app limits sign-in to the IT admins group. Only whether the
+# setting is present is recorded, never its value.
+access_limited=$([ -n "$container" ] && docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null | grep -c '^HRM_ADMIN_GROUP_IDS=.' || true)
 backup=$(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -n 1)
 backup_kb=$([ -n "$backup" ] && du -sk "$backup" | cut -f1 || true)
 
@@ -47,7 +51,8 @@ export IMAGE="$image" STARTED="$started" BACKUP="${backup##*/}" BACKUP_KB="$back
   SELFTEST_RUN="$(unit_run intuneget-cron@intune-self-test.service)" \
   SELFTEST_ENABLED="$(systemctl is-enabled intuneget-intune-self-test.timer 2>/dev/null || true)" \
   START_RUN="$(unit_run intuneget-cron@start-scheduled-updates.service)" \
-  START_ENABLED="$(systemctl is-enabled intuneget-start-updates.timer 2>/dev/null || true)"
+  START_ENABLED="$(systemctl is-enabled intuneget-start-updates.timer 2>/dev/null || true)" \
+  ACCESS_LIMITED="${access_limited:-}"
 
 tmp=$(mktemp "$(dirname "$OUT")/.hrm-status.XXXXXX")
 python3 -I - > "$tmp" <<'PY'
@@ -128,6 +133,13 @@ def scheduled_updates():
         return {'ok': False, 'at': unit['at'], 'detail': 'The hourly run is late.'}
     return {'ok': True, 'at': unit['at'], 'detail': None}
 
+def app_access():
+    # Patch 0056: the app shows its own view on Home; this copy is for anything reading the file.
+    if os.environ['ACCESS_LIMITED'] == '':
+        return None
+    limited = os.environ['ACCESS_LIMITED'] != '0'
+    return {'ok': limited, 'at': None, 'detail': None if limited else "Access isn't limited to a group yet."}
+
 try:
     deploy = json.loads(os.environ['DEPLOY_JSON'])
 except ValueError:
@@ -144,7 +156,7 @@ print(json.dumps({
     'updateCheck': run(os.environ['CHECK_RUN']),
     'notifications': run(os.environ['NOTIFY_RUN']),
     'checks': {'intuneReads': intune_reads(run(os.environ['CHECK_RUN'])), 'intuneSelfTest': self_test(),
-               'scheduledUpdates': scheduled_updates()},
+               'scheduledUpdates': scheduled_updates(), 'appAccess': app_access()},
     'offsiteBackup': (lambda raw: {k: v for k, v in json.loads(raw).items() if k in ('result', 'at', 'compressedBytes')} if raw.strip() else None)(os.environ['OFFSITE_JSON']),
     'tunnel': {'version': os.environ['CF_VERSION'] or None, 'running': os.environ['CF_ACTIVE'] == 'active',
                'lastUpdate': run(os.environ['CF_UPDATE_RUN'])},
