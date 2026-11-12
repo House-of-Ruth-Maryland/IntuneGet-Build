@@ -460,10 +460,10 @@ index 0bc6f3260..a2ec93980 100644
          ...unchecked.map((d) => ({ tenantId: d.intune_tenant_id ?? '', intuneAppId: d.intune_app_id })),
 diff --git a/lib/db/__tests__/sqlite-deployed-version-sync.test.ts b/lib/db/__tests__/sqlite-deployed-version-sync.test.ts
 new file mode 100644
-index 000000000..baeb54f8c
+index 000000000..9774b803c
 --- /dev/null
 +++ b/lib/db/__tests__/sqlite-deployed-version-sync.test.ts
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,108 @@
 +// HRM patch 0049: detected updates are corrected as soon as a new copy is deployed.
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { mkdtempSync, rmSync } from 'node:fs';
@@ -517,7 +517,9 @@ index 000000000..baeb54f8c
 +    const { db, row } = await seed();
 +    await db.updateCheckResults.upsert({
 +      user_id: 'u3', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'app-0',
-+      display_name: 'Vendor App', current_version: '0.9.0', latest_version: '2.0.0',
++      // A lower latest version, so the kept row never depends on which upsert ran in a later
++      // millisecond (ties are broken by updated_at; see the tie-break test below).
++      display_name: 'Vendor App', current_version: '0.9.0', latest_version: '1.8.0',
 +    });
 +    const result = await db.updateCheckResults.syncDeployedVersion({
 +      userId: 'u2', tenantId: 't1', wingetId: 'Vendor.App', intuneAppId: 'app-2', version: '1.5.0', displayName: 'Vendor App',
@@ -530,6 +532,27 @@ index 000000000..baeb54f8c
 +      id: row.id, intune_app_id: 'app-2', current_version: '1.5.0', latest_version: '2.0.0', is_critical: true,
 +      notified_at: '2026-01-01T00:00:00.000Z', dismissed_at: '2026-01-02T00:00:00.000Z',
 +    });
++  });
++
++  it('keeps the most recently written row when two rows offer the same version', async () => {
++    vi.useFakeTimers({ toFake: ['Date'] });
++    try {
++      vi.setSystemTime(new Date('2026-03-01T00:00:00.000Z'));
++      const { db } = await seed();
++      vi.setSystemTime(new Date('2026-03-01T00:00:01.000Z'));
++      const later = await db.updateCheckResults.upsert({
++        user_id: 'u3', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'app-0',
++        display_name: 'Vendor App', current_version: '0.9.0', latest_version: '2.0.0',
++      });
++      vi.setSystemTime(new Date('2026-03-01T00:00:02.000Z'));
++      await db.updateCheckResults.syncDeployedVersion({
++        userId: 'u2', tenantId: 't1', wingetId: 'Vendor.App', intuneAppId: 'app-2', version: '1.5.0', displayName: 'Vendor App',
++      });
++      const [moved] = await all(db, 'u2', 't1');
++      expect(moved).toMatchObject({ id: later.id, notified_at: null, dismissed_at: null });
++    } finally {
++      vi.useRealTimers();
++    }
 +  });
 +
 +  it('does nothing when the app has no detected update', async () => {
