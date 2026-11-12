@@ -28,6 +28,7 @@ HRM IT notes.
 | `.github/workflows/tests.yml` | For code PR revisions: apply pinned patches, cache npm downloads, check Help and both app/packager types, then run the full regression suite once. Deploy-only PRs and description edits do not run the suite. Manual dispatch covers bot-created upgrade PRs. |
 | `scripts/check-app.sh` | Shared local/PR validation entry point for a patched tree with dependencies installed. `related` runs affected tests during iteration; `full` checks Help, both compiler configurations and all tests. |
 | `.github/workflows/help-check.yml` | On PRs that change patches, `upstream-ref` or `deploy/` (not `deploy/version`): run the Help check and require "Help and tooltips checked" ticked in the PR description. |
+| `docs/mcp-api.md` | The MCP read API contract (patch 0055): endpoints, parameters, response fields with fake examples, and where the server differs from the MCP Worker's first contract. |
 | `scripts/check-help.mjs` | The Help check: every on-screen label a Help section lists in `uiLabels` (patch 0034) still exists in the app, every time Help gives matches a timer in `deploy/systemd/`, and HRM's tooltips and hints keep the writing rules. Run by the build, the weekly upstream check and PRs. |
 
 ## Registry and sign-in
@@ -166,6 +167,64 @@ Links in the report's to-dos use only the parsed https origin of `NEXT_PUBLIC_UR
 paths, query strings and fragments are never copied. Invalid or credential-bearing URLs are omitted.
 Only strict release tags can appear as version text. Output text/item limits and the UTF-8 report
 size are enforced at a single boundary.
+
+## MCP read API
+
+Patch 0055 serves a read-only API under `/api/hrm/mcp/` for HRM's MCP server (the
+`hrm-intuneget-mcp` Cloudflare Worker). The contract, every endpoint and its fields, is
+`docs/mcp-api.md`; change it in the same PR as the patch, and tell whoever keeps the Worker. It is
+built in `lib/hrm/mcp-api.ts` (answers) and `lib/hrm/mcp-auth.ts` (who may call it). Names, IDs,
+versions, counts, group names and codes only: never add staff emails, user or tenant IDs, device
+names, Intune descriptions, installer URLs or raw error, status or reason text. Install errors go
+out as a normalized code and HRM's own category. GET only; it never writes.
+
+Every request needs both a bearer key (`MCP_API_KEY`, same rules as `STATUS_REPORT_KEY`) and a
+Cloudflare Access JWT for the Worker's service token. The server checks the JWT signature against
+the team's keys, the issuer, the audience (`ACCESS_AUD`), the expiry and that `common_name` is the
+service token's client ID (`MCP_ACCESS_CLIENT_ID`). `MCP_TENANT_ID` names the one Intune tenant it
+reads. If any setting is missing or malformed, the API is off and answers an empty `401`. The
+Worker's `X-HRM-Requested-By` email goes to the server log only.
+
+Setup, once the image with patch 0055 is deployed:
+
+1. Cloudflare Access already has a path-only Access application for `<host>/api/hrm/mcp` and
+   `<host>/api/hrm/mcp/*` with a **Service Auth** policy for the Worker's service token only. Do
+   **not** add a Bypass for these paths: unlike the status report, the API needs Access to put the
+   service token's JWT on every request.
+2. On the VM, add the settings to `.env.local` without printing them. Generate the key in place:
+
+   ```bash
+   sudo sh -c 'umask 077; printf "\nMCP_API_KEY=%s\n" "$(openssl rand -hex 32)" >> /opt/intuneget/.env.local'
+   ```
+
+   Then add `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`), `ACCESS_AUD` (the Access
+   application's audience tag), `MCP_ACCESS_CLIENT_ID` (the service token's client ID, not its
+   secret) and `MCP_TENANT_ID` (the Intune tenant ID) with `sudoedit /opt/intuneget/.env.local`.
+   None of these go in this repo.
+3. Pass all five through `docker-compose.override.yml`, then recreate `web` with `--env-file .env.local`:
+
+   ```yaml
+         - MCP_API_KEY=${MCP_API_KEY:-}
+         - ACCESS_TEAM_DOMAIN=${ACCESS_TEAM_DOMAIN:-}
+         - ACCESS_AUD=${ACCESS_AUD:-}
+         - MCP_ACCESS_CLIENT_ID=${MCP_ACCESS_CLIENT_ID:-}
+         - MCP_TENANT_ID=${MCP_TENANT_ID:-}
+   ```
+
+   ```bash
+   cd /opt/intuneget && sudo docker compose --env-file .env.local up -d web
+   ```
+4. Put the same `MCP_API_KEY` in the Worker's secret store. Copy it from the VM over SSH; never
+   paste it into chat, issues or this repo. To rotate it, replace the line in `.env.local`, recreate
+   `web` and update the Worker's secret.
+
+Check from the VM that it stays closed without credentials (expect `401`):
+`curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/hrm/mcp/status`.
+Requests through the tunnel without the service token never reach the server.
+
+Answers are never cached outside the server (`Cache-Control: no-store`); the app list from Intune
+is kept inside the server for one minute. Each request has a 6-second deadline and a 256 KB limit;
+both answer an empty `503`.
 
 ## Old copies
 

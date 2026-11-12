@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Read-only API for HRM's MCP server. The server answers questions from HRM's MCP server about
+  server status, Needs attention, apps in Intune, App updates, the Update schedule, Deployments,
+  install failures and Pilot rollouts. It sends app names, IDs, versions, counts, group names and
+  error codes only, never staff emails, device names or error text, and it changes nothing. It is
+  off until the five settings in CLAUDE.md ("MCP read API") are set on the VM, and it needs both
+  the API key and the MCP server's Cloudflare Access service token. Contract: `docs/mcp-api.md`.
+  Help matches (patch 0055).
+
 - Inventory explains old copies. A copy IntuneGet has replaced shows a Previous copy tag. Its
   details say which version replaced it and when, and that it is removed automatically after 7
   days if it's safe. If cleanup is keeping it, the details say Kept: and why. Previous copies
