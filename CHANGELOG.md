@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Weekly upstream check picks the highest app release tag (vX.Y.Z) instead of GitHub's Latest
+  release. Upstream now also publishes IntuneGet Packager releases (packager-vX.Y.Z) marked Latest,
+  which made the check fail since November 9 and would have hidden the next app release.
+  Nothing the server runs changes.
+
 - App updates puts results first, then connected Automatic publishing and Device installation cards.
   State rows, expandable details and compact Beta reporting replace the stacked explanation panels.
   The overview explains the 3:30 version checks and distinguishes per-app Auto-update from shared
