@@ -127,7 +127,8 @@ def self_test():
         return {'ok': False, 'at': unit['at'], 'detail': 'The daily self-test is late.'}
     results = json_lines(os.environ['SELFTEST_JSON'])
     failed = [c for c in (results[-1].get('checks') or []) if not c.get('ok')] if results else []
-    detail = ', '.join(f"{c.get('name')} ({str(c.get('error') or 'failed')[:120]})" for c in failed[:5])
+    # Patch 0058: names only, never Graph's error text (that stays in the self-test's journal).
+    detail = ' '.join(f"Couldn't read {str(c.get('name') or 'Intune')[:60]}." for c in failed[:5])
     return {'ok': not failed, 'at': unit['at'], 'detail': detail or None}
 
 def scheduled_updates():
@@ -146,7 +147,7 @@ def app_access():
     if os.environ['ACCESS_LIMITED'] == '':
         return None
     limited = os.environ['ACCESS_LIMITED'] != '0'
-    return {'ok': limited, 'at': None, 'detail': None if limited else "Access isn't limited to a group yet."}
+    return {'ok': limited, 'at': None, 'detail': None if limited else 'Not limited to a group.'}
 
 def previous_check(key):
     try:

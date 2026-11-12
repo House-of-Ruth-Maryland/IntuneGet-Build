@@ -149,8 +149,8 @@ don't have access to IntuneGet. Ask HRM Support (https://support.hruthmd.org) to
 admins group." Cron, the status report, workflow callbacks, the packager, QA and the MCP read API
 never go through this check.
 
-Unset (or no well-formed group ID), nothing changes and Home's Server status shows "Access isn't
-limited to a group yet". The status file records it as `checks.appAccess`; the watchdog doesn't
+Unset (or no well-formed group ID), nothing changes and Home's Server status shows "Not limited to
+a group" under Who can sign in. The status file records it as `checks.appAccess`; the watchdog doesn't
 post about it.
 
 Setup, once the image with patch 0056 is deployed:
@@ -188,6 +188,9 @@ Keep Entra and Cloudflare Access matching the same group (recommended):
   Bypass and the MCP Service Auth policy as they are.
 
 To turn the limit off again, remove `HRM_ADMIN_GROUP_IDS` from `.env.local` and recreate `web`.
+
+While it is unset, the IT dashboard report shows a "Limit IntuneGet sign-in to IT-Admins" to-do
+(patch 0058); it goes once the group is set. The report's pill doesn't change.
 
 ## IT dashboard status report
 

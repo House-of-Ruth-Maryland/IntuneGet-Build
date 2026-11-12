@@ -72,7 +72,7 @@ class StatusFileTest(unittest.TestCase):
     def test_copies_a_failing_verdict(self):
         self.body.write_text(json.dumps({'versionSync': {
             'ok': False, 'at': '2026-11-03T10:00:00.000Z',
-            'detail': "2 deploys didn't update App updates in the last 24 hours (database busy). The 3:30 AM or 3:30 PM check corrects them. Tell HRM Support if this lasts.",
+            'detail': 'App updates missed 2 deploys in 24 hours (database busy). The next update check corrects it.',
             'extra': 'never copied',
         }}))
         check = self.write_status()['versionSync']

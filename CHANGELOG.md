@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Clearer screens after a UX review (patch 0058). Inventory tags an old copy that cleanup is
+  holding Kept for review, and says which newer copy was deployed and when. The sidebar has two
+  groups, Apps and Activity, with App updates under Apps and Help at the bottom. Home's Server
+  status shows checks that need a look first, with the reason, and folds working checks into All
+  checks. Needs attention buttons say where they go (Open app, Open Inventory, Open Deployments).
+  App updates starts with one status strip for the Update schedule, Installation timing and
+  Startup install results; Pause automatic updates is in Edit schedule, and Resume shows on the
+  strip while paused. The No access page shows which account is signed in and has Sign in with
+  another account. Deployments shows Sending to Intune instead of Uploading. Availability and
+  deadline's button is now Reload dates. Status and error messages are shorter and never show raw
+  error text. The IT dashboard report adds a "Limit IntuneGet sign-in to IT-Admins" to-do until
+  the IT admins group is set. Home's Intune self-test reason now names the failed read only.
+  David must reinstall `intuneget-status` on the VM (CLAUDE.md, "VM setup"). Help matches.
+
 - Version sync after deploy. When a deploy finishes, the server corrects App updates straight
   away. If that fails after 2 or more deploys in 24 hours, Home's Server status shows Version
   sync after deploy as Failing, and IT Ops gets a Teams alert (daily while it lasts, and when it
