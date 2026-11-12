@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Easier navigation. In Inventory, each app's details now list its actions under one Actions
+  heading: Availability and deadline first, then Deploy new version or Find in App catalog, then
+  Go back to previous version, with Retire app last. The refresh icon at the top is labelled
+  Reload from Intune. The sidebar now groups pages as Apps (App catalog, Inventory, Discovered
+  apps), Updates (App updates), Activity (Deployments, Reports) and Support (Help), and Search
+  lists them in the same order. Home shows one Deploy an app button instead of the Shortcuts card.
+  New keyboard shortcuts: G then P for App updates, G then V for Discovered apps and G then H for
+  Help. The Reports page is headed My deployment reports, since it shows only deployments you
+  started. Help matches (patch 0053).
+
 - One word for each job. Deploy now always means sending an app or a new version to Intune: App
   updates says Deploy new versions to Intune, the stat reads Deployed (7 days), and the Publishing
   history tab is now Update history. On App updates, Automatic update setup is now Automatic
