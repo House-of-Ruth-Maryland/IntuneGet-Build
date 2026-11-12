@@ -163,6 +163,37 @@ index 69172cbb4..9c79fbe37 100644
                          </p>
                        </div>
                        <div className="flex min-w-28 flex-col items-end gap-1">
+diff --git a/app/(app)/dashboard/unmanaged/page.tsx b/app/(app)/dashboard/unmanaged/page.tsx
+index cb84f981c..7cfec681a 100644
+--- a/app/(app)/dashboard/unmanaged/page.tsx
++++ b/app/(app)/dashboard/unmanaged/page.tsx
+@@ -240,7 +240,7 @@ export default function UnmanagedAppsPage() {
+       {/* Header */}
+       <PageHeader
+         title={<T>Discovered apps</T>}
+-        description={<T>Apps found on your devices that IntuneGet doesn't manage yet. Claim one to install and update it with IntuneGet, or remove it from devices.</T>}
++        description={<T>Apps found on your computers that IntuneGet doesn't manage yet. Claim one to install and update it with IntuneGet, or remove it from computers.</T>}
+         icon={Radar}
+         badge={lastSynced ? {
+           text: fromCache ? 'Cached' : 'Live',
+@@ -323,7 +323,7 @@ export default function UnmanagedAppsPage() {
+         )}
+       </AnimatePresence>
+ 
+-      {/* HRM patch 0040: what Claim and Remove from devices do */}
++      {/* HRM patch 0040: what Claim and Remove from computers do */}
+       <DiscoveredGuide />
+ 
+       {/* Stat Cards (5) */}
+@@ -384,7 +384,7 @@ export default function UnmanagedAppsPage() {
+           <div className="flex items-center gap-3">
+             <ShoppingCart className="w-5 h-5 text-accent-violet" />
+             <p className="text-sm text-text-secondary">
+-              <T><span className="font-medium text-text-primary"><Var>{cartItemCount}</Var> {cartItemCount === 1 ? 'app' : 'apps'}</span> in the Deployment list<Var>{cartRemovalCount > 0 ? ` (${cartRemovalCount} to remove)` : ''}</Var>. Nothing changes on devices until you deploy.</T>
++              <T><span className="font-medium text-text-primary"><Var>{cartItemCount}</Var> {cartItemCount === 1 ? 'app' : 'apps'}</span> in the Deployment list<Var>{cartRemovalCount > 0 ? ` (${cartRemovalCount} to remove)` : ''}</Var>. Nothing changes on computers until you deploy.</T>
+             </p>
+           </div>
+           <Button asChild size="sm" className="bg-gradient-to-r from-accent-violet to-accent-violet-bright hover:opacity-90 text-white border-0 flex-shrink-0">
 diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
 index 809225387..8efedc9dd 100644
 --- a/app/(app)/dashboard/updates/page.tsx
@@ -377,6 +408,19 @@ index 130859539..c936f1756 100644
      return reply({ error: "Couldn't read install results from Intune. The last results are kept. Try again in 5 minutes." }, 424);
    } catch {
      return reply({ error: "Couldn't check install results. The last results are kept. Try again in 5 minutes." }, 500);
+diff --git a/app/api/package/route.ts b/app/api/package/route.ts
+index c89f3b466..7da9bfc5c 100644
+--- a/app/api/package/route.ts
++++ b/app/api/package/route.ts
+@@ -224,7 +224,7 @@ export async function POST(request: NextRequest) {
+       if ((item as { hrmRemoval?: unknown }).hrmRemoval !== undefined) {
+         const removal = removalOf(item);
+         if (!removal || isStoreCartItem(item) || !isWin32CartItem(item) || !canUseCustomDetection(item)) {
+-          return NextResponse.json({ error: 'Invalid removal', message: 'Only catalog apps found on devices can be removed this way.' }, { status: 400 });
++          return NextResponse.json({ error: 'Invalid removal', message: 'Only catalog apps found on computers can be removed this way.' }, { status: 400 });
+         }
+         const problems = [
+           ...removalGroupProblems(item.assignments),
 diff --git a/app/api/status-report/route.ts b/app/api/status-report/route.ts
 index c61ee7b6d..1853c2710 100644
 --- a/app/api/status-report/route.ts
@@ -426,9 +470,20 @@ index 137797497..482196c0d 100644
    it('selects tested defaults initially and makes custom behaviour an explicit opt-in', async () => {
      await render(item());
 diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
-index 3e067710e..b0bad125c 100644
+index 3e067710e..9ea661540 100644
 --- a/components/CartItemConfig.tsx
 +++ b/components/CartItemConfig.tsx
+@@ -449,8 +449,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+             {removal && (
+               <div className="rounded-xl border border-status-error/30 bg-status-error/5 p-4 text-sm text-text-secondary space-y-1">
+                 <p className="font-medium text-text-primary">This only removes the app</p>
+-                <p>Deploying adds it to Intune as &quot;{item.displayName}&quot; with Uninstall groups. Devices in those groups that have the program named exactly &quot;{item.hrmRemoval?.discoveredName}&quot; uninstall it. It never installs anything.</p>
+-                <p>Afterwards, Inventory shows how many devices still have it. When none are left, press Delete from Intune there.</p>
++                <p>Deploying adds it to Intune as &quot;{item.displayName}&quot; with Uninstall groups. Computers in those groups that have the program named exactly &quot;{item.hrmRemoval?.discoveredName}&quot; uninstall it. It never installs anything.</p>
++                <p>Afterwards, Inventory shows how many computers still have it. When none are left, press Delete from Intune there.</p>
+               </div>
+             )}
+             {isEditableWin32 && !removal && (
 @@ -566,7 +566,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                  onToggle={() => toggleSection('behavior')}
                >
@@ -960,6 +1015,68 @@ index 9b9ac1027..695dae132 100644
        </p>
        <p className="mt-1 text-text-secondary">{rest.join(' ')}</p>
      </div>
+diff --git a/components/hrm/RetirePanel.tsx b/components/hrm/RetirePanel.tsx
+index 961ddfff7..035413bb4 100644
+--- a/components/hrm/RetirePanel.tsx
++++ b/components/hrm/RetirePanel.tsx
+@@ -15,7 +15,7 @@ export const RETIRE_LABELS = {
+   startEmpty: 'Start retiring',
+   keep: 'Keep it for now',
+   remove: 'Delete from Intune',
+-  force: 'Delete even though devices still report it',
++  force: 'Delete even though computers still report it',
+   cancel: 'Cancel retiring',
+   // HRM patch 0040: a copy added from Discovered apps only to remove the app
+   removing: 'Removing this app',
+@@ -43,18 +43,18 @@ export function RetirePanel({ appId, onDeleted }: { appId: string; onDeleted?: (
+         <h4 className="text-sm font-semibold text-text-primary mb-1">{removal ? RETIRE_LABELS.removing : 'Retiring this app'}</h4>
+         <p className="text-sm text-text-secondary">
+           {removal
+-            ? <>Added from Discovered apps on {when(retirement.startedAt)}, by {retirement.startedBy}, only to uninstall it. Devices in its Uninstall groups that have the app remove it when they check in. Updates and deployments for it are held.</>
++            ? <>Added from Discovered apps on {when(retirement.startedAt)}, by {retirement.startedBy}, only to uninstall it. Computers in its Uninstall groups that have the app remove it when they check in. Updates and deployments for it are held.</>
+             : <>Since {when(retirement.startedAt)}, by {retirement.startedBy}. Its groups are set to Uninstall, and updates and deployments for it are held.</>}
+         </p>
+         {c ? (
+           <p className="mt-2 text-sm text-text-secondary">
+             Intune reports: {c.installed} still installed · {c.pending} pending · {c.failed} failed · {c.notApplicable + c.other} other.
+-            {ready ? ' Devices report it gone, so it can be deleted.' : ' Devices check in over the next hours; refresh to see the latest.'}
++            {ready ? ' Computers report it gone, so it can be deleted.' : ' Computers check in over the next hours; refresh to see the latest.'}
+           </p>
+         ) : (
+           <p className="mt-2 text-sm text-text-muted">Couldn&apos;t read the uninstall results from Intune just now.</p>
+         )}
+-        {c && c.failed > 0 && <p className="mt-1 text-sm text-status-error">{c.failed === 1 ? '1 device' : `${c.failed} devices`} failed to uninstall. Check Install results above before deleting.</p>}
++        {c && c.failed > 0 && <p className="mt-1 text-sm text-status-error">{c.failed === 1 ? '1 computer' : `${c.failed} computers`} failed to uninstall. Check Install results above before deleting.</p>}
+         {action.error && <p role="alert" className="mt-2 text-sm text-status-error">{action.error.message}</p>}
+         {confirmDelete ? (
+           <div className="mt-3 space-y-2">
+@@ -82,7 +82,7 @@ export function RetirePanel({ appId, onDeleted }: { appId: string; onDeleted?: (
+           </div>
+         )}
+         {removal ? (
+-          <p className="mt-3 text-xs text-text-muted">When devices report it gone, delete this copy from Intune. To stop removing the app sooner, delete this copy now: Intune stops uninstalling, and devices that already removed it don&apos;t get it back.</p>
++          <p className="mt-3 text-xs text-text-muted">When computers report it gone, delete this copy from Intune. To stop removing the app sooner, delete this copy now: Intune stops uninstalling, and computers that already removed it don&apos;t get it back.</p>
+         ) : <div className="mt-3 text-xs text-text-muted">
+           <p>Cancel retiring puts these groups back, so Required groups install it again:</p>
+           {retirement.savedGroups.length > 0
+@@ -101,7 +101,7 @@ export function RetirePanel({ appId, onDeleted }: { appId: string; onDeleted?: (
+   return (
+     <div>
+       <h4 className="text-sm font-semibold text-text-secondary mb-2">{RETIRE_LABELS.open}</h4>
+-      <p className="text-sm text-text-secondary">When HRM stops using this app: uninstall it from its groups, then delete it from Intune once devices report it gone.</p>
++      <p className="text-sm text-text-secondary">When HRM stops using this app: uninstall it from its groups, then delete it from Intune once computers report it gone.</p>
+       {data.hold ? (
+         <p className="mt-2 text-sm text-status-warning">{data.hold}</p>
+       ) : (
+@@ -132,7 +132,7 @@ export function RetirePanel({ appId, onDeleted }: { appId: string; onDeleted?: (
+                   <ul className="list-disc pl-5 text-text-primary">{review.after.map((g) => <li key={g}>{g}</li>)}</ul>
+                 </>
+               )}
+-              <p className="text-text-muted">This only removes copies installed by IntuneGet. Copies installed another way stay; use Remove from devices in Discovered apps for those. Other copies of the app in Intune are not changed.</p>
++              <p className="text-text-muted">This only removes copies installed by IntuneGet. Copies installed another way stay; use Remove from computers in Discovered apps for those. Other copies of the app in Intune are not changed.</p>
+               {review.groups.length > 0 && (
+                 <label className="flex items-start gap-2 text-text-primary">
+                   <input type="checkbox" className="mt-1" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
 diff --git a/components/hrm/ServerStatusCard.test.ts b/components/hrm/ServerStatusCard.test.ts
 index d34d8e178..94b3f252f 100644
 --- a/components/hrm/ServerStatusCard.test.ts
@@ -1703,6 +1820,155 @@ index df2a246b7..8fc0c20dc 100644
            </DialogDescription>
          </DialogHeader>
  
+diff --git a/components/unmanaged/DiscoveredGuide.tsx b/components/unmanaged/DiscoveredGuide.tsx
+index 57fc8a352..c539f591a 100644
+--- a/components/unmanaged/DiscoveredGuide.tsx
++++ b/components/unmanaged/DiscoveredGuide.tsx
+@@ -16,15 +16,15 @@ const lanes = [
+     steps: ['Claim', 'Choose groups', 'Deploy to Intune', 'Get updates'],
+   },
+   {
+-    tone: 'remove' as const, icon: Trash2, title: 'Remove it from devices',
++    tone: 'remove' as const, icon: Trash2, title: 'Remove it from computers',
+     steps: ['Remove', 'Check groups', 'Deploy to Intune', 'Delete when done'],
+   },
+ ];
+ 
+ const terms: Array<[string, string]> = [
+-  ['Claimed', 'In the Deployment list, waiting to be installed. Nothing has changed on devices yet. Deploy it, or take it out of the list.'],
+-  ['To remove', 'In the Deployment list, waiting to be uninstalled. Nothing has changed on devices yet.'],
+-  ['Matched', 'IntuneGet knows which WinGet package it is, so it can install it. Remove from devices checks whether it can also remove it.'],
++  ['Claimed', 'In the Deployment list, waiting to be installed. Nothing has changed on computers yet. Deploy it, or take it out of the list.'],
++  ['To remove', 'In the Deployment list, waiting to be uninstalled. Nothing has changed on computers yet.'],
++  ['Matched', 'IntuneGet knows which WinGet package it is, so it can install it. Remove from computers checks whether it can also remove it.'],
+   ['Partial match / No match', 'IntuneGet isn\'t sure which package it is. Use Link package to pick one first.'],
+   ['Microsoft Store app', 'Comes from the Store. Install or remove it in Intune as a Microsoft Store app.'],
+ ];
+@@ -76,7 +76,7 @@ export function DiscoveredGuide() {
+               <div key={term}><dt className="inline font-semibold text-text-primary">{term}: </dt><dd className="inline text-text-secondary">{meaning}</dd></div>
+             ))}
+           </dl>
+-          <p className="text-xs text-text-muted">More in Help: <Link href="/dashboard/help#discovered" className="text-accent-cyan hover:underline">Discovered apps</Link> and <Link href="/dashboard/help#remove-discovered" className="text-accent-cyan hover:underline">Removing an app found on devices</Link>.</p>
++          <p className="text-xs text-text-muted">More in Help: <Link href="/dashboard/help#discovered" className="text-accent-cyan hover:underline">Discovered apps</Link> and <Link href="/dashboard/help#remove-discovered" className="text-accent-cyan hover:underline">Removing an app found on computers</Link>.</p>
+         </div>
+       )}
+     </section>
+diff --git a/components/unmanaged/FlowSteps.tsx b/components/unmanaged/FlowSteps.tsx
+index 8fb540aa2..c34271cc8 100644
+--- a/components/unmanaged/FlowSteps.tsx
++++ b/components/unmanaged/FlowSteps.tsx
+@@ -29,15 +29,15 @@ export function FlowSteps({ steps, tone = 'install', current = 0, className }: {
+ }
+ 
+ export const installSteps = (name: string): FlowStep[] => [
+-  { title: 'Claim', detail: `Adds ${name} to the Deployment list. Claimed means it is waiting there. Nothing changes on devices yet.` },
++  { title: 'Claim', detail: `Adds ${name} to the Deployment list. Claimed means it is waiting there. Nothing changes on computers yet.` },
+   { title: 'Choose groups in the Deployment list', detail: 'Required installs it automatically. Available lets staff install it from Company Portal.' },
+-  { title: 'Deploy to Intune', detail: "IntuneGet packages it, adds it to Intune and assigns your groups. Devices in Required groups install IntuneGet's copy, including ones that already have it." },
++  { title: 'Deploy to Intune', detail: "IntuneGet packages it, adds it to Intune and assigns your groups. Computers in Required groups install IntuneGet's copy, including ones that already have it." },
+   { title: 'IntuneGet keeps it up to date', detail: 'New versions show under App updates, and the app appears in Inventory.' },
+ ];
+ 
+ export const removeSteps = (name: string): FlowStep[] => [
+-  { title: 'Add removal to Deployment list', detail: 'Nothing changes on devices yet.' },
++  { title: 'Add removal to Deployment list', detail: 'Nothing changes on computers yet.' },
+   { title: 'Check the groups in the Deployment list', detail: 'Every group must be Uninstall. All devices removes it everywhere it is found.' },
+   { title: 'Deploy to Intune', detail: `IntuneGet adds "${name} (uninstall only)" to Intune with those Uninstall groups.` },
+-  { title: 'Watch it in Inventory, then delete it', detail: `Devices that have ${name} remove it when they check in. Inventory shows how many still have it. When none are left, press Delete from Intune.` },
++  { title: 'Watch it in Inventory, then delete it', detail: `Computers that have ${name} remove it when they check in. Inventory shows how many still have it. When none are left, press Delete from Intune.` },
+ ];
+diff --git a/components/unmanaged/RemoveAppModal.tsx b/components/unmanaged/RemoveAppModal.tsx
+index a10e6af3d..0d8ff22bf 100644
+--- a/components/unmanaged/RemoveAppModal.tsx
++++ b/components/unmanaged/RemoveAppModal.tsx
+@@ -1,6 +1,6 @@
+ 'use client';
+ 
+-// HRM patch 0040: guided removal of an app found on devices.
++// HRM patch 0040: guided removal of an app found on computers.
+ import { useEffect, useState } from 'react';
+ import { AlertTriangle, Loader2, Monitor, Trash2 } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+@@ -25,7 +25,7 @@ function alternatives(app: UnmanagedApp): string[] {
+     'In Intune, add it as a Microsoft Store app (new) and assign it to groups as Uninstall.',
+   ];
+   if (app.matchStatus !== 'matched') return [
+-    'If it is in WinGet, use Link package to pick the right package, then press Remove from devices again.',
++    'If it is in WinGet, use Link package to pick the right package, then press Remove from computers again.',
+     "Otherwise, remove it with a script in Intune (Devices, Scripts and remediations) or the vendor's own removal tool.",
+   ];
+   return ["Remove it with a script in Intune (Devices, Scripts and remediations) or the vendor's own removal tool."];
+@@ -54,7 +54,7 @@ export function RemoveAppModal({ app, onClose, onCheck, onConfirm, onLink }: Pro
+       <DialogContent className="max-w-lg mx-4">
+         <DialogHeader>
+           <DialogTitle>{REMOVAL_LABELS.remove}</DialogTitle>
+-          <DialogDescription className="sr-only">Uninstall {app.displayName} from devices through Intune</DialogDescription>
++          <DialogDescription className="sr-only">Uninstall {app.displayName} from computers through Intune</DialogDescription>
+         </DialogHeader>
+ 
+         <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+@@ -63,7 +63,7 @@ export function RemoveAppModal({ app, onClose, onCheck, onConfirm, onLink }: Pro
+             <div className="min-w-0">
+               <h3 className="text-text-primary font-semibold truncate">{app.displayName}</h3>
+               <p className="text-text-secondary text-sm truncate">{app.publisher || 'Unknown publisher'}</p>
+-              <p className="text-text-muted text-xs mt-1 flex items-center gap-1"><Monitor className="w-3.5 h-3.5" />Found on {app.deviceCount.toLocaleString()} {app.deviceCount === 1 ? 'device' : 'devices'}</p>
++              <p className="text-text-muted text-xs mt-1 flex items-center gap-1"><Monitor className="w-3.5 h-3.5" />Found on {app.deviceCount.toLocaleString()} {app.deviceCount === 1 ? 'computer' : 'computers'}</p>
+             </div>
+           </div>
+ 
+@@ -95,7 +95,7 @@ export function RemoveAppModal({ app, onClose, onCheck, onConfirm, onLink }: Pro
+ 
+               <div className="rounded-xl border border-overlay/10 p-4 space-y-1 text-sm text-text-secondary">
+                 <p className="font-medium text-text-primary">What gets removed</p>
+-                <p>Each device in the groups uninstalls the program named exactly &quot;{app.displayName}&quot;, using the program&apos;s own uninstaller.</p>
++                <p>Each computer in the groups uninstalls the program named exactly &quot;{app.displayName}&quot;, using the program&apos;s own uninstaller.</p>
+                 <p>Other products from the same publisher aren&apos;t touched. Copies installed for one user only aren&apos;t removed.</p>
+               </div>
+ 
+diff --git a/components/unmanaged/UnmanagedAppCard.tsx b/components/unmanaged/UnmanagedAppCard.tsx
+index aa9b2f13e..313fb1118 100644
+--- a/components/unmanaged/UnmanagedAppCard.tsx
++++ b/components/unmanaged/UnmanagedAppCard.tsx
+@@ -139,7 +139,7 @@ function UnmanagedAppCardComponent({
+         <div className="flex items-center gap-2">
+           {app.isClaimed && (
+             <span
+-              title={app.cartPurpose === 'remove' ? 'In the Deployment list to be uninstalled. Nothing has changed on devices yet.' : 'In the Deployment list to be installed. Nothing has changed on devices yet.'}
++              title={app.cartPurpose === 'remove' ? 'In the Deployment list to be uninstalled. Nothing has changed on computers yet.' : 'In the Deployment list to be installed. Nothing has changed on computers yet.'}
+               className={cn('text-xs flex items-center gap-1', app.cartPurpose === 'remove' ? 'text-status-error' : 'text-status-success')}
+             >
+               {app.cartPurpose === 'remove' ? <Trash2 className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+@@ -164,7 +164,7 @@ function UnmanagedAppCardComponent({
+               className="border-overlay/10 text-text-secondary hover:text-status-error hover:bg-status-error/5"
+             >
+               {removable ? <Trash2 className="w-4 h-4 mr-1.5" /> : <HelpCircle className="w-4 h-4 mr-1.5" />}
+-              {removable ? 'Remove from devices' : 'How to remove'}
++              {removable ? 'Remove from computers' : 'How to remove'}
+             </Button>
+           )}
+           {canLink && (
+diff --git a/components/unmanaged/UnmanagedListRow.tsx b/components/unmanaged/UnmanagedListRow.tsx
+index 8808a6954..c8431de05 100644
+--- a/components/unmanaged/UnmanagedListRow.tsx
++++ b/components/unmanaged/UnmanagedListRow.tsx
+@@ -143,7 +143,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+                 size="sm"
+                 variant="outline"
+                 onClick={onRemove}
+-                aria-label={removable ? `Remove ${app.displayName} from devices` : `How to remove ${app.displayName}`}
++                aria-label={removable ? `Remove ${app.displayName} from computers` : `How to remove ${app.displayName}`}
+                 className="h-8 px-3 text-text-secondary hover:text-status-error border-overlay/10 hover:bg-status-error/5"
+               >
+                 {removable ? <Trash2 className="w-4 h-4 lg:mr-1.5" /> : <HelpCircle className="w-4 h-4 lg:mr-1.5" />}
+@@ -170,7 +170,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+             )}
+             {app.isClaimed && (
+               <span
+-                title={app.cartPurpose === 'remove' ? 'In the Deployment list to be uninstalled. Nothing has changed on devices yet.' : 'In the Deployment list to be installed. Nothing has changed on devices yet.'}
++                title={app.cartPurpose === 'remove' ? 'In the Deployment list to be uninstalled. Nothing has changed on computers yet.' : 'In the Deployment list to be installed. Nothing has changed on computers yet.'}
+                 className={cn('flex items-center gap-1 text-xs', app.cartPurpose === 'remove' ? 'text-status-error' : 'text-emerald-400')}
+               >
+                 {app.cartPurpose === 'remove' ? <Trash2 className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
 diff --git a/components/updates/AutoUpdateHistory.tsx b/components/updates/AutoUpdateHistory.tsx
 index 33f572b9e..6c5a5f26c 100644
 --- a/components/updates/AutoUpdateHistory.tsx
@@ -1883,21 +2149,8 @@ index 11a399150..b29d92ba9 100644
      return { id: job.id, type, displayName: name, description: `${verb} ${name}`, timestamp: job.created_at, status, intuneAppUrl: job.intune_app_url ?? undefined, ...(includeUsers ? { deployedBy: job.user_email } : {}) };
    });
    return { ...counts, recentActivity, ...(includeUsers ? { perUser: [...users.values()].sort((a, b) => a.userEmail.localeCompare(b.userEmail)) } : {}) };
-diff --git a/lib/hrm/__tests__/deploy-review.test.ts b/lib/hrm/__tests__/deploy-review.test.ts
-index 45238f50f..a4c657359 100644
---- a/lib/hrm/__tests__/deploy-review.test.ts
-+++ b/lib/hrm/__tests__/deploy-review.test.ts
-@@ -47,7 +47,7 @@ describe('deploy review', () => {
- 
-   it('describes all devices, all users and update choices', () => {
-     expect(describeAssignments([{ type: 'allDevices', intent: 'required' }, { type: 'allUsers', intent: 'available' }])).toBe('All devices · Required, All users · Available');
--    expect(reviewRow({ ...base, updatePolicy: 'auto_update' } as CartItem).updates).toBe('Updates: Auto-update');
-+    expect(reviewRow({ ...base, updatePolicy: 'auto_update' } as CartItem).updates).toBe('Updates: Automatic');
-     expect(reviewRow({ ...base, appSource: 'store' } as unknown as CartItem).install).toBe('From the Microsoft Store');
-   });
- });
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
-index 276beabc8..d478c085f 100644
+index 276beabc8..da47db78e 100644
 --- a/lib/hrm/__tests__/help-content.test.ts
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -43,7 +43,9 @@ describe('help content', () => {
@@ -1923,7 +2176,7 @@ index 276beabc8..d478c085f 100644
      expect(text('deploying')).toContain('Previous copies waiting for automatic removal are left out');
      expect(text('updating')).toContain('press Check installs now');
      expect(text('updating')).not.toContain('Device results for the new copy');
-@@ -113,6 +118,21 @@ describe('help content', () => {
+@@ -113,6 +118,24 @@ describe('help content', () => {
      expect(HELP_SECTIONS.find((s) => s.id === 'installation-timing')!.points.join(' ')).toContain('reloads the whole app from Intune');
    });
  
@@ -1938,6 +2191,9 @@ index 276beabc8..d478c085f 100644
 +    expect(text('update-schedule')).toContain('Pause automatic updates, at the top of Edit schedule');
 +    for (const id of ['updating', 'old-copies']) expect(text(id)).toContain('default assignment settings');
 +    for (const fact of ['notifications show all', 'delivery optimization is not configured', 'automatically update superseded versions', 'the old copy keeps its groups']) expect(text('updating')).toContain(fact);
++    expect(text('updating')).toContain('Availability dates, installation deadlines and restart grace aren\'t copied either. Set them again in Inventory with Availability and deadline');
++    for (const id of ['retire', 'discovered', 'remove-discovered']) expect(text(id)).toContain('Remove from computers');
++    expect(HELP_SECTIONS.flatMap((s) => [s.title, ...s.points, ...(s.flow ?? []), ...s.uiLabels]).join(' ')).not.toMatch(/Remove from devices|found on devices|Wait for devices|devices still report it/);
 +    expect(text('server')).toContain('Limit IntuneGet sign-in to IT-Admins');
 +    expect(HELP_SECTIONS.flatMap((s) => s.uiLabels)).not.toContain('Reporting not configured');
 +  });
@@ -1946,16 +2202,18 @@ index 276beabc8..d478c085f 100644
      expect(HELP_SECTIONS.some((s) => s.links?.some((l) => l.href === 'https://support.hruthmd.org'))).toBe(true);
      expect(text.join(' ')).not.toMatch(/contact IT/i);
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
-index 83390390b..1f119d0e0 100644
+index 83390390b..2e50522fe 100644
 --- a/lib/hrm/__tests__/help-guides.test.ts
 +++ b/lib/hrm/__tests__/help-guides.test.ts
-@@ -78,19 +78,19 @@ describe('task-based Help guide integrity', () => {
+@@ -78,19 +78,21 @@ describe('task-based Help guide integrity', () => {
    });
  
    it('retains the important deployment, pilot, Beta and script-reporting distinctions', () => {
 -    expect(prose('deploying')).toContain('Deployed to Intune does not mean devices have installed');
 +    expect(prose('deploying')).toContain('Deployed to Intune does not mean computers have installed');
      expect(prose('pilot-rollouts')).toContain('no wider rollout happens without your approval');
++    expect(guide('remove-discovered').title).toBe('Remove an app found on computers');
++    expect(prose('updating')).toContain('Set them again with Availability and deadline in Inventory');
      expect(prose('pilot-rollouts')).toContain('not verified pilot-group members');
      expect(prose('startup-beta')).toContain('Windows pilot testing required');
      expect(prose('startup-beta')).toContain('No forced restart, login trigger or three-day deadline');
@@ -2115,7 +2373,7 @@ index 89bd65af6..b3280347f 100644
  
    it('does not count failures older than 24 hours', () => {
 diff --git a/lib/hrm/deploy-review.ts b/lib/hrm/deploy-review.ts
-index 4a5db668c..f6652e35d 100644
+index 4a5db668c..ed76e5448 100644
 --- a/lib/hrm/deploy-review.ts
 +++ b/lib/hrm/deploy-review.ts
 @@ -49,7 +49,7 @@ export function reviewRow(item: CartItem): ReviewRow {
@@ -2136,17 +2394,8 @@ index 4a5db668c..f6652e35d 100644
    } else action = 'Adds it to Intune';
  
    const row: ReviewRow = { id: item.id, title: `${item.displayName}${version}`, action, groups: takesCurrentGroups ? 'The groups the current copy has in Intune' : describeAssignments(assignments), warnings };
-@@ -81,7 +81,7 @@ export function reviewRow(item: CartItem): ReviewRow {
-     const restart = { Suppress: "doesn't restart", Prompt: 'asks staff to restart', Force: 'restarts the computer' }[config?.restartBehavior ?? 'Suppress'];
-     row.install = `${mode ?? 'Installs silently'}, ${restart ?? "doesn't restart"}`;
-     // HRM patch 0036: the same policy names as the cart picker and App updates (UPDATE_POLICY_LABELS).
--    row.updates = item.updatePolicy === 'auto_update' ? 'Updates: Auto-update' : item.updatePolicy === 'ignore' ? 'Updates: Ignore' : 'Updates: Notify only';
-+    row.updates = item.updatePolicy === 'auto_update' ? 'Updates: Automatic' : item.updatePolicy === 'ignore' ? 'Updates: Ignore' : 'Updates: Notify only';
-   } else {
-     row.install = 'From the Microsoft Store';
-   }
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
-index 93c7b017d..02573b6e5 100644
+index 93c7b017d..bf2675146 100644
 --- a/lib/hrm/help-content.ts
 +++ b/lib/hrm/help-content.ts
 @@ -17,15 +17,16 @@ export const HELP_SECTIONS: HelpSection[] = [
@@ -2168,7 +2417,15 @@ index 93c7b017d..02573b6e5 100644
        'Everything else is under More settings and What staff see during install. Each row shows its current setting, so you only open the ones you want to change.',
        'To see where an app is deployed, open it in Inventory: Groups lists each group and whether it is Required or Available. No groups means it installs nowhere.',
        'IntuneGet removes old copies left by its own updates (see How old copies are removed). For other copies, such as a second copy or one added in Intune by hand, use duplicate cleanup in Inventory.',
-@@ -44,21 +45,23 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -37,28 +38,30 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Required makes installation mandatory, with any postponement allowed by the package. Available lists the app in Company Portal for people to install themselves and works only with user groups.',
+       'Assign to a device group when every computer in the group needs the app, including shared computers and before anyone signs in.',
+       'Assign to a user group when the app follows the person to any computer they use, or when it is offered as Available.',
+-      'Follow HRM\'s Entra group naming convention, and make it clear in the name whether a group holds devices or users.',
++      'Follow HRM\'s Entra group naming convention, and make it clear in the name whether a group holds computers or users.',
+     ],
+     links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
+   },
    {
      id: 'installation-timing',
      title: 'Availability and deadline',
@@ -2182,19 +2439,20 @@ index 93c7b017d..02573b6e5 100644
        'Choose one assignment. App availability controls when Required apps can download or Available apps appear in Company Portal. Leave the date blank for as soon as possible.',
        'For Required groups, Installation deadline controls when installation starts. Leave it blank to install after availability. Another assignment with an earlier deadline can take priority.',
 -      'Choose device local time for each device’s clock, or UTC for one shared time. Changing the time zone keeps the entered clock times, so check the dates before saving.',
-+      'Choose device local time for each computer’s clock, or UTC for one shared time. Changing the time zone keeps the entered clock times, so check the dates before saving.',
++      'Choose Device local time for each computer’s clock, or UTC for one shared time. Changing the time zone keeps the entered clock times, so check the dates before saving.',
        'Restart grace period delays an Intune-managed restart after installation. The app must use return-code restart behavior or a mandatory restart. An installer can still force its own restart.',
        'With return-code restart behavior, grace applies to hard reboots. A soft reboot result only shows a notification.',
        'Grace can be 1 to 20160 minutes. Countdown and snooze cannot exceed grace. A snooze of 0 disables snooze. Without grace, a required restart may happen without warning.',
 -      'Press Save to Intune to apply the selected assignment’s dates and restart settings. Other settings and groups stay as they were. Press Reload from Intune to read the saved settings. If the assignment changed during review, reload and review again.',
 -      'Dates apply to this copy already in Intune, not to future versions. Installation timing in App updates and in the deploy panel sets prompts and postponement inside a package instead. Offline devices may install later; devices that already have this version are not reinstalled.',
+-      'Review these dates again after deploying a new version. They cannot be changed during a pilot or retirement. Saving group changes in the app’s main Save to Intune form keeps the live dates for groups whose assignment type stays the same.',
+-      'Uninstall groups, exclusions and policy set assignments cannot be edited in this panel.',
+-      'The refresh icon at the top of app details, also named Reload from Intune, reloads the whole app from Intune. The panel\'s own Reload from Intune button reloads only its assignments and dates.',
 +      'Press Save to Intune to apply the selected assignment’s dates and restart settings. Other settings and groups stay as they were. Then press Reload dates to see what Intune saved.',
 +      'If the app or a group changed after you opened the panel, saving stops. Press Reload dates and check the dates again before saving.',
 +      'Dates apply to this copy already in Intune, not to future versions. Installation timing in App updates and in the deploy panel sets prompts and postponement inside a package instead.',
 +      'Open What these dates change in the panel for the limits. Computers that already have this version are not changed. Offline computers may install after the chosen time, when they reconnect.',
-       'Review these dates again after deploying a new version. They cannot be changed during a pilot or retirement. Saving group changes in the app’s main Save to Intune form keeps the live dates for groups whose assignment type stays the same.',
--      'Uninstall groups, exclusions and policy set assignments cannot be edited in this panel.',
--      'The refresh icon at the top of app details, also named Reload from Intune, reloads the whole app from Intune. The panel\'s own Reload from Intune button reloads only its assignments and dates.',
++      'A new version doesn’t keep these dates or restart grace, so set them again on the new copy. They cannot be changed during a pilot or retirement. Saving group changes in the app’s main Save to Intune form keeps the live dates for groups whose assignment type stays the same.',
 +      'Uninstall groups, exclusions and policy set assignments cannot be edited in this panel. A copy with no Required or Available groups needs one first; add it, then press Reload dates.',
 +      'The refresh icon at the top of app details, named Reload from Intune, reloads the whole app from Intune. The panel\'s Reload dates button reloads only its groups and dates.',
      ],
@@ -2255,12 +2513,13 @@ index 93c7b017d..02573b6e5 100644
        'When a custom app installed from a GitHub release has a newer release, App updates shows it. Deploy new version opens the form with the new version, download link and checksum filled in.',
        'Check them, then add it to the Deployment list and deploy it from there. Nothing deploys on its own.',
        'Custom apps from other sites, such as UniFi Endpoint, can\'t be checked. Watch the vendor\'s releases.',
-@@ -127,17 +131,20 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -127,17 +131,21 @@ export const HELP_SECTIONS: HelpSection[] = [
        'Deployed alongside, both versions stay in Intune, and IntuneGet never removes the old one. Use duplicate cleanup in Inventory if you want only one.',
        'For WinGet and curated apps, open the app in Inventory and press Find in App catalog under Actions. The App catalog opens already searching for the app, so you can deploy a newer version.',
        'Inventory reads Intune again when you come back to the tab and its list is over a minute old.',
-+      'When Update, an automatic update or a custom app\'s new version carries groups to the new copy, the new copy gets Intune\'s default assignment settings: notifications show all, and delivery optimization is not configured.',
++      'When Update, an automatic update or a custom app\'s new version carries groups to the new copy, the new copy gets Intune\'s default assignment settings: notifications show all, and delivery optimization is not configured. Exclusion groups carry over too.',
 +      'For Available groups, the old copy\'s setting to automatically update superseded versions isn\'t copied to the new copy.',
++      'Availability dates, installation deadlines and restart grace aren\'t copied either. Set them again in Inventory with Availability and deadline on the new copy.',
 +      'If the old copy has no groups, or IntuneGet can\'t read them from Intune, nothing is assigned to the new copy and the old copy keeps its groups. Home flags it.',
      ],
      links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
@@ -2278,9 +2537,12 @@ index 93c7b017d..02573b6e5 100644
        'At the 3:30 AM and 3:30 PM update checks (Maryland time), IntuneGet removes those old copies of apps it deployed, once the newest copy has settled.',
        'It removes an old copy only when all 5 of these are true:',
        'The old copy was replaced at least 7 days ago: the next copy of the app was deployed 7 or more days ago. Apps updated more than once a week are still cleaned up.',
-@@ -150,22 +157,24 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -148,24 +156,26 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'To remove a copy, IntuneGet takes its groups off, removes the links between it and the app\'s other copies, then deletes it from Intune. Deleting can\'t be undone.',
+       'Nothing is uninstalled from computers. The newest copy has already replaced the old one on them.',
        'It removes at most 20 copies at each update check. The rest wait for the next check.',
-       'Apps used with the startup installer Beta are excluded from automatic old-copy cleanup, because a staged device task may still refer to a copy. Confirm cancellation before manually cleaning up those copies.',
+-      'Apps used with the startup installer Beta are excluded from automatic old-copy cleanup, because a staged device task may still refer to a copy. Confirm cancellation before manually cleaning up those copies.',
++      'Apps used with the startup installer Beta are excluded from automatic old-copy cleanup, because a task staged on a computer may still refer to a copy. Confirm cancellation before manually cleaning up those copies.',
        'It never touches copies added in Intune by hand, or removal copies ending in (uninstall only). Use duplicate cleanup in Inventory for those (see Deploying an app).',
 -      'If it can\'t remove a copy, the copy stays in Intune and Home lists it under Needs attention as Old copy of [app] (v[version]) needs a look, with the reason.',
 +      'If it can\'t remove a copy, the copy stays in Intune and Home lists it under Needs attention as Old copy of [app] (v[version]) needs a look, with the reason. Press Open app to open the newest copy in Inventory.',
@@ -2312,7 +2574,7 @@ index 93c7b017d..02573b6e5 100644
        'Previous copies waiting for removal are left out of the copies listed at the top of Inventory. A copy cleanup is keeping stays there, so you can use Keep this copy.',
      ],
      links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'HRM Support', href: HRM_SUPPORT_URL }],
-@@ -183,7 +192,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -183,7 +193,7 @@ export const HELP_SECTIONS: HelpSection[] = [
        'During an active pilot, other updates and deployments for the app are held, including Update all, automatic updates and deploying it from the App catalog. Save to Intune and duplicate cleanup are held for its copies too. Self-updating apps can still update themselves.',
        'Retire app and Go back to previous version are refused during a pilot too.',
        'The Pilot rollouts card, under the App updates title, shows only while a pilot is running. Wait for the pilot deployment to finish, then press Review results and wider rollout.',
@@ -2321,7 +2583,7 @@ index 93c7b017d..02573b6e5 100644
        'The counts describe each whole app. They do not check pilot group membership or show individual devices. No successful installations reported means you do not yet have evidence of a successful pilot.',
        'Compare New version currently reaches with New version after approval. The proposed groups come from the previous copy in Intune, including Required or Available, exclusions, filters and assignment settings.',
        'To proceed, select I reviewed the results and approve these wider groups, then press Approve wider rollout. Nothing reaches the wider groups on its own. If the groups changed after your review, close it and open a fresh review.',
-@@ -204,7 +213,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -204,7 +214,7 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'startup-beta',
      title: 'Startup installation beta',
@@ -2330,7 +2592,7 @@ index 93c7b017d..02573b6e5 100644
      flow: ['Choose a pilot app', 'Open Installation timing', 'Enable the startup Beta', 'Assign a Required pilot group', 'Deploy to Intune', 'Restart the pilot computer'],
      points: [
        "Beta: Windows pilot testing required. Local tests do not confirm real Intune delivery, Windows task permissions or restart installation. Validate staging, restart installation, reporting and cancellation on a pilot computer before wider rollout.",
-@@ -218,19 +227,20 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -218,19 +228,20 @@ export const HELP_SECTIONS: HelpSection[] = [
        "The Beta does not force a restart, apply the three-day postponement rule, or block sign-in until installation finishes. Use Windows Restart for the pilot; sleep and resume do not count. A vendor installer may need network access or another restart.",
        "The computer remembers deployment order. A delayed older package cannot replace a newer staged deployment for the same app. Delivery time and app version spelling do not decide which pending deployment runs.",
        "Intune has no native waiting-for-startup installation state. Staging returns retry, never success just for staging. Intune may temporarily display retry or failure while waiting. Automatic detection checks the actual installed version.",
@@ -2343,8 +2605,9 @@ index 93c7b017d..02573b6e5 100644
 +      "Check startup reports reads the latest Intune results; it does not force computers to check in. Counts cover received reports only. Computers without a report are never assumed installed. Last device activity and last collection time are shown separately. These reports are separate from Update history.",
        "Reports distinguish Waiting for restart, Installing, Installed, Failed, Cancelled and Status out of date. Installed requires installer success and the version marker. It records an installation outcome, not live inventory. Short installations may finish between reporting runs.",
 -      "Reports older than 6 hours, and Installing states older than 2 hours, need checking. Missing, malformed, omitted and unreadable results trigger Reports need review. A failed refresh keeps the last successful snapshot visible with the error.",
+-      "The IT dashboard receives aggregate startup counts, including incomplete-report warnings. It never receives app, device or staff names.",
 +      "Reports older than 6 hours, and Installing states older than 2 hours, need checking. Missing, malformed, omitted and unreadable results trigger Reports need review. If loading fails, the panel says Couldn't load startup reports and keeps the last successful snapshot. Press Check startup reports to try again.",
-       "The IT dashboard receives aggregate startup counts, including incomplete-report warnings. It never receives app, device or staff names.",
++      "The IT dashboard receives aggregate startup counts, including incomplete-report warnings. It never receives app, computer or staff names.",
        "A slow installer keeps running while the coordinator waits. It is not stopped after an hour. Other startup installations wait up to 30 minutes, then retry at a later restart. Investigate an Installing state older than 2 hours.",
        "Changing a policy, removing assignments or deleting the Intune app does not recall a staged package. An Uninstall assignment may not run before installation. Automatic old-copy cleanup leaves app families used with the Beta alone.",
        "The local record is under ProgramData in IntuneGet-Startup-Beta. Successful installations remove their task and try to remove the staged payload, keeping status and deployment order. Returned installation failures can retry on later restarts up to 3 attempts.",
@@ -2355,7 +2618,7 @@ index 93c7b017d..02573b6e5 100644
        "The cancellation script blocks that exact pending package, including later delivery or retries, without uninstalling an installed app. If installation is running, wait for it to finish before retrying cancellation. Confirm Cancelled when reporting is connected.",
      ],
      links: [{ label: 'Open App updates', href: '/dashboard/updates#startup-installations' }, { label: 'Remediations licensing and setup', href: 'https://learn.microsoft.com/en-us/intune/device-management/tools/deploy-remediations' }],
-@@ -238,19 +248,22 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -238,19 +249,22 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'automatic-installation-policy',
      title: 'Installation timing for automatic updates',
@@ -2386,7 +2649,7 @@ index 93c7b017d..02573b6e5 100644
        'Availability and deadline, in Inventory or on an App updates card, sets dates and restart grace on a copy already in Intune. Those dates belong to one assignment and do not carry over to future versions. Login-only installation is not offered.',
        'The Installation timing section of the deploy panel sets the same package settings for one deployment, including Install after next restart · Beta for pilot testing. See Startup installation beta.',
      ],
-@@ -259,20 +272,21 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -259,20 +273,21 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'update-schedule',
      title: 'Update schedule and blackouts',
@@ -2416,7 +2679,40 @@ index 93c7b017d..02573b6e5 100644
        "Without restricted hours, updates held by a blackout can start at the first 3:30 AM or 3:30 PM check after it ends, provided automatic updates have not also been paused.",
        "Update, Update all and Deploy new version on App updates, and deploying from the App catalog, still work at any time as manual overrides. Pausing does not cancel packages already queued or installations already delivered to computers.",
        "While automatic updates are paused, outside allowed hours or during a blackout, Deploy to pilot group and Approve wider rollout cannot proceed. A pilot already testing keeps its pilot group. Check the displayed reason before trying again.",
-@@ -336,20 +350,20 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -311,24 +326,24 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'retire',
+     title: 'Retiring an app',
+-    uiLabels: ['Inventory', 'Actions', 'Retire app', 'I understand this uninstalls the app from these groups', 'Uninstall from these groups', 'Start retiring', 'Retiring this app', 'Removing this app', 'Discovered apps', 'Remove from devices', 'Delete from Intune', 'Keep it for now', 'Delete even though devices still report it', 'Cancel retiring', 'Ignore', 'Ignored apps'],
+-    flow: ['Open the app in Inventory', 'Press Retire app', 'Check the groups', 'Uninstall from these groups', 'Wait for devices', 'Delete from Intune'],
++    uiLabels: ['Inventory', 'Actions', 'Retire app', 'I understand this uninstalls the app from these groups', 'Uninstall from these groups', 'Start retiring', 'Retiring this app', 'Removing this app', 'Discovered apps', 'Remove from computers', 'Delete from Intune', 'Keep it for now', 'Delete even though computers still report it', 'Cancel retiring', 'Ignore', 'Ignored apps'],
++    flow: ['Open the app in Inventory', 'Press Retire app', 'Check the groups', 'Uninstall from these groups', 'Wait for computers', 'Delete from Intune'],
+     points: [
+       'When HRM stops using an app, open it in Inventory and press Retire app, the last item under Actions. The review reads the app and its groups from Intune.',
+-      'Every group changes to Uninstall, so Intune removes the app from those devices and users. Exclusions stay exclusions. Install deadlines and restart settings are dropped.',
+-      'Retire app only removes the app from devices that got it from IntuneGet. Copies installed another way stay. To remove those, use Remove from devices in Discovered apps (see Removing an app found on devices).',
++      'Every group changes to Uninstall, so Intune removes the app from those computers and users. Exclusions stay exclusions. Install deadlines and restart settings are dropped.',
++      'Retire app only removes the app from computers that got it from IntuneGet. Copies installed another way stay. To remove those, use Remove from computers in Discovered apps (see Removing an app found on computers).',
+       'Other copies of the app in Intune are not changed. Retire each copy you no longer need.',
+       'Select I understand this uninstalls the app from these groups, then press Uninstall from these groups. A copy with no groups shows Start retiring instead.',
+       'Retire app is refused while a pilot or a deployment for the app is running.',
+       'While a copy is being retired, Update, automatic updates, pilots, going back and deploying from the App catalog are held for every copy of the app. Save to Intune and duplicate cleanup are held for that copy.',
+-      'Retiring this app shows how many devices still report it installed or pending. Devices check in over the next hours, so check back later.',
++      'Retiring this app shows how many computers still report it installed or pending. Computers check in over the next hours, so check back later.',
+       'An app being removed from Discovered apps shows in Inventory as Removing this app, with the same counts and Delete from Intune. It has no Cancel retiring.',
+-      'Devices that failed to uninstall don\'t stop the delete. Check them under Install results first. Home leaves an app being retired out of its install failures, apps that reach no devices and apps that can\'t go back.',
++      'Computers that failed to uninstall don\'t stop the delete. Check them under Install results first. Home leaves an app being retired out of its install failures, apps that reach no computers and apps that can\'t go back.',
+       'When none are left, press Delete from Intune, then press Delete from Intune again to confirm. Keep it for now closes the question.',
+-      'If some devices never report, for example because they are offline for good, select Delete even though devices still report it before confirming.',
++      'If some computers never report, for example because they are offline for good, select Delete even though computers still report it before confirming.',
+       'Deleting first removes this app\'s links to apps it replaces or depends on. If another app replaces or depends on it, the delete stops and says which app. Deleting can\'t be undone.',
+       'After deletion, every copy of the app is set to Ignore in App updates. To get updates for a copy that remains, use Ignored apps. To bring the app back, deploy it from the App catalog.',
+-      'Cancel retiring puts the saved groups back. Required groups then install the app again on devices that already uninstalled it.',
++      'Cancel retiring puts the saved groups back. Required groups then install the app again on computers that already uninstalled it.',
+       'If the groups were changed in Intune since retiring started, Cancel retiring is refused. Put them back in Intune instead.',
+     ],
+     links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }],
+@@ -336,20 +351,20 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'install-results',
      title: 'Install results',
@@ -2443,7 +2739,83 @@ index 93c7b017d..02573b6e5 100644
        'You can check each app once every 5 minutes. An update check or a failed attempt also starts the 5 minutes. The message says when to try again.',
        'Check installs now never sends a Teams alert. The next update check compares with the saved counts and alerts as usual.',
      ],
-@@ -446,42 +460,48 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -377,58 +392,58 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Compare Previously and Now, including exclusions, installation choices and assignment settings. Open app shows the current groups. Check the last successful check time before relying on a saved warning.',
+       'Mark reviewed acknowledges the displayed change without changing anything in Intune. A newer change needs its own review. Warnings for missing apps or no groups receiving installations remain until the problem is fixed.',
+       'Saved group-change warnings also appear with the live groups in App updates and when the deployment review replaces a current copy. Check the groups before you update or deploy again.',
+-      'Exclusions and Uninstall assignments do not install an app. Group checks describe assignments, not which devices are members of a group.',
++      'Exclusions and Uninstall assignments do not install an app. Group checks describe assignments, not which computers or users are in a group.',
+     ],
+     links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open App updates', href: '/dashboard/updates' }],
+   },
+   {
+     id: 'discovered',
+     title: 'Discovered apps',
+-    uiLabels: ['Discovered apps', 'How Discovered apps works', 'Hide', 'How this works', 'Matched', 'Claim', 'Claim discovered app', 'Add to Deployment list', 'Claim all matched apps', 'Claimed', 'In the Deployment list, not deployed yet', 'Showing claimed', 'Hiding claimed', 'Deployment list', 'Deploy to Intune', 'App updates', 'Inventory', 'Partial match', 'Link package', 'Microsoft Store app', 'No match', 'Custom app', 'Remove from devices'],
++    uiLabels: ['Discovered apps', 'How Discovered apps works', 'Hide', 'How this works', 'Matched', 'Claim', 'Claim discovered app', 'Add to Deployment list', 'Claim all matched apps', 'Claimed', 'In the Deployment list, not deployed yet', 'Showing claimed', 'Hiding claimed', 'Deployment list', 'Deploy to Intune', 'App updates', 'Inventory', 'Partial match', 'Link package', 'Microsoft Store app', 'No match', 'Custom app', 'Remove from computers'],
+     flow: ['Press Claim', 'Add to Deployment list', 'Choose groups', 'Deploy to Intune', 'Find it in App updates'],
+     points: [
+-      'Discovered apps lists apps Intune found on HRM devices that IntuneGet doesn\'t manage. You can bring an app under IntuneGet so it stays updated, or remove it from devices.',
+-      'Nothing on this page changes a device by itself. Every change goes through the Deployment list and Deploy to Intune.',
++      'Discovered apps lists apps Intune found on HRM computers that IntuneGet doesn\'t manage. You can bring an app under IntuneGet so it stays updated, or remove it from computers.',
++      'Nothing on this page changes a computer by itself. Every change goes through the Deployment list and Deploy to Intune.',
+       'The How Discovered apps works panel at the top shows both paths and the terms. Hide closes it and How this works opens it again. Your choice is remembered in this browser.',
+       'Matched means IntuneGet knows which WinGet package the app is. To manage it, press Claim. In Claim discovered app, press Add to Deployment list.',
+-      'Claimed means the app is in the Deployment list, waiting to be installed. Nothing has changed on devices yet. The row shows Claimed: in Deployment list.',
++      'Claimed means the app is in the Deployment list, waiting to be installed. Nothing has changed on computers yet. The row shows Claimed: in Deployment list.',
+       'Deploy a claimed app, or take it out of the Deployment list. The Claimed card counts them as In the Deployment list, not deployed yet. Showing claimed and Hiding claimed show or hide these rows.',
+       'In the Deployment list, choose the app\'s groups. Required installs it automatically. Available lets staff install it from Company Portal. Then press Deploy to Intune.',
+-      'IntuneGet packages the app, adds it to Intune and assigns the groups. Devices in Required groups install IntuneGet\'s copy, including devices that already have the app.',
++      'IntuneGet packages the app, adds it to Intune and assigns the groups. Computers in Required groups install IntuneGet\'s copy, including computers that already have the app.',
+       'After that, new versions show in App updates and the app is listed in Inventory.',
+       'Claim all matched apps adds every matched app to the Deployment list with no groups. Choose groups for each one before you deploy.',
+       'Partial match means there are close candidates. Check the name and publisher, then use Link package to pick the right one.',
+       'No match means the app isn\'t in the catalog, often because the vendor doesn\'t publish it to WinGet. Use Link package if you know the right package, or add it as a Custom app.',
+       'Microsoft Store app means the app comes from the Store and can\'t be deployed through IntuneGet. Add it in Intune as a Microsoft Store app.',
+-      'To uninstall an app instead, press Remove from devices (see Removing an app found on devices).',
++      'To uninstall an app instead, press Remove from computers (see Removing an app found on computers).',
+     ],
+     links: [{ label: 'Open Discovered apps', href: '/dashboard/unmanaged' }],
+   },
+   {
+     id: 'remove-discovered',
+-    title: 'Removing an app found on devices',
+-    uiLabels: ['Discovered apps', 'Remove', 'Remove from devices', 'How to remove', 'Matched', 'Partial match', 'No match', 'Link package', 'Microsoft Store app', 'What gets removed', 'Remove it from', 'All devices', 'Groups I choose in the Deployment list', 'I understand this uninstalls the app from every device in the groups I choose', 'Add removal to Deployment list', 'To remove', 'Deployment list', 'Removal', 'This only removes the app', 'Who gets it', 'More settings', 'Choose groups', 'Adds it to Intune only to uninstall', 'Deploy to Intune', 'Ignore', 'Inventory', 'Removing this app', 'Delete from Intune', 'Cancel retiring'],
+-    flow: ['Press Remove from devices', 'Choose where to remove it', 'Add removal to Deployment list', 'Deploy to Intune', 'Wait for devices', 'Delete from Intune'],
++    title: 'Removing an app found on computers',
++    uiLabels: ['Discovered apps', 'Remove', 'Remove from computers', 'How to remove', 'Matched', 'Partial match', 'No match', 'Link package', 'Microsoft Store app', 'What gets removed', 'Remove it from', 'All devices', 'Groups I choose in the Deployment list', 'I understand this uninstalls the app from every computer in the groups I choose', 'Add removal to Deployment list', 'To remove', 'Deployment list', 'Removal', 'This only removes the app', 'Who gets it', 'More settings', 'Choose groups', 'Adds it to Intune only to uninstall', 'Deploy to Intune', 'Ignore', 'Inventory', 'Removing this app', 'Delete from Intune', 'Cancel retiring'],
++    flow: ['Press Remove from computers', 'Choose where to remove it', 'Add removal to Deployment list', 'Deploy to Intune', 'Wait for computers', 'Delete from Intune'],
+     points: [
+-      'In Discovered apps, Matched rows that aren\'t in the Deployment list have Remove (list view) or Remove from devices (card view). Other rows have How to remove, which explains what to do instead.',
++      'In Discovered apps, Matched rows that aren\'t in the Deployment list have Remove (list view) or Remove from computers (card view). Other rows have How to remove, which explains what to do instead.',
+       'The dialog first checks whether IntuneGet can remove the app. It can only when the app is Matched to a WinGet package with an EXE installer that installs for everyone on the computer.',
+       'MSI, MSIX, portable and ZIP installers can\'t be removed this way. When IntuneGet can\'t remove an app, the dialog says why and what to do instead.',
+       'Microsoft Store app: add it in Intune as a Microsoft Store app (new) and assign it as Uninstall.',
+-      'Partial match or No match: if the app is in WinGet, use Link package, then press Remove from devices again. Otherwise use an Intune script (Devices, then Scripts and remediations) or the vendor\'s removal tool.',
++      'Partial match or No match: if the app is in WinGet, use Link package, then press Remove from computers again. Otherwise use an Intune script (Devices, then Scripts and remediations) or the vendor\'s removal tool.',
+       'MSI and other installers: use an Intune script or the vendor\'s removal tool.',
+       'If the app is already claimed, take it out of the Deployment list first.',
+-      'When IntuneGet can remove it, What gets removed explains it. Each device in the groups uninstalls the program named exactly as Discovered apps shows it, using the program\'s own uninstaller.',
++      'When IntuneGet can remove it, What gets removed explains it. Each computer in the groups uninstalls the program named exactly as Discovered apps shows it, using the program\'s own uninstaller.',
+       'Other products from the same publisher aren\'t touched. Copies installed for one user only aren\'t removed.',
+       'Under Remove it from, choose All devices, or Groups I choose in the Deployment list.',
+-      'Select I understand this uninstalls the app from every device in the groups I choose, then press Add removal to Deployment list. The row then shows To remove: in Deployment list.',
++      'Select I understand this uninstalls the app from every computer in the groups I choose, then press Add removal to Deployment list. The row then shows To remove: in Deployment list.',
+       'In the Deployment list, the app has a Removal badge and says what it uninstalls. Its settings show This only removes the app, and Remove it from instead of Who gets it.',
+       'Every group is Uninstall. Install scope, update settings and More settings are hidden.',
+       'Deploy to Intune stays off until the removal has at least one group and every group is Uninstall. Press Choose groups to fix it. The review says Adds it to Intune only to uninstall the app.',
+-      'Deploying adds the app to Intune with (uninstall only) after its name. It never installs anything, and its updates are set to Ignore. Devices that have the app remove it when they check in.',
+-      'Afterwards, open the copy in Inventory. Removing this app shows how many devices still report it installed, pending or failed. Devices check in over the next hours, so check back later.',
++      'Deploying adds the app to Intune with (uninstall only) after its name. It never installs anything, and its updates are set to Ignore. Computers that have the app remove it when they check in.',
++      'Afterwards, open the copy in Inventory. Removing this app shows how many computers still report it installed, pending or failed. Computers check in over the next hours, so check back later.',
+       'While it is removing, updates and deployments of the app are held, and the hold messages say it is being retired. Home leaves it out of install failures.',
+       'When none are left, press Delete from Intune, then confirm.',
+-      'To stop removing sooner, delete the copy. Intune stops uninstalling, and devices that already removed it don\'t get it back. A removal has no Cancel retiring.',
++      'To stop removing sooner, delete the copy. Intune stops uninstalling, and computers that already removed it don\'t get it back. A removal has no Cancel retiring.',
+     ],
+     links: [{ label: 'Open Discovered apps', href: '/dashboard/unmanaged' }, { label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open Intune for script results', href: INTUNE_URL }],
+   },
+@@ -446,42 +461,48 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'server',
      title: 'How the server is updated',
@@ -2472,7 +2844,8 @@ index 93c7b017d..02573b6e5 100644
        'HRM\'s IT dashboard shows Server status problems, failed or stuck deployments, and counts of apps deployed each day. Open Home here for details.',
        'The summary refreshes at most once a minute. If the server is slow, the IT dashboard keeps the last safe summary and its original time.',
        'HRM\'s IntuneGet MCP server can read apps, App updates, Deployments, Pilot rollouts, install failures and Needs attention here. It changes nothing in Intune or IntuneGet.',
-       'The MCP server gets app names, IDs, versions, counts, group names and error codes only. It never gets staff emails, device names or error text.',
+-      'The MCP server gets app names, IDs, versions, counts, group names and error codes only. It never gets staff emails, device names or error text.',
++      'The MCP server gets app names, IDs, versions, counts, group names and error codes only. It never gets staff emails, computer names or error text.',
        'When Who can sign in on Server status shows IT admins group, only members of HRM\'s IT admins group can use IntuneGet.',
 -      'Access isn\'t limited to a group yet means anyone who gets past HRM\'s sign-in can use IntuneGet, and Server status shows Check instead of Healthy. No Teams alert posts for it. Open a ticket with HRM Support.',
 -      'Someone outside the group sees No access to IntuneGet and a Sign out button. To add or remove someone, ask HRM Support. The change can take up to 5 minutes to apply.',
@@ -2505,7 +2878,7 @@ index 93c7b017d..02573b6e5 100644
      ],
      links: [{ label: 'Open Settings', href: '/dashboard/settings' }, { label: 'Open App updates', href: '/dashboard/updates' }],
    },
-@@ -498,9 +518,9 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -498,9 +519,9 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'support',
      title: 'When something goes wrong',
@@ -2518,7 +2891,7 @@ index 93c7b017d..02573b6e5 100644
        'For anything else, open a ticket with HRM Support.',
      ],
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
-index dc2aeba49..7e45ce2d6 100644
+index dc2aeba49..e295441b5 100644
 --- a/lib/hrm/help-guides.ts
 +++ b/lib/hrm/help-guides.ts
 @@ -22,7 +22,7 @@ const support = { label: 'Open HRM Support', href: 'https://support.hruthmd.org'
@@ -2558,8 +2931,9 @@ index dc2aeba49..7e45ce2d6 100644
      start: inventory, before: ['Choose the app copy and assignment you intend to change.', 'These dates cannot change during a pilot or retirement.'],
      steps: [
 -      step('Read current assignments', 'Open the app in Inventory and press Availability and deadline under Actions. In the panel, press Reload from Intune to read its current groups.', 'inventory', 'Reload from Intune', 'Editable Required and Available assignments appear.'),
+-      step('Choose dates', 'Select one assignment. Set App availability and, for a Required assignment, Installation deadline. Confirm device local time or UTC.', 'inventory', 'Installation deadline', 'The selected assignment’s dates are ready for review.'),
 +      step('Read current assignments', 'Open the app in Inventory and press Availability and deadline under Actions. In the panel, press Reload dates to read its current groups.', 'inventory', 'Reload dates', 'Editable Required and Available assignments appear.'),
-       step('Choose dates', 'Select one assignment. Set App availability and, for a Required assignment, Installation deadline. Confirm device local time or UTC.', 'inventory', 'Installation deadline', 'The selected assignment’s dates are ready for review.'),
++      step('Choose dates', 'Select one assignment. Set App availability and, for a Required assignment, Installation deadline. Confirm Device local time or UTC.', 'inventory', 'Installation deadline', 'The selected assignment’s dates are ready for review.'),
        step('Review restart settings', 'If supported by the app, choose Restart grace period, countdown and snooze. Check the entered clock times after changing time zones.', 'inventory', 'Restart grace period', 'Restart settings match the selected assignment and app behavior.'),
 -      step('Save and read back', 'Press Save to Intune, then Reload from Intune to confirm the saved values.', 'inventory', 'Save to Intune', 'Only the selected assignment’s dates and restart settings change.'),
 +      step('Save and read back', 'Press Save to Intune, then Reload dates to confirm the saved values.', 'inventory', 'Save to Intune', 'Only the selected assignment’s dates and restart settings change.'),
@@ -2576,12 +2950,17 @@ index dc2aeba49..7e45ce2d6 100644
    },
    {
      id: 'esp', category: 'deploy', title: 'Include an app in new-computer setup',
-@@ -82,12 +82,12 @@ export const HELP_GUIDES: HelpGuide[] = [
+@@ -78,16 +78,16 @@ export const HELP_GUIDES: HelpGuide[] = [
+   {
+     id: 'updates', category: 'updates', title: 'Choose how an app stays updated',
+     summary: 'Use Notify only, Auto-update or Ignore to control what happens when a new version appears.', keywords: ['notify', 'ignore', 'automatic', 'new version', 'GitHub releases', 'refresh'],
+-    start: updates, before: ['Check the app’s current groups before enabling automatic updates.'],
++    start: updates, before: ['Check the app’s current groups before choosing Auto-update.'],
      steps: [
        step('Find the app', 'Open App updates and read the groups shown on the app’s card.', 'updates', 'App updates', 'You can see where the next update would go.'),
        step('Choose its update rule', 'Choose Notify only for manual approval, Auto-update for automatic deployment, or Ignore to leave the app out of update checks.', 'updates', 'Auto-update', 'The app has an explicit update rule.'),
 -      step('Check the lists', 'Open Apps set to Auto-update to review app rules in the Auto-update on list. Use Ignored apps to restore an ignored app to Notify only or Auto-update.', 'updates', 'Ignored apps', 'Automatic and ignored apps are easy to audit.'),
-+      step('Check the lists', 'On the Update schedule row, press the apps with Automatic updates on count to open the Auto-update on list. Use Ignored apps to restore an ignored app.', 'updates', 'Ignored apps', 'Automatic and ignored apps are easy to audit.'),
++      step('Check the lists', 'On the Update schedule row, press the apps with Automatic updates on count to open the Auto-update on list. Use Ignored apps to restore an ignored app.', 'updates', 'Ignored apps', 'Auto-update and ignored apps are easy to audit.'),
      ],
      success: 'The app’s card or list shows the update rule you intended.', caution: 'Automatic updates follow the Update schedule and safety checks. When computers install follows Installation timing and the Intune assignment.',
      related: ['updating', 'automatic-installation-policy', 'update-schedule'],
@@ -2604,8 +2983,8 @@ index dc2aeba49..7e45ce2d6 100644
      related: ['pilot-rollouts', 'install-results', 'old-copies', 'rollback'],
 -    troubleshoot: [{ problem: 'Auto-update turned itself off', action: 'Read the failures in Deployments. After fixing the cause, use Turn auto-update back on.' }, { problem: 'The catalog has not synced', action: 'Wait for a newer catalog, or choose the new version in App catalog and use Deploy again.' }, { problem: 'The app has no groups', action: 'Choose groups before deploying; otherwise it installs nowhere.', guide: 'deploying' }],
 -    referenceGroups: [reference('What an ordinary update changes', [0, 1, 2, 3, 30, 4, 5, 6]), reference('Validation and safe retries', [7, 8, 9, 10, 11]), reference('Automatic updates stopped or catalog delayed', [12, 13, 14, 15, 16]), reference('Custom app versions', [17, 18, 19, 20, 21, 22, 23, 24]), reference('Review groups and replacement behavior', [25, 26, 27, 28, 29])],
-+    troubleshoot: [{ problem: 'Auto-update turned itself off', action: 'Read the failures in Deployments. After fixing the cause, use Turn auto-update back on.' }, { problem: 'Notification settings changed after an update', action: 'Carried-over groups get Intune’s default assignment settings. Read Groups carried to the new copy below.' }, { problem: 'The catalog has not synced', action: 'Wait for a newer catalog, or choose the new version in App catalog and use Deploy again.' }, { problem: 'The app has no groups', action: 'Choose groups before deploying; otherwise it installs nowhere.', guide: 'deploying' }],
-+    referenceGroups: [reference('What an ordinary update changes', [0, 1, 2, 3, 30, 4, 5, 6]), reference('Groups carried to the new copy', [31, 32, 33]), reference('Validation and safe retries', [7, 8, 9, 10, 11]), reference('Automatic updates stopped or catalog delayed', [12, 13, 14, 15, 16]), reference('Custom app versions', [17, 18, 19, 20, 21, 22, 23, 24]), reference('Review groups and replacement behavior', [25, 26, 27, 28, 29])],
++    troubleshoot: [{ problem: 'Auto-update turned itself off', action: 'Read the failures in Deployments. After fixing the cause, use Turn auto-update back on.' }, { problem: 'Notification settings changed after an update', action: 'Carried-over groups get Intune’s default assignment settings. Read Groups carried to the new copy below.' }, { problem: 'Dates or restart grace are gone after an update', action: 'They aren’t copied to the new copy. Set them again with Availability and deadline in Inventory.', guide: 'installation-timing' }, { problem: 'The catalog has not synced', action: 'Wait for a newer catalog, or choose the new version in App catalog and use Deploy again.' }, { problem: 'The app has no groups', action: 'Choose groups before deploying; otherwise it installs nowhere.', guide: 'deploying' }],
++    referenceGroups: [reference('What an ordinary update changes', [0, 1, 2, 3, 30, 4, 5, 6]), reference('Groups carried to the new copy', [31, 32, 33, 34]), reference('Validation and safe retries', [7, 8, 9, 10, 11]), reference('Automatic updates stopped or catalog delayed', [12, 13, 14, 15, 16]), reference('Custom app versions', [17, 18, 19, 20, 21, 22, 23, 24]), reference('Review groups and replacement behavior', [25, 26, 27, 28, 29])],
    },
    {
      id: 'old-copies', category: 'devices', title: 'Clean up old Intune copies',
@@ -2647,7 +3026,7 @@ index dc2aeba49..7e45ce2d6 100644
 -      step('Inspect received results', 'Press Check startup reports. Read last collection, last device activity and any Reports need review warning before relying on the counts.', 'updates', 'Check startup reports', 'Missing or stale reports remain distinct from Installed.'),
 +      step('Restart the pilot computer', 'Use Windows Restart. Check real version detection, task cleanup and local status after the later startup.', 'updates', 'Startup install results', 'The pilot provides real Windows evidence; sign-in is not blocked.'),
 +      step('Connect startup reporting', 'In App updates, press Open on Startup install results, then Set up startup reporting. Assign the detection-only Remediations script; the server administrator connects its ID and permission.', 'updates', 'Set up startup reporting', 'Startup outcomes can be collected separately from Update history.'),
-+      step('Inspect received results', 'Press Check startup reports. Read last collection, last device activity and any Reports need review warning before trusting the counts.', 'updates', 'Check startup reports', 'Missing or stale reports remain distinct from Installed.'),
++      step('Inspect received results', 'Press Check startup reports. Read the last collection, Last device activity and any Reports need review warning before trusting the counts.', 'updates', 'Check startup reports', 'Missing or stale reports remain distinct from Installed.'),
        step('Test cancellation separately', 'Remove the Required assignment. Open Cancel before installation for the package, download its cancellation script and deploy it as SYSTEM to the pilot group.', 'updates', 'Cancel before installation', 'The exact pending package is cancelled once the script runs; downloading alone changes nothing.'),
      ],
      success: 'Pilot evidence confirms waiting, restart installation, reporting and cancellation. Keep the feature marked Beta until Windows testing is complete.',
@@ -2708,7 +3087,19 @@ index dc2aeba49..7e45ce2d6 100644
    },
    {
      id: 'rollback', category: 'troubleshoot', title: 'Go back to a previous version',
-@@ -208,7 +207,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+@@ -198,9 +197,9 @@ export const HELP_GUIDES: HelpGuide[] = [
+       step('Check the installer', 'Use Check installer now when available. Wait for the link and saved checksum checks to finish.', 'inventory', 'Check installer now', 'An unchanged, reachable earlier installer can proceed to review.'),
+       step('Review versions and groups', 'Press Go back to previous version. Check both versions and groups, then select I checked the versions and groups.', 'inventory', 'Go back to previous version', 'The review confirms exactly what will be replaced.'),
+       step('Start and follow the deployment', 'Press Go back to the displayed version, then follow the job in Deployments.', 'deployments', 'Deployments', 'The earlier installer is packaged as a new replacement copy.'),
+-      step('Check the recovered devices', 'Open Inventory to inspect results. Review the skipped version under Previous version before using Allow again.', 'inventory', 'Allow again', 'Device outcomes and the automatic-update skip are visible.'),
++      step('Check the recovered computers', 'Open Inventory to inspect results. Review the skipped version under Previous version before using Allow again.', 'inventory', 'Allow again', 'Install results and the automatic-update skip are visible.'),
+     ],
+-    success: 'The earlier version is deployed again to the intended groups and devices report results.',
++    success: 'The earlier version is deployed again to the intended groups and computers report results.',
+     caution: 'Going back uninstalls the current version before installing the earlier one. A matching checksum proves file identity, not compatibility or safety.',
+     related: ['install-results', 'updating', 'support'],
+     troubleshoot: [{ problem: 'Go back is hidden', action: 'Read the installer status. A missing, changed or unsupported installer prevents going back; use a newer fix instead.' }, { problem: 'Automatic updates skip the bad version', action: 'This is intentional, even if going back fails. Use Allow again only after reviewing the reason.' }],
+@@ -208,36 +207,36 @@ export const HELP_GUIDES: HelpGuide[] = [
    },
    {
      id: 'retire', category: 'troubleshoot', title: 'Retire a managed app',
@@ -2717,7 +3108,14 @@ index dc2aeba49..7e45ce2d6 100644
      start: inventory, before: ['Check every affected group and exclusion.', 'Retire app covers IntuneGet-managed installations; separately installed apps need a different removal path.'],
      steps: [
        step('Review the app and groups', 'Open the app in Inventory and press Retire app, the last item under Actions. Read the groups that will change to Uninstall.', 'inventory', 'Retire app', 'The review shows this copy’s affected groups.'),
-@@ -220,24 +219,24 @@ export const HELP_GUIDES: HelpGuide[] = [
+-      step('Confirm uninstall', 'Select I understand this uninstalls the app from these groups, then press Uninstall from these groups.', 'inventory', 'Uninstall from these groups', 'The groups change to Uninstall; devices act as they check in.'),
+-      step('Wait and inspect failures', 'Read Retiring this app and Install results. Check failures and remaining installed or pending devices before deleting.', 'inventory', 'Retiring this app', 'You have received device evidence about the uninstall.'),
+-      step('Delete the Intune copy', 'When ready, press Delete from Intune and confirm. If devices still report it, review the extra acknowledgement carefully.', 'inventory', 'Delete from Intune', 'The Intune copy is deleted; the app’s updates are set to Ignore.'),
++      step('Confirm uninstall', 'Select I understand this uninstalls the app from these groups, then press Uninstall from these groups.', 'inventory', 'Uninstall from these groups', 'The groups change to Uninstall; computers act as they check in.'),
++      step('Wait and inspect failures', 'Read Retiring this app and Install results. Check failures and remaining installed or pending computers before deleting.', 'inventory', 'Retiring this app', 'You have uninstall results from computers.'),
++      step('Delete the Intune copy', 'When ready, press Delete from Intune and confirm. If computers still report it, read Delete even though computers still report it carefully.', 'inventory', 'Delete from Intune', 'The Intune copy is deleted; the app’s updates are set to Ignore.'),
+     ],
+     success: 'Uninstall results have been reviewed and the retired copy is removed from Intune.',
      caution: 'Deleting cannot be undone. Cancel retiring restores the saved groups, so Required groups can reinstall the app.',
      related: ['remove-discovered', 'install-results', 'group-changes'],
      troubleshoot: [{ problem: 'There are no groups', action: 'The review offers Start retiring. There are no assigned groups to uninstall from.' }, { problem: 'Cancel retiring is refused', action: 'Groups changed since retirement started. Review and restore the intended assignments in Intune.' }, { problem: 'The app was installed another way', action: 'Use the discovered-app removal guidance.', guide: 'remove-discovered' }],
@@ -2751,16 +3149,39 @@ index dc2aeba49..7e45ce2d6 100644
    },
    {
      id: 'app-activity', category: 'devices', title: 'Trace what changed for an app',
-@@ -277,7 +276,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+@@ -270,37 +269,37 @@ export const HELP_GUIDES: HelpGuide[] = [
+     referenceGroups: [reference('Refresh and compare assignment evidence', [0, 1, 2]), reference('Acknowledge changes and understand limits', [3, 4, 5])],
+   },
+   {
+-    id: 'discovered', category: 'devices', title: 'Manage an app found on devices',
++    id: 'discovered', category: 'devices', title: 'Manage an app found on computers',
+     summary: 'Match a discovered app, add it to the Deployment list and deploy a managed copy.', keywords: ['claim', 'matched', 'partial match', 'link package', 'unmanaged', 'discovered'],
+-    start: discovered, before: ['Claimed means queued in the Deployment list, not installed or managed on devices.'],
++    start: discovered, before: ['Claimed means queued in the Deployment list, not installed or managed on computers.'],
+     steps: [
        step('Check the match', 'In Discovered apps, check the name, publisher and match status. For Partial match, use Link package to choose the correct package.', 'discovered', 'Link package', 'The app is linked to the intended package.'),
-       step('Add it to the list', 'For a Matched app, press Claim, then Add to Deployment list in Claim discovered app.', 'discovered', 'Claim', 'The row is Claimed, but devices have not changed.'),
+-      step('Add it to the list', 'For a Matched app, press Claim, then Add to Deployment list in Claim discovered app.', 'discovered', 'Claim', 'The row is Claimed, but devices have not changed.'),
++      step('Add it to the list', 'For a Matched app, press Claim, then Add to Deployment list in Claim discovered app.', 'discovered', 'Claim', 'The row is Claimed, but computers have not changed.'),
        step('Choose groups and deploy', 'Open the Deployment list, choose Required or Available groups, then Deploy to Intune and review the deployment.', 'deployment-list', 'Who gets it', 'Intune receives a managed copy with the intended assignments.'),
 -      step('Verify management', 'After the deployment finishes, find the app in Inventory and check its update rule in App updates.', 'inventory', 'Inventory', 'Future versions and installation results can be followed in the app.'),
 +      step('Verify management', 'After the deployment finishes, find the app in Inventory and check its update rule in App updates.', 'inventory', 'Inventory', 'Future versions and install results can be followed in the app.'),
      ],
      success: 'A claimed app has been deployed to the intended groups and appears in Inventory and App updates.',
-     caution: 'Claiming alone changes no devices. Required groups install IntuneGet’s copy even where an unmanaged copy already exists.',
-@@ -294,7 +293,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+-    caution: 'Claiming alone changes no devices. Required groups install IntuneGet’s copy even where an unmanaged copy already exists.',
++    caution: 'Claiming alone changes no computers. Required groups install IntuneGet’s copy even where an unmanaged copy already exists.',
+     related: ['deploying', 'remove-discovered', 'updates'],
+     troubleshoot: [{ problem: 'No match is available', action: 'Use Link package if you know the correct package, or add a Custom app.' }, { problem: 'The app is from Microsoft Store', action: 'Add it in Intune as a Microsoft Store app; IntuneGet cannot deploy that Store package.' }, { problem: 'Claim all matched apps adds no groups', action: 'Choose groups for each queued app before deploying.' }],
+     referenceGroups: [reference('Understand discovery and claiming', [0, 1, 2, 3, 4, 5]), reference('Deploy a managed copy', [6, 7, 8, 9]), reference('Resolve matches or choose removal', [10, 11, 12, 13])],
+   },
+   {
+-    id: 'remove-discovered', category: 'troubleshoot', title: 'Remove an app found on devices',
++    id: 'remove-discovered', category: 'troubleshoot', title: 'Remove an app found on computers',
+     summary: 'Choose the supported removal path and verify results where that removal is actually managed.', keywords: ['remove', 'unmanaged uninstall', 'script', 'platform script', 'MSI', 'vendor removal'],
+-    start: discovered, before: ['Review the exact displayed program name and the device groups that should lose it.', 'A script deployed separately in Intune is tracked there, not by IntuneGet app-deployment status.'],
++    start: discovered, before: ['Review the exact displayed program name and the groups that should lose it.', 'A script deployed separately in Intune is tracked there, not by IntuneGet app-deployment status.'],
+     steps: [
+-      step('Check the supported path', 'In Discovered apps, press Remove or Remove from devices. If How to remove appears, read the reason and use the indicated Intune or vendor path.', 'discovered', 'Remove from devices', 'The dialog explains whether this app can use packaged removal.'),
++      step('Check the supported path', 'In Discovered apps, press Remove or Remove from computers. If How to remove appears, read the reason and use the indicated Intune or vendor path.', 'discovered', 'Remove from computers', 'The dialog explains whether this app can use packaged removal.'),
        step('Review what gets removed', 'For supported removal, read What gets removed. Choose All devices or Groups I choose in the Deployment list, then acknowledge the uninstall.', 'discovered', 'What gets removed', 'The exact program and intended removal scope are explicit.'),
        step('Queue and review removal', 'For packaged removal, press Add removal to Deployment list. Review the Removal badge and ensure every chosen group is Uninstall.', 'deployment-list', 'Removal', 'The list contains an uninstall-only deployment, not a normal app install.'),
        step('Deploy the chosen method', 'Press Deploy to Intune. Review the exact removal, groups and Uninstall assignments before deploying it.', 'deployment-list', 'Deploy to Intune', 'The removal is submitted through its actual management method.'),
@@ -2768,7 +3189,15 @@ index dc2aeba49..7e45ce2d6 100644
 +      step('Verify the matching results', 'Check Removing this app in Inventory, then verify that the app is gone on a pilot computer.', 'inventory', 'Removing this app', 'The uninstall-only copy has received install results to review.'),
        step('Finish packaged cleanup', 'When packaged-removal results are reviewed, use Delete from Intune to remove the uninstall-only copy. Script cleanup is managed separately in Intune.', 'inventory', 'Delete from Intune', 'The temporary removal configuration can be cleaned up deliberately.'),
      ],
-     success: 'The uninstall-only copy has received results, and removal has been verified on the intended devices.',
+-    success: 'The uninstall-only copy has received results, and removal has been verified on the intended devices.',
++    success: 'The uninstall-only copy has received results, and removal has been verified on the intended computers.',
+     caution: 'These steps are for matched machine-wide EXE apps. If How to remove gives an alternative path, stop here. A deployed app package does not prove a separate removal script ran or removed anything.',
+     related: ['retire', 'discovered', 'support'],
+-    troubleshoot: [{ problem: 'I already deployed a separate PowerShell script', action: 'For a platform script, inspect execution results in Intune. Verify the app is absent on the intended devices; a successful script exit alone is not removal evidence.' }, { problem: 'The app uses MSI, MSIX, portable or ZIP', action: 'Use the dialog’s Intune script or vendor guidance. Do not infer script success from IntuneGet Deployments.' }, { problem: 'The app is already claimed', action: 'Remove it from the Deployment list before choosing removal.' }, { problem: 'You need to stop packaged removal', action: 'Delete the uninstall-only Intune copy. Devices already uninstalled do not get the app back.' }],
++    troubleshoot: [{ problem: 'I already deployed a separate PowerShell script', action: 'For a platform script, inspect execution results in Intune. Verify the app is absent on the intended computers; a successful script exit alone is not removal evidence.' }, { problem: 'The app uses MSI, MSIX, portable or ZIP', action: 'Use the dialog’s Intune script or vendor guidance. Do not infer script success from IntuneGet Deployments.' }, { problem: 'The app is already claimed', action: 'Remove it from the Deployment list before choosing removal.' }, { problem: 'You need to stop packaged removal', action: 'Delete the uninstall-only Intune copy. Computers that already uninstalled it do not get the app back.' }],
+     referenceGroups: [reference('Eligibility and alternative methods', [0, 1, 2, 3, 4, 5, 6]), reference('Exact program and removal scope', [7, 8, 9, 10]), reference('Uninstall-only deployment review', [11, 12, 13, 14]), reference('Results, holds and cleanup', [15, 16, 17, 18])],
+   },
+   {
 @@ -319,18 +318,19 @@ export const HELP_GUIDES: HelpGuide[] = [
    },
    {
@@ -2917,6 +3346,39 @@ index 7ccda17a9..39321fca2 100644
 +export function previousCopyTitle(copy: Pick<PreviousCopy, 'kept'>): string {
 +  return copy.kept ? 'Kept for review' : 'Previous copy';
 +}
+diff --git a/lib/hrm/removal.ts b/lib/hrm/removal.ts
+index f7ebe4106..65ad91dea 100644
+--- a/lib/hrm/removal.ts
++++ b/lib/hrm/removal.ts
+@@ -1,5 +1,5 @@
+ /**
+- * HRM patch 0040: remove an app found on devices (Discovered apps → Remove from devices).
++ * HRM patch 0040: remove an app found on computers (Discovered apps → Remove from computers).
+  * Browser-safe helpers shared by the page, the Deployment list and the server.
+  *
+  * IntuneGet normally detects its apps by a registry marker that only its own installer writes,
+@@ -23,8 +23,8 @@ export const REMOVAL_SUFFIX = ' (uninstall only)';
+ export const REMOVAL_SCRIPT_HEADER = '# IntuneGet removal detection (HRM patch 0040)';
+ 
+ export const REMOVAL_LABELS = {
+-  remove: 'Remove from devices',
+-  confirm: 'I understand this uninstalls the app from every device in the groups I choose',
++  remove: 'Remove from computers',
++  confirm: 'I understand this uninstalls the app from every computer in the groups I choose',
+   add: 'Add removal to Deployment list',
+   badge: 'Removal',
+   claimed: 'Claimed',
+@@ -50,8 +50,8 @@ export function validRemovalName(name: unknown): boolean {
+  */
+ export function removalBlockReason(installer: { type?: string | null; nestedInstallerType?: string | null; scope?: string | null }): string | null {
+   const type = (installer.nestedInstallerType || installer.type || '').toLowerCase();
+-  if (type === 'msi' || type === 'wix') return 'This app uses an MSI installer. IntuneGet can only uninstall the exact MSI version it deploys, so older copies on devices would stay.';
+-  if (type === 'msix' || type === 'appx') return 'This app is an MSIX package, which IntuneGet can\'t remove from devices it didn\'t install it on.';
++  if (type === 'msi' || type === 'wix') return 'This app uses an MSI installer. IntuneGet can only uninstall the exact MSI version it deploys, so older copies on computers would stay.';
++  if (type === 'msix' || type === 'appx') return 'This app is an MSIX package, which IntuneGet can\'t remove from computers it didn\'t install it on.';
+   if (type === 'portable' || (installer.type || '').toLowerCase() === 'zip') return 'This app has no installer that Windows lists under installed programs, so there is nothing for Intune to uninstall.';
+   if ((installer.scope || '').toLowerCase() === 'user') return 'This package installs for one user at a time. Intune uninstalls as the system account, which can\'t see one user\'s programs.';
+   if (!['exe', 'inno', 'nullsoft', 'burn'].includes(type)) return 'IntuneGet can\'t remove apps with this kind of installer.';
 diff --git a/lib/hrm/status-report.ts b/lib/hrm/status-report.ts
 index 719afbc29..6ed6d256a 100644
 --- a/lib/hrm/status-report.ts

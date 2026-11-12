@@ -14,7 +14,10 @@
   deadline's button is now Reload dates. Status and error messages are shorter and never show raw
   error text. The IT dashboard report adds a "Limit IntuneGet sign-in to IT-Admins" to-do until
   the IT admins group is set. Home's Intune self-test reason now names the failed read only.
-  David must reinstall `intuneget-status` on the VM (CLAUDE.md, "VM setup"). Help matches.
+  David must reinstall `intuneget-status` on the VM (CLAUDE.md, "VM setup"). Remove and Retire
+  screens say computers instead of devices (Remove from computers), and the deploy review says
+  Updates: Auto-update. Help adds that groups carried to a new copy don't keep their availability
+  date, deadline or restart grace; set them again with Availability and deadline. Help matches.
 
 - Version sync after deploy. When a deploy finishes, the server corrects App updates straight
   away. If that fails after 2 or more deploys in 24 hours, Home's Server status shows Version
