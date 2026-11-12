@@ -2150,7 +2150,7 @@ index 11a399150..b29d92ba9 100644
    });
    return { ...counts, recentActivity, ...(includeUsers ? { perUser: [...users.values()].sort((a, b) => a.userEmail.localeCompare(b.userEmail)) } : {}) };
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
-index 276beabc8..3ccb0cb6b 100644
+index 276beabc8..d80e735b5 100644
 --- a/lib/hrm/__tests__/help-content.test.ts
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -43,7 +43,9 @@ describe('help content', () => {
@@ -2169,9 +2169,9 @@ index 276beabc8..3ccb0cb6b 100644
      for (const fact of ['Check installs now', 'once every 5 minutes', 'failed attempt also starts the 5 minutes', 'never sends a Teams alert', 'newest copy', 'no install results until the next update check']) expect(text('install-results')).toContain(fact);
      expect(text('install-results')).not.toContain('when the number of failed devices goes up');
 -    for (const fact of ['Previous copy tag', "Removed automatically after 7 days if it's safe", 'Kept:', 'left out of the copies listed at the top of Inventory']) expect(text('old-copies')).toContain(fact);
-+    for (const fact of ['Previous copy tag', 'Newer copy v[version] deployed [date]', 'IntuneGet removes it 7 days later if v[version] replaced it and installs well', 'Kept for review', 'left out of the copies listed at the top of Inventory']) expect(text('old-copies')).toContain(fact);
++    for (const fact of ['Previous copy tag', 'Newer copy v[version] deployed [date]', 'IntuneGet removes it 7 days after that if the newest copy installs well and has its groups', 'Kept for review', 'left out of the copies listed at the top of Inventory']) expect(text('old-copies')).toContain(fact);
 +    // HRM patch 0058: the old wording is gone, a deliberate second copy is never removed, and Help says when a held copy goes.
-+    for (const old of ['Kept:', 'Removed automatically after 7 days', 'Replaced by', 'Press View']) expect(text('old-copies')).not.toContain(old);
++    for (const old of ['Kept:', 'Removed automatically after 7 days', 'replaced it and installs well', 'With several newer copies', 'Replaced by', 'Press View']) expect(text('old-copies')).not.toContain(old);
 +    for (const fact of ['Cleanup never removes it', 'after a computer installs the newest copy', 'once failures are 1 in 10 or fewer']) expect(text('old-copies')).toContain(fact);
      expect(text('deploying')).toContain('Previous copies waiting for automatic removal are left out');
      expect(text('updating')).toContain('press Check installs now');
@@ -2307,7 +2307,7 @@ index 4b0c569e6..6dd33b54a 100644
  
    it('waits while a deployment, pilot or retirement of the app is under way', async () => {
 diff --git a/lib/hrm/__tests__/previous-copies.test.ts b/lib/hrm/__tests__/previous-copies.test.ts
-index a2d030d5d..da8d3f4b5 100644
+index a2d030d5d..578d477ad 100644
 --- a/lib/hrm/__tests__/previous-copies.test.ts
 +++ b/lib/hrm/__tests__/previous-copies.test.ts
 @@ -2,7 +2,7 @@
@@ -2337,7 +2337,7 @@ index a2d030d5d..da8d3f4b5 100644
      const [copy] = findPreviousCopies([row('2', B, '2.0', '2026-11-01T10:00:00Z'), row('1', A, '1.0', '2026-10-01T10:00:00Z')], 'tenant-one', options);
      expect(waitingForCleanup(copy)).toBe(true);
 -    expect(previousCopyText(copy)[2]).toBe("Removed automatically after 7 days if it's safe.");
-+    expect(previousCopyText(copy)[2]).toBe('IntuneGet removes it 7 days later if v2.0 replaced it and installs well.');
++    expect(previousCopyText(copy)[2]).toBe('IntuneGet removes it 7 days after that if the newest copy installs well and has its groups.');
    });
  });
 diff --git a/lib/hrm/__tests__/status-report.test.ts b/lib/hrm/__tests__/status-report.test.ts
@@ -2407,7 +2407,7 @@ index 4a5db668c..ed76e5448 100644
  
    const row: ReviewRow = { id: item.id, title: `${item.displayName}${version}`, action, groups: takesCurrentGroups ? 'The groups the current copy has in Intune' : describeAssignments(assignments), warnings };
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
-index 93c7b017d..98806be91 100644
+index 93c7b017d..2198022c9 100644
 --- a/lib/hrm/help-content.ts
 +++ b/lib/hrm/help-content.ts
 @@ -17,15 +17,16 @@ export const HELP_SECTIONS: HelpSection[] = [
@@ -2589,7 +2589,7 @@ index 93c7b017d..98806be91 100644
 -      'If cleanup is keeping the copy, its details say Kept: and the reason instead. Home lists the same copy under Needs attention.',
 -      'If cleanup never removes the app\'s copies, such as startup Beta apps or with cleanup turned off, the details say only which version replaced it.',
 +      'In Inventory, an older copy of an app IntuneGet deployed shows a Previous copy tag. Its details say Newer copy v[version] deployed [date].',
-+      'They also say IntuneGet removes it 7 days later if v[version] replaced it and installs well. With several newer copies, the newest one must install well.',
++      'They also say IntuneGet removes it 7 days after that if the newest copy installs well and has its groups.',
 +      'If cleanup is holding the copy, the tag and the details say Kept for review, with a warning icon, and give the reason. Home lists the same copy under Needs attention.',
 +      'If cleanup never removes the app\'s copies, such as startup Beta apps or with cleanup turned off, the details say only which newer copy was deployed, and when.',
 +      'A second copy deployed on purpose can also show Previous copy. Cleanup never removes it, because the newer copy didn\'t replace it. To keep only one, use Keep this copy, then Delete from Intune.',
@@ -3347,7 +3347,7 @@ index e0cc30040..de03790c4 100644
            }
            note(newest.tenantId, newest.wingetId, c.app.app, [], true);
 diff --git a/lib/hrm/previous-copy-text.ts b/lib/hrm/previous-copy-text.ts
-index 7ccda17a9..39321fca2 100644
+index 7ccda17a9..70532aa74 100644
 --- a/lib/hrm/previous-copy-text.ts
 +++ b/lib/hrm/previous-copy-text.ts
 @@ -22,10 +22,20 @@ export function waitingForCleanup(copy: Pick<PreviousCopy, 'removeAfter' | 'kept
@@ -3367,7 +3367,7 @@ index 7ccda17a9..39321fca2 100644
 +  const newer = `v${copy.replacedByVersion}`;
 +  const lines = [previousCopyTitle(copy), `Newer copy ${newer} deployed ${day(copy.replacedAt)}.`];
 +  if (copy.kept) lines.push(copy.kept);
-+  else if (copy.removeAfter) lines.push(`IntuneGet removes it 7 days later if ${newer} replaced it and installs well.`);
++  else if (copy.removeAfter) lines.push('IntuneGet removes it 7 days after that if the newest copy installs well and has its groups.');
    return lines;
  }
 +
