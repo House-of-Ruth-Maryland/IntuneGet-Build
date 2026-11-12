@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Clearer menu wording. App updates' step labels now read Step 1: Intune and Step 2: Computers.
+  The deploy panel section Install behaviour is now Installation timing. The Claim all button in
+  Discovered apps says Claim 3 apps instead of Claim 3 Apps. In Settings, General, Cart behavior is
+  now Deployment list, and the Carry over assignments and Supersede previous version on update
+  switches, which change nothing on this server, are replaced by one line linking to App updates,
+  where update behavior is set. The unused Account page now opens Home. Home's All in tenant view
+  says Activity for everyone in your tenant. Help matches (patch 0051).
+
 - Deploy new version for custom and GitHub-release apps now replaces the previous copy the same way
   Update does: the new copy takes the groups the previous copy has in Intune when it deploys, and
   the previous copy is left with none. The review marks it Replaces current copy. Old-copy cleanup
