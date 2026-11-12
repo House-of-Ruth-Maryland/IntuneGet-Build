@@ -87,7 +87,8 @@ Server status card). No parameters.
     { "name": "tunnelUpdate", "state": "ok", "checkedAt": "2026-11-03T00:00:10.000Z" },
     { "name": "intuneReads", "state": "ok", "checkedAt": "2026-11-03T07:30:00.000Z" },
     { "name": "intuneSelfTest", "state": "failed", "checkedAt": "2026-11-03T11:15:00.000Z" },
-    { "name": "scheduledUpdates", "state": "unknown", "checkedAt": null }
+    { "name": "scheduledUpdates", "state": "unknown", "checkedAt": null },
+    { "name": "versionSync", "state": "ok", "checkedAt": "2026-11-03T10:40:00.000Z" }
   ]
 }
 ```
@@ -98,6 +99,8 @@ Server status card). No parameters.
 - `checks[].state`: `ok`, `warning` (disk only), `failed` or `unknown` (never run or not set up).
   `offsiteBackup` is left out on servers without off-site backups. A check's reason text is never
   sent.
+- `versionSync` (patch 0057): `failed` when App updates wasn't corrected after 2 or more deploys in
+  the last 24 hours, with no successful correction since. `checkedAt` is the newest recorded result.
 - `version` is only ever a release tag like `v0.8.5-hrm.12`, otherwise `null`.
 
 ### `GET /attention`

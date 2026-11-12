@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Version sync after deploy. When a deploy finishes, the server corrects App updates straight
+  away. If that fails after 2 or more deploys in 24 hours, Home's Server status shows Version
+  sync after deploy as Failing, and IT Ops gets a Teams alert (daily while it lasts, and when it
+  clears). The next deploy that corrects App updates clears it, and the 3:30 AM or 3:30 PM check
+  still fixes the rows. The IT dashboard report and the MCP server's status show it too. Only a
+  time, the app's WinGet ID and a short code are kept, never error text. David must reinstall
+  `intuneget-status` and `intuneget-watchdog` on the VM (CLAUDE.md, "VM setup"). Help matches
+  (patch 0057).
+
 - Only HRM's IT admins group can use IntuneGet. With the group set on the VM (CLAUDE.md, "Access
   to the app"), staff outside the group, or from another tenant, see No access to IntuneGet and
   are asked to contact HRM Support. Every staff API call refuses them too. Adding or removing

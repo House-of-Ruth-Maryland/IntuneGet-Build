@@ -2,8 +2,9 @@
 """Watchdog for HRM's IntuneGet VM. Run by intuneget-watchdog.timer every 5 minutes.
 
 Checks the app's health, the server status file written by intuneget-status
-(disk, last deploy, update-check and notification timers, the tunnel, and the
-Intune read checks the status script summarizes, patch 0032) and posts
+(disk, last deploy, update-check and notification timers, the tunnel, the
+Intune read checks the status script summarizes, patch 0032, and the version
+sync after deploy, patch 0057) and posts
 to the IT Ops Teams channel only when something changes: once when a problem is
 confirmed (seen on two checks in a row), once a day while it lasts, and once
 when it clears. It stays quiet while a deploy is running.
@@ -52,6 +53,7 @@ LABELS = {
     'intuneReads': 'Install results or app activity could not be read from Intune',
     'intuneSelfTest': 'The daily Intune self-test failed or is late',
     'scheduledUpdates': 'The hourly scheduled update run failed or is late',
+    'versionSync': "App updates wasn't corrected after 2 or more recent deploys",
 }
 
 
@@ -136,7 +138,7 @@ def find_problems(at_now):
         at = parse_time(offsite.get('at'))
         if offsite.get('result') != 'success' or at is None or (at_now - at).total_seconds() > OFFSITE_LATE_HOURS * 3600:
             problems['offsiteBackup'] = f"Last result {offsite.get('result')} at {offsite.get('at')}."
-    # Patch 0032: the status script already decided these; a missing entry means not set up yet.
+    # Patches 0032 and 0057: the status script already decided these; a missing entry means not set up yet.
     for key, check in (status.get('checks') or {}).items():
         if key in LABELS and isinstance(check, dict) and check.get('ok') is False:
             problems[key] = check.get('detail') or 'Failed.'

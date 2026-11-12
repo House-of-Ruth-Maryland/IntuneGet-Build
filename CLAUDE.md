@@ -19,10 +19,11 @@ HRM IT notes.
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
 | `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day, scheduled update start hourly (patch 0030), optional startup Beta report collection hourly (patch 0044), Intune self-test daily at 7:15 AM New York (patch 0032). |
 | `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
-| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. Its `checks` section holds verdicts the app, watchdog and IT dashboard report all read as-is: Intune reads (install results or app activity failed at the last 2 update checks), the daily Intune self-test, the hourly scheduled-update run, and whether sign-in is limited to the IT admins group (patch 0056). |
+| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. Its `checks` section holds verdicts the app, watchdog and IT dashboard report all read as-is: Intune reads (install results or app activity failed at the last 2 update checks), the daily Intune self-test, the hourly scheduled-update run, and whether sign-in is limited to the IT admins group (patch 0056), and Version sync after deploy (patch 0057, read from the app's cron-authenticated `/api/cron/version-sync-status`). |
 | `deploy/intuneget-watchdog.py` | Every 5 minutes (installed as `/usr/local/sbin/intuneget-watchdog`, run by `intuneget-watchdog.timer`): checks the app's health and the status file and posts to IT Ops in Teams when a problem is confirmed, daily while it lasts, and when it clears. `intuneget-watchdog status` lists current problems; `intuneget-watchdog test` sends a test post. |
 | `deploy/intuneget-curated-refresh.sh` | Daily at 2:15 AM New York (installed as `/usr/local/sbin/intuneget-curated-refresh`, run by `intuneget-curated-refresh.timer`): downloads upstream's latest signed curated catalog into the app's data volume for patch 0011. |
 | `deploy/intuneget-backup.py` | Nightly at 1:30 AM New York (installed as `/usr/local/sbin/intuneget-backup`, run by `intuneget-backup.timer`): copies the SQLite database while the app runs, checks it, compresses it and uploads it to the Azure Storage container in `BACKUP_CONTAINER_URL` as the VM's managed identity. `intuneget-backup status` shows the last result. |
+| `deploy/tests/` | Python tests for the status script's `checks.versionSync` field and the watchdog's alerts (stub commands, temporary files). `scripts/check-app.sh full` runs them. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
 | `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: check Help (below), build `<tag>-hrm.<n>` and open the "Deploy" PR. |
 | `.github/workflows/tests.yml` | For code PR revisions: apply pinned patches, cache npm downloads, check Help and both app/packager types, then run the full regression suite once. Deploy-only PRs and description edits do not run the suite. Manual dispatch covers bot-created upgrade PRs. |
@@ -118,6 +119,9 @@ HRM IT notes.
   activity failing at 2 update checks in a row, the daily read-only Intune self-test
   (`/api/cron/intune-self-test`), and the hourly scheduled-update run. Graph changes without notice;
   when the self-test fails, compare the failing read with Microsoft's Graph changelog.
+- **Version sync after deploy** (patch 0057): a server alert when App updates wasn't corrected
+  after 2 or more deploys in 24 hours (patch 0049's step in the deploy callback). The app records
+  each result with a fixed code, never error text; the next successful correction clears it.
 - When auto-update turns itself off for an app after 3 failed updates in a row, every enabled webhook
   gets one "Auto-update turned off" message (installer-check blocks don't count).
 - **Server alerts** come from two places. The VM watchdog (`intuneget-watchdog`) posts through the

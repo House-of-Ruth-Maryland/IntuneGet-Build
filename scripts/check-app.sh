@@ -32,6 +32,8 @@ if [ "$mode" = related ]; then
   npm exec -- vitest related --run "$@"
 else
   node --test "$build_repo/scripts/check-help.test.mjs"
+  # VM status script and watchdog checks (stub commands only; patch 0057).
+  python3 -m unittest discover -s "$build_repo/deploy/tests"
   npm exec -- tsc --noEmit -p .
   (cd packager && npm exec -- tsc --noEmit -p .)
   npm test
