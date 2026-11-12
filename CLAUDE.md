@@ -287,6 +287,11 @@ line: older copies of the script can't read the two-line file and stop deploying
   and related links. Details belong in named collapsed groups, not new unstructured paragraphs. Fold its edits into the patch that changes the behaviour (or a Help-only patch), run
   `node scripts/check-help.mjs <patched tree> .`, and tick `- [x] Help and tooltips checked: <what
   changed>` in the PR description. The PR check and the build fail without them.
+- **Help is always updated by the `help-writer` agent, never by hand.** Don't edit
+  `lib/hrm/help-content.ts`, `lib/hrm/help-guides.ts`, Help illustrations, tooltips or hints directly;
+  give the change to `help-writer` and fold in what it writes. This applies to every session,
+  subagent and Orca worker: any task spec that changes a patch, a deploy script or a timer must tell
+  the worker to run `help-writer` and report what Help text it changed.
 
 ## Retire
 
