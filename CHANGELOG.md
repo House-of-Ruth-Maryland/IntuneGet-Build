@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- One word for each job. Deploy now always means sending an app or a new version to Intune: App
+  updates says Deploy new versions to Intune, the stat reads Deployed (7 days), and the Publishing
+  history tab is now Update history. On App updates, Automatic update setup is now Automatic
+  updates, the Automatic publishing card is now Update schedule (Edit schedule, Pause automatic
+  updates, Resume automatic updates) and the Device installation card is now Installation timing,
+  matching the deploy panel section that sets the same prompts and postponement. Inventory's date
+  panel, which sets availability, deadline and restart grace for a copy already in Intune, is now
+  Availability and deadline, with Reload from Intune and Save to Intune. The deploy panel explains
+  where each setting lives. Help, its illustrations and its search match, and Settings Help now
+  says plainly that this server has no update switches there (patch 0052).
+
 - Clearer menu wording. App updates' step labels now read Step 1: Intune and Step 2: Computers.
   The deploy panel section Install behaviour is now Installation timing. The Claim all button in
   Discovered apps says Claim 3 apps instead of Claim 3 Apps. In Settings, General, Cart behavior is
