@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Inventory explains old copies. A copy IntuneGet has replaced shows a Previous copy tag. Its
+  details say which version replaced it and when, and that it is removed automatically after 7
+  days if it's safe. If cleanup is keeping it, the details say Kept: and why. Previous copies
+  waiting for removal no longer also appear in the list of apps with more than one copy.
+- Check installs now. Install results in Inventory has a Check installs now button that reads the
+  newest copy's results from Intune straight away, instead of waiting for the 3:30 check. Each
+  app can be checked once every 5 minutes. It changes nothing in Intune and never sends a Teams
+  alert. Help matches (patch 0054).
+
 - Easier navigation. In Inventory, each app's details now list its actions under one Actions
   heading: Availability and deadline first, then Deploy new version or Find in App catalog, then
   Go back to previous version, with Retire app last. The refresh icon at the top is labelled

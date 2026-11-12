@@ -114,6 +114,8 @@ Use these exactly; sentence case, as the screen shows them.
 | device group, user group | device-based group |
 | Required, Available | Mandatory, Optional |
 | Teams alert, the IT Ops team, IT chat channel | Slack, notification email |
+| Previous copy (Inventory tag and note for a copy IntuneGet replaced) | old version, superseded copy, stale copy |
+| Check installs now (Install results button; "Check now" is the Group changes button) | Refresh results, Check now (for install results) |
 | Server status | health card |
 | the server | the VM, the container (Help is for staff, not the runbook) |
 | HRM Support (https://support.hruthmd.org) | contact IT, the helpdesk |
