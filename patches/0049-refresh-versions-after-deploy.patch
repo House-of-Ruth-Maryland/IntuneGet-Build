@@ -1,0 +1,1057 @@
+diff --git a/app/(app)/dashboard/uploads/page.test.ts b/app/(app)/dashboard/uploads/page.test.ts
+index e813ec603..5fae8f243 100644
+--- a/app/(app)/dashboard/uploads/page.test.ts
++++ b/app/(app)/dashboard/uploads/page.test.ts
+@@ -2,7 +2,8 @@
+ import { act,createElement,type ReactNode } from 'react';
+ import { createRoot,type Root } from 'react-dom/client';
+ import { beforeEach,afterEach,expect,it,vi } from 'vitest';
+-const state=vi.hoisted(()=>({jobs:[] as Record<string,unknown>[],getAccessToken:vi.fn().mockResolvedValue('fixture-token'),fetch:vi.fn()}));
++const state=vi.hoisted(()=>({jobs:[] as Record<string,unknown>[],getAccessToken:vi.fn().mockResolvedValue('fixture-token'),fetch:vi.fn(),invalidate:vi.fn(),queryClient:{} as {invalidateQueries?:unknown}}));
++vi.mock('@tanstack/react-query',()=>({useQueryClient:()=>{state.queryClient.invalidateQueries=state.invalidate;return state.queryClient;}}));
+ vi.mock('gt-next',()=>({T:({children}:{children:ReactNode})=>children,Var:({children}:{children:ReactNode})=>children}));
+ vi.mock('framer-motion', async () => {
+  const {createElement:h}=await import('react');
+@@ -31,7 +32,7 @@ let root:Root;
+ const job=(status:string,user='owner')=>({id:status+'-'+user,user_id:user,status,display_name:status+' example',winget_id:'Example.App',version:'1',publisher:'Example',architecture:'x64',installer_type:'msi',progress_percent:0,created_at:'2026-11-01T00:00:00Z',updated_at:'2026-11-01T00:00:00Z'});
+ const button=(label:string,within:ParentNode=document)=>[...within.querySelectorAll('button')].find(b=>b.textContent===label)!;
+ const render=async()=>{await act(async()=>root.render(createElement(UploadsPage)));};
+-beforeEach(()=>{state.jobs=[];state.fetch.mockReset();vi.stubGlobal('fetch',state.fetch);state.fetch.mockImplementation(async(url:string,init?:RequestInit)=>{
++beforeEach(()=>{state.jobs=[];state.fetch.mockReset();state.invalidate.mockReset();vi.stubGlobal('fetch',state.fetch);state.fetch.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(url==='/api/package/cancel'){const body=JSON.parse(String(init?.body));state.jobs=state.jobs.filter(j=>j.id!==body.jobId);return Response.json({success:true,archived:true});}
+  if(url==='/api/package/clear-history'){const body=JSON.parse(String(init?.body));state.jobs=state.jobs.filter(j=>j.user_id!=='owner'||!body.statuses.includes(j.status));return Response.json({success:true,archivedCount:1});}
+  return Response.json({jobs:state.jobs});
+@@ -86,3 +87,15 @@ it('keeps an unconfirmed cancellation active and not clearable',async()=>{
+  await act(async()=>{state.jobs=[job('cancelled')];confirm(Response.json({success:true}));});
+  expect(button('Dismiss')).toBeDefined();
+ });
++// HRM patch 0049
++it('refreshes App updates, Home and Inventory when a watched job finishes',async()=>{
++ state.jobs=[job('queued')];await render();
++ expect(state.invalidate).not.toHaveBeenCalled();
++ state.jobs=[{...job('queued'),status:'deployed'}];
++ await act(async()=>button('Refresh').click());
++ const keys=state.invalidate.mock.calls.map(([options])=>options.queryKey);
++ expect(keys).toEqual(expect.arrayContaining([['availableUpdates'],['hrm','home'],['inventory','apps']]));
++ state.invalidate.mockReset();
++ await act(async()=>button('Refresh').click());
++ expect(state.invalidate).not.toHaveBeenCalled();
++});
+diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
+index d42c38d3e..d8772b133 100644
+--- a/app/(app)/dashboard/uploads/page.tsx
++++ b/app/(app)/dashboard/uploads/page.tsx
+@@ -1,6 +1,7 @@
+ 'use client';
+ 
+-import { DEPLOYMENT_FILTERS, deploymentFilter, deploymentCounts, clearableDeploymentStatuses, matchesDeploymentFilter, isActiveDeployment, isTerminalDeployment, type DeploymentFilter } from '@/lib/hrm/deployment-status';
++import { DEPLOYMENT_FILTERS, deploymentFilter, deploymentCounts, clearableDeploymentStatuses, matchesDeploymentFilter, isActiveDeployment, isTerminalDeployment, hasNewlyFinishedDeployment, DEPLOYMENT_FINISHED_QUERY_KEYS, type DeploymentFilter } from '@/lib/hrm/deployment-status';
++import { useQueryClient } from '@tanstack/react-query';
+ import { isNewerVersion } from '@/lib/hrm/new-version';
+ import { describeAssignments } from '@/lib/hrm/deploy-review';
+ import { useState, useEffect, useCallback, useRef } from 'react';
+@@ -134,6 +135,9 @@ export default function UploadsPage() {
+   const [viewScope, setViewScope] = useState<'mine' | 'tenant'>('mine');
+ 
+   const jobsRequest = useRef<AbortController | null>(null);
++  // HRM patch 0049: when a watched job finishes, refresh App updates, Home and Inventory straight away.
++  const queryClient = useQueryClient();
++  const lastJobs = useRef<PackagingJob[]>([]);
+   useEffect(() => () => { jobsRequest.current?.abort(); jobsRequest.current = null; }, [viewScope, isMspUser, selectedTenantId, user?.id, user?.tenantId]);
+ 
+   const fetchJobs = useCallback(async (showRefreshing = false) => {
+@@ -182,7 +186,12 @@ export default function UploadsPage() {
+ 
+       const data = await response.json();
+       if (controller.signal.aborted) return;
+-      setJobs(data.jobs || []);
++      const nextJobs: PackagingJob[] = data.jobs || [];
++      if (hasNewlyFinishedDeployment(lastJobs.current, nextJobs)) {
++        for (const queryKey of DEPLOYMENT_FINISHED_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [...queryKey] });
++      }
++      lastJobs.current = nextJobs;
++      setJobs(nextJobs);
+       setError(null);
+       setSessionExpired(false);
+     } catch (err) {
+@@ -196,7 +205,7 @@ export default function UploadsPage() {
+         setIsRefreshing(false);
+       }
+     }
+-  }, [user?.id, getAccessToken, viewScope, isMspUser, selectedTenantId]);
++  }, [user?.id, getAccessToken, viewScope, isMspUser, selectedTenantId, queryClient]);
+ 
+   // Initial load
+   useEffect(() => {
+diff --git a/app/api/package/callback/route.ts b/app/api/package/callback/route.ts
+index 07fc07545..8021ca267 100644
+--- a/app/api/package/callback/route.ts
++++ b/app/api/package/callback/route.ts
+@@ -199,6 +199,23 @@ export async function POST(request: NextRequest) {
+         console.error(`[Callback] Failed to create upload history for ${data.jobId}:`, historyError);
+       }
+ 
++      // HRM patch 0049: App updates, Home and the sidebar badge read the detected updates, which the
++      // update check only rebuilds at 3:30. Correct them now that the new copy is deployed.
++      if (currentJob.tenant_id) {
++        try {
++          await db.updateCheckResults.syncDeployedVersion({
++            userId: currentJob.user_id,
++            tenantId: currentJob.tenant_id,
++            wingetId: currentJob.winget_id,
++            intuneAppId: data.intuneAppId,
++            version: currentJob.version,
++            displayName: currentJob.display_name,
++          });
++        } catch (syncError) {
++          console.error(`[Callback] Failed to refresh detected updates for ${data.jobId}:`, syncError);
++        }
++      }
++
+       // Materialize an update policy chosen in the cart, now that the
+       // upload_history row exists to anchor original_upload_history_id.
+       const chosenPolicy = parseCartUpdatePolicy(currentJob.package_config);
+diff --git a/app/api/package/callback/route.webhooks.test.ts b/app/api/package/callback/route.webhooks.test.ts
+index a5f117723..1c358dc80 100644
+--- a/app/api/package/callback/route.webhooks.test.ts
++++ b/app/api/package/callback/route.webhooks.test.ts
+@@ -1,9 +1,9 @@
+ import { NextRequest } from 'next/server';
+ import { beforeEach, describe, expect, it, vi } from 'vitest';
+ 
+-const mocks = vi.hoisted(() => ({ getById: vi.fn(), update: vi.fn(), notify: vi.fn() }));
++const mocks = vi.hoisted(() => ({ getById: vi.fn(), update: vi.fn(), notify: vi.fn(), syncDeployed: vi.fn() }));
+ vi.mock('@/lib/db', () => ({
+-  getDatabase: () => ({ jobs: { getById: mocks.getById, update: mocks.update }, uploadHistory: { create: vi.fn().mockResolvedValue({}) } }),
++  getDatabase: () => ({ jobs: { getById: mocks.getById, update: mocks.update }, uploadHistory: { create: vi.fn().mockResolvedValue({}) }, updateCheckResults: { syncDeployedVersion: mocks.syncDeployed } }),
+ }));
+ vi.mock('@/lib/callback-signature', () => ({ verifyCallbackSignature: () => true }));
+ vi.mock('@/lib/msp/batch-orchestrator', () => ({ onJobCompleted: vi.fn().mockResolvedValue(undefined) }));
+@@ -24,6 +24,7 @@ beforeEach(() => {
+   mocks.getById.mockResolvedValue({ id: JOB_ID, status: 'uploading', updated_at: '2026-10-24T20:00:00.000Z', package_config: null });
+   mocks.update.mockImplementation(async (_id: string, data: Record<string, unknown>) => ({ id: JOB_ID, ...data }));
+   mocks.notify.mockResolvedValue({ webhooksSent: 1, errors: [] });
++  mocks.syncDeployed.mockResolvedValue({ removed: 1, updated: 0 });
+ });
+ 
+ describe('package callback deployment webhooks', () => {
+@@ -64,3 +65,32 @@ describe('package callback deployment webhooks', () => {
+     errorLog.mockRestore();
+   });
+ });
++
++// HRM patch 0049: a deployed job corrects the detected updates straight away.
++describe('package callback detected updates', () => {
++  const job = { id: JOB_ID, status: 'uploading', updated_at: '2026-10-24T20:00:00.000Z', package_config: null, user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', version: '2.0.0', display_name: 'Vendor App' };
++
++  it('syncs the new copy and version for a deployed job', async () => {
++    mocks.getById.mockResolvedValue(job);
++    await POST(callback({ status: 'deployed', intuneAppId: 'app-2' }));
++    expect(mocks.syncDeployed).toHaveBeenCalledWith({ userId: 'u1', tenantId: 't1', wingetId: 'Vendor.App', intuneAppId: 'app-2', version: '2.0.0', displayName: 'Vendor App' });
++  });
++
++  it('does not sync for failed or repeated callbacks', async () => {
++    mocks.getById.mockResolvedValue(job);
++    await POST(callback({ status: 'failed', message: 'Upload failed' }));
++    mocks.getById.mockResolvedValue({ ...job, status: 'deployed' });
++    await POST(callback({ status: 'deployed', intuneAppId: 'app-2' }));
++    expect(mocks.syncDeployed).not.toHaveBeenCalled();
++  });
++
++  it('still answers the workflow when the sync fails', async () => {
++    mocks.getById.mockResolvedValue(job);
++    mocks.syncDeployed.mockRejectedValue(new Error('locked'));
++    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
++    const response = await POST(callback({ status: 'deployed', intuneAppId: 'app-2' }));
++    expect(response.status).toBe(200);
++    expect(errorLog).toHaveBeenCalledWith(`[Callback] Failed to refresh detected updates for ${JOB_ID}:`, expect.any(Error));
++    errorLog.mockRestore();
++  });
++});
+diff --git a/app/api/updates/available/route.sqlite.test.ts b/app/api/updates/available/route.sqlite.test.ts
+index bae1cdc71..80d69a8ce 100644
+--- a/app/api/updates/available/route.sqlite.test.ts
++++ b/app/api/updates/available/route.sqlite.test.ts
+@@ -108,6 +108,28 @@ describe('available updates route in SQLite mode', () => {
+     expect(restored.updates.map((u: { winget_id: string }) => u.winget_id).sort()).toEqual(['Vendor.App', 'Vendor.Notify']);
+   });
+ 
++  // HRM patch 0049: a copy deployed after the row was written counts as the current version.
++  it('hides an app a teammate already updated and shows the newer current version', async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    await seedResult();
++    await sqliteDb.updateCheckResults.upsert({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.Partial', intune_app_id: 'app-4', display_name: 'Partial App', current_version: '1.0.0', latest_version: '3.0.0', is_critical: true, updated_at: '2026-01-01T00:00:00.000Z' });
++    await sqliteDb.uploadHistory.create({ user_id: 'u2', intune_tenant_id: 't1', winget_id: 'Vendor.App', version: '1.1.0', display_name: 'Vendor App', intune_app_id: 'app-1b', deployed_at: new Date(Date.now() + 60_000).toISOString() });
++    await sqliteDb.uploadHistory.create({ user_id: 'u2', intune_tenant_id: 't1', winget_id: 'Vendor.Partial', version: '2.0.0', display_name: 'Partial App', intune_app_id: 'app-4b', deployed_at: '2026-01-02T00:00:00.000Z' });
++
++    const payload = await (await route.GET(getRequest())).json();
++    expect(payload.updates).toHaveLength(1);
++    expect(payload.updates[0]).toMatchObject({ winget_id: 'Vendor.Partial', current_version: '2.0.0', latest_version: '3.0.0' });
++  });
++
++  it('ignores a deployment older than the row, such as a newer copy the check skipped', async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    await sqliteDb.uploadHistory.create({ user_id: 'u1', intune_tenant_id: 't1', winget_id: 'Vendor.App', version: '1.1.0', display_name: 'Vendor App', intune_app_id: 'app-gone', deployed_at: '2026-01-01T00:00:00.000Z' });
++    await seedResult();
++
++    const payload = await (await route.GET(getRequest())).json();
++    expect(payload.updates[0]).toMatchObject({ winget_id: 'Vendor.App', current_version: '1.0.0' });
++  });
++
+   it('rejects an invalid action', async () => {
+     const response = await route.PATCH(patchRequest({ update_ids: ['x'], action: 'nope' }));
+     expect(response.status).toBe(400);
+diff --git a/app/api/updates/available/route.ts b/app/api/updates/available/route.ts
+index cbedada9f..5b05967cd 100644
+--- a/app/api/updates/available/route.ts
++++ b/app/api/updates/available/route.ts
+@@ -10,6 +10,7 @@ import { parseAccessToken } from '@/lib/auth-utils';
+ import { compareVersions } from '@/lib/version-compare';
+ import { shouldSkipUpdate } from '@/types/update-policies';
+ import type { AvailableUpdate } from '@/types/update-policies';
++import { effectiveCurrentVersion } from '@/lib/hrm/deployed-version-sync';
+ 
+ /**
+  * GET /api/updates/available
+@@ -35,11 +36,23 @@ export async function GET(request: NextRequest) {
+ 
+     if (isSqliteMode()) {
+       const db = getDatabase();
+-      const updates = await db.updateCheckResults.list(user.userId, {
++      const storedUpdates = await db.updateCheckResults.list(user.userId, {
+         tenantId: tenantId ?? undefined,
+         includeDismissed,
+         criticalOnly,
+       });
++      // HRM patch 0049: a copy deployed after the row was written (by anyone in the tenant) is the
++      // current version, so an app already updated never shows as "v1 -> v2" until the next check.
++      const newestDeployments = new Map<string, Awaited<ReturnType<typeof db.uploadHistory.getLatestInTenant>>>();
++      for (const update of storedUpdates) {
++        const key = `${update.tenant_id}|${update.winget_id}`;
++        if (newestDeployments.has(key)) continue;
++        newestDeployments.set(key, await db.uploadHistory.getLatestInTenant(update.tenant_id, update.winget_id).catch(() => null));
++      }
++      const updates = storedUpdates.map((update) => ({
++        ...update,
++        current_version: effectiveCurrentVersion(update, newestDeployments.get(`${update.tenant_id}|${update.winget_id}`) ?? null),
++      }));
+       const policies = await db.updatePolicies.list(user.userId, tenantId ?? undefined);
+       const policyMap = new Map(
+         policies.map((policy) => [
+diff --git a/app/api/updates/refresh/route.sqlite.test.ts b/app/api/updates/refresh/route.sqlite.test.ts
+index 7df066342..6c325b679 100644
+--- a/app/api/updates/refresh/route.sqlite.test.ts
++++ b/app/api/updates/refresh/route.sqlite.test.ts
+@@ -53,6 +53,19 @@ describe('updates refresh route in SQLite mode', () => {
+     expect(await response.json()).toMatchObject({ success: true, mode: 'sqlite', refreshedCount: 0, updateCount: 0 });
+   });
+ 
++  // HRM patch 0049: Refresh cleans every user's stale rows in the caller's tenant.
++  it("removes a teammate's row for an app that is no longer deployed", async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    await sqliteDb.updateCheckResults.upsert({ user_id: 'u2', tenant_id: 't1', winget_id: 'Gone.App', intune_app_id: 'gone-1', display_name: 'Gone App', current_version: '1.0.0', latest_version: '2.0.0' });
++    await sqliteDb.updatePolicies.upsert({ user_id: 'u2', tenant_id: 't1', winget_id: 'Gone.App', policy_type: 'notify' });
++    await sqliteDb.updateCheckResults.upsert({ user_id: 'u3', tenant_id: 't9', winget_id: 'Gone.App', intune_app_id: 'gone-9', display_name: 'Gone App', current_version: '1.0.0', latest_version: '2.0.0' });
++    await sqliteDb.updatePolicies.upsert({ user_id: 'u3', tenant_id: 't9', winget_id: 'Gone.App', policy_type: 'notify' });
++
++    expect((await route.POST(request())).status).toBe(200);
++    expect(await sqliteDb.updateCheckResults.list('u2', { includeDismissed: true })).toHaveLength(0);
++    expect(await sqliteDb.updateCheckResults.list('u3', { includeDismissed: true })).toHaveLength(1);
++  });
++
+   it('returns 401 without a token', async () => {
+     parseAccessTokenMock.mockResolvedValue(null);
+     const response = await route.POST(request());
+diff --git a/app/api/updates/refresh/route.ts b/app/api/updates/refresh/route.ts
+index b77f75ffe..a6b21f903 100644
+--- a/app/api/updates/refresh/route.ts
++++ b/app/api/updates/refresh/route.ts
+@@ -67,6 +67,8 @@ export async function POST(request: NextRequest) {
+       const { sqliteCustomReleases } = await import('@/lib/db/sqlite');
+       const summary = await runSqliteUpdateCheck(getDatabase(), {
+         userId: user.userId,
++        // HRM patch 0049: clean every user's stale rows in the caller's tenant, not only their own
++        tenantId: user.tenantId || undefined,
+         customReleases: { store: sqliteCustomReleases },
+         // HRM patch 0023: skip copies deleted in Intune
+         existingAppIds: listWin32AppIds,
+diff --git a/hooks/__tests__/use-updates.test.ts b/hooks/__tests__/use-updates.test.ts
+index f7d7e132e..de89d2717 100644
+--- a/hooks/__tests__/use-updates.test.ts
++++ b/hooks/__tests__/use-updates.test.ts
+@@ -1,4 +1,5 @@
+ import {
++  availableUpdatesRefetchInterval,
+   buildAvailableUpdatesQueryParams,
+   buildAutoUpdateHistoryQueryParams,
+   flattenAutoUpdateHistoryPages,
+@@ -6,6 +7,13 @@ import {
+ import type { AutoUpdateHistoryResponse } from '@/hooks/use-updates';
+ 
+ describe('use-updates helpers', () => {
++  // HRM patch 0049
++  it('polls available updates only while a deployment is running', () => {
++    expect(availableUpdatesRefetchInterval(2)).toBe(45000);
++    expect(availableUpdatesRefetchInterval(0)).toBe(false);
++    expect(availableUpdatesRefetchInterval(undefined)).toBe(false);
++  });
++
+   it('builds available updates query params', () => {
+     const params = buildAvailableUpdatesQueryParams({
+       tenantId: 'tenant-123',
+diff --git a/hooks/use-inventory.ts b/hooks/use-inventory.ts
+index 8725407f0..2a6326dcb 100644
+--- a/hooks/use-inventory.ts
++++ b/hooks/use-inventory.ts
+@@ -16,6 +16,8 @@ interface AppDetailsResponse {
+   app: IntuneAppWithAssignments;
+ }
+ 
++export const INVENTORY_STALE_MS = 60 * 1000;
++
+ export function useInventoryApps() {
+   const { getAccessToken, isAuthenticated, user } = useMicrosoftAuth();
+   const { isMspUser, selectedTenantId } = useMspOptional();
+@@ -44,7 +46,10 @@ export function useInventoryApps() {
+     },
+     getNextPageParam: lastPage => lastPage.nextPageToken || undefined,
+     enabled: isAuthenticated,
+-    staleTime: 5 * 60 * 1000,
++    // HRM patch 0049: a new copy appears within a minute of coming back to the tab. Paged Graph
++    // reads, so refresh on focus only, never on a timer.
++    staleTime: INVENTORY_STALE_MS,
++    refetchOnWindowFocus: true,
+   });
+   const { hasNextPage, isFetching, isError, fetchNextPage } = query;
+   useEffect(() => {
+diff --git a/hooks/use-updates.ts b/hooks/use-updates.ts
+index 8a64365b0..ad1634c3b 100644
+--- a/hooks/use-updates.ts
++++ b/hooks/use-updates.ts
+@@ -2,6 +2,7 @@
+ 
+ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+ import { useMicrosoftAuth } from './useMicrosoftAuth';
++import { useDashboardStats } from './useAnalytics';
+ import type {
+   AvailableUpdate,
+   AutoUpdateHistoryWithPolicy,
+@@ -48,11 +49,22 @@ export function buildAvailableUpdatesQueryParams(options: UseAvailableUpdatesOpt
+   return queryParams;
+ }
+ 
++/**
++ * HRM patch 0049: while one of the user's deployments is running, re-read App updates every 45
++ * seconds so the list, Home's count and the sidebar badge change soon after it finishes.
++ */
++export const AVAILABLE_UPDATES_ACTIVE_POLL_MS = 45 * 1000;
++export function availableUpdatesRefetchInterval(pendingJobs: number | undefined): number | false {
++  return (pendingJobs ?? 0) > 0 ? AVAILABLE_UPDATES_ACTIVE_POLL_MS : false;
++}
++
+ /**
+  * Hook to fetch available updates from the update management system
+  */
+ export function useAvailableUpdates(options: UseAvailableUpdatesOptions = {}) {
+   const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
++  // Shares the polled job counts the dashboard header already reads (same query key).
++  const { data: stats } = useDashboardStats();
+   const queryParams = buildAvailableUpdatesQueryParams(options);
+   const queryString = queryParams.toString();
+ 
+@@ -88,7 +100,9 @@ export function useAvailableUpdates(options: UseAvailableUpdatesOptions = {}) {
+     },
+     enabled: isAuthenticated,
+     staleTime: 1000 * 60, // 1 minute
+-    refetchOnWindowFocus: false,
++    // HRM patch 0049: coming back to the tab re-reads a stale list; poll only while a job runs.
++    refetchOnWindowFocus: true,
++    refetchInterval: availableUpdatesRefetchInterval(stats?.pending),
+   });
+ }
+ 
+diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
+index 026b14d5d..60bf4c463 100644
+--- a/lib/auto-update/__tests__/sqlite.test.ts
++++ b/lib/auto-update/__tests__/sqlite.test.ts
+@@ -238,6 +238,26 @@ describe('sqlite auto-update check', () => {
+     expect(await db.updateCheckResults.list('u2', { includeDismissed: true })).toHaveLength(1);
+   });
+ 
++  // HRM patch 0049: App updates' Refresh cleans a teammate's stale row in the same tenant.
++  it('cleans every user in the tenant when scoped to a tenant, and no other tenant', async () => {
++    const { db, runSqliteUpdateCheck } = await load();
++    for (const [userId, tenantId, appId] of [['u2', 't1', 'teammate-1'], ['u3', 't2', 'other-1']]) {
++      await db.uploadHistory.create({ user_id: userId, winget_id: 'Other.App', version: '2.0.0', display_name: 'Other App', intune_app_id: appId, intune_tenant_id: tenantId });
++      await db.updateCheckResults.upsert({ user_id: userId, tenant_id: tenantId, winget_id: 'Other.App', intune_app_id: appId, display_name: 'Other App', current_version: '1.0.0', latest_version: '2.0.0' });
++    }
++    await seedDeployment(db);
++    getAppsByWingetIdsMock.mockResolvedValue([
++      { winget_id: 'Vendor.App', name: 'Vendor App', latest_version: '1.0.0' },
++      { winget_id: 'Other.App', name: 'Other App', latest_version: '2.0.0' },
++    ]);
++
++    const summary = await runSqliteUpdateCheck(db, { userId: 'u1', tenantId: 't1' });
++
++    expect(summary.available).toBe(0);
++    expect(await db.updateCheckResults.list('u2', { includeDismissed: true })).toHaveLength(0);
++    expect(await db.updateCheckResults.list('u3', { includeDismissed: true })).toHaveLength(1);
++  });
++
+   it('records nothing when every deployed app is up to date', async () => {
+     const { db, runSqliteUpdateCheck } = await load();
+     await seedDeployment(db);
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index 0bc6f3260..a2ec93980 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -342,6 +342,9 @@ export async function runSqliteUpdateCheck(
+   db: DatabaseAdapter,
+   options?: {
+     userId?: string;
++    // HRM patch 0049: check every user's apps in this tenant (App updates' Refresh), so a teammate's
++    // stale row is cleaned too. Auto-update starts stay limited to userId's policies.
++    tenantId?: string;
+     now?: Date;
+     // HRM patch 0020: also look for new GitHub releases of custom apps
+     customReleases?: { store: CustomReleaseStore; fetchImpl?: typeof fetch };
+@@ -365,6 +368,9 @@ export async function runSqliteUpdateCheck(
+     byApp.set(appKey, copies);
+   }
+   const newest = new Map<string, UploadHistoryRecord>();
++  // HRM patch 0049: a tenant-wide check covers every user in that tenant; otherwise userId narrows it.
++  const inScope = (userId: string, tenantId: string | null | undefined) =>
++    options?.tenantId ? (tenantId ?? '') === options.tenantId : !options?.userId || userId === options.userId;
+ 
+   const existing = new Map<string, Set<string> | null>();
+   const isGoneFromIntune = (tenantId: string | null | undefined, intuneAppId: string | null | undefined) => {
+@@ -379,7 +385,7 @@ export async function runSqliteUpdateCheck(
+   for (const [appKey, copies] of byApp) {
+     const live = copies.find((d) => !isGoneFromIntune(d.intune_tenant_id, d.intune_app_id));
+     if (!live) continue;
+-    if (options?.userId && live.user_id !== options.userId) continue;
++    if (!inScope(live.user_id, live.intune_tenant_id)) continue;
+     newest.set(appKey, live);
+   }
+ 
+@@ -404,12 +410,12 @@ export async function runSqliteUpdateCheck(
+   for (const policy of policies) {
+     // A user-scoped check (the on-demand refresh) must never clean another
+     // user's scopes, so only their own policies seed the cleanup set.
+-    if (options?.userId && policy.user_id !== options.userId) continue;
++    if (!inScope(policy.user_id, policy.tenant_id)) continue;
+     allScopes.add(`${policy.user_id}|${policy.tenant_id}`);
+   }
+   // HRM patch 0024: every user who deployed something, so rows left on older copies are cleaned too.
+   for (const deployment of deployments) {
+-    if (options?.userId && deployment.user_id !== options.userId) continue;
++    if (!inScope(deployment.user_id, deployment.intune_tenant_id)) continue;
+     allScopes.add(`${deployment.user_id}|${deployment.intune_tenant_id ?? ''}`);
+   }
+ 
+@@ -493,7 +499,7 @@ export async function runSqliteUpdateCheck(
+       keep.push({ wingetId: deployment.winget_id, intuneAppId: deployment.intune_app_id });
+       keepByScope.set(scopeKey, keep);
+     }
+-    if (!options.userId) {
++    if (!options.userId && !options.tenantId) {
+       await store.removeMissing([
+         ...findings.map(({ release }) => ({ tenantId: release.tenant_id, intuneAppId: release.intune_app_id })),
+         ...unchecked.map((d) => ({ tenantId: d.intune_tenant_id ?? '', intuneAppId: d.intune_app_id })),
+diff --git a/lib/db/__tests__/sqlite-deployed-version-sync.test.ts b/lib/db/__tests__/sqlite-deployed-version-sync.test.ts
+new file mode 100644
+index 000000000..9774b803c
+--- /dev/null
++++ b/lib/db/__tests__/sqlite-deployed-version-sync.test.ts
+@@ -0,0 +1,108 @@
++// HRM patch 0049: detected updates are corrected as soon as a new copy is deployed.
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++let tempDir: string;
++
++beforeEach(() => {
++  vi.resetModules();
++  tempDir = mkdtempSync(join(tmpdir(), 'intuneget-sync-'));
++  process.env.DATABASE_PATH = join(tempDir, 'app.db');
++});
++
++afterEach(async () => {
++  const { closeSqliteDb } = await import('@/lib/db/sqlite');
++  closeSqliteDb();
++  rmSync(tempDir, { recursive: true, force: true });
++  delete process.env.DATABASE_PATH;
++});
++
++async function seed() {
++  const { sqliteDb } = await import('@/lib/db/sqlite');
++  const row = await sqliteDb.updateCheckResults.upsert({
++    user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'app-1',
++    display_name: 'Vendor App', current_version: '1.0.0', latest_version: '2.0.0', is_critical: true,
++    notified_at: '2026-01-01T00:00:00.000Z', dismissed_at: '2026-01-02T00:00:00.000Z',
++  });
++  await sqliteDb.updateCheckResults.upsert({
++    user_id: 'u1', tenant_id: 't2', winget_id: 'Vendor.App', intune_app_id: 'app-9',
++    display_name: 'Vendor App', current_version: '1.0.0', latest_version: '2.0.0',
++  });
++  return { db: sqliteDb, row };
++}
++
++const all = async (db: Awaited<ReturnType<typeof seed>>['db'], userId: string, tenantId: string) =>
++  db.updateCheckResults.list(userId, { tenantId, includeDismissed: true });
++
++describe('sqlite syncDeployedVersion', () => {
++  it('removes the row when the deployed version reaches the latest, in that tenant only', async () => {
++    const { db } = await seed();
++    const result = await db.updateCheckResults.syncDeployedVersion({
++      userId: 'u2', tenantId: 't1', wingetId: 'Vendor.App', intuneAppId: 'app-2', version: '2.0.0', displayName: 'Vendor App',
++    });
++    expect(result).toEqual({ removed: 1, updated: 0 });
++    expect(await all(db, 'u1', 't1')).toHaveLength(0);
++    expect(await all(db, 'u1', 't2')).toHaveLength(1);
++  });
++
++  it('moves the row to the new copy and keeps its id, dismissed and notified state', async () => {
++    const { db, row } = await seed();
++    await db.updateCheckResults.upsert({
++      user_id: 'u3', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'app-0',
++      // A lower latest version, so the kept row never depends on which upsert ran in a later
++      // millisecond (ties are broken by updated_at; see the tie-break test below).
++      display_name: 'Vendor App', current_version: '0.9.0', latest_version: '1.8.0',
++    });
++    const result = await db.updateCheckResults.syncDeployedVersion({
++      userId: 'u2', tenantId: 't1', wingetId: 'Vendor.App', intuneAppId: 'app-2', version: '1.5.0', displayName: 'Vendor App',
++    });
++    expect(result.updated).toBe(1);
++    expect(await all(db, 'u1', 't1')).toHaveLength(0);
++    expect(await all(db, 'u3', 't1')).toHaveLength(0);
++    const [moved] = await all(db, 'u2', 't1');
++    expect(moved).toMatchObject({
++      id: row.id, intune_app_id: 'app-2', current_version: '1.5.0', latest_version: '2.0.0', is_critical: true,
++      notified_at: '2026-01-01T00:00:00.000Z', dismissed_at: '2026-01-02T00:00:00.000Z',
++    });
++  });
++
++  it('keeps the most recently written row when two rows offer the same version', async () => {
++    vi.useFakeTimers({ toFake: ['Date'] });
++    try {
++      vi.setSystemTime(new Date('2026-03-01T00:00:00.000Z'));
++      const { db } = await seed();
++      vi.setSystemTime(new Date('2026-03-01T00:00:01.000Z'));
++      const later = await db.updateCheckResults.upsert({
++        user_id: 'u3', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'app-0',
++        display_name: 'Vendor App', current_version: '0.9.0', latest_version: '2.0.0',
++      });
++      vi.setSystemTime(new Date('2026-03-01T00:00:02.000Z'));
++      await db.updateCheckResults.syncDeployedVersion({
++        userId: 'u2', tenantId: 't1', wingetId: 'Vendor.App', intuneAppId: 'app-2', version: '1.5.0', displayName: 'Vendor App',
++      });
++      const [moved] = await all(db, 'u2', 't1');
++      expect(moved).toMatchObject({ id: later.id, notified_at: null, dismissed_at: null });
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it('does nothing when the app has no detected update', async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    const result = await sqliteDb.updateCheckResults.syncDeployedVersion({
++      userId: 'u1', tenantId: 't1', wingetId: 'Vendor.Other', intuneAppId: 'app-5', version: '1.0.0', displayName: 'Other',
++    });
++    expect(result).toEqual({ removed: 0, updated: 0 });
++  });
++
++  it('finds the newest deployment in a tenant whoever made it', async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    await sqliteDb.uploadHistory.create({ user_id: 'u1', intune_tenant_id: 't1', winget_id: 'Vendor.App', version: '1.0.0', display_name: 'Vendor App', intune_app_id: 'a', deployed_at: '2026-01-01T00:00:00.000Z' });
++    await sqliteDb.uploadHistory.create({ user_id: 'u2', intune_tenant_id: 't1', winget_id: 'Vendor.App', version: '1.1.0', display_name: 'Vendor App', intune_app_id: 'b', deployed_at: '2026-01-03T00:00:00.000Z' });
++    await sqliteDb.uploadHistory.create({ user_id: 'u2', intune_tenant_id: 't2', winget_id: 'Vendor.App', version: '9.0.0', display_name: 'Vendor App', intune_app_id: 'c', deployed_at: '2026-01-04T00:00:00.000Z' });
++    expect((await sqliteDb.uploadHistory.getLatestInTenant('t1', 'Vendor.App'))?.intune_app_id).toBe('b');
++    expect(await sqliteDb.uploadHistory.getLatestInTenant('t1', 'Vendor.None')).toBeNull();
++  });
++});
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 9f81128ed..6e26b9768 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -17,6 +17,7 @@ import { createInstallerBlockStore } from '@/lib/hrm/installer-block';
+ import { createPausedAlertStore } from '@/lib/hrm/paused-auto-update';
+ import { createAppInsightsStore } from '@/lib/hrm/app-insights-store';
+ import { syncSqliteAutoUpdate } from './sqlite-auto-update';
++import { planDeployedVersionSync } from '@/lib/hrm/deployed-version-sync';
+ import type { InstallStatusRecord, InstallStatusStore } from '@/lib/hrm/install-status';
+ import type { CustomRelease, CustomReleaseStore } from '@/lib/hrm/github-releases';
+ import type { PackageAssignment, IntuneAppCategorySelection } from '@/types/upload';
+@@ -35,6 +36,7 @@ import type {
+   AutoUpdateHistoryQuery,
+   UpdateCheckResult,
+   UpdateCheckQuery,
++  DeployedCopy,
+   CuratedLicenceAttestationRecord,
+   CuratedLicenceAttestationInput,
+   ClaimedAppInput,
+@@ -842,6 +844,20 @@ export const sqliteDb: DatabaseAdapter = {
+       return row ?? null;
+     },
+ 
++    // HRM patch 0049: newest copy of an app in a tenant, whoever deployed it
++    async getLatestInTenant(tenantId: string, wingetId: string): Promise<UploadHistoryRecord | null> {
++      const database = getDb();
++      const row = database
++        .prepare(
++          `SELECT * FROM upload_history
++           WHERE intune_tenant_id = ? AND winget_id = ?
++           ORDER BY deployed_at DESC
++           LIMIT 1`
++        )
++        .get(tenantId, wingetId) as UploadHistoryRecord | undefined;
++      return row ?? null;
++    },
++
+     async listAll(limit: number = 1000): Promise<UploadHistoryRecord[]> {
+       const database = getDb();
+       return database
+@@ -1224,6 +1240,36 @@ export const sqliteDb: DatabaseAdapter = {
+         .run(userId, tenantId, ...values);
+       return result.changes;
+     },
++
++    // HRM patch 0049: correct the tenant's rows for an app as soon as a new copy is deployed
++    async syncDeployedVersion(deployed: DeployedCopy): Promise<{ removed: number; updated: number }> {
++      const database = getDb();
++      return database.transaction(() => {
++        const rows = (database
++          .prepare('SELECT * FROM update_check_results WHERE tenant_id = ? AND winget_id = ?')
++          .all(deployed.tenantId, deployed.wingetId) as Record<string, unknown>[]).map(parseCheckResultRow);
++        const plan = planDeployedVersionSync(rows, deployed, new Date().toISOString());
++        const remove = database.prepare('DELETE FROM update_check_results WHERE id = ?');
++        for (const id of plan.deleteIds) remove.run(id);
++        const row = plan.replacement;
++        if (!row) return { removed: plan.deleteIds.length, updated: 0 };
++        database
++          .prepare(
++            `INSERT INTO update_check_results (
++               id, user_id, tenant_id, winget_id, intune_app_id, display_name,
++               current_version, latest_version, is_critical, is_managed, large_icon_type,
++               large_icon_value, notified_at, dismissed_at, detected_at, updated_at
++             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
++          )
++          .run(
++            row.id, row.user_id, row.tenant_id, row.winget_id, row.intune_app_id, row.display_name,
++            row.current_version, row.latest_version, row.is_critical ? 1 : 0, row.is_managed === false ? 0 : 1,
++            row.large_icon_type ?? null, row.large_icon_value ?? null, row.notified_at ?? null,
++            row.dismissed_at ?? null, row.detected_at, row.updated_at
++          );
++        return { removed: plan.deleteIds.length - 1, updated: 1 };
++      })();
++    },
+   },
+ 
+   curatedLicenceAttestations: {
+diff --git a/lib/db/supabase-adapter.ts b/lib/db/supabase-adapter.ts
+index 08214dd96..40b91fa3f 100644
+--- a/lib/db/supabase-adapter.ts
++++ b/lib/db/supabase-adapter.ts
+@@ -19,9 +19,11 @@ import type {
+   ClaimedAppRecord,
+   CuratedLicenceAttestationInput,
+   CuratedLicenceAttestationRecord,
++  DeployedCopy,
+   UpdateCheckQuery,
+   UpdateCheckResult,
+ } from './types';
++import { planDeployedVersionSync } from '@/lib/hrm/deployed-version-sync';
+ import type { PostgrestError } from '@supabase/supabase-js';
+ import type { SavedCustomAppDefinition } from '@/lib/custom-app-definitions';
+ 
+@@ -637,6 +639,27 @@ export const supabaseDb: DatabaseAdapter = {
+       return data ?? null;
+     },
+ 
++    // HRM patch 0049: newest copy of an app in a tenant, whoever deployed it
++    async getLatestInTenant(tenantId: string, wingetId: string): Promise<UploadHistoryRecord | null> {
++      const supabase = createServerClient();
++      const query = getUploadHistoryQuery(supabase);
++
++      const { data, error } = await query
++        .select('*')
++        .eq('intune_tenant_id', tenantId)
++        .eq('winget_id', wingetId)
++        .order('deployed_at', { ascending: false })
++        .limit(1)
++        .single();
++
++      if (isError(error) && error.code !== 'PGRST116') {
++        console.error('Error fetching latest tenant upload history:', error);
++        throw error;
++      }
++
++      return data ?? null;
++    },
++
+     async listAll(limit: number = 1000): Promise<UploadHistoryRecord[]> {
+       const supabase = createServerClient();
+       const query = getUploadHistoryQuery(supabase);
+@@ -1047,6 +1070,51 @@ export const supabaseDb: DatabaseAdapter = {
+       }
+       return staleIds.length;
+     },
++
++    // HRM patch 0049: correct the tenant's rows for an app as soon as a new copy is deployed
++    async syncDeployedVersion(deployed: DeployedCopy): Promise<{ removed: number; updated: number }> {
++      const supabase = createServerClient();
++      const { data, error } = await supabase
++        .from('update_check_results')
++        .select('*')
++        .eq('tenant_id', deployed.tenantId)
++        .eq('winget_id', deployed.wingetId);
++      if (isError(error)) {
++        console.error('Error reading update check results:', error);
++        throw error;
++      }
++      const plan = planDeployedVersionSync(
++        (data ?? []) as unknown as UpdateCheckResult[],
++        deployed,
++        new Date().toISOString()
++      );
++      const row = plan.replacement;
++      const deleteIds = row ? plan.deleteIds.filter((id) => id !== row.id) : plan.deleteIds;
++      if (deleteIds.length > 0) {
++        const { error: deleteError } = await supabase.from('update_check_results').delete().in('id', deleteIds);
++        if (isError(deleteError)) {
++          console.error('Error deleting superseded update check results:', deleteError);
++          throw deleteError;
++        }
++      }
++      if (!row) return { removed: deleteIds.length, updated: 0 };
++      const { error: updateError } = await supabase
++        .from('update_check_results')
++        .update({
++          user_id: row.user_id,
++          intune_app_id: row.intune_app_id,
++          display_name: row.display_name,
++          current_version: row.current_version,
++          is_critical: row.is_critical,
++          updated_at: row.updated_at,
++        })
++        .eq('id', row.id);
++      if (isError(updateError)) {
++        console.error('Error updating deployed update check result:', updateError);
++        throw updateError;
++      }
++      return { removed: deleteIds.length, updated: 1 };
++    },
+   },
+ 
+   curatedLicenceAttestations: {
+diff --git a/lib/db/types.ts b/lib/db/types.ts
+index 1a637a16d..6bc777f1a 100644
+--- a/lib/db/types.ts
++++ b/lib/db/types.ts
+@@ -45,6 +45,16 @@ export interface UpdateCheckResult {
+   updated_at: string;
+ }
+ 
++/** HRM patch 0049: a copy of an app that a deployment just put in Intune. */
++export interface DeployedCopy {
++  userId: string;
++  tenantId: string;
++  wingetId: string;
++  intuneAppId: string;
++  version: string;
++  displayName: string;
++}
++
+ export interface UpdateCheckQuery {
+   tenantId?: string;
+   includeDismissed?: boolean;
+@@ -297,6 +307,11 @@ export interface DatabaseAdapter {
+      */
+     getLatest(userId: string, tenantId: string, wingetId: string): Promise<UploadHistoryRecord | null>;
+ 
++    /**
++     * HRM patch 0049: the newest deployment of one app in a tenant, whoever deployed it.
++     */
++    getLatestInTenant(tenantId: string, wingetId: string): Promise<UploadHistoryRecord | null>;
++
+     /**
+      * Every recorded deployment, newest first. Used by the update check to scan
+      * the whole local fleet without knowing the user ids up front.
+@@ -335,6 +350,12 @@ export interface DatabaseAdapter {
+       tenantId: string,
+       keep: Array<{ wingetId: string; intuneAppId: string }>
+     ): Promise<number>;
++
++    /**
++     * HRM patch 0049: after a new copy of an app is deployed, delete the tenant's detected updates
++     * for it that are no longer newer, or move the remaining one to the new copy and version.
++     */
++    syncDeployedVersion(deployed: DeployedCopy): Promise<{ removed: number; updated: number }>;
+   };
+ 
+   updatePolicies: {
+diff --git a/lib/hrm/__tests__/deployed-version-sync.test.ts b/lib/hrm/__tests__/deployed-version-sync.test.ts
+new file mode 100644
+index 000000000..38f04c8d3
+--- /dev/null
++++ b/lib/hrm/__tests__/deployed-version-sync.test.ts
+@@ -0,0 +1,47 @@
++import { describe, expect, it } from 'vitest';
++import { effectiveCurrentVersion, planDeployedVersionSync } from '@/lib/hrm/deployed-version-sync';
++import type { UpdateCheckResult } from '@/lib/db/types';
++
++const row = (over: Partial<UpdateCheckResult>): UpdateCheckResult => ({
++  id: 'r1', user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'app-1', display_name: 'Vendor App',
++  current_version: '1.0.0', latest_version: '2.0.0', is_critical: true, is_managed: true, large_icon_type: null,
++  large_icon_value: null, notified_at: null, dismissed_at: null, detected_at: '2026-01-01T00:00:00.000Z',
++  updated_at: '2026-01-01T00:00:00.000Z', ...over,
++});
++const deployed = { userId: 'u2', tenantId: 't1', wingetId: 'Vendor.App', intuneAppId: 'app-2', version: '2.0.0', displayName: 'Vendor App' };
++const NOW = '2026-02-01T00:00:00.000Z';
++
++describe('planDeployedVersionSync', () => {
++  it('deletes rows at or below the deployed version', () => {
++    expect(planDeployedVersionSync([row({}), row({ id: 'r2', latest_version: '1.5.0' })], deployed, NOW))
++      .toEqual({ deleteIds: ['r1', 'r2'], replacement: null });
++  });
++
++  it('keeps the row with the highest latest version on the new copy', () => {
++    const plan = planDeployedVersionSync(
++      [row({ latest_version: '3.0.0', dismissed_at: NOW }), row({ id: 'r2', latest_version: '2.5.0' })],
++      { ...deployed, version: '2.1.0' }, NOW);
++    expect(plan.deleteIds).toEqual(['r1', 'r2']);
++    expect(plan.replacement).toMatchObject({
++      id: 'r1', user_id: 'u2', intune_app_id: 'app-2', current_version: '2.1.0', latest_version: '3.0.0',
++      is_critical: true, dismissed_at: NOW, updated_at: NOW,
++    });
++  });
++
++  it('ignores rows of other apps and tenants', () => {
++    expect(planDeployedVersionSync([row({ tenant_id: 't2' }), row({ winget_id: 'Other' })], deployed, NOW))
++      .toEqual({ deleteIds: [], replacement: null });
++  });
++});
++
++describe('effectiveCurrentVersion', () => {
++  it('uses a newer deployment made after the row was written', () => {
++    expect(effectiveCurrentVersion(row({}), { version: '1.5.0', deployed_at: NOW })).toBe('1.5.0');
++  });
++
++  it('keeps the row when the deployment is older, lower or missing', () => {
++    expect(effectiveCurrentVersion(row({ updated_at: NOW }), { version: '1.5.0', deployed_at: '2026-01-15T00:00:00.000Z' })).toBe('1.0.0');
++    expect(effectiveCurrentVersion(row({}), { version: '0.9.0', deployed_at: NOW })).toBe('1.0.0');
++    expect(effectiveCurrentVersion(row({}), null)).toBe('1.0.0');
++  });
++});
+diff --git a/lib/hrm/__tests__/deployment-status.test.ts b/lib/hrm/__tests__/deployment-status.test.ts
+index fd91ca4a9..0ad5743ff 100644
+--- a/lib/hrm/__tests__/deployment-status.test.ts
++++ b/lib/hrm/__tests__/deployment-status.test.ts
+@@ -1,5 +1,5 @@
+-import { expect, it } from 'vitest';
+-import { deploymentCounts, deploymentFilter, matchesDeploymentFilter, isTerminalDeployment, clearableDeploymentStatuses } from '../deployment-status';
++import { describe, expect, it } from 'vitest';
++import { deploymentCounts, deploymentFilter, matchesDeploymentFilter, isTerminalDeployment, clearableDeploymentStatuses, DEPLOYMENT_FINISHED_QUERY_KEYS, hasNewlyFinishedDeployment } from '../deployment-status';
+ it('keeps cancellation out of failures while including failed installation tests', () => {
+   const statuses=['queued','awaiting_qa','deployed','failed','qa_failed','cancelled'];
+   expect(deploymentCounts(statuses.map(status=>({status})))).toEqual({total:6,active:2,completed:1,failed:2,cancelled:1});
+@@ -19,3 +19,19 @@ it('limits clearing to the selected finished outcome and never active jobs',()=>
+  expect(clearableDeploymentStatuses('failed')).toEqual(['failed','qa_failed']);
+  expect(clearableDeploymentStatuses('active')).toEqual([]);
+ });
++
++// HRM patch 0049
++describe('hasNewlyFinishedDeployment', () => {
++  it('is true only when a job that was active has finished', () => {
++    const active = [{ id: 'j1', status: 'uploading' }];
++    expect(hasNewlyFinishedDeployment(active, [{ id: 'j1', status: 'deployed' }])).toBe(true);
++    expect(hasNewlyFinishedDeployment(active, [{ id: 'j1', status: 'failed' }])).toBe(true);
++    expect(hasNewlyFinishedDeployment(active, [{ id: 'j1', status: 'cancelled' }])).toBe(true);
++    expect(hasNewlyFinishedDeployment(active, [{ id: 'j1', status: 'packaging' }])).toBe(false);
++    expect(hasNewlyFinishedDeployment([], [{ id: 'j1', status: 'deployed' }])).toBe(false);
++    expect(hasNewlyFinishedDeployment([{ id: 'j1', status: 'deployed' }], [{ id: 'j1', status: 'deployed' }])).toBe(false);
++  });
++  it('refreshes App updates, Home and Inventory', () => {
++    expect(DEPLOYMENT_FINISHED_QUERY_KEYS).toEqual(expect.arrayContaining([['availableUpdates'], ['inventory', 'apps'], ['hrm', 'home']]));
++  });
++});
+diff --git a/lib/hrm/deployed-version-sync.ts b/lib/hrm/deployed-version-sync.ts
+new file mode 100644
+index 000000000..af6ae0e29
+--- /dev/null
++++ b/lib/hrm/deployed-version-sync.ts
+@@ -0,0 +1,81 @@
++/**
++ * HRM patch 0049: keep detected updates true as soon as a deployment finishes.
++ *
++ * The update check (3:30 AM and 3:30 PM) records "app X is on v1, v2 is out" for the newest copy of
++ * each app in each tenant (patch 0024). A deployment of v2 used to leave that row saying v1 until the
++ * next check. These helpers decide what the row should say once a new copy is deployed, and whether a
++ * stored row is already out of date when it is read, so both database adapters behave the same.
++ */
++import { compareVersions } from '@/lib/version-compare';
++import type { DeployedCopy, UpdateCheckResult, UploadHistoryRecord } from '@/lib/db/types';
++
++export type { DeployedCopy };
++
++export interface DeployedVersionSyncPlan {
++  /** Rows to delete (every row for the app when the new copy is current). */
++  deleteIds: string[];
++  /** The single row that replaces them, on the new copy, or null when the app is up to date. */
++  replacement: UpdateCheckResult | null;
++}
++
++function isMajorBump(current: string, latest: string): boolean {
++  const currentMajor = Number.parseInt(current.split('.')[0] ?? '', 10);
++  const latestMajor = Number.parseInt(latest.split('.')[0] ?? '', 10);
++  return Number.isFinite(currentMajor) && Number.isFinite(latestMajor) && latestMajor > currentMajor;
++}
++
++/**
++ * Plan the change to one tenant's update rows for an app after a new copy of it is deployed.
++ * Rows already at or below the deployed version are removed. Otherwise one row is kept, moved to the
++ * new copy (patch 0024: only the newest copy has a row) with the deployed version as its current
++ * version. Its id, dismissed and notified state stay, because the version it offers did not change.
++ */
++export function planDeployedVersionSync(
++  rows: UpdateCheckResult[],
++  deployed: DeployedCopy,
++  now: string
++): DeployedVersionSyncPlan {
++  const matching = rows.filter((row) => row.tenant_id === deployed.tenantId && row.winget_id === deployed.wingetId);
++  if (matching.length === 0) return { deleteIds: [], replacement: null };
++
++  const reference = [...matching].sort((a, b) => {
++    const byVersion = compareVersions(b.latest_version, a.latest_version);
++    return byVersion !== 0 ? byVersion : String(b.updated_at).localeCompare(String(a.updated_at));
++  })[0];
++  const deleteIds = matching.map((row) => row.id);
++
++  if (compareVersions(reference.latest_version, deployed.version) <= 0) {
++    return { deleteIds, replacement: null };
++  }
++
++  return {
++    deleteIds,
++    replacement: {
++      ...reference,
++      user_id: deployed.userId,
++      intune_app_id: deployed.intuneAppId,
++      display_name: deployed.displayName || reference.display_name,
++      current_version: deployed.version,
++      is_critical: isMajorBump(deployed.version, reference.latest_version),
++      updated_at: now,
++    },
++  };
++}
++
++/**
++ * Read-time safety net: the version an update row should show, given the newest deployment of the
++ * app in its tenant. Only a deployment made after the row was last written counts, so a newer copy
++ * that was later deleted in Intune (and skipped by the check, patch 0023) never hides a real update.
++ */
++export function effectiveCurrentVersion(
++  row: Pick<UpdateCheckResult, 'current_version' | 'updated_at'>,
++  newest: Pick<UploadHistoryRecord, 'version' | 'deployed_at'> | null
++): string {
++  if (!newest?.version || !newest.deployed_at) return row.current_version;
++  const deployedAt = Date.parse(newest.deployed_at);
++  const writtenAt = Date.parse(row.updated_at);
++  if (!Number.isFinite(deployedAt) || !Number.isFinite(writtenAt) || deployedAt <= writtenAt) {
++    return row.current_version;
++  }
++  return compareVersions(newest.version, row.current_version) > 0 ? newest.version : row.current_version;
++}
+diff --git a/lib/hrm/deployment-status.ts b/lib/hrm/deployment-status.ts
+index 23bca92e9..9589a5950 100644
+--- a/lib/hrm/deployment-status.ts
++++ b/lib/hrm/deployment-status.ts
+@@ -26,3 +26,14 @@ export function deploymentCounts(jobs: { status: string }[]) {
+ }
+ /** Clearing a filtered list never hides a different finished outcome. */
+ export const clearableDeploymentStatuses = (filter: DeploymentFilter) => TERMINAL_DEPLOYMENT_STATUSES.filter(status => matchesDeploymentFilter(status, filter));
++
++// HRM patch 0049: the cached screens a finished deployment changes (App updates, its sidebar badge,
++// Home, Inventory and App catalog's deployed marks). Deployments refreshes them when a job it was
++// watching finishes, so they show the new version without waiting for their own refresh.
++export const DEPLOYMENT_FINISHED_QUERY_KEYS: readonly (readonly string[])[] = [
++  ['availableUpdates'], ['autoUpdateHistory'], ['updatePolicies'], ['inventory', 'apps'], ['catalog', 'deployed'], ['hrm', 'home'],
++];
++export function hasNewlyFinishedDeployment(previous: { id: string; status: string }[], next: { id: string; status: string }[]): boolean {
++  const wasActive = new Set(previous.filter(job => isActiveDeployment(job.status)).map(job => job.id));
++  return next.some(job => wasActive.has(job.id) && isTerminalDeployment(job.status));
++}
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index ea4682c3b..70a882c25 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -72,7 +72,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'updates',
+     title: 'App updates',
+-    uiLabels: ['App updates', 'Deploy new version', 'Notify only', 'Auto-update', 'Ignore', 'Apps set to Auto-update', 'Auto-update on', 'Ignored apps'],
++    uiLabels: ['App updates', 'Deploy new version', 'Notify only', 'Auto-update', 'Ignore', 'Apps set to Auto-update', 'Auto-update on', 'Ignored apps', 'Refresh', 'Home'],
+     points: [
+       'The server checks for new app versions at 3:30 AM and 3:30 PM, and sends update alerts at 4:00 AM and 4:00 PM (Maryland time).',
+       'Updates waiting for approval show on the Home page and in App updates.',
+@@ -81,6 +81,9 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Apps set to Ignore are left out of App updates and the Teams update alert. To bring one back, press Ignored apps in App updates and choose Notify only or Auto-update for it.',
+       'Each App updates card shows the groups that copy is assigned to, read from Intune, so you can see where an update will land. A copy deleted in Intune drops off at the next check, and auto-update never acts on it.',
+       'Custom apps installed from a GitHub release download are checked too. A newer release shows in App updates with Deploy new version.',
++      'When a deployment finishes as deployed, App updates and Home show the new version straight away, whoever deployed it. The app drops off the list, or shows the new version as current if an even newer one is out.',
++      'App updates reads its list again when you come back to the browser tab, and every 45 seconds while one of your deployments is running.',
++      'Press Refresh in App updates to check now. It clears out-of-date entries for everyone in your tenant. Any automatic updates it starts are for your own Auto-update apps only.',
+     ],
+   },
+   {
+@@ -89,7 +92,9 @@ export const HELP_SECTIONS: HelpSection[] = [
+     uiLabels: ['App updates', 'Update all', 'Auto-update on', 'Deployments', 'Failed at:', 'Validation', 'Details', 'Retry safely', 'Inventory', 'App catalog', 'Deploy again', 'Deploy new version', 'Custom app', 'Find in App catalog', 'is already in Intune', 'Supersedes', "Doesn't supersede", 'and replace', 'alongside', 'Save to Intune', 'Turn auto-update back on'],
+     points: [
+       'WinGet and curated apps: open App updates and press Update on the app, or Update all. The new version replaces the previous one in Intune and keeps its groups. The result posts to Teams.',
++      'As soon as the deployment finishes, App updates and Home show the new version. Inventory still lists the previous copy until it is removed.',
+       'The previous copy stays in Intune until IntuneGet removes it, at least 7 days after the update (see How old copies are removed).',
++      'Device results for the new copy arrive with the next update check, at 3:30 AM or 3:30 PM Maryland time. Inventory reads Intune again when you come back to the tab and its list is over a minute old.',
+       'The 3:30 AM and 3:30 PM checks can publish apps set to Auto-update, with the same safety checks. Paused automatic publishing, publishing hours and blackouts can hold new packages (see Publishing schedule and blackouts).',
+       'An active pilot holds other updates for that app until you approve wider rollout or safely end a failed pilot.',
+       'An ordinary update takes the groups the app has in Intune at that moment, so groups added later with Save to Intune carry over.',
+diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
+index a7facf779..c225e9b17 100644
+--- a/lib/hrm/help-guides.ts
++++ b/lib/hrm/help-guides.ts
+@@ -77,7 +77,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+   },
+   {
+     id: 'updates', category: 'updates', title: 'Choose how an app stays updated',
+-    summary: 'Use Notify only, Auto-update or Ignore to control what happens when a new version appears.', keywords: ['notify', 'ignore', 'automatic', 'new version', 'GitHub releases'],
++    summary: 'Use Notify only, Auto-update or Ignore to control what happens when a new version appears.', keywords: ['notify', 'ignore', 'automatic', 'new version', 'GitHub releases', 'refresh'],
+     start: updates, before: ['Check the app’s current groups before enabling automatic updates.'],
+     steps: [
+       step('Find the app', 'Open App updates and read the groups shown on the app’s card.', 'updates', 'App updates', 'You can see where the next update would go.'),
+@@ -87,7 +87,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+     success: 'The app’s card or list shows the update rule you intended.', caution: 'Automatic publishing follows the publishing schedule and safety checks. Device installation follows the package and Intune assignment.',
+     related: ['updating', 'automatic-installation-policy', 'update-schedule'],
+     troubleshoot: [{ problem: 'An app seems missing', action: 'Check Ignored apps. A copy deleted in Intune drops off at the next check.' }, { problem: 'A custom app has no update alert', action: 'Automatic checks cover GitHub release downloads; watch other vendors’ releases yourself.', guide: 'updating' }],
+-    referenceGroups: [reference('Check cadence and new versions', [0, 1, 6]), reference('Update rules and visibility', [2, 3, 4]), reference('Where an update will go', [5])],
++    referenceGroups: [reference('Check cadence and new versions', [0, 1, 6]), reference('Update rules and visibility', [2, 3, 4]), reference('Where an update will go', [5]), reference('After a deployment finishes', [7, 8, 9])],
+   },
+   {
+     id: 'updating', category: 'updates', title: 'Publish a new version',
+@@ -97,13 +97,13 @@ export const HELP_GUIDES: HelpGuide[] = [
+       step('Choose the new version', 'For WinGet or curated apps, press Update in App updates. For a custom app, use Deploy new version on the newest copy in Inventory.', 'updates', 'Update', 'The new version uses the appropriate update path.'),
+       step('Review custom details', 'For a custom app, check the version, download link and checksum, then add it to the Deployment list.', 'catalog', 'Deploy new version', 'The custom package details are ready to deploy.'),
+       step('Check replacement and groups', 'If a review opens, confirm the groups and Supersedes. A deployment marked alongside keeps both copies.', 'deployment-list', 'Supersedes', 'You understand whether the previous copy will be replaced.'),
+-      step('Follow publishing', 'Open Deployments to check packaging and publishing. If it fails, read Failed at: and Details before using Retry safely.', 'deployments', 'Failed at:', 'The deployment outcome and failure stage are visible.'),
+-      step('Check installations', 'Open the new copy in Inventory and read device results. The previous copy can remain until automatic cleanup conditions are met.', 'inventory', 'Inventory', 'You have installation evidence beyond publishing success.'),
++      step('Follow publishing', 'Open Deployments to check packaging and publishing. If it fails, read Failed at: and Details before using Retry safely.', 'deployments', 'Failed at:', 'Once deployed, App updates and Home show the new version. A failure shows its stage.'),
++      step('Check installations', 'After the next 3:30 AM or 3:30 PM check, open the new copy in Inventory and read device results. Inventory still lists the previous copy until it is removed.', 'inventory', 'Inventory', 'You have installation evidence beyond publishing success.'),
+     ],
+     success: 'The new version is published to the intended groups and devices report installation results.', caution: 'A checksum mismatch needs a corrected catalog entry or installer. Repeating Retry safely does not fix the mismatch.',
+     related: ['pilot-rollouts', 'install-results', 'old-copies', 'rollback'],
+     troubleshoot: [{ problem: 'Auto-update turned itself off', action: 'Read the failures in Deployments. After fixing the cause, use Turn auto-update back on.' }, { problem: 'The catalog has not synced', action: 'Wait for a newer catalog, or choose the new version in App catalog and use Deploy again.' }, { problem: 'The app has no groups', action: 'Choose groups before publishing; otherwise it installs nowhere.', guide: 'deploying' }],
+-    referenceGroups: [reference('What an ordinary update changes', [0, 1, 2, 3, 4]), reference('Validation and safe retries', [5, 6, 7, 8, 9]), reference('Automatic updates stopped or catalog delayed', [10, 11, 12, 13, 14]), reference('Custom app versions', [15, 16, 17, 18, 19, 20, 21]), reference('Review groups and replacement behavior', [22, 23, 24, 25, 26])],
++    referenceGroups: [reference('What an ordinary update changes', [0, 1, 2, 3, 4, 5, 6]), reference('Validation and safe retries', [7, 8, 9, 10, 11]), reference('Automatic updates stopped or catalog delayed', [12, 13, 14, 15, 16]), reference('Custom app versions', [17, 18, 19, 20, 21, 22, 23]), reference('Review groups and replacement behavior', [24, 25, 26, 27, 28])],
+   },
+   {
+     id: 'old-copies', category: 'devices', title: 'Clean up old Intune copies',

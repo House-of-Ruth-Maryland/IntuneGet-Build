@@ -1,0 +1,418 @@
+diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
+index 8d0f14b2e..08c82ea91 100644
+--- a/app/(app)/dashboard/page.tsx
++++ b/app/(app)/dashboard/page.tsx
+@@ -308,7 +308,7 @@ export default function DashboardPage() {
+       <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Deployment statistics scope">
+         <Button variant={statisticsScope === 'mine' ? 'default' : 'outline'} aria-pressed={statisticsScope === 'mine'} onClick={() => setStatisticsScope('mine')}><T>My deployments</T></Button>
+         <Button variant={statisticsScope === 'tenant' ? 'default' : 'outline'} aria-pressed={statisticsScope === 'tenant'} onClick={() => setStatisticsScope('tenant')}><T>All in tenant</T></Button>
+-        <p className="text-sm text-text-muted">{statisticsScope === 'tenant' ? <T>Activity for the selected tenant</T> : isMspUser ? <T>Across all your tenants</T> : <T>Your deployment activity</T>}</p>
++        <p className="text-sm text-text-muted">{statisticsScope === 'tenant' ? <T>Activity for everyone in your tenant</T> : isMspUser ? <T>Across all your tenants</T> : <T>Your deployment activity</T>}</p>
+       </div>
+       {statsError ? <div role="alert" className="text-status-error"><T>Unable to load deployment statistics. Please try again.</T></div> : <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+         <StatCard
+diff --git a/app/(app)/dashboard/settings/page.tsx b/app/(app)/dashboard/settings/page.tsx
+index 8407d1e24..69172cbb4 100644
+--- a/app/(app)/dashboard/settings/page.tsx
++++ b/app/(app)/dashboard/settings/page.tsx
+@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
+ import { useCartStore } from '@/stores/cart-store';
+ import { clearConsentPending, isConsentPending } from '@/components/AdminConsentBanner';
+ import { useDatabaseMode } from '@/hooks/use-database-mode';
++import { UpdateBehaviorSettings } from '@/components/hrm/UpdateBehaviorSettings';
+ 
+ type SettingsTab = 'general' | 'permissions' | 'notifications' | 'exports' | 'data';
+ type PreferenceKey = 'cart' | 'assignments' | 'supersedence';
+@@ -432,16 +433,16 @@ export default function SettingsPage() {
+                     </div>
+                   </motion.section>
+ 
+-                  {/* Cart behavior card */}
++                  {/* Deployment list card (HRM patch 0051: was upstream's "Cart behavior") */}
+                   <motion.section
+                     variants={itemVariants}
+                     className="glass-light rounded-xl p-6 border border-overlay/5 hover:border-accent-cyan/20 transition-colors"
+                   >
+                     <div className="flex items-center justify-between">
+                       <div>
+-                        <p className="text-text-primary font-medium"><T>Cart behavior</T></p>
++                        <p className="text-text-primary font-medium"><T>Deployment list</T></p>
+                         <p className="text-sm text-text-muted">
+-                          <T>Control whether the cart opens automatically when adding apps</T>
++                          <T>Open the deployment list when you add an app</T>
+                         </p>
+                       </div>
+                       <div className="flex min-w-28 flex-col items-end gap-1">
+@@ -460,6 +461,8 @@ export default function SettingsPage() {
+                     </div>
+                   </motion.section>
+ 
++                  {/* HRM patch 0051: these two switches only take effect in Supabase mode. */}
++                  <UpdateBehaviorSettings>
+                   {/* Carry over assignments card */}
+                   <motion.section
+                     variants={itemVariants}
+@@ -515,6 +518,7 @@ export default function SettingsPage() {
+                       </div>
+                     </div>
+                   </motion.section>
++                  </UpdateBehaviorSettings>
+                 </motion.div>
+               </motion.div>
+             )}
+diff --git a/components/CartItemConfig.curated.test.ts b/components/CartItemConfig.curated.test.ts
+index ad7ae1e38..137797497 100644
+--- a/components/CartItemConfig.curated.test.ts
++++ b/components/CartItemConfig.curated.test.ts
+@@ -37,9 +37,9 @@ describe('curated deployment settings choice', () => {
+   it('selects tested defaults initially and makes custom behaviour an explicit opt-in', async () => {
+     await render(item());
+     expect(radios()[0].checked).toBe(true);
+-    expect(document.body.textContent).not.toContain('Install behaviour');
++    expect(document.body.textContent).not.toContain('Installation timing');
+     await act(async () => radios()[1].click());
+-    expect(document.body.textContent).toContain('Install behaviour');
++    expect(document.body.textContent).toContain('Installation timing');
+     await act(async () => save());
+     expect(useCartStore.getState().items[0]).toMatchObject({ curatedSettingsMode: 'custom' });
+   });
+@@ -68,7 +68,7 @@ describe('curated deployment settings choice', () => {
+     await act(async () => appearance.click());
+     expect(document.querySelector('#curated-progress-message')).not.toBeNull();
+     expect(document.body.textContent).not.toContain('Show progress dialog');
+-    expect(document.body.textContent).not.toContain('Install behaviour');
++    expect(document.body.textContent).not.toContain('Installation timing');
+     await act(async () => {
+       const dialog = document.querySelector<HTMLSelectElement>('#curated-dialog-position')!;
+       dialog.value = 'BottomRight'; dialog.dispatchEvent(new Event('change', { bubbles: true }));
+diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
+index 80301a840..1361fde6a 100644
+--- a/components/CartItemConfig.tsx
++++ b/components/CartItemConfig.tsx
+@@ -560,7 +560,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+               {/* Installation Behavior (win32 only) */}
+               {canEditExecution && <ConfigSection
+                 summary={summaries.behavior}
+-                title="Install behaviour"
++                title="Installation timing"
+                 icon={<Settings className="w-4 h-4" />}
+                 expanded={expandedSection === 'behavior'}
+                 onToggle={() => toggleSection('behavior')}
+diff --git a/components/PackageConfig.layout.test.ts b/components/PackageConfig.layout.test.ts
+index c5ee59510..ab1734028 100644
+--- a/components/PackageConfig.layout.test.ts
++++ b/components/PackageConfig.layout.test.ts
+@@ -83,7 +83,7 @@ describe('deploy panel layout', () => {
+       "How Intune checks it's installedAutomatic",
+       'New computer setupNot required',
+       'Replaces or needs other appsNone',
+-      'Install behaviourSilent, no restart',
++      'Installation timingSilent, no restart',
+       'Letting staff postponeOff',
+       'Install window brandingDefault',
+     ]));
+@@ -94,7 +94,7 @@ describe('deploy panel layout', () => {
+     await render();
+     await act(async () => button('Letting staff postpone')!.click());
+     expect(text()).toContain('Let staff postpone the install');
+-    await act(async () => button('Install behaviour')!.click());
++    await act(async () => button('Installation timing')!.click());
+     expect(text()).toContain('What staff see while it installs');
+     expect(text()).toContain('Remove existing installation first');
+   });
+diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
+index ed58ff4f3..eb43b2855 100644
+--- a/components/PackageConfig.tsx
++++ b/components/PackageConfig.tsx
+@@ -1173,7 +1173,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+               {/* Installation Behavior (advanced only, win32 only) */}
+               {!isStoreApp && (visibleSections === null || visibleSections.includes('behavior')) && <ConfigSection
+                 summary={summaries.behavior}
+-                title="Install behaviour"
++                title="Installation timing"
+                 icon={<Settings className="w-4 h-4" />}
+                 expanded={expandedSection === 'behavior'}
+                 onToggle={() => toggleSection('behavior')}
+diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
+index 1749692c7..b3dc511b4 100644
+--- a/components/hrm/InstallationPolicyPanel.tsx
++++ b/components/hrm/InstallationPolicyPanel.tsx
+@@ -30,7 +30,7 @@ export function InstallationPolicyPanel({ apps }: { apps: AppUpdatePolicy[] }) {
+   };
+   return <section className="h-full rounded-2xl border border-overlay/10 bg-bg-surface p-5 space-y-4" aria-label="Device installation">
+     <div className="flex flex-wrap items-center justify-between gap-3">
+-      <div><p className="text-xs font-medium text-accent-cyan mb-1">STEP 2 · COMPUTERS</p><h2 className="text-lg font-semibold text-text-primary">Device installation</h2></div>
++      <div><p className="text-xs font-medium text-accent-cyan mb-1">Step 2: Computers</p><h2 className="text-lg font-semibold text-text-primary">Device installation</h2></div>
+       <Dialog open={open} onOpenChange={value => { if (!action.isPending) { setOpen(value); if (value) choose(''); } }}>
+         <DialogTrigger asChild><Button variant="ghost" size="sm" disabled={!data?.shared}>Edit shared policy</Button></DialogTrigger>
+         <DialogContent side="right" onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }} hideCloseButton={action.isPending}>
+diff --git a/components/hrm/UpdateBehaviorSettings.test.ts b/components/hrm/UpdateBehaviorSettings.test.ts
+new file mode 100644
+index 000000000..b4e5c9012
+--- /dev/null
++++ b/components/hrm/UpdateBehaviorSettings.test.ts
+@@ -0,0 +1,54 @@
++// @vitest-environment happy-dom
++// HRM patch 0051: Settings' update switches only where they take effect; a link to App updates on SQLite.
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++
++(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++let root: Root | null = null;
++let container: HTMLDivElement | null = null;
++
++afterEach(() => {
++  act(() => root?.unmount());
++  container?.remove();
++  root = null;
++  container = null;
++  vi.unstubAllGlobals();
++  vi.resetModules();
++});
++
++async function renderWithMode(databaseMode: string | null) {
++  vi.stubGlobal('fetch', vi.fn(async () => (databaseMode === null
++    ? Promise.reject(new Error('offline'))
++    : new Response(JSON.stringify({ databaseMode }), { status: 200 }))));
++  const { UpdateBehaviorSettings } = await import('./UpdateBehaviorSettings');
++  container = document.createElement('div');
++  document.body.appendChild(container);
++  root = createRoot(container);
++  await act(async () => {
++    root!.render(createElement(UpdateBehaviorSettings, null, createElement('p', null, 'Carry over assignments')));
++  });
++  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
++  return container;
++}
++
++describe('UpdateBehaviorSettings', () => {
++  it('replaces the switches with a link to App updates on a SQLite server', async () => {
++    const el = await renderWithMode('sqlite');
++    expect(el.textContent).not.toContain('Carry over assignments');
++    expect(el.textContent).toContain('Update behavior is set on App updates.');
++    const link = el.querySelector('a');
++    expect(link?.getAttribute('href')).toBe('/dashboard/updates');
++    expect(link?.textContent).toBe('App updates');
++  });
++
++  it('shows the switches on a Supabase server, where they take effect', async () => {
++    const el = await renderWithMode('supabase');
++    expect(el.textContent).toBe('Carry over assignments');
++  });
++
++  it('shows nothing while the mode cannot be read', async () => {
++    expect((await renderWithMode(null)).textContent).toBe('');
++  });
++});
+diff --git a/components/hrm/UpdateBehaviorSettings.tsx b/components/hrm/UpdateBehaviorSettings.tsx
+new file mode 100644
+index 000000000..4aa0bf0ca
+--- /dev/null
++++ b/components/hrm/UpdateBehaviorSettings.tsx
+@@ -0,0 +1,25 @@
++'use client';
++
++import type { ReactNode } from 'react';
++import Link from 'next/link';
++import { useDatabaseMode } from '@/hooks/use-database-mode';
++
++// HRM patch 0051: Settings > General's "Carry over assignments" and "Supersede previous version on
++// update" take effect only in Supabase mode (same gate as patch 0035). On a SQLite server, Update and
++// automatic updates always replace the previous version and keep its groups, so the switches are
++// replaced by one line pointing to App updates, where update behavior is set. Nothing shows until the
++// mode is known.
++export function UpdateBehaviorSettings({ children }: { children: ReactNode }) {
++  const mode = useDatabaseMode();
++  if (mode === 'supabase') return <>{children}</>;
++  if (mode !== 'sqlite') return null;
++  return (
++    <section className="glass-light rounded-xl p-6 border border-overlay/5">
++      <p className="text-text-primary font-medium">Update behavior</p>
++      <p className="text-sm text-text-muted">
++        Update behavior is set on{' '}
++        <Link href="/dashboard/updates" className="text-accent-cyan hover:underline">App updates</Link>.
++      </p>
++    </section>
++  );
++}
+diff --git a/components/hrm/UpdateSchedule.tsx b/components/hrm/UpdateSchedule.tsx
+index 4160f0548..7e756f8fd 100644
+--- a/components/hrm/UpdateSchedule.tsx
++++ b/components/hrm/UpdateSchedule.tsx
+@@ -65,7 +65,7 @@ export function UpdateSchedule() {
+       {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
+     </div>;
+   return <section aria-label="Automatic publishing" className="h-full rounded-2xl border border-overlay/10 bg-bg-surface p-5 space-y-4">
+-    <div className="flex flex-wrap gap-3 items-center justify-between"><div><p className="text-xs font-medium text-accent-cyan mb-1">STEP 1 · INTUNE</p><h2 className="text-lg font-semibold text-text-primary">Automatic publishing</h2></div>
++    <div className="flex flex-wrap gap-3 items-center justify-between"><div><p className="text-xs font-medium text-accent-cyan mb-1">Step 1: Intune</p><h2 className="text-lg font-semibold text-text-primary">Automatic publishing</h2></div>
+       {data?.schedule && <Dialog open={editing} onOpenChange={value => { if (!action.isPending) { if (value) { action.reset(); setDraft(data.schedule!); } setEditing(value); } }}>
+         <DialogTrigger asChild><Button variant="ghost" size="sm">Edit publishing schedule</Button></DialogTrigger>
+         <DialogContent side="right" hideCloseButton={action.isPending} onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }}>
+diff --git a/components/unmanaged/ClaimAllModal.tsx b/components/unmanaged/ClaimAllModal.tsx
+index e33539426..b9154d42b 100644
+--- a/components/unmanaged/ClaimAllModal.tsx
++++ b/components/unmanaged/ClaimAllModal.tsx
+@@ -205,7 +205,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+                 className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white border-0"
+               >
+                 <ShoppingCart className="w-4 h-4 mr-2" />
+-                Claim {apps.length} Apps
++                Claim {apps.length} apps
+               </Button>
+             </>
+           )}
+diff --git a/lib/hrm/__tests__/site.test.ts b/lib/hrm/__tests__/site.test.ts
+index 32948c67f..cf39a21f0 100644
+--- a/lib/hrm/__tests__/site.test.ts
++++ b/lib/hrm/__tests__/site.test.ts
+@@ -61,8 +61,8 @@ describe('serverHttpsOrigin', () => {
+ 
+ // HRM patch 0036: hidden upstream sections don't open by address either.
+ describe('hidden dashboard sections', () => {
+-  it('redirects SCCM, app requests and MSP pages to Home', async () => {
+-    for (const path of ['/dashboard/sccm', '/dashboard/sccm/new', '/dashboard/app-requests', '/dashboard/msp', '/dashboard/msp/team']) {
++  it('redirects SCCM, app requests, MSP and Account pages to Home', async () => {
++    for (const path of ['/dashboard/sccm', '/dashboard/sccm/new', '/dashboard/app-requests', '/dashboard/msp', '/dashboard/msp/team', '/dashboard/account']) {
+       const response = await get(path);
+       expect(response.status, path).toBe(307);
+       expect(new URL(response.headers.get('location')!).pathname, path).toBe('/dashboard');
+@@ -70,7 +70,7 @@ describe('hidden dashboard sections', () => {
+   });
+ 
+   it('leaves similar-looking and visible pages alone', () => {
+-    for (const path of ['/dashboard', '/dashboard/settings', '/dashboard/mspx', '/dashboard/sccm-help', '/api/msp/tenants']) {
++    for (const path of ['/dashboard', '/dashboard/settings', '/dashboard/mspx', '/dashboard/sccm-help', '/api/msp/tenants', '/dashboard/accounts-report', '/api/account']) {
+       expect(isHiddenDashboardPath(path), path).toBe(false);
+     }
+   });
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index 88dfed7af..f91ad37f2 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -193,11 +193,11 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'startup-beta',
+     title: 'Startup installation beta',
+-    uiLabels: ['Install behaviour', 'Install after next restart · Beta', 'Startup installations', 'Beta', 'Check startup reports', 'Set up startup reporting', 'Edit shared policy', 'Apply to', 'Use shared policy', 'Save app exception', 'Reporting not configured', 'Cancel before installation', 'Download cancellation script', 'Reports need review'],
+-    flow: ['Choose a pilot app', 'Open Install behaviour', 'Enable the startup Beta', 'Assign a Required pilot group', 'Deploy to Intune', 'Restart the pilot computer'],
++    uiLabels: ['Installation timing', 'Install after next restart · Beta', 'Startup installations', 'Beta', 'Check startup reports', 'Set up startup reporting', 'Edit shared policy', 'Apply to', 'Use shared policy', 'Save app exception', 'Reporting not configured', 'Cancel before installation', 'Download cancellation script', 'Reports need review'],
++    flow: ['Choose a pilot app', 'Open Installation timing', 'Enable the startup Beta', 'Assign a Required pilot group', 'Deploy to Intune', 'Restart the pilot computer'],
+     points: [
+       "Beta: Windows pilot testing required. Local tests do not confirm real Intune delivery, Windows task permissions or restart installation. Validate staging, restart installation, reporting and cancellation on a pilot computer before wider rollout.",
+-      "Install after next restart · Beta is opt-in for one app. Open Install behaviour in its deployment configuration sidebar, then enable the Beta. The same option is in the Deployment list editor. It is not enabled by default.",
++      "Install after next restart · Beta is opt-in for one app and off by default. Set it in the Installation timing section of the deploy panel or the Deployment list editor. The Inventory panel with the same name only sets dates.",
+       "This sets the current deployment. Future automatic updates follow the shared policy or app exception in App updates.",
+       "For future automatic updates, open Edit shared policy in App updates. In Apply to choose the app, turn off Use shared policy, choose Install after next restart · Beta, then Save app exception. A tenant-wide restart rule is unavailable.",
+       "Choose a machine-wide MSI or EXE app and a Required assignment to a small pilot device group. Use a version not already detected as installed; an installed version is not installed again just to test the feature.",
+@@ -239,7 +239,8 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'If the app is in use after postponement expires, the package allows at least 5 minutes to close it. This is not a guarantee that the installer will preserve unsaved work or suppress a restart.',
+       'Open Which updates use this rule? to review scope. Manual Update, Update all and pilots keep their saved package settings. Queued or published packages keep their existing rule.',
+       'Publishing history records packaging and publishing. Published to Intune means the app reached Intune, not that devices installed it. Expand a published release for reported device installation results and their last check time; Inventory also shows them. Expand a release to see Installation policy for this release, the rule saved when packaging was queued. Device postponements and per-device deadlines are not reported in this history.',
+-      'Installation timing opens a separate right-side panel for dates on a version already published. Those dates are per assignment and do not become recurring rules for future versions. Login-only installation is not offered. Install after next restart is available separately as a per-app Beta for pilot testing; see Startup installation beta.',
++      'Installation timing in Inventory opens a separate right-side panel for dates on a version already published. Those dates are per assignment and do not become recurring rules for future versions. Login-only installation is not offered.',
++      'Install after next restart is a separate per-app Beta for pilot testing, set in the Installation timing section of the deploy panel. See Startup installation beta.',
+     ],
+     links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'Open Inventory', href: '/dashboard/inventory' }],
+   },
+@@ -446,14 +447,16 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'your-settings',
+     title: 'Theme, shortcuts and your settings',
+-    uiLabels: ['Search', 'Keyboard shortcuts', 'Same as computer', 'Theme', 'Supersede previous version on update', 'Carry over assignments'],
++    uiLabels: ['Search', 'Keyboard shortcuts', 'Same as computer', 'Theme', 'Settings', 'Deployment list', 'Update behavior', 'App updates'],
+     points: [
+       'To jump to any page, press Ctrl+K (Cmd+K on a Mac), or Search at the top of the page on a wide screen. Type to filter, use the Up and Down arrows to move, Enter to open, and Esc to close.',
+       'Shortcuts: press G, then D for Home, A for App catalog, U for Deployments, I for Inventory, R for Reports or S for Settings. The full list is under Keyboard shortcuts in the search box.',
+       'IntuneGet follows your computer\'s light or dark setting. To choose, press your name at the bottom of the sidebar, then pick Light, Dark or Same as computer under Theme.',
+       'Your theme and the collapsed sidebar are remembered in this browser. Another browser or computer starts with the defaults.',
+-      'Settings also has Supersede previous version on update and Carry over assignments. They change nothing on the server: Update and automatic updates always replace the previous version and keep its groups.',
++      'In Settings, General, the Deployment list switch opens the Deployment list each time you add an app. Turn it off to keep adding apps without it opening.',
++      'Settings has no update switches. The Update behavior card says Update behavior is set on App updates. Update and automatic updates always replace the previous version and keep its groups.',
+     ],
++    links: [{ label: 'Open Settings', href: '/dashboard/settings' }, { label: 'Open App updates', href: '/dashboard/updates' }],
+   },
+   {
+     id: 'reports',
+diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
+index 0903f4d04..1e5a7445b 100644
+--- a/lib/hrm/help-guides.ts
++++ b/lib/hrm/help-guides.ts
+@@ -56,7 +56,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+       step('Save and read back', 'Press Save timing to Intune, then Reload timing to confirm the saved values.', 'inventory', 'Save timing to Intune', 'Only the selected assignment’s timing changes.'),
+     ],
+     success: 'Reload timing shows the intended dates and restart settings for the selected assignment.',
+-    caution: 'These dates apply to this published copy. They do not create a recurring schedule or a login trigger; offline devices may install later.',
++    caution: 'These dates apply to this published copy. They do not create a recurring schedule or a login trigger; offline devices may install later. The deploy panel section with the same name sets a new deployment instead.',
+     related: ['automatic-installation-policy', 'update-schedule', 'startup-beta'],
+     troubleshoot: [{ problem: 'The assignment changed during review', action: 'Reload timing and review the current values before saving again.' }, { problem: 'The app is already installed', action: 'Timing changes do not reinstall the same version.' }],
+     referenceGroups: [reference('Read and save one assignment', [0, 7, 9]), reference('Availability, deadlines and time zones', [1, 2, 3, 8]), reference('Restart grace and snooze', [4, 5, 6])],
+@@ -141,7 +141,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+     summary: 'Stage one eligible app, verify it waits for Windows Restart, then inspect installation and cancellation.', keywords: ['Beta', 'reboot', 'startup', 'restart', 'SYSTEM', 'Remediations', 'cancellation'],
+     start: catalog, before: ['Beta: Windows pilot testing required. Use an eligible machine-wide MSI or EXE app and a small pilot device group.', 'Deploy the matching packaging workflow and scripts before enabling the Beta.'],
+     steps: [
+-      step('Enable the Beta', 'Open Install behaviour for the app. Choose Install after next restart · Beta and assign the pilot device group as Required.', 'catalog', 'Install after next restart · Beta', 'Only this deployment is configured to wait for a later startup.'),
++      step('Enable the Beta', 'In the deploy panel, open the Installation timing section. Choose Install after next restart · Beta, then assign the pilot device group as Required.', 'catalog', 'Install after next restart · Beta', 'Only this deployment is configured to wait for a later startup.'),
+       step('Deploy and verify waiting', 'Deploy through the Deployment list. On the pilot computer, confirm the package is staged and the version is still uninstalled before restarting.', 'deployment-list', 'Deploy to Intune', 'Staging has not been mistaken for installation success.'),
+       step('Restart the pilot computer', 'Use Windows Restart. Check real version detection, task cleanup and local status after the later startup.', 'updates', 'Startup installations · Beta', 'The pilot provides real Windows evidence; sign-in is not blocked.'),
+       step('Connect startup reporting', 'In Startup installations, open Set up startup reporting. Assign the licensed detection-only Remediations script and have the server administrator connect its ID and read permission.', 'updates', 'Set up startup reporting', 'Startup outcomes can be collected separately from publishing history.'),
+@@ -169,7 +169,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+     caution: 'The choice period starts at the device’s first installation attempt. Prompts may be skipped when nobody is signed in or no app needs closing.',
+     related: ['update-schedule', 'installation-timing', 'startup-beta'],
+     troubleshoot: [{ problem: 'An existing package did not change', action: 'Policy edits do not change queued or published packages. Check the release’s saved policy.' }, { problem: 'You need installation only after restart', action: 'Use the per-app startup Beta after checking eligibility and pilot requirements.', guide: 'startup-beta' }],
+-    referenceGroups: [reference('Scope, inheritance and saving', [0, 1, 2, 3, 7]), reference('Device choice period and prompts', [4, 5, 6]), reference('Published release evidence and other timing controls', [8, 9])],
++    referenceGroups: [reference('Scope, inheritance and saving', [0, 1, 2, 3, 7]), reference('Device choice period and prompts', [4, 5, 6]), reference('Published release evidence and other timing controls', [8, 9, 10])],
+   },
+   {
+     id: 'update-schedule', category: 'updates', title: 'Control automatic publishing',
+@@ -333,7 +333,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+   },
+   {
+     id: 'your-settings', category: 'settings', title: 'Find a page or change your theme',
+-    summary: 'Use Search and keyboard shortcuts, or choose a theme for this browser.', keywords: ['theme', 'dark', 'light', 'keyboard', 'search', 'shortcuts', 'preferences'],
++    summary: 'Use Search and keyboard shortcuts, or choose a theme for this browser.', keywords: ['theme', 'dark', 'light', 'keyboard', 'search', 'shortcuts', 'preferences', 'deployment list', 'update behavior', 'supersede', 'carry over assignments'],
+     start: settings, before: ['Theme and sidebar preferences are remembered in this browser.'],
+     steps: [
+       step('Jump with Search', 'Press Ctrl+K, or Cmd+K on a Mac. Type a page name, use the arrow keys, then Enter to open it.', 'settings', 'Search', 'You can reach the right page without opening more menus.'),
+@@ -341,10 +341,10 @@ export const HELP_GUIDES: HelpGuide[] = [
+       step('Choose a theme', 'Press your name at the bottom of the sidebar. Under Theme, choose Light, Dark or Same as computer.', 'settings', 'Theme', 'This browser uses the selected appearance.'),
+     ],
+     success: 'You can navigate with Search and the browser uses your chosen theme.',
+-    caution: 'Supersede previous version on update and Carry over assignments do not change server update behavior; updates always replace the previous version and keep groups.',
++    caution: 'Update behavior is set on App updates, not in Settings. Update and automatic updates always replace the previous version and keep its groups.',
+     related: ['support', 'updates'],
+     troubleshoot: [{ problem: 'Another browser has different settings', action: 'Theme and sidebar choices are stored separately in each browser.' }],
+-    referenceGroups: [reference('Search and keyboard navigation', [0, 1]), reference('Appearance and saved preferences', [2, 3, 4])],
++    referenceGroups: [reference('Search and keyboard navigation', [0, 1]), reference('Appearance and saved preferences', [2, 3]), reference('Deployment list and update behavior', [4, 5])],
+   },
+   {
+     id: 'reports', category: 'devices', title: 'Review deployment results and history',
+diff --git a/lib/hrm/site.ts b/lib/hrm/site.ts
+index 500b7f860..4173edc02 100644
+--- a/lib/hrm/site.ts
++++ b/lib/hrm/site.ts
+@@ -19,7 +19,9 @@ export function isMarketingPath(pathname: string): boolean {
+ 
+ // HRM patch 0036: upstream sections hidden from the sidebar (SCCM migration, public app requests,
+ // MSP) still opened by typing the address. Their pages stay in the code; the proxy sends them Home.
+-const HIDDEN_DASHBOARD_PREFIXES = ['/dashboard/sccm', '/dashboard/app-requests', '/dashboard/msp'];
++// HRM patch 0051: upstream's Account page too. No menu links to it, and Settings > General already
++// shows the signed-in account and the Intune connection.
++const HIDDEN_DASHBOARD_PREFIXES = ['/dashboard/sccm', '/dashboard/app-requests', '/dashboard/msp', '/dashboard/account'];
+ 
+ export function isHiddenDashboardPath(pathname: string): boolean {
+   return HIDDEN_DASHBOARD_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+diff --git a/proxy.ts b/proxy.ts
+index bc0993199..2de5e3ecd 100644
+--- a/proxy.ts
++++ b/proxy.ts
+@@ -20,7 +20,7 @@ export function proxy(request: NextRequest) {
+     if (pathname !== '/robots.txt') return new NextResponse(null, { status: 404 });
+     return new NextResponse(ROBOTS_TXT, { headers: { 'Content-Type': 'text/plain' } });
+   }
+-  // HRM patch 0036: hidden upstream sections (SCCM, app requests, MSP) go Home too.
++  // HRM patch 0036: hidden upstream sections (SCCM, app requests, MSP, and Account from 0051) go Home too.
+   if (isMarketingPath(pathname) || isHiddenDashboardPath(pathname)) {
+     return NextResponse.redirect(new URL(HOME_PATH, request.url));
+   }

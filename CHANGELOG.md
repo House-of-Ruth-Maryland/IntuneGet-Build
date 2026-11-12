@@ -2,6 +2,110 @@
 
 ## Unreleased
 
+- Clearer screens after a UX review (patch 0058). Inventory tags an old copy that cleanup is
+  holding Kept for review, and says which newer copy was deployed and when. The sidebar has two
+  groups, Apps and Activity, with App updates under Apps and Help at the bottom. Home's Server
+  status shows checks that need a look first, with the reason, and folds working checks into All
+  checks. Needs attention buttons say where they go (Open app, Open Inventory, Open Deployments).
+  App updates starts with one status strip for the Update schedule, Installation timing and
+  Startup install results; Pause automatic updates is in Edit schedule, and Resume shows on the
+  strip while paused. The No access page shows which account is signed in and has Sign in with
+  another account. Deployments shows Sending to Intune instead of Uploading. Availability and
+  deadline's button is now Reload dates. Status and error messages are shorter and never show raw
+  error text. The IT dashboard report adds a "Limit IntuneGet sign-in to IT-Admins" to-do until
+  the IT admins group is set. Home's Intune self-test reason now names the failed read only.
+  On a phone, the menu button shows again; the page header was covering it.
+  David must reinstall `intuneget-status` on the VM (CLAUDE.md, "VM setup"). Remove and Retire
+  screens say computers instead of devices (Remove from computers), and the deploy review says
+  Updates: Auto-update. Help adds that groups carried to a new copy don't keep their availability
+  date, deadline or restart grace; set them again with Availability and deadline. Help matches.
+
+- Version sync after deploy. When a deploy finishes, the server corrects App updates straight
+  away. If that fails after 2 or more deploys in 24 hours, Home's Server status shows Version
+  sync after deploy as Failing, and IT Ops gets a Teams alert (daily while it lasts, and when it
+  clears). The next deploy that corrects App updates clears it, and so does the 3:30 AM or 3:30 PM
+  update check once it has rebuilt App updates (not when the catalog couldn't be read). New missed
+  deploys raise it again by the same rule. If the app stops answering, the status file keeps a
+  Failing verdict for up to 24 hours, or until a later update check succeeds, so the alert never
+  clears by itself. The IT dashboard report and the MCP server's status show it too. Only a
+  time, the app's WinGet ID and a short code are kept, never error text. David must reinstall
+  `intuneget-status` and `intuneget-watchdog` on the VM (CLAUDE.md, "VM setup"). Help matches
+  (patch 0057).
+
+- Only HRM's IT admins group can use IntuneGet. With the group set on the VM (CLAUDE.md, "Access
+  to the app"), staff outside the group, or from another tenant, see No access to IntuneGet and
+  are asked to contact HRM Support. Every staff API call refuses them too. Adding or removing
+  someone can take up to 5 minutes to apply. If the server can't check, the page says so and has
+  a Try again button. No new Microsoft permission is needed. Until the group is set, nothing
+  changes and Home's Server status shows "Not limited to a group" under Who can sign
+  in. Cron jobs, the IT dashboard report, workflow callbacks and the MCP read API are not affected.
+  The tenant setting is now `HRM_TENANT_ID` for both sign-in and the MCP read API;
+  `MCP_TENANT_ID` still works when it is unset. Help matches (patch 0056).
+
+- Read-only API for HRM's MCP server. The server answers questions from HRM's MCP server about
+  server status, Needs attention, apps in Intune, App updates, the Update schedule, Deployments,
+  install failures and Pilot rollouts. It sends app names, IDs, versions, counts, group names and
+  error codes only, never staff emails, device names or error text, and it changes nothing. It is
+  off until the five settings in CLAUDE.md ("MCP read API") are set on the VM, and it needs both
+  the API key and the MCP server's Cloudflare Access service token. Contract: `docs/mcp-api.md`.
+  Help matches (patch 0055).
+
+- Inventory explains old copies. A copy IntuneGet has replaced shows a Previous copy tag. Its
+  details say which version replaced it and when, and that it is removed automatically after 7
+  days if it's safe. If cleanup is keeping it, the details say Kept: and why. Previous copies
+  waiting for removal no longer also appear in the list of apps with more than one copy.
+- Check installs now. Install results in Inventory has a Check installs now button that reads the
+  newest copy's results from Intune straight away, instead of waiting for the 3:30 check. Each
+  app can be checked once every 5 minutes. It changes nothing in Intune and never sends a Teams
+  alert. Help matches (patch 0054).
+
+- Easier navigation. In Inventory, each app's details now list its actions under one Actions
+  heading: Availability and deadline first, then Deploy new version or Find in App catalog, then
+  Go back to previous version, with Retire app last. The refresh icon at the top is labelled
+  Reload from Intune. The sidebar now groups pages as Apps (App catalog, Inventory, Discovered
+  apps), Updates (App updates), Activity (Deployments, Reports) and Support (Help), and Search
+  lists them in the same order. Home shows one Deploy an app button instead of the Shortcuts card.
+  New keyboard shortcuts: G then P for App updates, G then V for Discovered apps and G then H for
+  Help. The Reports page is headed My deployment reports, since it shows only deployments you
+  started. Help matches (patch 0053).
+
+- One word for each job. Deploy now always means sending an app or a new version to Intune: App
+  updates says Deploy new versions to Intune, the stat reads Deployed (7 days), and the Publishing
+  history tab is now Update history. On App updates, Automatic update setup is now Automatic
+  updates, the Automatic publishing card is now Update schedule (Edit schedule, Pause automatic
+  updates, Resume automatic updates) and the Device installation card is now Installation timing,
+  matching the deploy panel section that sets the same prompts and postponement. Inventory's date
+  panel, which sets availability, deadline and restart grace for a copy already in Intune, is now
+  Availability and deadline, with Reload from Intune and Save to Intune. The deploy panel explains
+  where each setting lives. Help, its illustrations and its search match, and Settings Help now
+  says plainly that this server has no update switches there (patch 0052).
+
+- Clearer menu wording. App updates' step labels now read Step 1: Intune and Step 2: Computers.
+  The deploy panel section Install behaviour is now Installation timing. The Claim all button in
+  Discovered apps says Claim 3 apps instead of Claim 3 Apps. In Settings, General, Cart behavior is
+  now Deployment list, and the Carry over assignments and Supersede previous version on update
+  switches, which change nothing on this server, are replaced by one line linking to App updates,
+  where update behavior is set. The unused Account page now opens Home. Home's All in tenant view
+  says Activity for everyone in your tenant. Help matches (patch 0051).
+
+- Deploy new version for custom and GitHub-release apps now replaces the previous copy the same way
+  Update does: the new copy takes the groups the previous copy has in Intune when it deploys, and
+  the previous copy is left with none. The review marks it Replaces current copy. Old-copy cleanup
+  now waits 7 days from when each old copy was replaced, not from the newest copy's deployment, so
+  apps updated more than once a week are cleaned up too. The newest copy still needs a successful
+  install and no more than 1 in 10 failures. When the newest copy has been out 7 days with no
+  groups, no installs or too many failures, Home now lists the old copies waiting on it with the
+  reason. Help, the form text and the Inventory hint match (patch 0050).
+
+- App updates, Home's count and the sidebar badge show the new version as soon as a deployment
+  finishes, instead of listing the app as out of date until the next 3:30 check. This works for
+  every way of deploying: Update, Update all, Auto-update, App catalog, Deploy new version and
+  pilots. Dismissed apps stay dismissed. Deployments refreshes App updates, Home and Inventory when
+  a job finishes, App updates re-reads when you come back to the tab and every 45 seconds while a
+  deployment runs, and Inventory re-reads when you come back after a minute. Refresh in App updates
+  now cleans out-of-date entries for everyone in the tenant. Inventory still lists the previous
+  copy until it is removed. Help says when each screen changes (patch 0049).
+
 - Weekly upstream check picks the highest app release tag (vX.Y.Z) instead of GitHub's Latest
   release. Upstream now also publishes IntuneGet Packager releases (packager-vX.Y.Z) marked Latest,
   which made the check fail since November 9 and would have hidden the next app release.

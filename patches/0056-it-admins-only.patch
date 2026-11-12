@@ -1,0 +1,930 @@
+diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
+index 80d095015..9704ef7d4 100644
+--- a/app/(app)/dashboard/layout.tsx
++++ b/app/(app)/dashboard/layout.tsx
+@@ -27,6 +27,9 @@ import { Sidebar, DeploymentStatusIndicator } from '@/components/dashboard';
+ const CommandPalette = dynamic(() => import('@/components/dashboard/CommandPalette').then(m => m.CommandPalette));
+ import { springPresets } from '@/lib/animations/variants';
+ import { getClientFeatureFlags } from '@/lib/features';
++// HRM patch 0056: staff outside the IT admins group see a "no access" page instead of the dashboard.
++import { useAppAccess } from '@/hooks/useAppAccess';
++import { AccessDenied } from '@/components/hrm/AccessDenied';
+ 
+ export default function DashboardLayout({
+   children,
+@@ -72,6 +75,8 @@ export default function DashboardLayout({
+     setIsLoading(false);
+   }, []);
+ 
++  const { state: appAccess, retry: retryAccess } = useAppAccess(isAuthenticated && !isLoading);
++
+   useEffect(() => {
+     if (!isLoading && !isInitializing && !isAuthenticated && !isSigningOut) {
+       router.push('/auth/signin?callbackUrl=/dashboard');
+@@ -80,6 +85,8 @@ export default function DashboardLayout({
+ 
+   useEffect(() => {
+     if (isLoading || !isAuthenticated || isCheckingOnboarding) return;
++    // HRM patch 0056: a refused user's consent check fails too; never send them to onboarding.
++    if (appAccess !== 'allowed') return;
+ 
+     if (isOnboardingComplete) {
+       setShowRetryBanner(false);
+@@ -105,7 +112,7 @@ export default function DashboardLayout({
+ 
+     // consent_not_granted or insufficient_intune_permissions: real consent gap.
+     router.push('/onboarding');
+-  }, [isLoading, isAuthenticated, isCheckingOnboarding, isOnboardingComplete, errorType, router]);
++  }, [isLoading, isAuthenticated, isCheckingOnboarding, isOnboardingComplete, errorType, router, appAccess]);
+ 
+   useEffect(() => {
+     if (isAuthenticated && !isLoading) {
+@@ -127,7 +134,11 @@ export default function DashboardLayout({
+     await signOut();
+   };
+ 
+-  if (isLoading || isCheckingOnboarding) {
++  if (isAuthenticated && (appAccess === 'denied' || appAccess === 'unavailable')) {
++    return <AccessDenied unavailable={appAccess === 'unavailable'} onRetry={retryAccess} onSignOut={handleSignOut} />;
++  }
++
++  if (isLoading || isCheckingOnboarding || (isAuthenticated && appAccess === 'checking')) {
+     return (
+       <div className="min-h-screen flex items-center justify-center bg-bg-deepest">
+         <div className="relative">
+diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
+index e700daf83..59d723798 100644
+--- a/app/(app)/dashboard/page.tsx
++++ b/app/(app)/dashboard/page.tsx
+@@ -278,7 +278,7 @@ export default function DashboardPage() {
+               <Package className="w-4 h-4 mr-2" aria-hidden="true" />Deploy an app
+             </Link>
+           </Button>
+-          <ServerStatusCard status={home?.server} loading={homeLoading} />
++          <ServerStatusCard status={home?.server} loading={homeLoading} appAccess={home?.appAccess} />
+         </div>
+       </div>
+ 
+diff --git a/app/api/hrm/access/route.test.ts b/app/api/hrm/access/route.test.ts
+new file mode 100644
+index 000000000..27263863a
+--- /dev/null
++++ b/app/api/hrm/access/route.test.ts
+@@ -0,0 +1,55 @@
++// HRM patch 0056
++import { NextRequest } from 'next/server';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ verify: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ verifyAccessToken: mocks.verify }));
++import { GET } from './route';
++import { ACCESS_DENIED_CODE, ACCESS_UNAVAILABLE_CODE } from '@/lib/hrm/admin-access';
++import { accessStateFromStatus, stateWhileChecking } from '@/hooks/useAppAccess';
++
++const request = () => new NextRequest('http://localhost/api/hrm/access', { headers: { Authorization: 'Bearer x.y.z' } });
++const user = { userId: 'user-01', tenantId: 'tenant-01', userEmail: 'staff.one@example.test', userName: null };
++beforeEach(() => vi.clearAllMocks());
++
++describe('HRM access route', () => {
++  it('requires sign-in', async () => {
++    mocks.verify.mockResolvedValue(null);
++    expect((await GET(request())).status).toBe(401);
++  });
++
++  it('says yes to a member, never cached', async () => {
++    mocks.verify.mockResolvedValue({ user, access: 'allowed' });
++    const response = await GET(request());
++    expect(response.status).toBe(200);
++    expect(response.headers.get('cache-control')).toBe('private, no-store');
++  });
++
++  it('refuses a non-member or another tenant with 403, and a failed check with 503', async () => {
++    for (const access of ['not_member', 'wrong_tenant']) {
++      mocks.verify.mockResolvedValue({ user, access });
++      const response = await GET(request());
++      expect(response.status).toBe(403);
++      expect((await response.json()).code).toBe(ACCESS_DENIED_CODE);
++    }
++    mocks.verify.mockResolvedValue({ user, access: 'unavailable' });
++    const response = await GET(request());
++    expect(response.status).toBe(503);
++    expect((await response.json()).code).toBe(ACCESS_UNAVAILABLE_CODE);
++  });
++
++  it('picks the dashboard screen from the answer', () => {
++    expect(accessStateFromStatus(200)).toBe('allowed');
++    expect(accessStateFromStatus(403)).toBe('denied');
++    expect(accessStateFromStatus(503)).toBe('unavailable');
++    expect(accessStateFromStatus(401)).toBe('allowed');
++  });
++});
++
++describe('stateWhileChecking', () => {
++  it('keeps an allowed dashboard on screen while access is checked again', () => {
++    expect(stateWhileChecking('allowed')).toBe('allowed');
++    expect(stateWhileChecking('denied')).toBe('checking');
++    expect(stateWhileChecking('unavailable')).toBe('checking');
++    expect(stateWhileChecking('checking')).toBe('checking');
++  });
++});
+diff --git a/app/api/hrm/access/route.ts b/app/api/hrm/access/route.ts
+new file mode 100644
+index 000000000..1cb1973ae
+--- /dev/null
++++ b/app/api/hrm/access/route.ts
+@@ -0,0 +1,13 @@
++// HRM patch 0056: whether the signed-in user may use IntuneGet. The dashboard asks this first and
++// shows the "no access" page on a 403, before any other screen loads.
++
++import { NextRequest, NextResponse } from 'next/server';
++import { verifyAccessToken } from '@/lib/auth-utils';
++import { accessRefusedResponse } from '@/lib/hrm/admin-access';
++
++export async function GET(request: NextRequest) {
++  const verified = await verifyAccessToken(request.headers.get('Authorization'));
++  if (!verified) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
++  if (verified.access !== 'allowed') return accessRefusedResponse(verified.access);
++  return NextResponse.json({ allowed: true }, { headers: { 'Cache-Control': 'private, no-store' } });
++}
+diff --git a/app/api/hrm/home/route.test.ts b/app/api/hrm/home/route.test.ts
+index 9184998e3..2ea9ae458 100644
+--- a/app/api/hrm/home/route.test.ts
++++ b/app/api/hrm/home/route.test.ts
+@@ -36,10 +36,20 @@ describe('HRM home route', () => {
+     const response = await GET(request());
+     expect(mocks.jobs).toHaveBeenCalledWith({ tenantId: 'token-tenant' });
+     expect(response.headers.get('cache-control')).toBe('private, no-store');
+-    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [], rollbackGaps: [], oldCopiesKept: [] });
++    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [], rollbackGaps: [], oldCopiesKept: [], appAccess: 'not_limited' });
+     expect(mocks.installs).toHaveBeenCalledWith('token-tenant');
+   });
+ 
++  // HRM patch 0056
++  it('says whether sign-in is limited to the IT admins group', async () => {
++    vi.stubEnv('HRM_ADMIN_GROUP_IDS', '00000000-0000-4000-8000-0000000000a1');
++    try {
++      expect(await (await GET(request())).json()).toMatchObject({ appAccess: 'limited' });
++    } finally {
++      vi.unstubAllEnvs();
++    }
++  });
++
+   it('still returns server status when the job query fails', async () => {
+     mocks.jobs.mockRejectedValue(new Error('db busy'));
+     expect(await (await GET(request())).json()).toMatchObject({ attention: null, server: { reported: false } });
+diff --git a/app/api/hrm/home/route.ts b/app/api/hrm/home/route.ts
+index cde546a4b..8f6ca2d26 100644
+--- a/app/api/hrm/home/route.ts
++++ b/app/api/hrm/home/route.ts
+@@ -5,6 +5,8 @@ import { parseAccessToken } from '@/lib/auth-utils';
+ import { readServerStatus } from '@/lib/hrm/home';
+ // HRM patch 0055: the attention lists are shared with the MCP read API.
+ import { readTenantAttention } from '@/lib/hrm/attention';
++// HRM patch 0056: Server status says when sign-in isn't limited to the IT admins group.
++import { adminAccessState } from '@/lib/hrm/admin-access';
+ 
+ export async function GET(request: NextRequest) {
+   const user = await parseAccessToken(request.headers.get('Authorization'));
+@@ -15,7 +17,7 @@ export async function GET(request: NextRequest) {
+     readTenantAttention(user.tenantId),
+   ]);
+   return NextResponse.json(
+-    { attention, server, installFailures, unreached, rollbackGaps, oldCopiesKept },
++    { attention, server, installFailures, unreached, rollbackGaps, oldCopiesKept, appAccess: adminAccessState() },
+     { headers: { 'Cache-Control': 'private, no-store' } },
+   );
+ }
+diff --git a/components/hrm/AccessDenied.tsx b/components/hrm/AccessDenied.tsx
+new file mode 100644
+index 000000000..98908fcd5
+--- /dev/null
++++ b/components/hrm/AccessDenied.tsx
+@@ -0,0 +1,34 @@
++'use client';
++
++// HRM patch 0056: shown instead of the dashboard when the signed-in user isn't in HRM's IT admins
++// group, or when the server couldn't check.
++
++import { Lock, RefreshCw, LogOut } from 'lucide-react';
++import { Button } from '@/components/ui/button';
++import { ACCESS_DENIED_MESSAGE, ACCESS_UNAVAILABLE_MESSAGE } from '@/lib/hrm/admin-access';
++
++export function AccessDenied({ unavailable, onRetry, onSignOut }: { unavailable?: boolean; onRetry: () => void; onSignOut: () => void }) {
++  return (
++    <main className="min-h-screen flex items-center justify-center bg-bg-deepest px-4">
++      <section aria-labelledby="access-denied-title" className="glass-light rounded-xl p-6 max-w-md w-full text-center">
++        <Lock className="w-8 h-8 text-status-warning mx-auto mb-3" aria-hidden="true" />
++        <h1 id="access-denied-title" className="text-lg font-semibold text-text-primary">
++          {unavailable ? "Couldn't check your access" : 'No access to IntuneGet'}
++        </h1>
++        <p className="text-sm text-text-secondary mt-2">{unavailable ? ACCESS_UNAVAILABLE_MESSAGE : ACCESS_DENIED_MESSAGE}</p>
++        <div className="flex flex-col sm:flex-row gap-2 justify-center mt-5">
++          {unavailable && (
++            <Button onClick={onRetry} className="focus-visible:ring-2 focus-visible:ring-accent-cyan">
++              <RefreshCw className="w-4 h-4 mr-2" aria-hidden="true" />
++              Try again
++            </Button>
++          )}
++          <Button variant="outline" onClick={onSignOut} className="focus-visible:ring-2 focus-visible:ring-accent-cyan">
++            <LogOut className="w-4 h-4 mr-2" aria-hidden="true" />
++            Sign out
++          </Button>
++        </div>
++      </section>
++    </main>
++  );
++}
+diff --git a/components/hrm/ServerStatusCard.tsx b/components/hrm/ServerStatusCard.tsx
+index b7371dabf..bb40a5b59 100644
+--- a/components/hrm/ServerStatusCard.tsx
++++ b/components/hrm/ServerStatusCard.tsx
+@@ -37,25 +37,38 @@ function Row({ label, children }: { label: string; children: React.ReactNode })
+   );
+ }
+ 
+-export function ServerStatusCard({ status, loading }: { status?: ServerStatus; loading?: boolean }) {
++// HRM patch 0056: whether sign-in is limited to the IT admins group (HRM_ADMIN_GROUP_IDS on the VM).
++function AccessRow({ appAccess }: { appAccess?: 'limited' | 'not_limited' }) {
++  if (!appAccess) return null;
++  return (
++    <Row label="Who can sign in">
++      {appAccess === 'limited' ? <Pill tone="ok">IT admins group</Pill> : <Pill tone="warn">Access isn't limited to a group yet</Pill>}
++    </Row>
++  );
++}
++
++export function ServerStatusCard({ status, loading, appAccess }: { status?: ServerStatus; loading?: boolean; appAccess?: 'limited' | 'not_limited' }) {
+   return (
+     <section aria-labelledby="server-status-title" className="glass-light rounded-xl p-5 border-t-4 border-t-accent-violet-bright">
+       <div className="flex items-center gap-2 mb-3">
+         <Server className="w-5 h-5 text-accent-cyan" aria-hidden="true" />
+         <h2 id="server-status-title" className="text-lg font-semibold text-text-primary">Server status</h2>
+         {status?.reported && (
+-          <span className="ml-auto">{status.problems.length === 0 ? <Pill tone="ok">Healthy</Pill> : <Pill tone="warn">Check</Pill>}</span>
++          <span className="ml-auto">{status.problems.length === 0 && appAccess !== 'not_limited' ? <Pill tone="ok">Healthy</Pill> : <Pill tone="warn">Check</Pill>}</span>
+         )}
+       </div>
+ 
+       {loading && !status ? (
+         <Loader2 className="w-5 h-5 text-text-secondary animate-spin" aria-label="Loading server status" />
+       ) : !status?.reported ? (
+-        <p className="text-sm text-text-muted">
+-          {status?.reason === 'stale'
+-            ? `Status not reported since ${relative(status.generatedAt)}. The status timer on the server may have stopped.`
+-            : 'Status not reported. The status timer on the server may not be installed yet.'}
+-        </p>
++        <>
++          <p className="text-sm text-text-muted">
++            {status?.reason === 'stale'
++              ? `Status not reported since ${relative(status.generatedAt)}. The status timer on the server may have stopped.`
++              : 'Status not reported. The status timer on the server may not be installed yet.'}
++          </p>
++          {appAccess && <dl className="mt-2"><AccessRow appAccess={appAccess} /></dl>}
++        </>
+       ) : (
+         <dl>
+           <Row label="Version">{status.version ?? 'Unknown'}</Row>
+@@ -114,6 +127,7 @@ export function ServerStatusCard({ status, loading }: { status?: ServerStatus; l
+               </span>
+             )}
+           </Row>
++          <AccessRow appAccess={appAccess} />
+         </dl>
+       )}
+     </section>
+diff --git a/hooks/useAppAccess.ts b/hooks/useAppAccess.ts
+new file mode 100644
+index 000000000..9990ffdc7
+--- /dev/null
++++ b/hooks/useAppAccess.ts
+@@ -0,0 +1,48 @@
++'use client';
++
++// HRM patch 0056: asks the server whether the signed-in user may use IntuneGet, before the
++// dashboard loads anything else. The server enforces this on every route; this only picks the
++// screen to show.
++
++import { useCallback, useEffect, useState } from 'react';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++
++export type AppAccessState = 'checking' | 'allowed' | 'denied' | 'unavailable';
++
++/** Maps the server's answer to a screen. Anything unexpected lets the dashboard load (routes still refuse). */
++export function accessStateFromStatus(status: number): Exclude<AppAccessState, 'checking'> {
++  if (status === 403) return 'denied';
++  if (status === 503) return 'unavailable';
++  return 'allowed';
++}
++
++/** While checking again (a new token or account), a dashboard already allowed stays on screen. */
++export function stateWhileChecking(previous: AppAccessState): AppAccessState {
++  return previous === 'allowed' ? 'allowed' : 'checking';
++}
++
++export function useAppAccess(enabled: boolean): { state: AppAccessState; retry: () => void } {
++  const { getAccessToken } = useMicrosoftAuth();
++  const [state, setState] = useState<AppAccessState>('checking');
++  const [attempt, setAttempt] = useState(0);
++
++  useEffect(() => {
++    if (!enabled) return;
++    let cancelled = false;
++    setState(stateWhileChecking);
++    (async () => {
++      try {
++        const token = await getAccessToken();
++        if (!token) { if (!cancelled) setState('allowed'); return; }
++        const response = await fetch('/api/hrm/access', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
++        if (!cancelled) setState(accessStateFromStatus(response.status));
++      } catch {
++        if (!cancelled) setState('allowed');
++      }
++    })();
++    return () => { cancelled = true; };
++  }, [enabled, getAccessToken, attempt]);
++
++  const retry = useCallback(() => setAttempt((n) => n + 1), []);
++  return { state, retry };
++}
+diff --git a/hooks/useHrmHome.ts b/hooks/useHrmHome.ts
+index 8703bef04..573a2a93f 100644
+--- a/hooks/useHrmHome.ts
++++ b/hooks/useHrmHome.ts
+@@ -17,6 +17,8 @@ export interface HrmHomeData {
+   rollbackGaps?: Array<{ displayName: string; intuneAppId: string; previousVersion: string }>;
+   // HRM patch 0042: old copies IntuneGet couldn't remove after an update
+   oldCopiesKept?: Array<{ displayName: string; intuneAppId: string; version: string; newestAppId: string; reason: string }>;
++  // HRM patch 0056: whether sign-in is limited to the IT admins group
++  appAccess?: 'limited' | 'not_limited';
+ }
+ 
+ export function useHrmHome() {
+diff --git a/lib/auth-utils.ts b/lib/auth-utils.ts
+index c37a2ca67..18eabe49f 100644
+--- a/lib/auth-utils.ts
++++ b/lib/auth-utils.ts
+@@ -5,6 +5,8 @@
+ 
+ import crypto from 'crypto';
+ import { decodeJwt } from 'jose';
++// HRM patch 0056: only HRM's IT admins group may use the app.
++import { checkAdminAccess, type AccessDecision } from '@/lib/hrm/admin-access';
+ 
+ /**
+  * User information extracted from a Microsoft access token
+@@ -98,12 +100,13 @@ async function verifyTokenWithGraph(accessToken: string): Promise<TokenUserInfo
+ }
+ 
+ /**
+- * Parse and verify a Microsoft Graph access token from an Authorization header.
+- * The token's authenticity is confirmed by presenting it to the Microsoft Graph
+- * API — Microsoft verifies the signature, issuer, audience, and expiry.
+- * Results are cached to minimise latency on hot paths.
++ * HRM patch 0056: verify the token, then decide whether this user may use the app (members of
++ * HRM_ADMIN_GROUP_IDS in HRM_TENANT_ID; everyone while no group is set). Null when the token
++ * isn't a genuine Graph token. The proxy uses this to answer refused users with a clear 403.
+  */
+-export async function parseAccessToken(authHeader: string | null): Promise<TokenUserInfo | null> {
++export async function verifyAccessToken(
++  authHeader: string | null
++): Promise<{ user: TokenUserInfo; access: AccessDecision } | null> {
+   if (!authHeader?.startsWith('Bearer ')) {
+     return null;
+   }
+@@ -113,7 +116,23 @@ export async function parseAccessToken(authHeader: string | null): Promise<Token
+     return null;
+   }
+ 
+-  return verifyTokenWithGraph(accessToken);
++  const user = await verifyTokenWithGraph(accessToken);
++  if (!user) return null;
++  return { user, access: await checkAdminAccess(user, accessToken) };
++}
++
++/**
++ * Parse and verify a Microsoft Graph access token from an Authorization header.
++ * The token's authenticity is confirmed by presenting it to the Microsoft Graph
++ * API — Microsoft verifies the signature, issuer, audience, and expiry.
++ * Results are cached to minimise latency on hot paths.
++ *
++ * HRM patch 0056: users outside HRM's IT admins group (or tenant) get null too, so every
++ * route that checks a user refuses them even if the proxy's 403 were skipped.
++ */
++export async function parseAccessToken(authHeader: string | null): Promise<TokenUserInfo | null> {
++  const verified = await verifyAccessToken(authHeader);
++  return verified?.access === 'allowed' ? verified.user : null;
+ }
+ 
+ /**
+diff --git a/lib/hrm/__tests__/admin-access.test.ts b/lib/hrm/__tests__/admin-access.test.ts
+new file mode 100644
+index 000000000..16d191f93
+--- /dev/null
++++ b/lib/hrm/__tests__/admin-access.test.ts
+@@ -0,0 +1,184 @@
++// HRM patch 0056: only HRM's IT admins group may use IntuneGet. Fake IDs only.
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import {
++  ACCESS_CACHE_MS,
++  ACCESS_DENIED_CODE,
++  ACCESS_DENIED_MESSAGE,
++  adminAccessConfig,
++  adminAccessState,
++  checkAdminAccess,
++  clearAdminAccessCache,
++  isMachineApiPath,
++} from '../admin-access';
++
++const ADMINS = '00000000-0000-4000-8000-0000000000a1';
++const OTHER_GROUP = '00000000-0000-4000-8000-0000000000b2';
++const TENANT = '00000000-0000-4000-8000-0000000000c3';
++const OTHER_TENANT = '00000000-0000-4000-8000-0000000000d4';
++const env = { HRM_ADMIN_GROUP_IDS: ADMINS, HRM_TENANT_ID: TENANT };
++const user = { userId: 'user-01', tenantId: TENANT };
++
++function graph(groups: string[] | null, status = 200) {
++  return vi.fn(async () => (groups === null
++    ? new Response('{"error":{"message":"fake detail"}}', { status })
++    : Response.json({ value: groups }, { status })));
++}
++
++beforeEach(() => clearAdminAccessCache());
++
++describe('access settings', () => {
++  it('is off when no group is set, so nothing changes', () => {
++    expect(adminAccessConfig({})).toBeNull();
++    expect(adminAccessState({})).toBe('not_limited');
++    expect(adminAccessState(env)).toBe('limited');
++  });
++
++  it('keeps only well-formed group IDs and ignores a malformed tenant', () => {
++    expect(adminAccessConfig({ HRM_ADMIN_GROUP_IDS: ` ${ADMINS.toUpperCase()}, not-a-guid,${OTHER_GROUP},${ADMINS}`, HRM_TENANT_ID: 'example.test' }))
++      .toEqual({ groupIds: [ADMINS, OTHER_GROUP], tenantId: null });
++    expect(adminAccessConfig({ HRM_ADMIN_GROUP_IDS: 'not-a-guid' })).toBeNull();
++  });
++
++  it("reads patch 0055's tenant setting when HRM_TENANT_ID is unset", () => {
++    expect(adminAccessConfig({ HRM_ADMIN_GROUP_IDS: ADMINS, MCP_TENANT_ID: TENANT })?.tenantId).toBe(TENANT);
++    expect(adminAccessConfig({ HRM_ADMIN_GROUP_IDS: ADMINS, MCP_TENANT_ID: OTHER_TENANT, HRM_TENANT_ID: TENANT })?.tenantId).toBe(TENANT);
++  });
++});
++
++describe('checkAdminAccess', () => {
++  it('allows everyone without asking Graph when no group is set', async () => {
++    const fetchImpl = graph([]);
++    expect(await checkAdminAccess(user, 'token', { env: {}, fetchImpl })).toBe('allowed');
++    expect(fetchImpl).not.toHaveBeenCalled();
++  });
++
++  it("allows a member, asking with the user's own token", async () => {
++    const fetchImpl = graph([ADMINS]);
++    expect(await checkAdminAccess(user, 'user-token', { env, fetchImpl })).toBe('allowed');
++    expect(fetchImpl).toHaveBeenCalledWith('https://graph.microsoft.com/v1.0/me/checkMemberGroups', expect.objectContaining({
++      method: 'POST',
++      headers: expect.objectContaining({ Authorization: 'Bearer user-token' }),
++      body: JSON.stringify({ groupIds: [ADMINS] }),
++    }));
++  });
++
++  it('refuses a non-member', async () => {
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl: graph([]) })).toBe('not_member');
++  });
++
++  it('refuses another tenant without asking Graph', async () => {
++    const fetchImpl = graph([ADMINS]);
++    expect(await checkAdminAccess({ userId: 'user-02', tenantId: OTHER_TENANT }, 'token', { env, fetchImpl })).toBe('wrong_tenant');
++    expect(fetchImpl).not.toHaveBeenCalled();
++  });
++
++  it('keeps a decision for 5 minutes, then asks again', async () => {
++    const fetchImpl = graph([ADMINS]);
++    const now = 1_000_000;
++    await checkAdminAccess(user, 'token', { env, fetchImpl, now });
++    await checkAdminAccess(user, 'token', { env, fetchImpl, now: now + ACCESS_CACHE_MS - 1 });
++    expect(fetchImpl).toHaveBeenCalledTimes(1);
++    fetchImpl.mockImplementation(async () => Response.json({ value: [] }));
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl, now: now + ACCESS_CACHE_MS })).toBe('not_member');
++    expect(fetchImpl).toHaveBeenCalledTimes(2);
++  });
++
++  it('asks again when the group setting changes', async () => {
++    const fetchImpl = graph([ADMINS]);
++    await checkAdminAccess(user, 'token', { env, fetchImpl });
++    await checkAdminAccess(user, 'token', { env: { ...env, HRM_ADMIN_GROUP_IDS: OTHER_GROUP }, fetchImpl });
++    expect(fetchImpl).toHaveBeenCalledTimes(2);
++  });
++
++  it('refuses, and keeps nothing, when Graph fails', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    const failing = graph(null, 500);
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl: failing })).toBe('unavailable');
++    expect(warn.mock.calls.flat().join(' ')).not.toContain('fake detail');
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl: vi.fn(async () => { throw new Error('offline'); }) })).toBe('unavailable');
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl: graph([ADMINS]) })).toBe('allowed');
++    warn.mockRestore();
++  });
++});
++
++describe('machine routes', () => {
++  it('never checks cron, status report, workflow callbacks or the MCP read API', () => {
++    for (const path of ['/api/cron/check-updates', '/api/status-report', '/api/hrm/mcp', '/api/hrm/mcp/status', '/api/package/callback', '/api/packager/jobs', '/api/qa/cohort', '/api/health']) {
++      expect(isMachineApiPath(path), path).toBe(true);
++    }
++    for (const path of ['/api/hrm/home', '/api/hrm/retire', '/api/hrm/mcpx', '/api/package', '/api/intune/apps', '/api/status-reports']) {
++      expect(isMachineApiPath(path), path).toBe(false);
++    }
++  });
++});
++
++// The shared token check and the proxy, end to end with a faked Graph.
++describe('every user route', () => {
++  const fetchMock = vi.fn();
++  const jwt = (tid: string, oid = 'user-01') =>
++    ['e30', Buffer.from(JSON.stringify({ tid, oid, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url'), 'sig'].join('.');
++  const answer = (groups: string[]) => fetchMock.mockImplementation(async (url: string) => url.includes('checkMemberGroups')
++    ? Response.json({ value: groups })
++    : Response.json({ id: 'user-01', displayName: 'Staff One', userPrincipalName: 'staff.one@example.test' }));
++
++  beforeEach(() => {
++    vi.resetModules();
++    fetchMock.mockReset();
++    vi.stubGlobal('fetch', fetchMock);
++    vi.stubEnv('HRM_ADMIN_GROUP_IDS', ADMINS);
++    vi.stubEnv('HRM_TENANT_ID', TENANT);
++  });
++  afterEach(() => {
++    vi.unstubAllEnvs();
++    vi.unstubAllGlobals();
++  });
++
++  const call = async (path: string, token: string) => {
++    const { proxy } = await import('@/proxy');
++    return proxy(new NextRequest(`https://intune.example.test${path}`, { headers: { Authorization: `Bearer ${token}` } }));
++  };
++
++  it('lets a member through', async () => {
++    answer([ADMINS]);
++    const { parseAccessToken } = await import('@/lib/auth-utils');
++    const token = jwt(TENANT);
++    expect((await call('/api/hrm/home', token)).status).toBe(200);
++    expect(await parseAccessToken(`Bearer ${token}`)).toMatchObject({ userId: 'user-01', tenantId: TENANT });
++  });
++
++  it('answers a non-member with a clear 403, and the shared check refuses them too', async () => {
++    answer([]);
++    const { parseAccessToken } = await import('@/lib/auth-utils');
++    const token = jwt(TENANT, 'user-02');
++    const response = await call('/api/hrm/retire', token);
++    expect(response.status).toBe(403);
++    expect(await response.json()).toEqual({ error: ACCESS_DENIED_MESSAGE, code: ACCESS_DENIED_CODE });
++    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
++    expect(await parseAccessToken(`Bearer ${token}`)).toBeNull();
++  });
++
++  it('answers another tenant with a 403', async () => {
++    answer([ADMINS]);
++    expect((await call('/api/intune/apps', jwt(OTHER_TENANT))).status).toBe(403);
++  });
++
++  it('changes nothing while no group is set', async () => {
++    vi.stubEnv('HRM_ADMIN_GROUP_IDS', '');
++    answer([]);
++    const { parseAccessToken } = await import('@/lib/auth-utils');
++    const token = jwt(OTHER_TENANT);
++    expect((await call('/api/hrm/home', token)).status).toBe(200);
++    expect(await parseAccessToken(`Bearer ${token}`)).toMatchObject({ tenantId: OTHER_TENANT });
++    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('checkMemberGroups'))).toBe(false);
++  });
++
++  it('leaves machine routes and non-staff credentials alone', async () => {
++    answer([]);
++    for (const path of ['/api/cron/check-updates', '/api/status-report', '/api/hrm/mcp/status', '/api/package/callback']) {
++      expect((await call(path, jwt(TENANT))).status, path).toBe(200);
++    }
++    expect((await call('/api/hrm/home', 'a'.repeat(64))).status).toBe(200);
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++});
+diff --git a/lib/hrm/__tests__/mcp-auth.test.ts b/lib/hrm/__tests__/mcp-auth.test.ts
+index cee2ad940..3e03692ed 100644
+--- a/lib/hrm/__tests__/mcp-auth.test.ts
++++ b/lib/hrm/__tests__/mcp-auth.test.ts
+@@ -44,6 +44,13 @@ describe('MCP API settings', () => {
+       { ACCESS_TEAM_DOMAIN: 'keys.example.test' }, { ACCESS_TEAM_DOMAIN: 'evil.example.test/x.cloudflareaccess.com' },
+     ]) expect(mcpConfig({ ...env, ...change })).toBeNull();
+   });
++
++  // HRM patch 0056: one tenant setting for sign-in and this API.
++  it('reads the tenant from HRM_TENANT_ID first', () => {
++    const { MCP_TENANT_ID: _unused, ...rest } = env;
++    expect(mcpConfig({ ...rest, HRM_TENANT_ID: TENANT })?.tenantId).toBe(TENANT);
++    expect(mcpConfig({ ...env, HRM_TENANT_ID: 'not-a-guid' })).toBeNull();
++  });
+ });
+ 
+ describe('Cloudflare Access token', () => {
+diff --git a/lib/hrm/admin-access.ts b/lib/hrm/admin-access.ts
+new file mode 100644
+index 000000000..593d48e74
+--- /dev/null
++++ b/lib/hrm/admin-access.ts
+@@ -0,0 +1,151 @@
++/**
++ * HRM patch 0056: only HRM's IT admins may use IntuneGet, behind Cloudflare Access.
++ *
++ * Settings, on the VM only (never in the repo):
++ *  - HRM_ADMIN_GROUP_IDS: comma-separated Entra group object IDs (up to 20). Unset means access
++ *    isn't limited to a group: nothing changes, and Home's Server status says so.
++ *  - HRM_TENANT_ID: the one Entra tenant allowed to sign in. Patch 0055's MCP_TENANT_ID is read
++ *    when it is unset, so one setting names the tenant for both.
++ *
++ * Membership uses POST /me/checkMemberGroups with the signed-in user's own token. Microsoft lists
++ * User.Read (which sign-in already requests) as enough for the signed-in user, and the check is
++ * transitive, so nested groups count. No new permission or admin consent is needed.
++ *
++ * Decisions are kept in memory for 5 minutes per user. A failed check is never kept, and it
++ * refuses the request (503) rather than letting it through.
++ *
++ * Machine routes (cron, status report, workflow callbacks, the MCP read API) never use a user
++ * token, so this check never applies to them.
++ */
++
++export type AccessDecision = 'allowed' | 'not_member' | 'wrong_tenant' | 'unavailable';
++
++export interface AdminAccessConfig {
++  groupIds: string[];
++  tenantId: string | null;
++}
++
++export const ACCESS_CACHE_MS = 5 * 60 * 1000;
++export const ACCESS_CHECK_TIMEOUT_MS = 5_000;
++/** checkMemberGroups takes at most 20 group IDs per request. */
++export const MAX_ADMIN_GROUPS = 20;
++export const ACCESS_DENIED_CODE = 'hrm_access_denied';
++export const ACCESS_UNAVAILABLE_CODE = 'hrm_access_unavailable';
++export const ACCESS_DENIED_MESSAGE =
++  "You don't have access to IntuneGet. Ask HRM Support (https://support.hruthmd.org) to add you to the IT admins group.";
++export const ACCESS_UNAVAILABLE_MESSAGE = "IntuneGet couldn't check your access. Try again in a minute.";
++
++const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
++const CHECK_URL = 'https://graph.microsoft.com/v1.0/me/checkMemberGroups';
++
++type Env = Record<string, string | undefined>;
++
++/** The access settings, or null when no valid group is set (access isn't limited). */
++export function adminAccessConfig(env: Env = process.env): AdminAccessConfig | null {
++  const groupIds = [...new Set(
++    (env.HRM_ADMIN_GROUP_IDS ?? '')
++      .split(',')
++      .map((id) => id.trim().toLowerCase())
++      .filter((id) => GUID.test(id)),
++  )].slice(0, MAX_ADMIN_GROUPS);
++  if (groupIds.length === 0) return null;
++  const tenant = (env.HRM_TENANT_ID || env.MCP_TENANT_ID || '').trim().toLowerCase();
++  return { groupIds, tenantId: GUID.test(tenant) ? tenant : null };
++}
++
++/** For Home's Server status: whether sign-in is limited to the admins group. */
++export function adminAccessState(env: Env = process.env): 'limited' | 'not_limited' {
++  return adminAccessConfig(env) ? 'limited' : 'not_limited';
++}
++
++const decisions = new Map<string, { decision: AccessDecision; expiresAt: number }>();
++
++/** Test helper: forget every cached decision. */
++export function clearAdminAccessCache(): void {
++  decisions.clear();
++}
++
++async function memberOfAny(accessToken: string, groupIds: string[], fetchImpl: typeof fetch): Promise<boolean | null> {
++  try {
++    const response = await fetchImpl(CHECK_URL, {
++      method: 'POST',
++      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
++      body: JSON.stringify({ groupIds }),
++      signal: AbortSignal.timeout(ACCESS_CHECK_TIMEOUT_MS),
++    });
++    if (!response.ok) {
++      // Status code only: the body can carry user or tenant details.
++      console.warn(`[HRM access] Group check failed with status ${response.status}`);
++      return null;
++    }
++    const body = (await response.json()) as { value?: unknown };
++    if (!Array.isArray(body.value)) return null;
++    const found = new Set(body.value.filter((id): id is string => typeof id === 'string').map((id) => id.toLowerCase()));
++    return groupIds.some((id) => found.has(id));
++  } catch {
++    console.warn('[HRM access] Group check could not reach Microsoft Graph');
++    return null;
++  }
++}
++
++/**
++ * Whether this verified user may use the app. The token must already be verified with Graph
++ * (parseAccessToken does that first). Allowed for everyone while no group is set.
++ */
++export async function checkAdminAccess(
++  user: { userId: string; tenantId: string },
++  accessToken: string,
++  options: { env?: Env; fetchImpl?: typeof fetch; now?: number } = {},
++): Promise<AccessDecision> {
++  const config = adminAccessConfig(options.env);
++  if (!config) return 'allowed';
++  const now = options.now ?? Date.now();
++  const tenantId = user.tenantId.toLowerCase();
++  const key = `${config.tenantId ?? ''}|${config.groupIds.join(',')}|${tenantId}|${user.userId}`;
++  const cached = decisions.get(key);
++  if (cached && cached.expiresAt > now) return cached.decision;
++
++  let decision: AccessDecision;
++  if (config.tenantId && tenantId !== config.tenantId) {
++    decision = 'wrong_tenant';
++  } else {
++    const member = await memberOfAny(accessToken, config.groupIds, options.fetchImpl ?? fetch);
++    if (member === null) return 'unavailable';
++    decision = member ? 'allowed' : 'not_member';
++  }
++
++  if (decisions.size > 1000) {
++    for (const [entry, value] of decisions) if (value.expiresAt <= now) decisions.delete(entry);
++  }
++  decisions.set(key, { decision, expiresAt: now + ACCESS_CACHE_MS });
++  return decision;
++}
++
++/** The answer for a refused user: 403 for non-members and other tenants, 503 when the check failed. */
++export function accessRefusedResponse(decision: Exclude<AccessDecision, 'allowed'>): Response {
++  const unavailable = decision === 'unavailable';
++  return Response.json(
++    unavailable
++      ? { error: ACCESS_UNAVAILABLE_MESSAGE, code: ACCESS_UNAVAILABLE_CODE }
++      : { error: ACCESS_DENIED_MESSAGE, code: ACCESS_DENIED_CODE },
++    { status: unavailable ? 503 : 403, headers: { 'Cache-Control': 'no-store' } },
++  );
++}
++
++/**
++ * API paths that never take a staff member's token. They have their own keys or signatures, so
++ * the proxy leaves them alone. (They don't call parseAccessToken either.)
++ */
++const MACHINE_API_PREFIXES = [
++  '/api/cron',
++  '/api/status-report',
++  '/api/hrm/mcp',
++  '/api/package/callback',
++  '/api/packager',
++  '/api/qa',
++  '/api/health',
++];
++
++export function isMachineApiPath(pathname: string): boolean {
++  return MACHINE_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
++}
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index daf782bfe..f4c6e6426 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -444,11 +444,11 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'server',
+     title: 'How the server is updated',
+-    uiLabels: ['Server status', 'Last deploy', 'Off-site backup', 'Backup before deploy', 'Update check', 'Update alerts', 'Disk', 'Tunnel', 'App updates', 'Deployments', 'Pilot rollouts', 'Needs attention'],
++    uiLabels: ['Server status', 'Last deploy', 'Off-site backup', 'Backup before deploy', 'Update check', 'Update alerts', 'Disk', 'Tunnel', 'App updates', 'Deployments', 'Pilot rollouts', 'Needs attention', 'Who can sign in', 'IT admins group', "Access isn't limited to a group yet", 'Healthy', 'Check', 'No access to IntuneGet', "Couldn't check your access", 'Try again', 'Sign out'],
+     points: [
+       'New IntuneGet versions are built with HRM\'s changes and proposed as a Deploy pull request in IntuneGet-Build.',
+       'Merging it updates the server within 5 minutes. The server backs up its data first and goes back to the previous version on its own if the new one doesn\'t start.',
+-      'Server status on the Home page shows the running version, Last deploy, Off-site backup, Backup before deploy, Update check, Update alerts, the Intune checks below, Disk and Tunnel.',
++      'Server status on the Home page shows the running version, Last deploy, Off-site backup, Backup before deploy, Update check, Update alerts, the Intune checks below, Disk, Tunnel and Who can sign in.',
+       'Off-site backup turns red if the last nightly copy to Azure failed or is more than 36 hours old.',
+       'Intune reads shows Failing when install results or app activity could not be read at the last 2 update checks (3:30 AM and 3:30 PM).',
+       'Intune self-test tests every Intune read the server relies on, daily at 7:15 AM (Maryland time), without changing anything in Intune. It shows Failing if a read fails or the test is more than 26 hours old.',
+@@ -458,6 +458,10 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'The summary refreshes at most once a minute. If the server is slow, the IT dashboard keeps the last safe summary and its original time.',
+       'HRM\'s IntuneGet MCP server can read apps, App updates, Deployments, Pilot rollouts, install failures and Needs attention here. It changes nothing in Intune or IntuneGet.',
+       'The MCP server gets app names, IDs, versions, counts, group names and error codes only. It never gets staff emails, device names or error text.',
++      'When Who can sign in on Server status shows IT admins group, only members of HRM\'s IT admins group can use IntuneGet.',
++      'Access isn\'t limited to a group yet means anyone who gets past HRM\'s sign-in can use IntuneGet, and Server status shows Check instead of Healthy. No Teams alert posts for it. Open a ticket with HRM Support.',
++      'Someone outside the group sees No access to IntuneGet and a Sign out button. To add or remove someone, ask HRM Support. The change can take up to 5 minutes to apply.',
++      'Couldn\'t check your access means the server couldn\'t ask Microsoft about your groups. Wait a minute and press Try again. If it lasts, open a ticket with HRM Support.',
+     ],
+     links: [{ label: 'IntuneGet-Build runbook', href: RUNBOOK_URL }],
+   },
+diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
+index 7711050bf..b243fe2bf 100644
+--- a/lib/hrm/help-guides.ts
++++ b/lib/hrm/help-guides.ts
+@@ -319,18 +319,18 @@ export const HELP_GUIDES: HelpGuide[] = [
+   },
+   {
+     id: 'server', category: 'settings', title: 'Check server health and updates',
+-    summary: 'Read the running version and check failures before investigating the server or requesting support.', keywords: ['server status', 'backup', 'deploy', 'tunnel', 'disk', 'health', 'self-test', 'mcp'],
++    summary: 'Read the running version and check failures before investigating the server or requesting support.', keywords: ['server status', 'backup', 'deploy', 'tunnel', 'disk', 'health', 'self-test', 'mcp', 'sign in', 'access', 'no access', 'IT admins group'],
+     start: home, before: ['Server status describes the server, not installation success on user computers.'],
+     steps: [
+-      step('Read the current status', 'Open Home and find Server status. Check the running version, Last deploy and backup results.', 'server', 'Server status', 'You know which version is running and whether backups are current.'),
++      step('Read the current status', 'Open Home and find Server status. Check the running version, Last deploy, backup results and Who can sign in.', 'server', 'Server status', 'You know which version is running, whether backups are current and who can sign in.'),
+       step('Inspect a failing check', 'Read the reason beside Intune reads, Intune self-test, Scheduled updates, Disk or Tunnel when it shows Failing.', 'server', 'Failing', 'The problem can be tied to a specific server check.'),
+       step('Escalate with evidence', 'For a persistent failure, open HRM Support with the check name, time and displayed reason. Use the runbook for authorized server work.', 'support', 'HRM Support', 'Support receives a precise description of the failing service.'),
+     ],
+     success: 'You can identify the running version and the specific check needing attention.',
+     caution: 'A Deploy pull request changes production when merged. Server updates back up first and can roll back if startup health fails.',
+     related: ['alerts', 'support', 'install-results'],
+-    troubleshoot: [{ problem: 'The IT dashboard shows an older summary', action: 'Open Home for current details. A slow server can leave the last safe summary visible with its original time.' }, { problem: 'Off-site backup is red', action: 'The last copy failed or is too old. Use the displayed time and failure reason in your support request.' }],
+-    referenceGroups: [reference('Server updates and automatic rollback', [0, 1]), reference('Read health and backup checks', [2, 3, 4, 5, 6, 7]), reference('External dashboard freshness', [8, 9]), reference('MCP server reads', [10, 11])],
++    troubleshoot: [{ problem: 'The IT dashboard shows an older summary', action: 'Open Home for current details. A slow server can leave the last safe summary visible with its original time.' }, { problem: 'Off-site backup is red', action: 'The last copy failed or is too old. Use the displayed time and failure reason in your support request.' }, { problem: 'A staff member sees No access to IntuneGet', action: 'They are not in the IT admins group. Ask HRM Support to add them; it can take up to 5 minutes to apply.' }, { problem: 'Who can sign in shows Access isn\'t limited to a group yet', action: 'Anyone who gets past HRM\'s sign-in can use IntuneGet. Open a ticket with HRM Support.' }],
++    referenceGroups: [reference('Server updates and automatic rollback', [0, 1]), reference('Read health and backup checks', [2, 3, 4, 5, 6, 7]), reference('External dashboard freshness', [8, 9]), reference('MCP server reads', [10, 11]), reference('Who can use IntuneGet', [12, 13, 14, 15])],
+   },
+   {
+     id: 'your-settings', category: 'settings', title: 'Find a page or change your theme',
+diff --git a/lib/hrm/mcp-auth.ts b/lib/hrm/mcp-auth.ts
+index 71c49072c..f785b3321 100644
+--- a/lib/hrm/mcp-auth.ts
++++ b/lib/hrm/mcp-auth.ts
+@@ -5,7 +5,8 @@
+  *  1. Authorization: Bearer <MCP_API_KEY> (at least 32 characters, compared in constant time).
+  *  2. A Cloudflare Access JWT (Cf-Access-Jwt-Assertion) signed by the team's keys, for ACCESS_AUD,
+  *     whose common_name is the MCP Worker's service token client ID (MCP_ACCESS_CLIENT_ID).
+- * MCP_TENANT_ID names the one Intune tenant the API reads. Missing settings turn the API off.
++ * HRM_TENANT_ID names the one Intune tenant the API reads (patch 0056 shares it with sign-in;
++ * MCP_TENANT_ID is still read when it is unset). Missing settings turn the API off.
+  * Callers only ever learn "401"; the reason is never returned or logged.
+  */
+ 
+@@ -30,7 +31,7 @@ export function mcpConfig(env: Record<string, string | undefined> = process.env)
+   const teamDomain = (env.ACCESS_TEAM_DOMAIN ?? '').trim().toLowerCase().replace(/^https:\/\//, '').replace(/\/+$/, '');
+   const audience = (env.ACCESS_AUD ?? '').trim();
+   const clientId = (env.MCP_ACCESS_CLIENT_ID ?? '').trim();
+-  const tenantId = (env.MCP_TENANT_ID ?? '').trim().toLowerCase();
++  const tenantId = (env.HRM_TENANT_ID || env.MCP_TENANT_ID || '').trim().toLowerCase();
+   if (apiKey.length < 32 || !TEAM_DOMAIN.test(teamDomain) || audience.length < 16 || clientId.length < 8 || !GUID.test(tenantId)) return null;
+   return { apiKey, teamDomain, audience, clientId, tenantId };
+ }
+diff --git a/proxy.ts b/proxy.ts
+index 2de5e3ecd..6a6696d84 100644
+--- a/proxy.ts
++++ b/proxy.ts
+@@ -1,6 +1,9 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createNextMiddleware } from 'gt-next/middleware';
+ import { HOME_PATH, ROBOTS_TXT, isCrawlerPath, isHiddenDashboardPath, isMarketingPath } from '@/lib/hrm/site';
++// HRM patch 0056: staff outside the IT admins group get a clear 403 from every user API route.
++import { accessRefusedResponse, adminAccessConfig, isMachineApiPath } from '@/lib/hrm/admin-access';
++import { verifyAccessToken } from '@/lib/auth-utils';
+ 
+ const PROTECTED_ROUTES = ['/dashboard'];
+ 
+@@ -12,7 +15,28 @@ const PROTECTED_ROUTES = ['/dashboard'];
+ // flip in client-rendered sections like Uploads (issue #136).
+ const gtMiddleware = createNextMiddleware({ localeRouting: false });
+ 
+-export function proxy(request: NextRequest) {
++function withSecurityHeaders<R extends Response>(response: R): R {
++  response.headers.set('X-Content-Type-Options', 'nosniff');
++  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
++  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
++  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
++  return response;
++}
++
++/**
++ * HRM patch 0056: a 403 (or 503 when the check failed) for a genuine staff token whose user
++ * isn't in the IT admins group. Anything else goes on to the route, which still refuses a
++ * missing or invalid token itself. Machine routes and unlimited access are never checked.
++ */
++async function refuseOutsideAdmins(request: NextRequest): Promise<Response | null> {
++  const auth = request.headers.get('authorization');
++  if (!auth?.startsWith('Bearer ') || auth.slice(7).split('.').length !== 3) return null;
++  const verified = await verifyAccessToken(auth);
++  if (!verified || verified.access === 'allowed') return null;
++  return withSecurityHeaders(accessRefusedResponse(verified.access));
++}
++
++export async function proxy(request: NextRequest) {
+   const { pathname } = request.nextUrl;
+ 
+   // HRM patch: no marketing site on this server.
+@@ -36,18 +60,18 @@ export function proxy(request: NextRequest) {
+     }
+   }
+ 
++  if (pathname.startsWith('/api/') && !isMachineApiPath(pathname) && adminAccessConfig()) {
++    const refused = await refuseOutsideAdmins(request);
++    if (refused) return refused;
++  }
++
+   // Pin the UI locale on page requests. API requests are skipped: their locale
+   // is irrelevant and must not drive the shared cookie.
+   const response = pathname.startsWith('/api')
+     ? NextResponse.next()
+     : gtMiddleware(request);
+ 
+-  response.headers.set('X-Content-Type-Options', 'nosniff');
+-  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+-  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+-
+-  return response;
++  return withSecurityHeaders(response);
+ }
+ 
+ export const config = {

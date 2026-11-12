@@ -1,0 +1,803 @@
+diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
+index 08c82ea91..e700daf83 100644
+--- a/app/(app)/dashboard/page.tsx
++++ b/app/(app)/dashboard/page.tsx
+@@ -13,8 +13,6 @@ import {
+   KeyRound,
+   ArrowUpCircle,
+   Hourglass,
+-  LifeBuoy,
+-  Radar,
+ } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+@@ -200,7 +198,7 @@ export default function DashboardPage() {
+       {/* Non-blocking nudge to re-consent for the assignment-filters permission */}
+       <FilterPermissionNudge />
+ 
+-      {/* HRM patch: layout B. Work on the left, server status and shortcuts on the right. */}
++      {/* HRM patch: layout B. Work on the left, Deploy an app and server status on the right. */}
+       <div className="grid gap-6 lg:grid-cols-3">
+         <div className="space-y-6 lg:col-span-2 min-w-0">
+           <section aria-labelledby="attention-title" className={mounted ? 'animate-fade-up stagger-1' : 'opacity-0'}>
+@@ -274,33 +272,13 @@ export default function DashboardPage() {
+         </div>
+ 
+         <div className="space-y-6 min-w-0">
++          {/* HRM patch 0053: one primary action instead of a Shortcuts card that repeated the sidebar. */}
++          <Button asChild className="w-full justify-center bg-accent-cyan hover:bg-accent-cyan-dim text-white border-0">
++            <Link href="/dashboard/apps">
++              <Package className="w-4 h-4 mr-2" aria-hidden="true" />Deploy an app
++            </Link>
++          </Button>
+           <ServerStatusCard status={home?.server} loading={homeLoading} />
+-
+-          <section aria-labelledby="shortcuts-title" className="glass-light rounded-xl p-5">
+-            <h2 id="shortcuts-title" className="text-lg font-semibold text-text-primary mb-3">Shortcuts</h2>
+-            <div className="grid gap-2">
+-              <Link href="/dashboard/apps">
+-                <Button className="w-full justify-start bg-accent-cyan hover:bg-accent-cyan-dim text-white border-0">
+-                  <Package className="w-4 h-4 mr-2" aria-hidden="true" />Deploy an app
+-                </Button>
+-              </Link>
+-              <Link href="/dashboard/updates">
+-                <Button variant="outline" className="w-full justify-start">
+-                  <ArrowUpCircle className="w-4 h-4 mr-2" aria-hidden="true" />Review updates
+-                </Button>
+-              </Link>
+-              <Link href="/dashboard/unmanaged">
+-                <Button variant="outline" className="w-full justify-start">
+-                  <Radar className="w-4 h-4 mr-2" aria-hidden="true" />Discovered apps
+-                </Button>
+-              </Link>
+-              <Link href="/dashboard/help">
+-                <Button variant="outline" className="w-full justify-start">
+-                  <LifeBuoy className="w-4 h-4 mr-2" aria-hidden="true" />Help
+-                </Button>
+-              </Link>
+-            </div>
+-          </section>
+         </div>
+       </div>
+ 
+diff --git a/app/(app)/dashboard/reports/page.tsx b/app/(app)/dashboard/reports/page.tsx
+index 96a48c0c5..a5489fbdb 100644
+--- a/app/(app)/dashboard/reports/page.tsx
++++ b/app/(app)/dashboard/reports/page.tsx
+@@ -57,12 +57,13 @@ export default function ReportsPage() {
+   };
+ 
+   // HRM patch 0036: /api/analytics counts only the signed-in user's jobs (jobs.getByUserId),
+-  // so the page says so instead of reading like a server-wide report.
++  // so the page says so instead of reading like a server-wide report. HRM patch 0053: the title
++  // says so too ("My deployment reports"); the sidebar keeps the short name Reports.
+   if (isLoading) {
+     return (
+       <div className="space-y-6">
+         <PageHeader
+-          title={<T>Reports</T>}
++          title={<T>My deployment reports</T>}
+           description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
+         />
+         <SkeletonGrid count={4} columns={4} variant="stat" />
+@@ -78,7 +79,7 @@ export default function ReportsPage() {
+     return (
+       <div className="space-y-6">
+         <PageHeader
+-          title={<T>Reports</T>}
++          title={<T>My deployment reports</T>}
+           description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
+         />
+         <AnimatedEmptyState
+@@ -102,7 +103,7 @@ export default function ReportsPage() {
+     <div className="space-y-6">
+       {/* Header */}
+       <PageHeader
+-        title={<T>Reports</T>}
++        title={<T>My deployment reports</T>}
+         description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
+         gradient
+         gradientColors="mixed"
+diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
+index dc4541c49..d4f1c62ba 100644
+--- a/components/dashboard/CommandPalette.tsx
++++ b/components/dashboard/CommandPalette.tsx
+@@ -21,14 +21,15 @@ import {
+ import { SHORTCUT_HINTS, useModifierKeyLabel } from '@/hooks/useKeyboardShortcuts';
+ 
+ // HRM patch: the same pages as HRM's sidebar (Home, no SCCM or app requests, Help).
++// HRM patch 0053: in the sidebar's order (Apps, Updates, Activity, then Settings and Help).
+ const NAVIGATION_ITEMS = [
+   { name: 'Home', href: '/dashboard', icon: LayoutDashboard, keywords: 'home dashboard overview' },
+-  { name: 'App catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget' },
+-  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'uploads deploy jobs status' },
+-  { name: 'Discovered apps', href: '/dashboard/unmanaged', icon: Radar, keywords: 'unmanaged discovered scan' },
++  { name: 'App catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget deploy' },
+   { name: 'Inventory', href: '/dashboard/inventory', icon: Server, keywords: 'deployed inventory intune' },
+-  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions' },
+-  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts' },
++  { name: 'Discovered apps', href: '/dashboard/unmanaged', icon: Radar, keywords: 'unmanaged discovered scan devices' },
++  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions automatic schedule' },
++  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'uploads deploy jobs status history' },
++  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts my deployments' },
+   { name: 'Settings', href: '/dashboard/settings', icon: Settings, keywords: 'settings preferences permissions' },
+   { name: 'Help', href: '/dashboard/help', icon: LifeBuoy, keywords: 'help support how' },
+ ];
+diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
+index 7baaa52b0..ac305a6ea 100644
+--- a/components/dashboard/Sidebar.tsx
++++ b/components/dashboard/Sidebar.tsx
+@@ -36,6 +36,7 @@ import { UpdateBadge } from '@/components/inventory';
+ import { TooltipProvider } from '@/components/ui/tooltip';
+ import { SidebarNavItem } from './SidebarNavItem';
+ import { SidebarUserSection } from './SidebarUserSection';
++import { hrmNavGroups } from '@/lib/hrm/navigation';
+ import type { LucideIcon } from 'lucide-react';
+ 
+ type NavItem = {
+@@ -133,13 +134,16 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+       ? [{ label: 'MSP', items: mspNav }]
+       : [{ label: 'MSP', items: [{ name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 }] }]),
+   ];
+-  const navGroups: NavGroup[] = [
+-    ...upstreamGroups
++  // HRM patch 0053: HRM's groups by job (Apps, Updates, Activity, Support) instead of upstream's
++  // Management and Analytics. Same items and routes; upstreamGroups stays so upstream's feature
++  // flags still decide which items exist.
++  const navGroups: NavGroup[] = hrmNavGroups(
++    upstreamGroups
+       .filter((group) => group.label !== 'MSP')
+-      .map((group) => ({ ...group, items: group.items.filter((item) => !HRM_HIDDEN_HREFS.has(item.href)) }))
+-      .filter((group) => group.items.length > 0),
+-    { label: 'Support', items: helpNav },
+-  ];
++      .flatMap((group) => group.items)
++      .filter((item) => !HRM_HIDDEN_HREFS.has(item.href)),
++    helpNav
++  );
+ 
+   const sidebarContent = (
+     <div className="flex flex-col h-full">
+diff --git a/components/dashboard/__tests__/CommandPalette.test.ts b/components/dashboard/__tests__/CommandPalette.test.ts
+index 3e7edc41f..680dffc33 100644
+--- a/components/dashboard/__tests__/CommandPalette.test.ts
++++ b/components/dashboard/__tests__/CommandPalette.test.ts
+@@ -58,6 +58,14 @@ describe('CommandPalette keyboard', () => {
+     expect(onOpenChange).toHaveBeenCalledWith(false);
+   });
+ 
++  // HRM patch 0053: pages in the sidebar's order, and the new G shortcuts listed.
++  it('lists pages in sidebar order and shows the new G shortcuts', () => {
++    const pages = [...document.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])')].map((el) => el.textContent);
++    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Settings', 'Help']);
++    const text = document.querySelector('[role="dialog"]')!.textContent;
++    for (const hint of ['Go to App updates', 'Go to Discovered apps', 'Go to Help']) expect(text).toContain(hint);
++  });
++
+   it('closes with Escape', async () => {
+     await key('Escape');
+     expect(onOpenChange).toHaveBeenCalledWith(false);
+diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
+index 1febb4b89..e8deecec0 100644
+--- a/components/hrm/help/HelpVisual.tsx
++++ b/components/hrm/help/HelpVisual.tsx
+@@ -3,7 +3,8 @@ import { ArrowRight, Box, Check, ChevronDown, Circle, List, Package, Search, Set
+ import { HRM_SUPPORT_URL } from '@/lib/hrm/help-content';
+ import type { HelpScreen, HelpStep } from '@/lib/hrm/help-guides';
+ 
+-export const HELP_SCREENS: Record<HelpScreen, { label: string; href: string }> = {
++/** label: the page's name in the sidebar and Search; heading: its on-page title when that differs. */
++export const HELP_SCREENS: Record<HelpScreen, { label: string; href: string; heading?: string }> = {
+   catalog: { label: 'App catalog', href: '/dashboard/apps' },
+   'deployment-list': { label: 'Deployment list', href: '/dashboard/apps' },
+   updates: { label: 'App updates', href: '/dashboard/updates' },
+@@ -13,7 +14,7 @@ export const HELP_SCREENS: Record<HelpScreen, { label: string; href: string }> =
+   settings: { label: 'Settings', href: '/dashboard/settings' },
+   server: { label: 'Home', href: '/dashboard' },
+   support: { label: 'HRM Support', href: HRM_SUPPORT_URL },
+-  reports: { label: 'Reports', href: '/dashboard/reports' },
++  reports: { label: 'Reports', href: '/dashboard/reports', heading: 'My deployment reports' },
+ };
+ 
+ function ExampleRow({ label, value }: { label: string; value: string }) {
+@@ -27,10 +28,13 @@ export function HelpVisual({ step, number, guideId }: { step: HelpStep; number:
+   const action = /^(Open|Save|Deploy|Add|Remove|Check|Update|Review|Approve|End|Go back|Keep|Delete|Reload|Retry|Download|Contact|Turn|Edit|Find|Show|Clear|Pause|Resume)/i.test(step.focus);
+   const target = (<div className="relative my-4 rounded-xl border-2 border-accent-cyan bg-accent-cyan/5 p-3.5"><span className="absolute -left-2.5 -top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-accent-cyan text-xs font-bold text-bg-deep">{number}</span><div className={`flex min-h-10 items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm font-semibold ${action ? 'bg-accent-cyan/15 text-text-primary' : 'border border-overlay/15 bg-bg-surface text-text-primary'}`}><span>{step.focus}</span>{action ? <ArrowRight size={16} className="shrink-0 text-accent-cyan"/> : <ChevronDown size={15} className="shrink-0 text-text-muted"/>}</div></div>);
+   const rowLabels: Partial<Record<HelpScreen, string[]>> = { catalog: ['Who gets it', 'When a new version comes out'], 'deployment-list': ['Who gets it', 'When a new version comes out'], updates: ['Update schedule', 'Installation timing'], inventory: ['Groups', 'Device results'], discovered: ['App found on devices'], settings: ['Appearance', 'Notifications'], server: ['Server status', 'Intune reads'] };
+-  const focusAtHeading = step.focus === screen.label;
++  const heading = screen.heading ?? screen.label;
++  const focusAtHeading = step.focus === heading;
++  // Inventory app details: Availability and deadline, Previous version and Retire app sit under Actions, between device results and Groups.
++  const actionsPanel = step.screen === 'inventory' ? ({ 'installation-timing': 'Availability and deadline', rollback: 'Previous version', retire: 'Retire app' } as Record<string, string>)[guideId] : undefined;
+   const focusAtRow = rowLabels[step.screen]?.includes(step.focus);
+   const row = (label: string, value: string) => step.focus === label ? target : <ExampleRow label={label} value={value}/>;
+-  const location = step.screen === 'catalog' && !focusAtHeading ? 'App configuration · panel on the right' : guideId === 'install-results' && step.screen === 'server' ? 'Needs attention · Apps reaching no devices' : guideId === 'installation-timing' ? 'App details · Availability and deadline' : guideId === 'automatic-installation-policy' ? 'Automatic updates · Installation timing · Edit shared policy' : guideId === 'update-schedule' ? 'Automatic updates · Update schedule · Edit schedule' : guideId === 'startup-beta' && step.screen === 'updates' ? 'Startup installations · Beta' : null;
++  const location = step.screen === 'catalog' && !focusAtHeading ? 'App configuration · panel on the right' : guideId === 'install-results' && step.screen === 'server' ? 'Needs attention · Apps reaching no devices' : actionsPanel ? `App details · Actions · ${actionsPanel}` : guideId === 'automatic-installation-policy' ? 'Automatic updates · Installation timing · Edit shared policy' : guideId === 'update-schedule' ? 'Automatic updates · Update schedule · Edit schedule' : guideId === 'startup-beta' && step.screen === 'updates' ? 'Startup installations · Beta' : null;
+   return <figure className="min-w-0 overflow-hidden rounded-2xl border border-overlay/10 bg-bg-elevated" aria-label={`Visual reference: ${screen.label}, ${step.focus}`}>
+     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-overlay/10 px-4 py-3"><span className="text-xs font-medium text-text-secondary">Where to look</span><span className="rounded-full bg-overlay/5 px-2 py-1 text-[11px] text-text-muted">Illustration · example data</span></div>
+     <div className="p-4 sm:p-6">
+@@ -41,18 +45,18 @@ export function HelpVisual({ step, number, guideId }: { step: HelpStep; number:
+           <div className="min-w-0 flex-1 p-4 sm:p-5">
+             {focusAtHeading && target}
+             {location && <p className="mb-3 text-xs font-medium leading-relaxed text-accent-cyan">{location}</p>}
+-            <div className="mb-4 flex items-center justify-between gap-3"><span className="text-sm font-semibold text-text-primary">{screen.label}</span>{step.screen === 'updates' && <span className="text-[11px] text-text-muted">Deploying ≠ installing</span>}</div>
++            <div className="mb-4 flex items-center justify-between gap-3"><span className="text-sm font-semibold text-text-primary">{heading}</span>{step.screen === 'updates' && <span className="text-[11px] text-text-muted">Deploying ≠ installing</span>}</div>
+             {['catalog', 'discovered'].includes(step.screen) && <div className="mb-4 flex items-center gap-2 rounded-lg border border-overlay/10 bg-overlay/[0.02] px-3 py-2 text-xs text-text-muted"><Search size={13}/>Search apps</div>}
+             {['catalog', 'inventory', 'discovered', 'deployments', 'deployment-list', 'updates'].includes(step.screen) && <div className="mb-3 flex items-center gap-3"><span className="rounded-xl bg-accent-cyan/10 p-2.5 text-accent-cyan"><Package size={20}/></span><div className="min-w-0"><p className="text-sm font-medium text-text-primary">Example app</p><p className="mt-1 text-xs text-text-muted">{step.screen === 'deployments' ? 'Deployment history' : 'Deployment configuration'}</p></div></div>}
+             {['catalog', 'deployment-list'].includes(step.screen) && <>{row('Who gets it', 'Pilot device group')}{row('When a new version comes out', 'Notify only')}</>}
+             {step.screen === 'updates' && <>{row('Update schedule', 'Deploys new versions to Intune')}{row('Installation timing', 'Sets prompts and postponement')}</>}
+-            {step.screen === 'inventory' && <>{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}{row('Device results', 'Check received reports')}</>}
++            {step.screen === 'inventory' && (actionsPanel ? <>{row('Device results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}{row('Device results', 'Check received reports')}</>)}
+             {step.screen === 'discovered' && row('App found on devices', 'Review match and eligibility')}
+             {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">Deployment outcome</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Installing on computers is a separate result.</p></div>}
+             {step.screen === 'settings' && <>{row('Appearance', 'Your preference')}{row('Notifications', 'Review configuration')}</>}
+             {step.screen === 'server' && <>{row('Server status', 'Check each result')}{row('Intune reads', 'Review latest check')}</>}
+             {step.screen === 'support' && <div className="my-4 space-y-3 rounded-lg border border-overlay/10 p-3 text-xs text-text-muted"><p>App and version</p><p>What you tried</p><p>Result or error code</p></div>}
+-            {!focusAtHeading && !focusAtRow && target}
++            {!focusAtHeading && !focusAtRow && !actionsPanel && target}
+ 
+             <p className="mt-3 text-[11px] leading-relaxed text-text-muted">Layout simplified to show the control you need.</p>
+           </div>
+diff --git a/components/hrm/help/HelpWorkspace.test.ts b/components/hrm/help/HelpWorkspace.test.ts
+index 1bb17d854..40d5394fe 100644
+--- a/components/hrm/help/HelpWorkspace.test.ts
++++ b/components/hrm/help/HelpWorkspace.test.ts
+@@ -69,3 +69,18 @@ it('shows shared pause separately from per-app Auto-update and Installation timi
+   expect(visual.textContent).not.toContain('Auto-update installation timing');
+   expect(document.querySelector('[aria-label="Current step"]')?.textContent).toContain('queued work and manual updates are not cancelled');
+ });
++it('shows Inventory panels under Actions and the Reports page heading (HRM patch 0053)', async () => {
++  window.history.replaceState(null, '', '/dashboard/help#retire');
++  await act(async () => root.render(createElement(HelpWorkspace)));
++  let visual = document.querySelector('[aria-label^="Visual reference:"]')!;
++  expect(visual.getAttribute('aria-label')).toContain('Retire app');
++  expect(visual.textContent).toContain('App details · Actions · Retire app');
++  await act(async () => root.unmount());
++  root = createRoot(document.body.appendChild(document.createElement('div')));
++  window.history.replaceState(null, '', '/dashboard/help#reports');
++  await act(async () => root.render(createElement(HelpWorkspace)));
++  visual = document.querySelector('[aria-label^="Visual reference:"]')!;
++  expect(visual.getAttribute('aria-label')).toContain('My deployment reports');
++  expect(visual.textContent).toContain('My deployment reports');
++  expect(visual.textContent).toContain('Reports');
++});
+diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
+index f1be2a9d5..9df0fad08 100644
+--- a/components/inventory/InventoryAppDetails.tsx
++++ b/components/inventory/InventoryAppDetails.tsx
+@@ -83,14 +83,17 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+         size="sm"
+         onClick={() => refetch()}
+         disabled={isLoading}
++        aria-label="Reload from Intune"
++        title="Reload from Intune"
+         className="text-text-secondary hover:text-text-primary flex-shrink-0"
+       >
+-        <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
++        <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
+       </Button>
+     </div>
+   ) : undefined;
+ 
+-  const footerContent = app && prefill ? (
++  // HRM patch 0053: the version action sits in the Actions section, not the panel footer.
++  const versionAction = app && prefill ? (
+     <div className="space-y-2">
+       <Button asChild className="w-full bg-accent-cyan hover:bg-accent-cyan-bright text-white">
+         <Link href={`/dashboard/apps?newVersionOf=${prefill.jobId}`}>
+@@ -119,7 +122,6 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+       width="lg"
+       direction="right"
+       header={customHeader}
+-      footer={footerContent}
+     >
+       {/* Loading State */}
+       {isLoading && (
+@@ -152,12 +154,18 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+           {/* HRM patch 0019: install results for apps IntuneGet deployed */}
+           {/* HRM patch 0036: the Groups section below reads Intune live, so the saved check adds only unreviewed changes */}
+           {appId && <><InstallStatusBar appId={appId} /><AppDriftWarning appId={appId} changesOnly /></>}
+-          {/* HRM patch 0037: go back to the previous version */}
+-          {appId && <RollbackPanel appId={appId} />}
+-          {/* HRM patch 0038: retire the app (Uninstall, then delete) */}
+-          {appId && <RetirePanel appId={appId} onDeleted={onClose} />}
+-
+-          {appId && <AppTimingPanel appId={appId} groupNames={app.assignmentGroupNames} />}
++          {/* HRM patch 0053: one Actions section in a fixed order, routine first and Retire app
++              (destructive) last: Availability and deadline (0041), Deploy new version (0015) or
++              Find in App catalog (0014), Go back to previous version (0037), Retire app (0038). */}
++          {appId && (
++            <section aria-labelledby="inventory-app-actions" className="space-y-3" data-testid="inventory-app-actions">
++              <h4 id="inventory-app-actions" className="text-sm font-semibold text-text-secondary">Actions</h4>
++              <div data-action="timing" className="empty:hidden"><AppTimingPanel appId={appId} groupNames={app.assignmentGroupNames} /></div>
++              {versionAction && <div data-action="version" className="empty:hidden">{versionAction}</div>}
++              <div data-action="rollback" className="empty:hidden"><RollbackPanel appId={appId} /></div>
++              <div data-action="retire" className="empty:hidden"><RetirePanel appId={appId} onDeleted={onClose} /></div>
++            </section>
++          )}
+ 
+           {/* Description */}
+           {app.description && (
+diff --git a/components/inventory/inventory-app-actions.test.ts b/components/inventory/inventory-app-actions.test.ts
+new file mode 100644
+index 000000000..d7f6d2c2c
+--- /dev/null
++++ b/components/inventory/inventory-app-actions.test.ts
+@@ -0,0 +1,65 @@
++// @vitest-environment happy-dom
++import { act, createElement, type ReactNode } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++
++// HRM patch 0053: one Actions section in a fixed order, Retire app last, and a labelled refresh button.
++const state = vi.hoisted(() => ({ prefill: null as unknown, refetch: vi.fn() }));
++vi.mock('@/hooks/use-inventory', () => ({
++  useAppDetails: () => ({
++    data: { app: { id: 'fixture-app', displayName: 'Fixture', publisher: 'Example', createdDateTime: '2026-01-01T00:00:00Z', lastModifiedDateTime: '2026-01-01T00:00:00Z', assignments: [] } },
++    isLoading: false, error: null, refetch: state.refetch,
++  }),
++}));
++vi.mock('@/hooks/useNewVersionPrefill', () => ({ useNewVersionPrefill: () => ({ data: state.prefill }) }));
++vi.mock('@/components/hrm/InstallStatusBar', () => ({ InstallStatusBar: () => null }));
++vi.mock('@/components/hrm/AppInsights', () => ({ AppActivityTimeline: () => null, AppDriftWarning: () => null }));
++vi.mock('@/components/hrm/AppTimingPanel', () => ({ AppTimingPanel: () => createElement('p', null, 'Availability and deadline') }));
++vi.mock('@/components/hrm/RollbackPanel', () => ({ RollbackPanel: () => createElement('p', null, 'Go back to previous version') }));
++vi.mock('@/components/hrm/RetirePanel', () => ({ RetirePanel: () => createElement('p', null, 'Retire app') }));
++vi.mock('@/components/dashboard/animations/SlidePanel', () => ({
++  SlidePanel: ({ header, footer, children }: { header?: ReactNode; footer?: ReactNode; children: ReactNode }) =>
++    createElement('div', null, header, children, footer ? createElement('footer', null, footer) : null),
++}));
++vi.mock('next/link', () => ({ default: ({ href, children }: { href: string; children: ReactNode }) => createElement('a', { href }, children) }));
++
++import { InventoryAppDetails } from './InventoryAppDetails';
++
++let root: Root | undefined;
++afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; state.prefill = null; state.refetch.mockReset(); });
++
++async function render(onUpdate?: (name: string) => void) {
++  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++  const container = document.createElement('div'); document.body.append(container);
++  root = createRoot(container);
++  await act(async () => root!.render(createElement(InventoryAppDetails, { appId: 'fixture-app', onClose: vi.fn(), onUpdate })));
++  return container;
++}
++const actionTexts = (c: HTMLElement) => [...c.querySelectorAll('[data-testid="inventory-app-actions"] [data-action]')].map((el) => el.textContent?.trim());
++
++describe('Inventory app details actions', () => {
++  it('lists Availability and deadline, Find in App catalog, Go back to previous version, then Retire app', async () => {
++    const c = await render(vi.fn());
++    const section = c.querySelector('[data-testid="inventory-app-actions"]')!;
++    expect(section.querySelector('h4')?.textContent).toBe('Actions');
++    expect(actionTexts(c)).toEqual(['Availability and deadline', 'Find in App catalog', 'Go back to previous version', 'Retire app']);
++    expect(c.querySelector('footer')).toBeNull();
++  });
++
++  it('puts Deploy new version second for a custom app', async () => {
++    state.prefill = { jobId: 'job-1', previousVersion: '1.0.0' };
++    const c = await render(vi.fn());
++    expect(actionTexts(c)[1]).toContain('Deploy new version');
++    expect(c.querySelector('a[href="/dashboard/apps?newVersionOf=job-1"]')).not.toBeNull();
++    expect(actionTexts(c).at(-1)).toBe('Retire app');
++  });
++
++  it('labels the refresh button Reload from Intune', async () => {
++    const c = await render();
++    const button = c.querySelector<HTMLButtonElement>('button[aria-label="Reload from Intune"]');
++    expect(button).not.toBeNull();
++    await act(async () => button!.click());
++    expect(state.refetch).toHaveBeenCalled();
++    expect(actionTexts(c)).toEqual(['Availability and deadline', 'Go back to previous version', 'Retire app']);
++  });
++});
+diff --git a/hooks/useKeyboardShortcuts.ts b/hooks/useKeyboardShortcuts.ts
+index 86ac657e9..cbb1ef97d 100644
+--- a/hooks/useKeyboardShortcuts.ts
++++ b/hooks/useKeyboardShortcuts.ts
+@@ -2,6 +2,7 @@
+ 
+ import { useEffect, useRef, useCallback, useState } from 'react';
+ import { useRouter } from 'next/navigation';
++import { GO_TO_SHORTCUTS, goToShortcutHref } from '@/lib/hrm/navigation';
+ 
+ interface ShortcutAction {
+   key: string;
+@@ -75,31 +76,11 @@ export function useKeyboardShortcuts({
+         pendingKey.current = null;
+         if (pendingTimer.current) clearTimeout(pendingTimer.current);
+ 
+-        switch (e.key) {
+-          case 'd':
+-            e.preventDefault();
+-            router.push('/dashboard');
+-            break;
+-          case 'a':
+-            e.preventDefault();
+-            router.push('/dashboard/apps');
+-            break;
+-          case 'u':
+-            e.preventDefault();
+-            router.push('/dashboard/uploads');
+-            break;
+-          case 'i':
+-            e.preventDefault();
+-            router.push('/dashboard/inventory');
+-            break;
+-          case 's':
+-            e.preventDefault();
+-            router.push('/dashboard/settings');
+-            break;
+-          case 'r':
+-            e.preventDefault();
+-            router.push('/dashboard/reports');
+-            break;
++        // HRM patch 0053: one shared list (lib/hrm/navigation.ts), adds P, V and H.
++        const href = goToShortcutHref(e.key);
++        if (href) {
++          e.preventDefault();
++          router.push(href);
+         }
+       }
+     },
+@@ -133,14 +114,11 @@ export function useModifierKeyLabel(): 'Cmd' | 'Ctrl' {
+ 
+ // HRM patch 0036: the palette is called "Search" everywhere (header button, dialog name, this
+ // list). 'Mod' is shown as Cmd or Ctrl by useModifierKeyLabel.
+-export const SHORTCUT_HINTS = [
++// HRM patch 0053: the G shortcuts come from GO_TO_SHORTCUTS, in sidebar order, and C names the
++// deployment list.
++export const SHORTCUT_HINTS: readonly { keys: readonly string[]; description: string }[] = [
+   { keys: ['Mod', 'K'], description: 'Search' },
+   { keys: ['/'], description: 'Focus search' },
+-  { keys: ['C'], description: 'Toggle cart' },
+-  { keys: ['G', 'D'], description: 'Go to Home' },
+-  { keys: ['G', 'A'], description: 'Go to App catalog' },
+-  { keys: ['G', 'U'], description: 'Go to Deployments' },
+-  { keys: ['G', 'I'], description: 'Go to Inventory' },
+-  { keys: ['G', 'S'], description: 'Go to Settings' },
+-  { keys: ['G', 'R'], description: 'Go to Reports' },
+-] as const;
++  { keys: ['C'], description: 'Show or hide the deployment list' },
++  ...GO_TO_SHORTCUTS.map((shortcut) => ({ keys: ['G', shortcut.key.toUpperCase()], description: `Go to ${shortcut.name}` })),
++];
+diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
+index d2433866c..b73511611 100644
+--- a/lib/hrm/__tests__/help-content.test.ts
++++ b/lib/hrm/__tests__/help-content.test.ts
+@@ -91,6 +91,18 @@ describe('help content', () => {
+     }
+   });
+ 
++  it('describes the sidebar groups, every G shortcut and where Inventory actions sit (HRM patch 0053)', async () => {
++    const { GO_TO_SHORTCUTS, HRM_NAV_LAYOUT } = await import('../navigation');
++    const settings = HELP_SECTIONS.find((s) => s.id === 'your-settings')!.points.join(' ');
++    for (const shortcut of GO_TO_SHORTCUTS) expect(settings).toContain(`${shortcut.key.toUpperCase()} ${shortcut.name}`);
++    for (const group of HRM_NAV_LAYOUT) if (group.label) expect(settings).toContain(`${group.label} (`);
++    expect(settings).not.toMatch(/Management|Analytics|Shortcuts card|Review updates/);
++    for (const [id, fact] of [['installation-timing', 'Availability and deadline under Actions'], ['updating', 'Deploy new version under Actions'], ['updating', 'Find in App catalog under Actions'], ['rollback', 'Under Actions, find Previous version'], ['retire', 'the last item under Actions'], ['reports', 'My deployment reports']]) {
++      expect(HELP_SECTIONS.find((s) => s.id === id)!.points.join(' '), id).toContain(fact);
++    }
++    expect(HELP_SECTIONS.find((s) => s.id === 'installation-timing')!.points.join(' ')).toContain('reloads the whole app from Intune');
++  });
++
+   it('points to HRM Support, never "contact IT"', () => {
+     expect(HELP_SECTIONS.some((s) => s.links?.some((l) => l.href === 'https://support.hruthmd.org'))).toBe(true);
+     expect(text.join(' ')).not.toMatch(/contact IT/i);
+diff --git a/lib/hrm/__tests__/navigation.test.ts b/lib/hrm/__tests__/navigation.test.ts
+new file mode 100644
+index 000000000..2a6a9e74c
+--- /dev/null
++++ b/lib/hrm/__tests__/navigation.test.ts
+@@ -0,0 +1,84 @@
++// @vitest-environment happy-dom
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { GO_TO_SHORTCUTS, goToShortcutHref, hrmNavGroups, HRM_NAV_LAYOUT } from '../navigation';
++
++const push = vi.hoisted(() => vi.fn());
++vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
++
++import { SHORTCUT_HINTS, useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
++
++// HRM patch 0053: sidebar groups by job, and G shortcuts for the pages HRM uses most.
++const item = (href: string) => ({ href, name: href });
++const SIDEBAR_ITEMS = ['/dashboard', '/dashboard/apps', '/dashboard/uploads', '/dashboard/unmanaged', '/dashboard/inventory', '/dashboard/updates', '/dashboard/reports'].map(item);
++
++describe('sidebar groups', () => {
++  it('groups the same pages as Apps, Updates, Activity and Support', () => {
++    const groups = hrmNavGroups(SIDEBAR_ITEMS, [item('/dashboard/help')]);
++    expect(groups.map((g) => [g.label ?? null, g.items.map((i) => i.href)])).toEqual([
++      [null, ['/dashboard']],
++      ['Apps', ['/dashboard/apps', '/dashboard/inventory', '/dashboard/unmanaged']],
++      ['Updates', ['/dashboard/updates']],
++      ['Activity', ['/dashboard/uploads', '/dashboard/reports']],
++      ['Support', ['/dashboard/help']],
++    ]);
++  });
++
++  it('keeps every page exactly once and drops empty groups', () => {
++    const hrefs = HRM_NAV_LAYOUT.flatMap((g) => g.hrefs);
++    expect(new Set(hrefs).size).toBe(hrefs.length);
++    expect(hrmNavGroups([item('/dashboard')], []).map((g) => g.label ?? null)).toEqual([null]);
++  });
++
++  it('never shows hidden pages it was not given', () => {
++    const groups = hrmNavGroups(SIDEBAR_ITEMS.filter((i) => i.href !== '/dashboard/reports'), []);
++    expect(groups.find((g) => g.label === 'Activity')?.items.map((i) => i.href)).toEqual(['/dashboard/uploads']);
++  });
++});
++
++describe('G shortcuts', () => {
++  it('keeps upstream keys and adds App updates, Discovered apps and Help', () => {
++    expect(goToShortcutHref('d')).toBe('/dashboard');
++    expect(goToShortcutHref('u')).toBe('/dashboard/uploads');
++    expect(goToShortcutHref('p')).toBe('/dashboard/updates');
++    expect(goToShortcutHref('v')).toBe('/dashboard/unmanaged');
++    expect(goToShortcutHref('h')).toBe('/dashboard/help');
++    expect(goToShortcutHref('x')).toBeNull();
++    expect(new Set(GO_TO_SHORTCUTS.map((s) => s.key)).size).toBe(GO_TO_SHORTCUTS.length);
++  });
++
++  it('lists every G shortcut in the Keyboard shortcuts hints, without cart wording', () => {
++    const descriptions = SHORTCUT_HINTS.map((h) => h.description);
++    expect(descriptions).toEqual(expect.arrayContaining(['Go to App updates', 'Go to Discovered apps', 'Go to Help']));
++    expect(SHORTCUT_HINTS.find((h) => h.description === 'Go to App updates')?.keys).toEqual(['G', 'P']);
++    expect(descriptions.join(' ')).not.toMatch(/cart/i);
++  });
++
++  describe('in the page', () => {
++    let root: Root | undefined;
++    afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; push.mockReset(); });
++
++    async function mount() {
++      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++      function Probe() { useKeyboardShortcuts({ onCommandPalette: vi.fn(), onToggleCart: vi.fn() }); return null; }
++      const container = document.createElement('div'); document.body.append(container);
++      root = createRoot(container);
++      await act(async () => root!.render(createElement(Probe)));
++    }
++    const press = (key: string) => document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
++
++    it.each([['p', '/dashboard/updates'], ['v', '/dashboard/unmanaged'], ['h', '/dashboard/help'], ['i', '/dashboard/inventory']])('G then %s opens %s', async (key, href) => {
++      await mount();
++      press('g'); press(key);
++      expect(push).toHaveBeenCalledWith(href);
++    });
++
++    it('ignores the keys while typing in a field', async () => {
++      await mount();
++      const input = document.createElement('input'); document.body.append(input); input.focus();
++      press('g'); press('p');
++      expect(push).not.toHaveBeenCalled();
++    });
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index b07e8c930..04bf70173 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -43,10 +43,10 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'installation-timing',
+     title: 'Availability and deadline',
+-    uiLabels: ['Inventory', 'App updates', 'Availability and deadline', 'Reload from Intune', 'App availability', 'Installation deadline', 'Restart grace period', 'Save to Intune', 'Installation timing'],
++    uiLabels: ['Inventory', 'Actions', 'App updates', 'Availability and deadline', 'Reload from Intune', 'App availability', 'Installation deadline', 'Restart grace period', 'Save to Intune', 'Installation timing'],
+     flow: ['Open the app in Inventory', 'Press Availability and deadline', 'Press Reload from Intune', 'Choose assignment and dates', 'Press Save to Intune'],
+     points: [
+-      'Open the app in Inventory, or find its card in App updates, and press Availability and deadline. In the panel on the right, press Reload from Intune to read its current Required and Available groups. Uninstall groups, exclusions and policy set assignments cannot be edited here.',
++      'Open the app in Inventory and press Availability and deadline under Actions, or press it on the app\'s card in App updates. In the panel on the right, press Reload from Intune to read its current Required and Available groups.',
+       'Choose one assignment. App availability controls when Required apps can download or Available apps appear in Company Portal. Leave the date blank for as soon as possible.',
+       'For Required groups, Installation deadline controls when installation starts. Leave it blank to install after availability. Another assignment with an earlier deadline can take priority.',
+       'Choose device local time for each device’s clock, or UTC for one shared time. Changing the time zone keeps the entered clock times, so check the dates before saving.',
+@@ -56,6 +56,8 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Press Save to Intune to apply the selected assignment’s dates and restart settings. Other settings and groups stay as they were. Press Reload from Intune to read the saved settings. If the assignment changed during review, reload and review again.',
+       'Dates apply to this copy already in Intune, not to future versions. Installation timing in App updates and in the deploy panel sets prompts and postponement inside a package instead. Offline devices may install later; devices that already have this version are not reinstalled.',
+       'Review these dates again after deploying a new version. They cannot be changed during a pilot or retirement. Saving group changes in the app’s main Save to Intune form keeps the live dates for groups whose assignment type stays the same.',
++      'Uninstall groups, exclusions and policy set assignments cannot be edited in this panel.',
++      'The refresh icon at the top of app details, also named Reload from Intune, reloads the whole app from Intune. The panel\'s own Reload from Intune button reloads only its assignments and dates.',
+     ],
+     links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Intune availability and deadlines', href: 'https://learn.microsoft.com/en-us/intune/app-management/deployment/win32' }],
+   },
+@@ -89,7 +91,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'updating',
+     title: 'Updating an app',
+-    uiLabels: ['App updates', 'Update all', 'Auto-update on', 'Update schedule', 'Deployments', 'Failed at:', 'Validation', 'Details', 'Retry safely', 'Inventory', 'App catalog', 'Deploy again', 'Deploy new version', 'Custom app', 'Find in App catalog', 'is already in Intune', 'Supersedes', "Doesn't supersede", 'and replace', 'alongside', 'Save to Intune', 'Turn auto-update back on', 'Deployment list', 'Replaces current copy'],
++    uiLabels: ['App updates', 'Update all', 'Auto-update on', 'Update schedule', 'Deployments', 'Failed at:', 'Validation', 'Details', 'Retry safely', 'Inventory', 'App catalog', 'Deploy again', 'Deploy new version', 'Custom app', 'Find in App catalog', 'Actions', 'is already in Intune', 'Supersedes', "Doesn't supersede", 'and replace', 'alongside', 'Save to Intune', 'Turn auto-update back on', 'Deployment list', 'Replaces current copy'],
+     points: [
+       'WinGet and curated apps: open App updates and press Update on the app, or Update all. The new version replaces the previous one in Intune and keeps its groups. The result posts to Teams.',
+       'As soon as the deployment finishes, App updates and Home show the new version. Inventory still lists the previous copy until it is removed.',
+@@ -108,7 +110,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'After fixing the cause, press Turn auto-update back on on the app\'s card, or choose Auto-update in its menu or in the Auto-update on list. This also clears the failed count.',
+       'If Update says the catalog has not synced the installer yet, try again later. IntuneGet looks for a newer catalog every 6 hours.',
+       'To deploy it sooner, open the app in the App catalog, choose the new version and press Deploy again. It replaces the current copy in Intune with the groups shown in the panel.',
+-      'Custom apps (installers that are not in WinGet, such as PdfCraft or UniFi Endpoint): open the app in Inventory and press Deploy new version.',
++      'Custom apps (installers that are not in WinGet, such as PdfCraft or UniFi Endpoint): open the app in Inventory and press Deploy new version under Actions.',
+       'The form is filled in from the last version. Enter the new version and its https download link. Devices update in place, as with Update.',
+       'Like Update, the new version takes the groups the previous copy has in Intune when it deploys, and leaves that copy with none. The Deployment list marks it Replaces current copy. IntuneGet removes the previous copy later.',
+       'When a custom app installed from a GitHub release has a newer release, App updates shows it. Deploy new version opens the form with the new version, download link and checksum filled in.',
+@@ -120,7 +122,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'If the deployment says the app is already in Intune and asks whether to deploy the new version as its replacement, that is the normal step for a new version.',
+       'Check the groups it lists. If it says Supersedes, the button reads Deploy (new version) and replace (old version). If it says Doesn\'t supersede, the button reads alongside instead.',
+       'Deployed alongside, both versions stay in Intune, and IntuneGet never removes the old one. Use duplicate cleanup in Inventory if you want only one.',
+-      'For WinGet and curated apps, Find in App catalog in Inventory opens the App catalog already searching for the app, so you can deploy a newer version.',
++      'For WinGet and curated apps, open the app in Inventory and press Find in App catalog under Actions. The App catalog opens already searching for the app, so you can deploy a newer version.',
+     ],
+     links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
+   },
+@@ -271,10 +273,10 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'rollback',
+     title: 'Going back to a previous version',
+-    uiLabels: ['Inventory', 'Previous version', 'Go back to previous version', 'I checked the versions and groups', 'Allow again', 'Check installer now', 'Needs attention', 'Deployments'],
++    uiLabels: ['Inventory', 'Actions', 'Previous version', 'Go back to previous version', 'I checked the versions and groups', 'Allow again', 'Check installer now', 'Needs attention', 'Deployments'],
+     flow: ['Open the app in Inventory', 'Press Go back to previous version', 'Check versions and groups', 'Press Go back'],
+     points: [
+-      'If a new version causes problems, open the app in Inventory. Under Previous version, press Go back to previous version.',
++      'If a new version causes problems, open the app in Inventory. Under Actions, find Previous version and press Go back to previous version.',
+       'It appears on the newest copy IntuneGet deployed, when IntuneGet also deployed an older version of the app. Custom apps can go back too. Self-updating apps can\'t.',
+       'Under Previous version, a line shows whether the earlier installer still downloads and when it was checked. IntuneGet checks the saved link at the 3:30 AM and 3:30 PM update checks, Maryland time, without downloading the file.',
+       'Each of these checks stops after 1 minute and starts with the apps checked longest ago. With many apps, some are checked at the next update check instead.',
+@@ -300,10 +302,10 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'retire',
+     title: 'Retiring an app',
+-    uiLabels: ['Inventory', 'Retire app', 'I understand this uninstalls the app from these groups', 'Uninstall from these groups', 'Start retiring', 'Retiring this app', 'Removing this app', 'Discovered apps', 'Remove from devices', 'Delete from Intune', 'Keep it for now', 'Delete even though devices still report it', 'Cancel retiring', 'Ignore', 'Ignored apps'],
++    uiLabels: ['Inventory', 'Actions', 'Retire app', 'I understand this uninstalls the app from these groups', 'Uninstall from these groups', 'Start retiring', 'Retiring this app', 'Removing this app', 'Discovered apps', 'Remove from devices', 'Delete from Intune', 'Keep it for now', 'Delete even though devices still report it', 'Cancel retiring', 'Ignore', 'Ignored apps'],
+     flow: ['Open the app in Inventory', 'Press Retire app', 'Check the groups', 'Uninstall from these groups', 'Wait for devices', 'Delete from Intune'],
+     points: [
+-      'When HRM stops using an app, open it in Inventory and press Retire app. The review reads the app and its groups from Intune.',
++      'When HRM stops using an app, open it in Inventory and press Retire app, the last item under Actions. The review reads the app and its groups from Intune.',
+       'Every group changes to Uninstall, so Intune removes the app from those devices and users. Exclusions stay exclusions. Install deadlines and restart settings are dropped.',
+       'Retire app only removes the app from devices that got it from IntuneGet. Copies installed another way stay. To remove those, use Remove from devices in Discovered apps (see Removing an app found on devices).',
+       'Other copies of the app in Intune are not changed. Retire each copy you no longer need.',
+@@ -448,13 +450,14 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'your-settings',
+     title: 'Theme, shortcuts and your settings',
+-    uiLabels: ['Search', 'Keyboard shortcuts', 'Same as computer', 'Theme', 'Settings', 'Deployment list', 'Update behavior', 'App updates'],
++    uiLabels: ['Search', 'Keyboard shortcuts', 'Same as computer', 'Theme', 'Settings', 'Deployment list', 'Update behavior', 'App updates', 'Home', 'Apps', 'App catalog', 'Inventory', 'Discovered apps', 'Updates', 'Activity', 'Deployments', 'Reports', 'Support', 'Help'],
+     points: [
+       'To jump to any page, press Ctrl+K (Cmd+K on a Mac), or Search at the top of the page on a wide screen. Type to filter, use the Up and Down arrows to move, Enter to open, and Esc to close.',
+-      'Shortcuts: press G, then D for Home, A for App catalog, U for Deployments, I for Inventory, R for Reports or S for Settings. The full list is under Keyboard shortcuts in the search box.',
++      'The sidebar groups pages by job: Apps (App catalog, Inventory, Discovered apps), Updates (App updates), Activity (Deployments, Reports) and Support (Help). Home sits above them. Search lists pages in the same order.',
++      'Press G, then a letter, to open a page: D Home, A App catalog, I Inventory, V Discovered apps, P App updates, U Deployments, R Reports, S Settings or H Help. Keyboard shortcuts in Search lists them all.',
+       'IntuneGet follows your computer\'s light or dark setting. To choose, press your name at the bottom of the sidebar, then pick Light, Dark or Same as computer under Theme.',
+       'Your theme and the collapsed sidebar are remembered in this browser. Another browser or computer starts with the defaults.',
+-      'In Settings, General, the Deployment list switch opens the Deployment list each time you add an app. Turn it off to keep adding apps without it opening.',
++      'In Settings, General, the Deployment list switch opens the Deployment list each time you add an app. Turn it off to keep adding apps without it opening. Press C on any page to show or hide the Deployment list.',
+       'On this server, Settings has no update switches. Its Update behavior card says Update behavior is set on App updates. Update and automatic updates always replace the previous version and keep its groups.',
+     ],
+     links: [{ label: 'Open Settings', href: '/dashboard/settings' }, { label: 'Open App updates', href: '/dashboard/updates' }],
+@@ -462,9 +465,9 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'reports',
+     title: 'Reports',
+-    uiLabels: ['Reports', 'Deployments', 'All in tenant', 'Failed', 'Cancelled', 'Dismiss', 'Clear cancelled history', 'Completed', 'All', 'Active'],
++    uiLabels: ['Reports', 'My deployment reports', 'Deployments', 'All in tenant', 'Failed', 'Cancelled', 'Dismiss', 'Clear cancelled history', 'Completed', 'All', 'Active'],
+     points: [
+-      'Reports shows your deployments only. In Deployments, choose All in tenant for everyone’s history. Failed excludes Cancelled deployments.',
++      'Reports, headed My deployment reports, shows only deployments you started. In Deployments, choose All in tenant for everyone’s history. Failed excludes Cancelled deployments.',
+       'Dismiss hides one of your finished deployments. Clear cancelled history hides your cancellations; Completed and Failed clear their outcomes. All clears your finished history. Active has no clear action. Audit records stay.',
+     ],
+     links: [{ label: 'Open Deployments', href: '/dashboard/uploads' }],
+diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
+index af140b05b..35667fa34 100644
+--- a/lib/hrm/help-guides.ts
++++ b/lib/hrm/help-guides.ts
+@@ -50,7 +50,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+     summary: 'Change one existing assignment’s availability, installation deadline or restart grace period.', keywords: ['availability and deadline', 'availability', 'deadline', 'restart grace', 'UTC', 'device local', 'timing', 'dates'],
+     start: inventory, before: ['Choose the app copy and assignment you intend to change.', 'These dates cannot change during a pilot or retirement.'],
+     steps: [
+-      step('Read current assignments', 'Open the app in Inventory, then Availability and deadline. Press Reload from Intune to read its current groups.', 'inventory', 'Reload from Intune', 'Editable Required and Available assignments appear.'),
++      step('Read current assignments', 'Open the app in Inventory and press Availability and deadline under Actions. In the panel, press Reload from Intune to read its current groups.', 'inventory', 'Reload from Intune', 'Editable Required and Available assignments appear.'),
+       step('Choose dates', 'Select one assignment. Set App availability and, for a Required assignment, Installation deadline. Confirm device local time or UTC.', 'inventory', 'Installation deadline', 'The selected assignment’s dates are ready for review.'),
+       step('Review restart settings', 'If supported by the app, choose Restart grace period, countdown and snooze. Check the entered clock times after changing time zones.', 'inventory', 'Restart grace period', 'Restart settings match the selected assignment and app behavior.'),
+       step('Save and read back', 'Press Save to Intune, then Reload from Intune to confirm the saved values.', 'inventory', 'Save to Intune', 'Only the selected assignment’s dates and restart settings change.'),
+@@ -59,7 +59,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+     caution: 'These dates apply to this copy already in Intune. They do not create a recurring schedule or a login trigger; offline devices may install later. Installation timing sets prompts and postponement inside a package instead.',
+     related: ['automatic-installation-policy', 'update-schedule', 'startup-beta'],
+     troubleshoot: [{ problem: 'The assignment changed during review', action: 'Press Reload from Intune and review the current values before saving again.' }, { problem: 'The app is already installed', action: 'Changing dates does not reinstall the same version.' }],
+-    referenceGroups: [reference('Read and save one assignment', [0, 7, 9]), reference('Availability, deadlines and time zones', [1, 2, 3, 8]), reference('Restart grace and snooze', [4, 5, 6])],
++    referenceGroups: [reference('Read and save one assignment', [0, 7, 9, 10, 11]), reference('Availability, deadlines and time zones', [1, 2, 3, 8]), reference('Restart grace and snooze', [4, 5, 6])],
+   },
+   {
+     id: 'esp', category: 'deploy', title: 'Include an app in new-computer setup',
+@@ -94,7 +94,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+     summary: 'Update a managed app while checking its groups, replacement behavior and deployment outcome.', keywords: ['Update all', 'custom app', 'new version', 'checksum', 'validation', 'retry'],
+     start: updates, before: ['Review the groups on the current Intune copy.', 'For a custom app, have the new version and its HTTPS installer link ready.'],
+     steps: [
+-      step('Choose the new version', 'For WinGet or curated apps, press Update in App updates. For a custom app, use Deploy new version on the newest copy in Inventory.', 'updates', 'Update', 'The new version uses the appropriate update path.'),
++      step('Choose the new version', 'For WinGet or curated apps, press Update in App updates. For a custom app, open the newest copy in Inventory and press Deploy new version under Actions.', 'updates', 'Update', 'The new version uses the appropriate update path.'),
+       step('Review custom details', 'For a custom app, check the version, download link and checksum, then add it to the Deployment list.', 'catalog', 'Deploy new version', 'The custom package details are ready to deploy.'),
+       step('Check replacement and groups', 'If a review opens, check the groups. Replaces current copy or Supersedes means the previous copy is replaced. A deployment marked alongside keeps both copies.', 'deployment-list', 'Replaces current copy', 'You understand whether the previous copy will be replaced.'),
+       step('Follow the deployment', 'Open Deployments to check packaging and deployment. If it fails, read Failed at: and Details before using Retry safely.', 'deployments', 'Failed at:', 'Once deployed, App updates and Home show the new version. A failure shows its stage.'),
+@@ -194,7 +194,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+     summary: 'Check the saved installer and current groups before replacing a problematic version with an earlier one.', keywords: ['rollback', 'downgrade', 'previous version', 'checksum', 'Allow again'],
+     start: inventory, before: ['Confirm the older version can safely read the app’s current settings and data.', 'An active pilot, retirement or deployment must finish first.'],
+     steps: [
+-      step('Open the newest copy', 'In Inventory, open the newest copy IntuneGet deployed and find Previous version.', 'inventory', 'Previous version', 'The earlier version and its installer-check status appear when supported.'),
++      step('Open the newest copy', 'In Inventory, open the newest copy IntuneGet deployed. Under Actions, find Previous version.', 'inventory', 'Previous version', 'The earlier version and its installer-check status appear when supported.'),
+       step('Check the installer', 'Use Check installer now when available. Wait for the link and saved checksum checks to finish.', 'inventory', 'Check installer now', 'An unchanged, reachable earlier installer can proceed to review.'),
+       step('Review versions and groups', 'Press Go back to previous version. Check both versions and groups, then select I checked the versions and groups.', 'inventory', 'Go back to previous version', 'The review confirms exactly what will be replaced.'),
+       step('Start and follow the deployment', 'Press Go back to the displayed version, then follow the job in Deployments.', 'deployments', 'Deployments', 'The earlier installer is packaged as a new replacement copy.'),
+@@ -211,7 +211,7 @@ export const HELP_GUIDES: HelpGuide[] = [
+     summary: 'Change a managed copy’s groups to Uninstall, wait for device results, then remove the Intune copy.', keywords: ['uninstall', 'retire', 'remove managed', 'cancel retiring', 'delete'],
+     start: inventory, before: ['Check every affected group and exclusion.', 'Retire app covers IntuneGet-managed installations; separately installed apps need a different removal path.'],
+     steps: [
+-      step('Review the app and groups', 'Open the app in Inventory and press Retire app. Read the groups that will change to Uninstall.', 'inventory', 'Retire app', 'The review shows this copy’s affected groups.'),
++      step('Review the app and groups', 'Open the app in Inventory and press Retire app, the last item under Actions. Read the groups that will change to Uninstall.', 'inventory', 'Retire app', 'The review shows this copy’s affected groups.'),
+       step('Confirm uninstall', 'Select I understand this uninstalls the app from these groups, then press Uninstall from these groups.', 'inventory', 'Uninstall from these groups', 'The groups change to Uninstall; devices act as they check in.'),
+       step('Wait and inspect failures', 'Read Retiring this app and Install results. Check failures and remaining installed or pending devices before deleting.', 'inventory', 'Retiring this app', 'You have received device evidence about the uninstall.'),
+       step('Delete the Intune copy', 'When ready, press Delete from Intune and confirm. If devices still report it, review the extra acknowledgement carefully.', 'inventory', 'Delete from Intune', 'The Intune copy is deleted; the app’s updates are set to Ignore.'),
+@@ -333,25 +333,25 @@ export const HELP_GUIDES: HelpGuide[] = [
+   },
+   {
+     id: 'your-settings', category: 'settings', title: 'Find a page or change your theme',
+-    summary: 'Use Search and keyboard shortcuts, or choose a theme for this browser.', keywords: ['theme', 'dark', 'light', 'keyboard', 'search', 'shortcuts', 'preferences', 'deployment list', 'update behavior', 'supersede', 'carry over assignments'],
++    summary: 'Use the sidebar, Search and keyboard shortcuts, or choose a theme for this browser.', keywords: ['theme', 'dark', 'light', 'keyboard', 'search', 'shortcuts', 'sidebar', 'navigation', 'menu', 'preferences', 'deployment list', 'update behavior', 'supersede', 'carry over assignments'],
+     start: settings, before: ['Theme and sidebar preferences are remembered in this browser.'],
+     steps: [
+       step('Jump with Search', 'Press Ctrl+K, or Cmd+K on a Mac. Type a page name, use the arrow keys, then Enter to open it.', 'settings', 'Search', 'You can reach the right page without opening more menus.'),
+-      step('Find the shortcuts', 'Open Keyboard shortcuts in Search to see the available page-navigation keys.', 'settings', 'Keyboard shortcuts', 'The complete shortcut list is visible.'),
++      step('Use the shortcuts', 'Press G, then a letter, to open a page, such as G then P for App updates. Keyboard shortcuts in Search lists every key in sidebar order.', 'settings', 'Keyboard shortcuts', 'The complete shortcut list is visible.'),
+       step('Choose a theme', 'Press your name at the bottom of the sidebar. Under Theme, choose Light, Dark or Same as computer.', 'settings', 'Theme', 'This browser uses the selected appearance.'),
+     ],
+     success: 'You can navigate with Search and the browser uses your chosen theme.',
+     caution: 'On this server, Update behavior is set on App updates, not in Settings. Update and automatic updates always replace the previous version and keep its groups.',
+     related: ['support', 'updates'],
+     troubleshoot: [{ problem: 'Another browser has different settings', action: 'Theme and sidebar choices are stored separately in each browser.' }],
+-    referenceGroups: [reference('Search and keyboard navigation', [0, 1]), reference('Appearance and saved preferences', [2, 3]), reference('Deployment list and update behavior', [4, 5])],
++    referenceGroups: [reference('Sidebar, Search and keyboard navigation', [0, 1, 2]), reference('Appearance and saved preferences', [3, 4]), reference('Deployment list and update behavior', [5, 6])],
+   },
+   {
+     id: 'reports', category: 'devices', title: 'Review deployment results and history',
+     summary: 'Check deployment trends, distinguish failed and cancelled outcomes, and hide only the finished history you own.', keywords: ['reports', 'trends', 'all in tenant', 'history', 'staff', 'failed', 'cancelled', 'dismiss', 'clear history'],
+     start: { label: 'Open Reports', href: '/dashboard/reports' }, before: ['Reports includes only deployments you started.', 'Dismiss and clear-history controls are available only for your finished deployments.'],
+     steps: [
+-      step('Read your report', 'Open Reports to review the outcomes and trends for deployments you started.', 'reports', 'Reports', 'The report’s personal scope is clear.'),
++      step('Read your report', 'Open Reports in the sidebar. My deployment reports shows the outcomes and trends for deployments you started.', 'reports', 'My deployment reports', 'The report’s personal scope is clear.'),
+       step('Choose whose history to view', 'Open Deployments to inspect recorded outcomes. Choose All in tenant when you need deployments started by other staff.', 'deployments', 'All in tenant', 'The deployment list shows the selected personal or tenant-wide scope.'),
+       step('Separate failed and cancelled outcomes', 'Choose Failed for failures, including failed installation checks. Choose Cancelled for cancellations; these are not counted as Failed.', 'deployments', 'Cancelled', 'Cancelled deployments have their own outcome instead of appearing as failures.'),
+       step('Dismiss one finished deployment', 'For one of your finished deployments, press Dismiss and confirm. This hides the card without deleting its deployment audit or update records.', 'deployments', 'Dismiss', 'Your finished deployment is hidden; other staff’s deployments are unchanged.'),
+diff --git a/lib/hrm/navigation.ts b/lib/hrm/navigation.ts
+new file mode 100644
+index 000000000..b66910631
+--- /dev/null
++++ b/lib/hrm/navigation.ts
+@@ -0,0 +1,35 @@
++// HRM patch 0053: the sidebar's groups. Routes are unchanged; only the grouping and order are HRM's.
++// Home on its own, then the pages grouped by job. Items not listed here (none
++// today) are dropped rather than shown in a random place.
++export const HRM_NAV_LAYOUT: { label?: string; hrefs: string[] }[] = [
++  { hrefs: ['/dashboard'] },
++  { label: 'Apps', hrefs: ['/dashboard/apps', '/dashboard/inventory', '/dashboard/unmanaged'] },
++  { label: 'Updates', hrefs: ['/dashboard/updates'] },
++  { label: 'Activity', hrefs: ['/dashboard/uploads', '/dashboard/reports'] },
++  { label: 'Support', hrefs: ['/dashboard/help'] },
++];
++
++export function hrmNavGroups<T extends { href: string }>(items: T[], support: T[]): { label?: string; items: T[] }[] {
++  const byHref = new Map([...items, ...support].map((item) => [item.href, item]));
++  return HRM_NAV_LAYOUT
++    .map((group) => ({ label: group.label, items: group.hrefs.flatMap((href) => byHref.get(href) ?? []) }))
++    .filter((group) => group.items.length > 0);
++}
++
++// Press G, then the key, to open a page. Listed in sidebar order; upstream's D, A, U, I, R and S
++// keep their meaning, and P (App updates; U was taken), V (Discovered apps) and H (Help) are added.
++export const GO_TO_SHORTCUTS: { key: string; href: string; name: string }[] = [
++  { key: 'd', href: '/dashboard', name: 'Home' },
++  { key: 'a', href: '/dashboard/apps', name: 'App catalog' },
++  { key: 'i', href: '/dashboard/inventory', name: 'Inventory' },
++  { key: 'v', href: '/dashboard/unmanaged', name: 'Discovered apps' },
++  { key: 'p', href: '/dashboard/updates', name: 'App updates' },
++  { key: 'u', href: '/dashboard/uploads', name: 'Deployments' },
++  { key: 'r', href: '/dashboard/reports', name: 'Reports' },
++  { key: 's', href: '/dashboard/settings', name: 'Settings' },
++  { key: 'h', href: '/dashboard/help', name: 'Help' },
++];
++
++export function goToShortcutHref(key: string): string | null {
++  return GO_TO_SHORTCUTS.find((shortcut) => shortcut.key === key.toLowerCase())?.href ?? null;
++}

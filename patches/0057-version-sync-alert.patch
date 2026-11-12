@@ -1,0 +1,921 @@
+diff --git a/app/api/cron/check-updates/route.sqlite.test.ts b/app/api/cron/check-updates/route.sqlite.test.ts
+index dc8230402..17592ba5b 100644
+--- a/app/api/cron/check-updates/route.sqlite.test.ts
++++ b/app/api/cron/check-updates/route.sqlite.test.ts
+@@ -53,6 +53,20 @@ describe('check-updates cron in SQLite mode', () => {
+     expect(await response.json()).toMatchObject({ mode: 'sqlite', available: 0, triggered: 0 });
+   });
+ 
++  it('clears Version sync after deploy once it has rebuilt App updates (HRM patch 0057)', async () => {
++    process.env.CRON_SECRET = 'secret';
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    const { versionSyncVerdict } = await import('@/lib/hrm/version-sync-health');
++    const before = new Date(Date.now() - 60_000).toISOString();
++    for (const appId of ['Vendor.One', 'Vendor.Two']) {
++      await sqliteDb.versionSyncEvents.record({ at: before, appId, result: 'failed', code: 'database_busy' });
++    }
++    expect(versionSyncVerdict(await sqliteDb.versionSyncEvents.listRecent()).ok).toBe(false);
++    const response = await route.GET(request('secret'));
++    expect(await response.json()).toMatchObject({ versionSyncCleared: true });
++    expect(versionSyncVerdict(await sqliteDb.versionSyncEvents.listRecent()).ok).toBe(true);
++  });
++
+   it('rejects a wrong secret', async () => {
+     process.env.CRON_SECRET = 'secret';
+     expect((await route.GET(request('other'))).status).toBe(401);
+diff --git a/app/api/cron/check-updates/route.ts b/app/api/cron/check-updates/route.ts
+index dc3a32b5a..4b30b3d30 100644
+--- a/app/api/cron/check-updates/route.ts
++++ b/app/api/cron/check-updates/route.ts
+@@ -14,6 +14,7 @@ import { runSqliteAppInsightsCheck } from '@/lib/hrm/app-insights-check';
+ import { runSqliteInstallCheck } from '@/lib/hrm/install-status-check';
+ import { runSqliteRollbackReadinessCheck } from '@/lib/hrm/rollback-readiness';
+ import { runSqliteOldCopyCleanup } from '@/lib/hrm/old-copy-cleanup';
++import { recordUpdateCheckCorrection } from '@/lib/hrm/version-sync-health';
+ import { alertPausedAutoUpdates } from '@/lib/hrm/paused-auto-update';
+ import { parseVersion, compareVersions } from '@/lib/version-compare';
+ import {
+@@ -295,7 +296,9 @@ export async function GET(request: Request) {
+       const rollbackReadiness = await runSqliteRollbackReadinessCheck().catch(() => ({ checked: 0, missing: 0, unreachable: 0, error: true }));
+       // HRM patch 0042: remove old copies once the newest has settled (after the fresh install counts above).
+       const oldCopies = await runSqliteOldCopyCleanup().catch(() => ({ checked: 0, removed: 0, kept: 0, errors: 1 }));
+-      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates, rollbackReadiness, oldCopies });
++      // HRM patch 0057: App updates is rebuilt now, so earlier version sync failures no longer matter.
++      const versionSyncCleared = await recordUpdateCheckCorrection(getDatabase().versionSyncEvents, summary);
++      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates, rollbackReadiness, oldCopies, versionSyncCleared });
+     } catch (error) {
+       return NextResponse.json(
+         { error: error instanceof Error ? error.message : 'Update check failed' },
+diff --git a/app/api/cron/version-sync-status/route.test.ts b/app/api/cron/version-sync-status/route.test.ts
+new file mode 100644
+index 000000000..72c18c431
+--- /dev/null
++++ b/app/api/cron/version-sync-status/route.test.ts
+@@ -0,0 +1,47 @@
++// HRM patch 0057: the verdict the VM status script copies into hrm-status.json.
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++
++const mocks = vi.hoisted(() => ({ listRecent: vi.fn() }));
++vi.mock('@/lib/db', () => ({ getDatabase: () => ({ versionSyncEvents: { listRecent: mocks.listRecent } }) }));
++
++import { GET } from './route';
++
++const request = (auth?: string) => new Request('http://localhost/api/cron/version-sync-status', { headers: auth ? { authorization: auth } : {} });
++const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
++
++beforeEach(() => {
++  process.env.CRON_SECRET = 'fixture-cron-secret';
++  mocks.listRecent.mockReset();
++});
++afterEach(() => { delete process.env.CRON_SECRET; });
++
++describe('GET /api/cron/version-sync-status', () => {
++  it('needs the cron secret', async () => {
++    expect((await GET(request())).status).toBe(401);
++    expect((await GET(request('Bearer wrong'))).status).toBe(401);
++    delete process.env.CRON_SECRET;
++    expect((await GET(request('Bearer '))).status).toBe(401);
++    expect(mocks.listRecent).not.toHaveBeenCalled();
++  });
++
++  it('answers the verdict', async () => {
++    mocks.listRecent.mockResolvedValue([
++      { at: minutesAgo(5), appId: 'Vendor.App', result: 'failed', code: 'database_busy' },
++      { at: minutesAgo(60), appId: 'Vendor.Other', result: 'failed', code: 'unknown' },
++    ]);
++    const response = await GET(request('Bearer fixture-cron-secret'));
++    expect(response.status).toBe(200);
++    expect(response.headers.get('Cache-Control')).toBe('no-store');
++    const body = await response.json();
++    expect(body.versionSync).toMatchObject({ ok: false, at: expect.any(String) });
++    expect(body.versionSync.detail).toContain('database busy');
++    expect(JSON.stringify(body)).not.toContain('Vendor.');
++  });
++
++  it('answers 503 without error text when the database fails', async () => {
++    mocks.listRecent.mockRejectedValue(new Error('FORBIDDEN detail'));
++    const response = await GET(request('Bearer fixture-cron-secret'));
++    expect(response.status).toBe(503);
++    expect(await response.text()).not.toContain('FORBIDDEN');
++  });
++});
+diff --git a/app/api/cron/version-sync-status/route.ts b/app/api/cron/version-sync-status/route.ts
+new file mode 100644
+index 000000000..b33b7d4ef
+--- /dev/null
++++ b/app/api/cron/version-sync-status/route.ts
+@@ -0,0 +1,26 @@
++/**
++ * HRM patch 0057: the "Version sync after deploy" verdict for the VM status script.
++ *
++ * deploy/intuneget-status.sh reads this every 5 minutes with the cron secret and copies the answer
++ * into hrm-status.json as checks.versionSync, which Home, the watchdog and the IT dashboard report
++ * read. Read-only; it answers counts and a fixed reason only.
++ */
++import { NextResponse } from 'next/server';
++import { getDatabase } from '@/lib/db';
++import { versionSyncVerdict } from '@/lib/hrm/version-sync-health';
++
++export const dynamic = 'force-dynamic';
++
++export async function GET(request: Request) {
++  const cronSecret = process.env.CRON_SECRET;
++  if (!cronSecret || request.headers.get('authorization') !== `Bearer ${cronSecret}`) {
++    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
++  }
++  try {
++    const events = await getDatabase().versionSyncEvents.listRecent();
++    return NextResponse.json({ versionSync: versionSyncVerdict(events) }, { headers: { 'Cache-Control': 'no-store' } });
++  } catch {
++    // The status script keeps its last verdict when this fails; never return error text.
++    return NextResponse.json({ error: 'Unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
++  }
++}
+diff --git a/app/api/package/callback/route.ts b/app/api/package/callback/route.ts
+index 8021ca267..c6d349dd3 100644
+--- a/app/api/package/callback/route.ts
++++ b/app/api/package/callback/route.ts
+@@ -6,6 +6,7 @@
+ 
+ import { NextRequest, NextResponse } from 'next/server';
+ import { getDatabase } from '@/lib/db';
++import { versionSyncErrorCode, type VersionSyncCode } from '@/lib/hrm/version-sync-health';
+ import { verifyCallbackSignature } from '@/lib/callback-signature';
+ import { onJobCompleted } from '@/lib/msp/batch-orchestrator';
+ import { handleAutoUpdateJobCompletion } from '@/lib/auto-update/cleanup';
+@@ -202,6 +203,7 @@ export async function POST(request: NextRequest) {
+       // HRM patch 0049: App updates, Home and the sidebar badge read the detected updates, which the
+       // update check only rebuilds at 3:30. Correct them now that the new copy is deployed.
+       if (currentJob.tenant_id) {
++        let syncCode: VersionSyncCode | null = null;
+         try {
+           await db.updateCheckResults.syncDeployedVersion({
+             userId: currentJob.user_id,
+@@ -212,8 +214,21 @@ export async function POST(request: NextRequest) {
+             displayName: currentJob.display_name,
+           });
+         } catch (syncError) {
++          syncCode = versionSyncErrorCode(syncError);
+           console.error(`[Callback] Failed to refresh detected updates for ${data.jobId}:`, syncError);
+         }
++        // HRM patch 0057: record the result (a code, never the error text) so repeated failures
++        // show on Home and in the watchdog. Recording never affects the callback's answer.
++        try {
++          await db.versionSyncEvents.record({
++            at: new Date().toISOString(),
++            appId: currentJob.winget_id,
++            result: syncCode ? 'failed' : 'ok',
++            code: syncCode,
++          });
++        } catch (recordError) {
++          console.error(`[Callback] Failed to record the version sync result for ${data.jobId}:`, recordError);
++        }
+       }
+ 
+       // Materialize an update policy chosen in the cart, now that the
+diff --git a/app/api/package/callback/route.webhooks.test.ts b/app/api/package/callback/route.webhooks.test.ts
+index 1c358dc80..caf29b288 100644
+--- a/app/api/package/callback/route.webhooks.test.ts
++++ b/app/api/package/callback/route.webhooks.test.ts
+@@ -1,9 +1,9 @@
+ import { NextRequest } from 'next/server';
+ import { beforeEach, describe, expect, it, vi } from 'vitest';
+ 
+-const mocks = vi.hoisted(() => ({ getById: vi.fn(), update: vi.fn(), notify: vi.fn(), syncDeployed: vi.fn() }));
++const mocks = vi.hoisted(() => ({ getById: vi.fn(), update: vi.fn(), notify: vi.fn(), syncDeployed: vi.fn(), recordSync: vi.fn() }));
+ vi.mock('@/lib/db', () => ({
+-  getDatabase: () => ({ jobs: { getById: mocks.getById, update: mocks.update }, uploadHistory: { create: vi.fn().mockResolvedValue({}) }, updateCheckResults: { syncDeployedVersion: mocks.syncDeployed } }),
++  getDatabase: () => ({ jobs: { getById: mocks.getById, update: mocks.update }, uploadHistory: { create: vi.fn().mockResolvedValue({}) }, updateCheckResults: { syncDeployedVersion: mocks.syncDeployed }, versionSyncEvents: { record: mocks.recordSync } }),
+ }));
+ vi.mock('@/lib/callback-signature', () => ({ verifyCallbackSignature: () => true }));
+ vi.mock('@/lib/msp/batch-orchestrator', () => ({ onJobCompleted: vi.fn().mockResolvedValue(undefined) }));
+@@ -25,6 +25,7 @@ beforeEach(() => {
+   mocks.update.mockImplementation(async (_id: string, data: Record<string, unknown>) => ({ id: JOB_ID, ...data }));
+   mocks.notify.mockResolvedValue({ webhooksSent: 1, errors: [] });
+   mocks.syncDeployed.mockResolvedValue({ removed: 1, updated: 0 });
++  mocks.recordSync.mockResolvedValue(undefined);
+ });
+ 
+ describe('package callback deployment webhooks', () => {
+@@ -93,4 +94,31 @@ describe('package callback detected updates', () => {
+     expect(errorLog).toHaveBeenCalledWith(`[Callback] Failed to refresh detected updates for ${JOB_ID}:`, expect.any(Error));
+     errorLog.mockRestore();
+   });
++
++  // HRM patch 0057
++  it('records a successful sync', async () => {
++    mocks.getById.mockResolvedValue(job);
++    await POST(callback({ status: 'deployed', intuneAppId: 'app-2' }));
++    expect(mocks.recordSync).toHaveBeenCalledWith({ at: expect.any(String), appId: 'Vendor.App', result: 'ok', code: null });
++  });
++
++  it('records a failed sync with a code, never the error text', async () => {
++    mocks.getById.mockResolvedValue(job);
++    mocks.syncDeployed.mockRejectedValue(Object.assign(new Error('database is locked: fixture detail'), { code: 'SQLITE_BUSY' }));
++    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
++    await POST(callback({ status: 'deployed', intuneAppId: 'app-2' }));
++    expect(mocks.recordSync).toHaveBeenCalledWith({ at: expect.any(String), appId: 'Vendor.App', result: 'failed', code: 'database_busy' });
++    expect(JSON.stringify(mocks.recordSync.mock.calls)).not.toContain('fixture detail');
++    errorLog.mockRestore();
++  });
++
++  it('still answers the workflow when recording the result fails', async () => {
++    mocks.getById.mockResolvedValue(job);
++    mocks.recordSync.mockRejectedValue(new Error('disk full'));
++    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
++    const response = await POST(callback({ status: 'deployed', intuneAppId: 'app-2' }));
++    expect(response.status).toBe(200);
++    expect(errorLog).toHaveBeenCalledWith(`[Callback] Failed to record the version sync result for ${JOB_ID}:`, expect.any(Error));
++    errorLog.mockRestore();
++  });
+ });
+diff --git a/components/hrm/ServerStatusCard.test.ts b/components/hrm/ServerStatusCard.test.ts
+new file mode 100644
+index 000000000..d34d8e178
+--- /dev/null
++++ b/components/hrm/ServerStatusCard.test.ts
+@@ -0,0 +1,34 @@
++// @vitest-environment happy-dom
++// HRM patch 0057: Server status shows Version sync after deploy like the other checks.
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, expect, it } from 'vitest';
++import { interpretServerStatus } from '@/lib/hrm/home';
++import { ServerStatusCard } from './ServerStatusCard';
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++const status = (checks: Record<string, unknown>) => interpretServerStatus(JSON.stringify({
++  generatedAt: new Date().toISOString(), version: 'v0.8.5-hrm.1', startedAt: null, lastDeploy: null, lastBackup: null,
++  disk: { totalKb: 100, usedKb: 10 }, updateCheck: { result: null, at: null }, notifications: { result: null, at: null },
++  tunnel: { version: null, running: true, lastUpdate: { result: null, at: null } }, checks,
++}));
++
++let root: Root;
++beforeEach(() => { const node = document.createElement('div'); document.body.append(node); root = createRoot(node); });
++afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
++const row = (label: string) => [...document.querySelectorAll('dt')].find((dt) => dt.textContent === label)?.parentElement?.textContent ?? null;
++
++it('shows Working, or Failing with the reason', async () => {
++  await act(async () => root.render(createElement(ServerStatusCard, { status: status({ versionSync: { ok: true, at: null, detail: null } }) })));
++  expect(row('Version sync after deploy')).toContain('Working');
++  expect(document.body.textContent).toContain('Healthy');
++  await act(async () => root.render(createElement(ServerStatusCard, { status: status({ versionSync: { ok: false, at: null, detail: 'Fixture reason.' } }) })));
++  expect(row('Version sync after deploy')).toContain('Failing');
++  expect(row('Version sync after deploy')).toContain('Fixture reason.');
++  expect(document.body.textContent).toContain('Check');
++});
++
++it('hides the row until the server reports it', async () => {
++  await act(async () => root.render(createElement(ServerStatusCard, { status: status({}) })));
++  expect(row('Version sync after deploy')).toBeNull();
++});
+diff --git a/components/hrm/ServerStatusCard.tsx b/components/hrm/ServerStatusCard.tsx
+index bb40a5b59..7150f8edf 100644
+--- a/components/hrm/ServerStatusCard.tsx
++++ b/components/hrm/ServerStatusCard.tsx
+@@ -97,8 +97,8 @@ export function ServerStatusCard({ status, loading, appAccess }: { status?: Serv
+           <Row label="Update alerts">
+             {status.problems.includes('notifications') ? <Pill tone="bad">Failed</Pill> : relative(status.notifications.at)}
+           </Row>
+-          {/* HRM patch 0032: whether the server can still read what it needs from Intune */}
+-          {([['intuneReads', 'Intune reads'], ['intuneSelfTest', 'Intune self-test'], ['scheduledUpdates', 'Scheduled updates']] as const).map(([key, label]) => {
++          {/* HRM patch 0032: whether the server can still read what it needs from Intune; patch 0057 adds Version sync after deploy */}
++          {([['intuneReads', 'Intune reads'], ['intuneSelfTest', 'Intune self-test'], ['scheduledUpdates', 'Scheduled updates'], ['versionSync', 'Version sync after deploy']] as const).map(([key, label]) => {
+             const check = status.checks?.[key];
+             if (!check) return null;
+             return (
+diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
+index 60bf4c463..34d311d46 100644
+--- a/lib/auto-update/__tests__/sqlite.test.ts
++++ b/lib/auto-update/__tests__/sqlite.test.ts
+@@ -477,9 +477,10 @@ describe('updates that replace an Intune app', () => {
+     await db.updateCheckResults.markNotified?.([row.id]);
+ 
+     getAppsByWingetIdsMock.mockRejectedValue(new Error('catalog down'));
+-    await runSqliteUpdateCheck(db);
++    // HRM patch 0057: says so, so the check doesn't clear Version sync after deploy.
++    expect(await runSqliteUpdateCheck(db)).toMatchObject({ catalogUnavailable: true });
+     getAppsByWingetIdsMock.mockResolvedValue([]);
+-    await runSqliteUpdateCheck(db);
++    expect(await runSqliteUpdateCheck(db)).toMatchObject({ catalogUnavailable: true });
+     expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ id: row.id }]);
+   });
+ });
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index a2ec93980..e56fa8ab4 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -78,6 +78,8 @@ export interface SqliteUpdateCheckSummary {
+   errors: number;
+   /** HRM patch 0030: due, but outside the update schedule or in a blackout. */
+   held: number;
++  /** HRM patch 0057: the catalog couldn't be read, so existing App updates rows were kept, not rebuilt. */
++  catalogUnavailable?: true;
+ }
+ 
+ function isMajorBump(current: string, latest: string): boolean {
+@@ -523,7 +525,7 @@ export async function runSqliteUpdateCheck(
+   }
+ 
+   const started = await triggerDueAutoUpdates(db, policies, latestVersionByWinget, isGoneFromIntune, { userId: options?.userId, now });
+-  return { available, ...started };
++  return { available, ...started, ...(catalogUnavailable ? { catalogUnavailable: true as const } : {}) };
+ }
+ 
+ /**
+diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
+index 3d7f6dff7..5ea396f4b 100644
+--- a/lib/db/__tests__/job-create.test.ts
++++ b/lib/db/__tests__/job-create.test.ts
+@@ -50,7 +50,7 @@ function readStoredJob(id: string): Record<string, unknown> {
+   const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
+   try {
+     // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts, skipped versions, retirements, rollback readiness, removals) follow manual mappings, automatic update scope, and webhooks.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(23);
++    expect(stored.pragma('user_version', { simple: true })).toBe(24);
+     return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
+   } finally {
+     stored.close();
+diff --git a/lib/db/__tests__/sqlite-version-sync-events.test.ts b/lib/db/__tests__/sqlite-version-sync-events.test.ts
+new file mode 100644
+index 000000000..49d6d17d9
+--- /dev/null
++++ b/lib/db/__tests__/sqlite-version-sync-events.test.ts
+@@ -0,0 +1,50 @@
++// HRM patch 0057: recent version sync results are kept in SQLite, old ones removed on write.
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import Database from 'better-sqlite3';
++import { VERSION_SYNC_KEEP } from '@/lib/hrm/version-sync-health';
++
++let tempDir: string;
++
++beforeEach(() => {
++  vi.resetModules();
++  tempDir = mkdtempSync(join(tmpdir(), 'intuneget-sync-events-'));
++  process.env.DATABASE_PATH = join(tempDir, 'app.db');
++});
++
++afterEach(async () => {
++  const { closeSqliteDb } = await import('@/lib/db/sqlite');
++  closeSqliteDb();
++  rmSync(tempDir, { recursive: true, force: true });
++  delete process.env.DATABASE_PATH;
++});
++
++describe('sqlite versionSyncEvents', () => {
++  it('records results and lists them newest first', async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    const base = Date.now();
++    await sqliteDb.versionSyncEvents.record({ at: new Date(base - 60_000).toISOString(), appId: 'Vendor.App', result: 'failed', code: 'database_busy' });
++    await sqliteDb.versionSyncEvents.record({ at: new Date(base).toISOString(), appId: 'Vendor.Other', result: 'ok', code: null });
++    expect(await sqliteDb.versionSyncEvents.listRecent()).toEqual([
++      { at: new Date(base).toISOString(), appId: 'Vendor.Other', result: 'ok', code: null },
++      { at: new Date(base - 60_000).toISOString(), appId: 'Vendor.App', result: 'failed', code: 'database_busy' },
++    ]);
++  });
++
++  it('keeps only recent entries', async () => {
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    const base = Date.now();
++    await sqliteDb.versionSyncEvents.record({ at: new Date(base - 8 * 86_400_000).toISOString(), appId: 'Vendor.Old', result: 'failed', code: 'unknown' });
++    for (let i = 0; i < VERSION_SYNC_KEEP + 5; i++) {
++      await sqliteDb.versionSyncEvents.record({ at: new Date(base - (VERSION_SYNC_KEEP + 5 - i) * 1000).toISOString(), appId: 'Vendor.App', result: 'ok', code: null });
++    }
++    const events = await sqliteDb.versionSyncEvents.listRecent();
++    expect(events).toHaveLength(VERSION_SYNC_KEEP);
++    expect(events.some((event) => event.appId === 'Vendor.Old')).toBe(false);
++    const raw = new Database(process.env.DATABASE_PATH!, { readonly: true });
++    expect((raw.prepare('SELECT COUNT(*) AS n FROM hrm_version_sync_events').get() as { n: number }).n).toBe(VERSION_SYNC_KEEP);
++    raw.close();
++  });
++});
+diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
+index aba629ff9..08734572a 100644
+--- a/lib/db/sqlite-migrations.ts
++++ b/lib/db/sqlite-migrations.ts
+@@ -515,6 +515,13 @@ export const MIGRATIONS: SqliteMigration[] = [
+     const columns = db.prepare('PRAGMA table_info(hrm_update_schedule)').all() as Array<{ name: string }>;
+     if (!columns.some(c => c.name === 'paused')) db.exec('ALTER TABLE hrm_update_schedule ADD COLUMN paused INTEGER NOT NULL DEFAULT 0');
+   } },
++  { version: 24, name: 'version sync results after deploy (HRM patch 0057)', up: db => {
++    db.exec(`CREATE TABLE IF NOT EXISTS hrm_version_sync_events (
++      id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, app_id TEXT NOT NULL,
++      result TEXT NOT NULL CHECK (result IN ('ok', 'failed')), code TEXT
++    )`);
++    db.exec('CREATE INDEX IF NOT EXISTS idx_hrm_version_sync_events_at ON hrm_version_sync_events (at)');
++  } },
+ ];
+ 
+ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
+index 6e26b9768..05fb49a1b 100644
+--- a/lib/db/sqlite.ts
++++ b/lib/db/sqlite.ts
+@@ -18,6 +18,7 @@ import { createPausedAlertStore } from '@/lib/hrm/paused-auto-update';
+ import { createAppInsightsStore } from '@/lib/hrm/app-insights-store';
+ import { syncSqliteAutoUpdate } from './sqlite-auto-update';
+ import { planDeployedVersionSync } from '@/lib/hrm/deployed-version-sync';
++import { VERSION_SYNC_KEEP, VERSION_SYNC_KEEP_MS } from '@/lib/hrm/version-sync-health';
+ import type { InstallStatusRecord, InstallStatusStore } from '@/lib/hrm/install-status';
+ import type { CustomRelease, CustomReleaseStore } from '@/lib/hrm/github-releases';
+ import type { PackageAssignment, IntuneAppCategorySelection } from '@/types/upload';
+@@ -37,6 +38,7 @@ import type {
+   UpdateCheckResult,
+   UpdateCheckQuery,
+   DeployedCopy,
++  VersionSyncEvent,
+   CuratedLicenceAttestationRecord,
+   CuratedLicenceAttestationInput,
+   ClaimedAppInput,
+@@ -1272,6 +1274,32 @@ export const sqliteDb: DatabaseAdapter = {
+     },
+   },
+ 
++  // HRM patch 0057: recent version sync results (migration 24); old entries are removed on write
++  versionSyncEvents: {
++    async record(event: VersionSyncEvent): Promise<void> {
++      const database = getDb();
++      const oldest = new Date(Date.now() - VERSION_SYNC_KEEP_MS).toISOString();
++      database.transaction(() => {
++        database
++          .prepare('INSERT INTO hrm_version_sync_events (at, app_id, result, code) VALUES (?, ?, ?, ?)')
++          .run(event.at, event.appId, event.result, event.code);
++        database
++          .prepare(
++            `DELETE FROM hrm_version_sync_events WHERE at < ? OR id NOT IN
++               (SELECT id FROM hrm_version_sync_events ORDER BY at DESC, id DESC LIMIT ?)`
++          )
++          .run(oldest, VERSION_SYNC_KEEP);
++      })();
++    },
++
++    async listRecent(): Promise<VersionSyncEvent[]> {
++      const rows = getDb()
++        .prepare('SELECT at, app_id, result, code FROM hrm_version_sync_events ORDER BY at DESC, id DESC LIMIT ?')
++        .all(VERSION_SYNC_KEEP) as Array<{ at: string; app_id: string; result: VersionSyncEvent['result']; code: VersionSyncEvent['code'] }>;
++      return rows.map((row) => ({ at: row.at, appId: row.app_id, result: row.result, code: row.code }));
++    },
++  },
++
+   curatedLicenceAttestations: {
+     async get(
+       tenantId: string,
+diff --git a/lib/db/supabase-adapter.ts b/lib/db/supabase-adapter.ts
+index 40b91fa3f..857417aeb 100644
+--- a/lib/db/supabase-adapter.ts
++++ b/lib/db/supabase-adapter.ts
+@@ -20,10 +20,12 @@ import type {
+   CuratedLicenceAttestationInput,
+   CuratedLicenceAttestationRecord,
+   DeployedCopy,
++  VersionSyncEvent,
+   UpdateCheckQuery,
+   UpdateCheckResult,
+ } from './types';
+ import { planDeployedVersionSync } from '@/lib/hrm/deployed-version-sync';
++import { recentVersionSyncEvents } from '@/lib/hrm/version-sync-health';
+ import type { PostgrestError } from '@supabase/supabase-js';
+ import type { SavedCustomAppDefinition } from '@/lib/custom-app-definitions';
+ 
+@@ -125,6 +127,9 @@ function getUploadHistoryQuery(supabase: ReturnType<typeof createServerClient>):
+ /**
+  * Supabase implementation of the database adapter
+  */
++// HRM patch 0057: see versionSyncEvents below.
++let supabaseVersionSyncEvents: VersionSyncEvent[] = [];
++
+ export const supabaseDb: DatabaseAdapter = {
+   customAppDefinitions: {
+     async list(userId, tenantId, limit, offset) {
+@@ -1117,6 +1122,18 @@ export const supabaseDb: DatabaseAdapter = {
+     },
+   },
+ 
++  // HRM patch 0057: Supabase has no table for these yet, so recent results are kept in this server
++  // process (lost on restart). Add a table if HRM moves to Supabase.
++  versionSyncEvents: {
++    async record(event: VersionSyncEvent): Promise<void> {
++      supabaseVersionSyncEvents = recentVersionSyncEvents([event, ...supabaseVersionSyncEvents]);
++    },
++    async listRecent(): Promise<VersionSyncEvent[]> {
++      supabaseVersionSyncEvents = recentVersionSyncEvents(supabaseVersionSyncEvents);
++      return [...supabaseVersionSyncEvents];
++    },
++  },
++
+   curatedLicenceAttestations: {
+     async get(
+       tenantId: string,
+diff --git a/lib/db/types.ts b/lib/db/types.ts
+index 6bc777f1a..0252df23b 100644
+--- a/lib/db/types.ts
++++ b/lib/db/types.ts
+@@ -55,6 +55,16 @@ export interface DeployedCopy {
+   displayName: string;
+ }
+ 
++/** HRM patch 0057: one result of the version sync after a deploy. A fixed code, never error text. */
++export type VersionSyncCode = 'database_busy' | 'database_error' | 'timeout' | 'unknown';
++export interface VersionSyncEvent {
++  at: string;
++  /** The app's WinGet ID. */
++  appId: string;
++  result: 'ok' | 'failed';
++  code: VersionSyncCode | null;
++}
++
+ export interface UpdateCheckQuery {
+   tenantId?: string;
+   includeDismissed?: boolean;
+@@ -469,4 +479,14 @@ export interface DatabaseAdapter {
+       data: Partial<Pick<ClaimedAppRecord, 'status' | 'intune_app_id'>>
+     ): Promise<ClaimedAppRecord | null>;
+   };
++
++  /**
++   * HRM patch 0057: recent results of the version sync after a deploy (patch 0049), for the
++   * "Version sync after deploy" check. Keeps only recent entries.
++   */
++  versionSyncEvents: {
++    record(event: VersionSyncEvent): Promise<void>;
++    /** Recent entries, newest first. */
++    listRecent(): Promise<VersionSyncEvent[]>;
++  };
+ }
+diff --git a/lib/hrm/__tests__/home.test.ts b/lib/hrm/__tests__/home.test.ts
+index 1108b0e16..0c2f46c2f 100644
+--- a/lib/hrm/__tests__/home.test.ts
++++ b/lib/hrm/__tests__/home.test.ts
+@@ -25,6 +25,14 @@ describe('server status file', () => {
+     expect(status).toMatchObject({ reported: true, version: 'v0.8.2-hrm.9', diskWarning: false, problems: [] });
+   });
+ 
++  // HRM patch 0057
++  it('reports a failing version sync after deploy as a problem', () => {
++    const failing = { ok: false, at: '2026-10-27T11:00:00Z', detail: 'Fixture detail.' };
++    expect(interpretServerStatus(file({ checks: { versionSync: failing } }), NOW)).toMatchObject({ problems: ['versionSync'] });
++    expect(interpretServerStatus(file({ checks: { versionSync: { ...failing, ok: true } } }), NOW)).toMatchObject({ problems: [] });
++    expect(interpretServerStatus(file({ checks: { versionSync: null } }), NOW)).toMatchObject({ problems: [] });
++  });
++
+   it('never guesses when the file is missing, unreadable or old', () => {
+     expect(interpretServerStatus(null, NOW)).toEqual({ reported: false, reason: 'missing' });
+     expect(interpretServerStatus('{not json', NOW)).toEqual({ reported: false, reason: 'unreadable' });
+diff --git a/lib/hrm/__tests__/mcp-api.test.ts b/lib/hrm/__tests__/mcp-api.test.ts
+index aa3809716..0b28bb65a 100644
+--- a/lib/hrm/__tests__/mcp-api.test.ts
++++ b/lib/hrm/__tests__/mcp-api.test.ts
+@@ -83,6 +83,8 @@ describe('server status', () => {
+     expect(states).toMatchObject({ disk: 'warning', intuneSelfTest: 'failed', intuneReads: 'unknown', notifications: 'unknown', deploy: 'ok', tunnel: 'ok' });
+     expect(serverStatusView({ reported: true, ...({} as never), problems: [], diskRatio: 0, diskWarning: false, generatedAt: NOW.toISOString(), version: 'FORBIDDEN', disk: { totalKb: 1, usedKb: 0 }, tunnel: { running: true } } as never).version).toBeNull();
+     expect(serverStatusView({ reported: false, reason: 'stale', generatedAt: '2026-11-03T10:00:00Z' })).toMatchObject({ health: 'unknown', statusFile: 'stale', checks: [] });
++    // HRM patch 0057
++    expect(states).toMatchObject({ versionSync: 'unknown' });
+   });
+ });
+ 
+diff --git a/lib/hrm/__tests__/status-report.test.ts b/lib/hrm/__tests__/status-report.test.ts
+index 0944740d4..95b5a5b49 100644
+--- a/lib/hrm/__tests__/status-report.test.ts
++++ b/lib/hrm/__tests__/status-report.test.ts
+@@ -124,6 +124,15 @@ describe('status report', () => {
+     }
+   });
+ 
++  // HRM patch 0057: a state and a fixed title only, never the check's detail text
++  it('reports a failing version sync after deploy without its detail', () => {
++    const report = build({ server: server({ checks: { versionSync: { ok: false, at: '2026-11-03T11:00:00Z', detail: 'FORBIDDEN detail' } } }) });
++    expect(report).toMatchObject({ health: 'warn', status: 'Version sync failing' });
++    expect(report.todos).toEqual([{ id: 'server-versionSync', title: "App updates wasn't corrected after 2 or more recent deploys", link: `${ORIGIN}/dashboard` }]);
++    expect(JSON.stringify(report)).not.toContain('FORBIDDEN');
++    expect(build({ server: server({ checks: { versionSync: { ok: true, at: null, detail: null } } }) }).todos).toEqual([]);
++  });
++
+   it('checks each server-status leaf independently with a synthetic forbidden marker', () => {
+     const fixture = server() as unknown as Record<string, unknown>;
+     const leaves = (value: unknown, prefix: string[] = []): string[][] => {
+diff --git a/lib/hrm/__tests__/version-sync-health.test.ts b/lib/hrm/__tests__/version-sync-health.test.ts
+new file mode 100644
+index 000000000..e19e14e06
+--- /dev/null
++++ b/lib/hrm/__tests__/version-sync-health.test.ts
+@@ -0,0 +1,97 @@
++// HRM patch 0057: the "Version sync after deploy" verdict.
++import { describe, expect, it, vi } from 'vitest';
++import {
++  recentVersionSyncEvents,
++  recordUpdateCheckCorrection,
++  UPDATE_CHECK_ENTRY,
++  versionSyncErrorCode,
++  versionSyncVerdict,
++  VERSION_SYNC_KEEP,
++  type VersionSyncEvent,
++} from '@/lib/hrm/version-sync-health';
++
++const now = new Date('2026-11-03T12:00:00.000Z');
++const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
++const failed = (h: number, code: VersionSyncEvent['code'] = 'database_busy'): VersionSyncEvent => ({ at: hoursAgo(h), appId: 'Vendor.App', result: 'failed', code });
++const ok = (h: number): VersionSyncEvent => ({ at: hoursAgo(h), appId: 'Vendor.App', result: 'ok', code: null });
++
++describe('versionSyncVerdict', () => {
++  it('works with nothing recorded', () => {
++    expect(versionSyncVerdict([], now)).toEqual({ ok: true, at: null, detail: null });
++  });
++
++  it('stays working after one failure', () => {
++    expect(versionSyncVerdict([failed(1)], now)).toEqual({ ok: true, at: hoursAgo(1), detail: null });
++  });
++
++  it('fails at 2 failures in the last 24 hours, with a plain reason', () => {
++    const verdict = versionSyncVerdict([failed(1, 'timeout'), failed(20)], now);
++    expect(verdict.ok).toBe(false);
++    expect(verdict.at).toBe(hoursAgo(1));
++    expect(verdict.detail).toBe("2 deploys didn't update App updates in the last 24 hours (timed out). The 3:30 AM or 3:30 PM check corrects them. Tell HRM Support if this lasts.");
++  });
++
++  it('does not count failures older than 24 hours', () => {
++    expect(versionSyncVerdict([failed(1), failed(25)], now).ok).toBe(true);
++  });
++
++  it('clears when a later sync succeeds', () => {
++    expect(versionSyncVerdict([ok(0.5), failed(1), failed(2)], now)).toEqual({ ok: true, at: hoursAgo(0.5), detail: null });
++  });
++
++  it('fails again after 2 more failures following that success', () => {
++    expect(versionSyncVerdict([failed(0.1), ok(0.5), failed(1), failed(2)], now).ok).toBe(true);
++    expect(versionSyncVerdict([failed(0.1), failed(0.2), ok(0.5), failed(1)], now).ok).toBe(false);
++  });
++
++  it('reads entries in any order', () => {
++    expect(versionSyncVerdict([failed(2), ok(0.5), failed(1)], now).ok).toBe(true);
++  });
++});
++
++describe('recentVersionSyncEvents', () => {
++  it('keeps only the newest entries from the last 7 days', () => {
++    const many = Array.from({ length: VERSION_SYNC_KEEP + 10 }, (_, i) => failed(i));
++    const kept = recentVersionSyncEvents([...many, failed(24 * 8), { ...ok(1), at: 'not a time' }], now);
++    expect(kept).toHaveLength(VERSION_SYNC_KEEP);
++    expect(kept[0].at).toBe(hoursAgo(0));
++  });
++});
++
++describe('versionSyncErrorCode', () => {
++  it('maps errors to fixed codes', () => {
++    expect(versionSyncErrorCode(Object.assign(new Error('x'), { code: 'SQLITE_BUSY' }))).toBe('database_busy');
++    expect(versionSyncErrorCode(Object.assign(new Error('x'), { code: 'SQLITE_LOCKED_SHAREDCACHE' }))).toBe('database_busy');
++    expect(versionSyncErrorCode(Object.assign(new Error('x'), { code: 'SQLITE_CONSTRAINT' }))).toBe('database_error');
++    expect(versionSyncErrorCode({ code: 'PGRST301', message: 'x' })).toBe('database_error');
++    expect(versionSyncErrorCode({ code: '23505', message: 'x' })).toBe('database_error');
++    expect(versionSyncErrorCode({ code: '40P01', message: 'x' })).toBe('database_error');
++    for (const code of ['EPERM', 'EBUSY', 'EPIPE', 'EACCES']) expect(versionSyncErrorCode(Object.assign(new Error('x'), { code }))).toBe('unknown');
++    expect(versionSyncErrorCode(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toBe('timeout');
++    expect(versionSyncErrorCode(new Error('fixture detail'))).toBe('unknown');
++    expect(versionSyncErrorCode(null)).toBe('unknown');
++    expect(versionSyncErrorCode('text')).toBe('unknown');
++  });
++});
++
++describe('recordUpdateCheckCorrection', () => {
++  it('records a success after a full update check, which clears the check', async () => {
++    const events: VersionSyncEvent[] = [failed(2), failed(3)];
++    const store = { record: vi.fn(async (event: VersionSyncEvent) => { events.unshift(event); }) };
++    expect(versionSyncVerdict(events, now).ok).toBe(false);
++    await expect(recordUpdateCheckCorrection(store, {}, new Date(hoursAgo(1)))).resolves.toBe(true);
++    expect(store.record).toHaveBeenCalledWith({ at: hoursAgo(1), appId: UPDATE_CHECK_ENTRY, result: 'ok', code: null });
++    expect(versionSyncVerdict(events, now)).toEqual({ ok: true, at: hoursAgo(1), detail: null });
++    // New failures after the check raise it again by the same rule.
++    events.unshift(failed(0.5), failed(0.25));
++    expect(versionSyncVerdict(events, now).ok).toBe(false);
++  });
++
++  it('records nothing when the catalog was unreadable, and never throws', async () => {
++    const store = { record: vi.fn(async () => {}) };
++    await expect(recordUpdateCheckCorrection(store, { catalogUnavailable: true }, now)).resolves.toBe(false);
++    expect(store.record).not.toHaveBeenCalled();
++    const failing = { record: vi.fn(async () => { throw new Error('fixture'); }) };
++    await expect(recordUpdateCheckCorrection(failing, {}, now)).resolves.toBe(false);
++  });
++});
+diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
+index f4c6e6426..93c7b017d 100644
+--- a/lib/hrm/help-content.ts
++++ b/lib/hrm/help-content.ts
+@@ -75,7 +75,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'updates',
+     title: 'App updates',
+-    uiLabels: ['App updates', 'Deploy new version', 'Notify only', 'Auto-update', 'Ignore', 'Apps set to Auto-update', 'Auto-update on', 'Ignored apps', 'Refresh', 'Home', 'Pause automatic updates', 'Update schedule'],
++    uiLabels: ['App updates', 'Deploy new version', 'Notify only', 'Auto-update', 'Ignore', 'Apps set to Auto-update', 'Auto-update on', 'Ignored apps', 'Refresh', 'Home', 'Pause automatic updates', 'Update schedule', 'Server status', 'Version sync after deploy', 'Failing'],
+     points: [
+       'The server checks for new app versions at 3:30 AM and 3:30 PM, and sends update alerts at 4:00 AM and 4:00 PM (Maryland time).',
+       'Updates waiting for approval show on the Home page and in App updates.',
+@@ -87,6 +87,8 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'When a deployment finishes as deployed, App updates and Home show the new version straight away, whoever deployed it. The app drops off the list, or shows the new version as current if an even newer one is out.',
+       'App updates reads its list again when you come back to the browser tab, and every 45 seconds while one of your deployments is running.',
+       'Press Refresh in App updates to check now. It clears out-of-date entries for everyone in your tenant. Any automatic updates it starts are for your own Auto-update apps only.',
++      'If App updates still shows the old version after a deploy, the next update check at 3:30 AM or 3:30 PM (Maryland time) corrects it.',
++      'When this happens after 2 or more deploys in a day, Version sync after deploy shows Failing in Server status on Home.',
+     ],
+   },
+   {
+@@ -444,16 +446,19 @@ export const HELP_SECTIONS: HelpSection[] = [
+   {
+     id: 'server',
+     title: 'How the server is updated',
+-    uiLabels: ['Server status', 'Last deploy', 'Off-site backup', 'Backup before deploy', 'Update check', 'Update alerts', 'Disk', 'Tunnel', 'App updates', 'Deployments', 'Pilot rollouts', 'Needs attention', 'Who can sign in', 'IT admins group', "Access isn't limited to a group yet", 'Healthy', 'Check', 'No access to IntuneGet', "Couldn't check your access", 'Try again', 'Sign out'],
++    uiLabels: ['Server status', 'Last deploy', 'Off-site backup', 'Backup before deploy', 'Update check', 'Update alerts', 'Intune reads', 'Intune self-test', 'Scheduled updates', 'Version sync after deploy', 'Working', 'Failing', 'Disk', 'Tunnel', 'App updates', 'Deployments', 'Pilot rollouts', 'Needs attention', 'Who can sign in', 'IT admins group', "Access isn't limited to a group yet", 'Healthy', 'Check', 'No access to IntuneGet', "Couldn't check your access", 'Try again', 'Sign out'],
+     points: [
+       'New IntuneGet versions are built with HRM\'s changes and proposed as a Deploy pull request in IntuneGet-Build.',
+       'Merging it updates the server within 5 minutes. The server backs up its data first and goes back to the previous version on its own if the new one doesn\'t start.',
+-      'Server status on the Home page shows the running version, Last deploy, Off-site backup, Backup before deploy, Update check, Update alerts, the Intune checks below, Disk, Tunnel and Who can sign in.',
++      'Server status on the Home page shows the running version, Last deploy, Off-site backup, Backup before deploy, Update check, Update alerts, the 4 checks below, Disk, Tunnel and Who can sign in.',
+       'Off-site backup turns red if the last nightly copy to Azure failed or is more than 36 hours old.',
+       'Intune reads shows Failing when install results or app activity could not be read at the last 2 update checks (3:30 AM and 3:30 PM).',
+       'Intune self-test tests every Intune read the server relies on, daily at 7:15 AM (Maryland time), without changing anything in Intune. It shows Failing if a read fails or the test is more than 26 hours old.',
+       'Scheduled updates is the hourly run that starts updates held by the update schedule. It shows Failing if the last run failed or none ran for 2 hours.',
+-      'Each of these shows Working, or Failing with a short reason, and a Teams alert posts to IT Ops. If Failing lasts, open a ticket with HRM Support.',
++      'Version sync after deploy shows Failing when 2 or more deploys in the last 24 hours didn\'t update App updates, and none has worked since.',
++      'While it shows Failing, App updates can show an old version until the 3:30 AM or 3:30 PM check. The next deploy that updates App updates clears it.',
++      'Each of these 4 checks shows Working, or Failing with a short reason. When one fails, Server status shows Check and a Teams alert posts to IT Ops.',
++      'If Failing lasts, open a ticket with HRM Support and include the reason shown.',
+       'HRM\'s IT dashboard shows Server status problems, failed or stuck deployments, and counts of apps deployed each day. Open Home here for details.',
+       'The summary refreshes at most once a minute. If the server is slow, the IT dashboard keeps the last safe summary and its original time.',
+       'HRM\'s IntuneGet MCP server can read apps, App updates, Deployments, Pilot rollouts, install failures and Needs attention here. It changes nothing in Intune or IntuneGet.',
+diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
+index b243fe2bf..dc2aeba49 100644
+--- a/lib/hrm/help-guides.ts
++++ b/lib/hrm/help-guides.ts
+@@ -86,8 +86,8 @@ export const HELP_GUIDES: HelpGuide[] = [
+     ],
+     success: 'The app’s card or list shows the update rule you intended.', caution: 'Automatic updates follow the Update schedule and safety checks. When computers install follows Installation timing and the Intune assignment.',
+     related: ['updating', 'automatic-installation-policy', 'update-schedule'],
+-    troubleshoot: [{ problem: 'An app seems missing', action: 'Check Ignored apps. A copy deleted in Intune drops off at the next check.' }, { problem: 'A custom app has no update alert', action: 'Automatic checks cover GitHub release downloads; watch other vendors’ releases yourself.', guide: 'updating' }],
+-    referenceGroups: [reference('Check cadence and new versions', [0, 1, 6]), reference('Update rules and visibility', [2, 3, 4]), reference('Where an update will go', [5]), reference('After a deployment finishes', [7, 8, 9])],
++    troubleshoot: [{ problem: 'An app seems missing', action: 'Check Ignored apps. A copy deleted in Intune drops off at the next check.' }, { problem: 'A custom app has no update alert', action: 'Automatic checks cover GitHub release downloads; watch other vendors’ releases yourself.', guide: 'updating' }, { problem: 'App updates still shows the old version after a deploy', action: 'The 3:30 AM or 3:30 PM check corrects it. If Version sync after deploy shows Failing on Home, tell HRM Support.', guide: 'server' }],
++    referenceGroups: [reference('Check cadence and new versions', [0, 1, 6]), reference('Update rules and visibility', [2, 3, 4]), reference('Where an update will go', [5]), reference('After a deployment finishes', [7, 8, 9, 10, 11])],
+   },
+   {
+     id: 'updating', category: 'updates', title: 'Deploy a new version',
+@@ -319,18 +319,18 @@ export const HELP_GUIDES: HelpGuide[] = [
+   },
+   {
+     id: 'server', category: 'settings', title: 'Check server health and updates',
+-    summary: 'Read the running version and check failures before investigating the server or requesting support.', keywords: ['server status', 'backup', 'deploy', 'tunnel', 'disk', 'health', 'self-test', 'mcp', 'sign in', 'access', 'no access', 'IT admins group'],
++    summary: 'Read the running version and check failures before investigating the server or requesting support.', keywords: ['server status', 'backup', 'deploy', 'tunnel', 'disk', 'health', 'self-test', 'mcp', 'sign in', 'access', 'no access', 'IT admins group', 'version sync'],
+     start: home, before: ['Server status describes the server, not installation success on user computers.'],
+     steps: [
+       step('Read the current status', 'Open Home and find Server status. Check the running version, Last deploy, backup results and Who can sign in.', 'server', 'Server status', 'You know which version is running, whether backups are current and who can sign in.'),
+-      step('Inspect a failing check', 'Read the reason beside Intune reads, Intune self-test, Scheduled updates, Disk or Tunnel when it shows Failing.', 'server', 'Failing', 'The problem can be tied to a specific server check.'),
++      step('Inspect a failing check', 'When Intune reads, Intune self-test, Scheduled updates or Version sync after deploy shows Failing, read the reason under it. Also check Disk and Tunnel.', 'server', 'Failing', 'The problem can be tied to a specific server check.'),
+       step('Escalate with evidence', 'For a persistent failure, open HRM Support with the check name, time and displayed reason. Use the runbook for authorized server work.', 'support', 'HRM Support', 'Support receives a precise description of the failing service.'),
+     ],
+     success: 'You can identify the running version and the specific check needing attention.',
+     caution: 'A Deploy pull request changes production when merged. Server updates back up first and can roll back if startup health fails.',
+     related: ['alerts', 'support', 'install-results'],
+-    troubleshoot: [{ problem: 'The IT dashboard shows an older summary', action: 'Open Home for current details. A slow server can leave the last safe summary visible with its original time.' }, { problem: 'Off-site backup is red', action: 'The last copy failed or is too old. Use the displayed time and failure reason in your support request.' }, { problem: 'A staff member sees No access to IntuneGet', action: 'They are not in the IT admins group. Ask HRM Support to add them; it can take up to 5 minutes to apply.' }, { problem: 'Who can sign in shows Access isn\'t limited to a group yet', action: 'Anyone who gets past HRM\'s sign-in can use IntuneGet. Open a ticket with HRM Support.' }],
+-    referenceGroups: [reference('Server updates and automatic rollback', [0, 1]), reference('Read health and backup checks', [2, 3, 4, 5, 6, 7]), reference('External dashboard freshness', [8, 9]), reference('MCP server reads', [10, 11]), reference('Who can use IntuneGet', [12, 13, 14, 15])],
++    troubleshoot: [{ problem: 'The IT dashboard shows an older summary', action: 'Open Home for current details. A slow server can leave the last safe summary visible with its original time.' }, { problem: 'Version sync after deploy shows Failing', action: 'App updates can show old versions until the 3:30 AM or 3:30 PM check. Send HRM Support the reason shown.' }, { problem: 'Off-site backup is red', action: 'The last copy failed or is too old. Use the displayed time and failure reason in your support request.' }, { problem: 'A staff member sees No access to IntuneGet', action: 'They are not in the IT admins group. Ask HRM Support to add them; it can take up to 5 minutes to apply.' }, { problem: 'Who can sign in shows Access isn\'t limited to a group yet', action: 'Anyone who gets past HRM\'s sign-in can use IntuneGet. Open a ticket with HRM Support.' }],
++    referenceGroups: [reference('Server updates and automatic rollback', [0, 1]), reference('Read health and backup checks', [2, 3, 4, 5, 6, 7, 8, 9, 10]), reference('External dashboard freshness', [11, 12]), reference('MCP server reads', [13, 14]), reference('Who can use IntuneGet', [15, 16, 17, 18])],
+   },
+   {
+     id: 'your-settings', category: 'settings', title: 'Find a page or change your theme',
+diff --git a/lib/hrm/home.ts b/lib/hrm/home.ts
+index a7ee22922..c9fc01031 100644
+--- a/lib/hrm/home.ts
++++ b/lib/hrm/home.ts
+@@ -20,7 +20,8 @@ export const OFFSITE_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
+ interface UnitRun { result: string | null; at: string | null }
+ /** HRM patch 0032: a verdict the VM status script already worked out; null when not set up. */
+ export interface StatusCheck { ok: boolean; at: string | null; detail: string | null }
+-export const STATUS_CHECKS = ['intuneReads', 'intuneSelfTest', 'scheduledUpdates'] as const;
++// HRM patch 0057 adds versionSync: App updates not corrected after 2 or more deploys in 24 hours.
++export const STATUS_CHECKS = ['intuneReads', 'intuneSelfTest', 'scheduledUpdates', 'versionSync'] as const;
+ export type StatusCheckKey = (typeof STATUS_CHECKS)[number];
+ 
+ export interface ServerStatusFile {
+diff --git a/lib/hrm/mcp-api.ts b/lib/hrm/mcp-api.ts
+index 61de47c62..92a458d52 100644
+--- a/lib/hrm/mcp-api.ts
++++ b/lib/hrm/mcp-api.ts
+@@ -90,7 +90,7 @@ function boolParam(query: URLSearchParams, name: string): boolean {
+ 
+ // ---------- GET /status ----------
+ 
+-const CHECK_ORDER = ['deploy', 'offsiteBackup', 'disk', 'updateCheck', 'notifications', 'tunnel', 'tunnelUpdate', 'intuneReads', 'intuneSelfTest', 'scheduledUpdates'] as const;
++const CHECK_ORDER = ['deploy', 'offsiteBackup', 'disk', 'updateCheck', 'notifications', 'tunnel', 'tunnelUpdate', 'intuneReads', 'intuneSelfTest', 'scheduledUpdates', 'versionSync'] as const;
+ type CheckState = 'ok' | 'warning' | 'failed' | 'unknown';
+ 
+ export function serverStatusView(server: ServerStatus) {
+diff --git a/lib/hrm/status-report.ts b/lib/hrm/status-report.ts
+index d79e8f515..719afbc29 100644
+--- a/lib/hrm/status-report.ts
++++ b/lib/hrm/status-report.ts
+@@ -57,6 +57,8 @@ const PROBLEMS: Record<string, { status: string; title: string }> = {
+   intuneReads: { status: 'Intune reads failing', title: 'Install results or app activity could not be read from Intune' },
+   intuneSelfTest: { status: 'Intune self-test failed', title: 'The daily Intune self-test failed' },
+   scheduledUpdates: { status: 'Scheduled updates failing', title: 'The hourly scheduled update run failed or is late' },
++  // HRM patch 0057
++  versionSync: { status: 'Version sync failing', title: "App updates wasn't corrected after 2 or more recent deploys" },
+ };
+ const PROBLEM_ORDER = Object.keys(PROBLEMS);
+ 
+diff --git a/lib/hrm/version-sync-health.ts b/lib/hrm/version-sync-health.ts
+new file mode 100644
+index 000000000..a98277198
+--- /dev/null
++++ b/lib/hrm/version-sync-health.ts
+@@ -0,0 +1,90 @@
++/**
++ * HRM patch 0057: make repeated failures of the version sync after a deploy (patch 0049) visible.
++ *
++ * The deploy callback corrects App updates as soon as a deployment finishes. When that throws, the
++ * 3:30 update check repairs it later, so one failure is harmless. Each result is recorded (time,
++ * WinGet ID, result and a short code, never error text), and 2 or more failures in 24 hours with no
++ * success since then fail the "Version sync after deploy" check on Home, the watchdog and the IT
++ * dashboard report. A full update check that rebuilds App updates records a success too, so it
++ * clears the check; new failures raise it again by the same rule. The VM status script copies the
++ * verdict into hrm-status.json.
++ */
++import type { VersionSyncCode, VersionSyncEvent } from '@/lib/db/types';
++
++export type { VersionSyncCode, VersionSyncEvent };
++
++export const VERSION_SYNC_WINDOW_MS = 24 * 60 * 60 * 1000;
++export const VERSION_SYNC_FAILURE_THRESHOLD = 2;
++/** Only recent entries are kept: at most this many, and none older than 7 days. */
++export const VERSION_SYNC_KEEP = 50;
++export const VERSION_SYNC_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
++
++export const VERSION_SYNC_CODES: readonly VersionSyncCode[] = ['database_busy', 'database_error', 'timeout', 'unknown'];
++
++const CODE_TEXT: Record<VersionSyncCode, string> = {
++  database_busy: 'database busy',
++  database_error: 'database error',
++  timeout: 'timed out',
++  unknown: 'unknown error',
++};
++
++/** The entry a full update check records once it has rebuilt App updates (not a WinGet ID). */
++export const UPDATE_CHECK_ENTRY = 'update-check';
++
++/** Patch 0057: the 3:30 check rebuilt App updates for every app, which also clears the check. */
++export async function recordUpdateCheckCorrection(
++  events: { record(event: VersionSyncEvent): Promise<void> },
++  summary: { catalogUnavailable?: boolean },
++  now = new Date(),
++): Promise<boolean> {
++  // With the catalog unreadable, old rows were kept rather than corrected: nothing to record.
++  if (summary.catalogUnavailable) return false;
++  try {
++    await events.record({ at: now.toISOString(), appId: UPDATE_CHECK_ENTRY, result: 'ok', code: null });
++    return true;
++  } catch {
++    return false; // Recording never fails the update check.
++  }
++}
++
++/** A short, fixed code for a sync error. The error's own text is never kept or shown. */
++export function versionSyncErrorCode(error: unknown): VersionSyncCode {
++  const value = error as { code?: unknown; name?: unknown } | null;
++  const code = typeof value?.code === 'string' ? value.code : '';
++  const name = typeof value?.name === 'string' ? value.name : '';
++  if (code === 'SQLITE_BUSY' || code.startsWith('SQLITE_BUSY_') || code === 'SQLITE_LOCKED' || code.startsWith('SQLITE_LOCKED_')) return 'database_busy';
++  if (code.startsWith('SQLITE_') || code.startsWith('PGRST') || /^(?=.*[0-9])[0-9A-Z]{5}$/.test(code)) return 'database_error'; // SQLSTATE codes have a digit; EPERM or EBUSY don't.
++  if (name === 'AbortError' || name === 'TimeoutError' || code === 'ETIMEDOUT') return 'timeout';
++  return 'unknown';
++}
++
++/** Keeps only well-formed entries, newest first, within the keep limits. */
++export function recentVersionSyncEvents(events: VersionSyncEvent[], now = new Date()): VersionSyncEvent[] {
++  const oldest = now.getTime() - VERSION_SYNC_KEEP_MS;
++  return events
++    .filter((event) => Number.isFinite(Date.parse(event.at)) && Date.parse(event.at) >= oldest)
++    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
++    .slice(0, VERSION_SYNC_KEEP);
++}
++
++/** Same shape as the VM status script's other checks (lib/hrm/home.ts StatusCheck). */
++export interface VersionSyncVerdict { ok: boolean; at: string | null; detail: string | null }
++
++/**
++ * Failing when 2 or more syncs failed in the last 24 hours after the newest success. A later
++ * success, or a full update check that rebuilt App updates, clears it straight away. `at` is the newest recorded result.
++ */
++export function versionSyncVerdict(events: VersionSyncEvent[], now = new Date()): VersionSyncVerdict {
++  const recent = recentVersionSyncEvents(events, now);
++  const at = recent[0]?.at ?? null;
++  const lastOk = recent.find((event) => event.result === 'ok');
++  const since = Math.max(now.getTime() - VERSION_SYNC_WINDOW_MS, lastOk ? Date.parse(lastOk.at) : -Infinity);
++  const failures = recent.filter((event) => event.result === 'failed' && Date.parse(event.at) > since);
++  if (failures.length < VERSION_SYNC_FAILURE_THRESHOLD) return { ok: true, at, detail: null };
++  const reason = CODE_TEXT[failures[0].code ?? 'unknown'] ?? CODE_TEXT.unknown;
++  return {
++    ok: false,
++    at,
++    detail: `${failures.length} deploys didn't update App updates in the last 24 hours (${reason}). The 3:30 AM or 3:30 PM check corrects them. Tell HRM Support if this lasts.`,
++  };
++}

@@ -19,15 +19,17 @@ HRM IT notes.
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
 | `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day, scheduled update start hourly (patch 0030), optional startup Beta report collection hourly (patch 0044), Intune self-test daily at 7:15 AM New York (patch 0032). |
 | `deploy/cloudflared-apt-update.sh` | Nightly cloudflared update through apt (installed as `/usr/local/sbin/cloudflared-apt-update`), run by the `cloudflared-update` drop-in in `deploy/systemd/cloudflared-update.service.d/`. |
-| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. Its `checks` section holds verdicts the app, watchdog and IT dashboard report all read as-is: Intune reads (install results or app activity failed at the last 2 update checks), the daily Intune self-test, and the hourly scheduled-update run. |
+| `deploy/intuneget-status.sh` | Writes `hrm-status.json` into the app's data volume every 5 minutes (installed as `/usr/local/sbin/intuneget-status`, run by `intuneget-status.timer`) for the Home page's Server status card. Its `checks` section holds verdicts the app, watchdog and IT dashboard report all read as-is: Intune reads (install results or app activity failed at the last 2 update checks), the daily Intune self-test, the hourly scheduled-update run, and whether sign-in is limited to the IT admins group (patch 0056), and Version sync after deploy (patch 0057, read from the app's cron-authenticated `/api/cron/version-sync-status`). |
 | `deploy/intuneget-watchdog.py` | Every 5 minutes (installed as `/usr/local/sbin/intuneget-watchdog`, run by `intuneget-watchdog.timer`): checks the app's health and the status file and posts to IT Ops in Teams when a problem is confirmed, daily while it lasts, and when it clears. `intuneget-watchdog status` lists current problems; `intuneget-watchdog test` sends a test post. |
 | `deploy/intuneget-curated-refresh.sh` | Daily at 2:15 AM New York (installed as `/usr/local/sbin/intuneget-curated-refresh`, run by `intuneget-curated-refresh.timer`): downloads upstream's latest signed curated catalog into the app's data volume for patch 0011. |
 | `deploy/intuneget-backup.py` | Nightly at 1:30 AM New York (installed as `/usr/local/sbin/intuneget-backup`, run by `intuneget-backup.timer`): copies the SQLite database while the app runs, checks it, compresses it and uploads it to the Azure Storage container in `BACKUP_CONTAINER_URL` as the VM's managed identity. `intuneget-backup status` shows the last result. |
+| `deploy/tests/` | Python tests for the status script's `checks.versionSync` field and the watchdog's alerts (stub commands, temporary files). `scripts/check-app.sh full` runs them. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
 | `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: check Help (below), build `<tag>-hrm.<n>` and open the "Deploy" PR. |
 | `.github/workflows/tests.yml` | For code PR revisions: apply pinned patches, cache npm downloads, check Help and both app/packager types, then run the full regression suite once. Deploy-only PRs and description edits do not run the suite. Manual dispatch covers bot-created upgrade PRs. |
 | `scripts/check-app.sh` | Shared local/PR validation entry point for a patched tree with dependencies installed. `related` runs affected tests during iteration; `full` checks Help, both compiler configurations and all tests. |
 | `.github/workflows/help-check.yml` | On PRs that change patches, `upstream-ref` or `deploy/` (not `deploy/version`): run the Help check and require "Help and tooltips checked" ticked in the PR description. |
+| `docs/mcp-api.md` | The MCP read API contract (patch 0055): endpoints, parameters, response fields with fake examples, and where the server differs from the MCP Worker's first contract. |
 | `scripts/check-help.mjs` | The Help check: every on-screen label a Help section lists in `uiLabels` (patch 0034) still exists in the app, every time Help gives matches a timer in `deploy/systemd/`, and HRM's tooltips and hints keep the writing rules. Run by the build, the weekly upstream check and PRs. |
 
 ## Registry and sign-in
@@ -117,6 +119,10 @@ HRM IT notes.
   activity failing at 2 update checks in a row, the daily read-only Intune self-test
   (`/api/cron/intune-self-test`), and the hourly scheduled-update run. Graph changes without notice;
   when the self-test fails, compare the failing read with Microsoft's Graph changelog.
+- **Version sync after deploy** (patch 0057): a server alert when App updates wasn't corrected
+  after 2 or more deploys in 24 hours (patch 0049's step in the deploy callback). The app records
+  each result with a fixed code, never error text; the next successful correction, or a 3:30 update
+  check that rebuilt App updates, clears it.
 - When auto-update turns itself off for an app after 3 failed updates in a row, every enabled webhook
   gets one "Auto-update turned off" message (installer-check blocks don't count).
 - **Server alerts** come from two places. The VM watchdog (`intuneget-watchdog`) posts through the
@@ -124,6 +130,68 @@ HRM IT notes.
   checks in a row, daily while it lasts, and when it clears; it is quiet during deploys. It can't
   report the VM itself being down, so a Cloudflare **Tunnel Health Alert** (Notifications, free on
   every plan) emails the IT Ops channel's email address when the tunnel goes degraded or down.
+
+## Access to the app
+
+Patch 0056 lets only HRM's IT admins Entra security group use IntuneGet, inside the app, behind
+Cloudflare Access. Two settings on the VM, never in this repo:
+
+- `HRM_ADMIN_GROUP_IDS`: the group's object ID (several separated by commas, at most 20).
+- `HRM_TENANT_ID`: HRM's Entra tenant ID. It is the one tenant setting: the MCP read API reads it
+  too. A server set up with `MCP_TENANT_ID` keeps working, since that is read when
+  `HRM_TENANT_ID` is unset; move it to `HRM_TENANT_ID` when convenient.
+
+With the group set, every staff API route (through `parseAccessToken`, and the request proxy for a
+clear `403`) checks the token's tenant and asks Graph `POST /me/checkMemberGroups` with the user's
+own sign-in token. User.Read covers it and nested groups count, so no new permission or consent is
+needed. Each decision is kept in memory for 5 minutes per user, so adding or removing someone takes
+up to 5 minutes. A failed check refuses (`503`, Try again) and is not kept. Refused staff see "You
+don't have access to IntuneGet. Ask HRM Support (https://support.hruthmd.org) to add you to the IT
+admins group." Cron, the status report, workflow callbacks, the packager, QA and the MCP read API
+never go through this check.
+
+Unset (or no well-formed group ID), nothing changes and Home's Server status shows "Not limited to
+a group" under Who can sign in. The status file records it as `checks.appAccess`; the watchdog doesn't
+post about it.
+
+Setup, once the image with patch 0056 is deployed:
+
+1. Find the group's object ID and the tenant ID (signed in to the Azure CLI as an admin):
+
+   ```bash
+   az ad group show --group "<IT admins group name>" --query id -o tsv
+   az account show --query tenantId -o tsv
+   ```
+2. On the VM, add both to `.env.local` without echoing them into the shell history or logs:
+   `sudoedit /opt/intuneget/.env.local` and add `HRM_ADMIN_GROUP_IDS=<group object ID>` and
+   `HRM_TENANT_ID=<tenant ID>`. If `MCP_TENANT_ID` is already there with the same value, rename it
+   to `HRM_TENANT_ID` (and in the override below) rather than keeping both.
+3. Pass both through `docker-compose.override.yml`, then recreate `web` with `--env-file .env.local`:
+
+   ```yaml
+         - HRM_ADMIN_GROUP_IDS=${HRM_ADMIN_GROUP_IDS:-}
+         - HRM_TENANT_ID=${HRM_TENANT_ID:-}
+   ```
+
+   ```bash
+   cd /opt/intuneget && sudo docker compose --env-file .env.local up -d web
+   ```
+4. Sign in as a group member (the app loads) and check Home's Server status shows Who can sign
+   in: IT admins group. If possible, try a test account outside the group and expect the No access page.
+
+Keep Entra and Cloudflare Access matching the same group (recommended):
+
+- Entra ID → Enterprise applications → IntuneGet's app → Properties: set **Assignment required**
+  to Yes, and under Users and groups assign only the IT admins group. Others then can't get a
+  sign-in token at all.
+- Cloudflare Access: limit the IntuneGet application's Allow policy to the same group (an Entra
+  group include rule; the Entra login method needs group support turned on), not the whole tenant. Leave the status report
+  Bypass and the MCP Service Auth policy as they are.
+
+To turn the limit off again, remove `HRM_ADMIN_GROUP_IDS` from `.env.local` and recreate `web`.
+
+While it is unset, the IT dashboard report shows a "Limit IntuneGet sign-in to IT-Admins" to-do
+(patch 0058); it goes once the group is set. The report's pill doesn't change.
 
 ## IT dashboard status report
 
@@ -167,12 +235,80 @@ paths, query strings and fragments are never copied. Invalid or credential-beari
 Only strict release tags can appear as version text. Output text/item limits and the UTF-8 report
 size are enforced at a single boundary.
 
+## MCP read API
+
+Patch 0055 serves a read-only API under `/api/hrm/mcp/` for HRM's MCP server (the
+`hrm-intuneget-mcp` Cloudflare Worker). The contract, every endpoint and its fields, is
+`docs/mcp-api.md`; change it in the same PR as the patch, and tell whoever keeps the Worker. It is
+built in `lib/hrm/mcp-api.ts` (answers) and `lib/hrm/mcp-auth.ts` (who may call it). Names, IDs,
+versions, counts, group names and codes only: never add staff emails, user or tenant IDs, device
+names, Intune descriptions, installer URLs or raw error, status or reason text. Install errors go
+out as a normalized code and HRM's own category. GET only; it never writes.
+
+Every request needs both a bearer key (`MCP_API_KEY`, same rules as `STATUS_REPORT_KEY`) and a
+Cloudflare Access JWT for the Worker's service token. The server checks the JWT signature against
+the team's keys, the issuer, the audience (`ACCESS_AUD`), the expiry and that `common_name` is the
+service token's client ID (`MCP_ACCESS_CLIENT_ID`). `HRM_TENANT_ID` (or the older `MCP_TENANT_ID`)
+names the one Intune tenant it reads. If any setting is missing or malformed, the API is off and answers an empty `401`. The
+Worker's `X-HRM-Requested-By` email goes to the server log only.
+
+Setup, once the image with patch 0055 is deployed:
+
+1. Cloudflare Access already has a path-only Access application for `<host>/api/hrm/mcp` and
+   `<host>/api/hrm/mcp/*` with a **Service Auth** policy for the Worker's service token only. Do
+   **not** add a Bypass for these paths: unlike the status report, the API needs Access to put the
+   service token's JWT on every request.
+2. On the VM, add the settings to `.env.local` without printing them. Generate the key in place:
+
+   ```bash
+   sudo sh -c 'umask 077; printf "\nMCP_API_KEY=%s\n" "$(openssl rand -hex 32)" >> /opt/intuneget/.env.local'
+   ```
+
+   Then add `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`), `ACCESS_AUD` (the Access
+   application's audience tag), `MCP_ACCESS_CLIENT_ID` (the service token's client ID, not its
+   secret) and, if it isn't there yet, `HRM_TENANT_ID` (the Intune tenant ID, shared with
+   "Access to the app") with `sudoedit /opt/intuneget/.env.local`.
+   None of these go in this repo.
+3. Pass all five through `docker-compose.override.yml` (skip `HRM_TENANT_ID` if "Access to the app" already added it), then recreate `web` with `--env-file .env.local`:
+
+   ```yaml
+         - MCP_API_KEY=${MCP_API_KEY:-}
+         - ACCESS_TEAM_DOMAIN=${ACCESS_TEAM_DOMAIN:-}
+         - ACCESS_AUD=${ACCESS_AUD:-}
+         - MCP_ACCESS_CLIENT_ID=${MCP_ACCESS_CLIENT_ID:-}
+         - HRM_TENANT_ID=${HRM_TENANT_ID:-}
+   ```
+
+   ```bash
+   cd /opt/intuneget && sudo docker compose --env-file .env.local up -d web
+   ```
+4. Put the same `MCP_API_KEY` in the Worker's secret store. Copy it from the VM over SSH; never
+   paste it into chat, issues or this repo. To rotate it, replace the line in `.env.local`, recreate
+   `web` and update the Worker's secret.
+
+Check from the VM that it stays closed without credentials (expect `401`):
+`curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/hrm/mcp/status`.
+Requests through the tunnel without the service token never reach the server.
+
+Answers are never cached outside the server (`Cache-Control: no-store`); the app list from Intune
+is kept inside the server for one minute. Each request has a 6-second deadline and a 256 KB limit;
+both answer an empty `503`.
+
 ## Old copies
 
-Patch 0042 removes older Intune copies of an app that IntuneGet deployed, at the update check, once the
-newest copy has been out 7 days with healthy installs, supersedes the old copy and already has all its
-groups. It deletes from Intune, so keep its rules strict: never widen it to copies added by hand or to
-copies whose groups differ. To turn it off, add `HRM_OLD_COPY_CLEANUP=off` to `.env.local`, pass it
+Patch 0042 (with 0050's timing) removes older Intune copies of an app that IntuneGet deployed, at the
+3:30 update check. Each old copy is removed once all of these hold:
+
+- the next version replaced it 7 or more days ago (counted per old copy, so apps released more often
+  than weekly still get cleaned),
+- the newest copy has healthy installs (at least 1 successful install, failures 10% or less),
+- the newest copy supersedes it (directly or through other copies of the app),
+- the newest copy already has every one of its groups, with the same intent and filter,
+- no pilot, retirement, going back or deployment of the app is under way.
+
+The copy you would roll back to (the one the newest replaced) is always kept for its first 7 days.
+It deletes from Intune, so keep these rules strict: never widen it to copies added by hand, removal
+copies, or copies whose groups differ. To turn it off, add `HRM_OLD_COPY_CLEANUP=off` to `.env.local`, pass it
 through `docker-compose.override.yml` (`- HRM_OLD_COPY_CLEANUP=${HRM_OLD_COPY_CLEANUP:-}`) and recreate
 `web` with `--env-file .env.local`.
 

@@ -90,6 +90,11 @@ Use these exactly; sentence case, as the screen shows them.
 | Say | Not |
 |---|---|
 | App catalog | App Catalog, catalog page |
+| Deploy, deployed (sending an app or a new version to Intune) | Publish, published, Send to Intune, Upload |
+| Automatic updates (the App updates setup section and the process) | Automatic publishing, Automatic update setup |
+| Installation timing (deploy panel section and App updates card: prompts, postponement and startup install built into the package) | Device installation, Install behaviour, Installation behavior |
+| Availability and deadline (panel opened from Inventory app details and App updates cards: Intune assignment dates and restart grace for a copy already in Intune) | Installation timing (for that panel), timing |
+| Update history (App updates tab) | Publishing history |
 | App updates | Updates page, App Updates |
 | Deployments | Uploads, jobs |
 | Discovered apps | Unmanaged apps |
@@ -98,16 +103,19 @@ Use these exactly; sentence case, as the screen shows them.
 | Custom app | non-WinGet app, manual app |
 | WinGet app, curated app | winget, Winget |
 | Deploy new version (custom apps), Update (WinGet and curated apps) | upgrade, redeploy |
-| Supersede previous version on update | supersedence (except when quoting Intune) |
-| Carry over assignments | copy groups |
+| Supersede previous version on update (Settings, Supabase only) | supersedence (except when quoting Intune) |
+| Carry over assignments (Settings, Supabase only) | copy groups |
+| Update behavior (what Update and automatic updates do with the previous copy and its groups, set on App updates) | update settings, supersede settings |
 | pilot group | test group, ring, canary |
 | Pilot rollouts | staged rollouts, rings |
 | wider rollout | full rollout, promotion, broad deployment |
-| Publishing schedule, blackout | maintenance window, change freeze, quiet hours |
+| Update schedule, blackout | Publishing schedule, maintenance window, change freeze, quiet hours |
 | groups (people and devices an app is assigned to) | targets, audiences |
 | device group, user group | device-based group |
 | Required, Available | Mandatory, Optional |
 | Teams alert, the IT Ops team, IT chat channel | Slack, notification email |
+| Previous copy (Inventory tag and note for a copy IntuneGet replaced) | old version, superseded copy, stale copy |
+| Check installs now (Install results button; "Check now" is the Group changes button) | Refresh results, Check now (for install results) |
 | Server status | health card |
 | the server | the VM, the container (Help is for staff, not the runbook) |
 | HRM Support (https://support.hruthmd.org) | contact IT, the helpdesk |
