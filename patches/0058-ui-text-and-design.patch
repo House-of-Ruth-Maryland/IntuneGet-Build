@@ -2360,7 +2360,7 @@ index 95b5a5b49..45312a94c 100644
      const report = build({
        deploys: [
 diff --git a/lib/hrm/__tests__/version-sync-health.test.ts b/lib/hrm/__tests__/version-sync-health.test.ts
-index 89bd65af6..b3280347f 100644
+index 93ae17bce..800fcd628 100644
 --- a/lib/hrm/__tests__/version-sync-health.test.ts
 +++ b/lib/hrm/__tests__/version-sync-health.test.ts
 @@ -26,7 +26,7 @@ describe('versionSyncVerdict', () => {
@@ -3426,7 +3426,7 @@ index 719afbc29..6ed6d256a 100644
    if (jobs === null || deploys === null) {
      flag('Database error', 'down');
 diff --git a/lib/hrm/version-sync-health.ts b/lib/hrm/version-sync-health.ts
-index 0e5d7abe8..4e1faa31a 100644
+index a4210ec98..0b688e8ca 100644
 --- a/lib/hrm/version-sync-health.ts
 +++ b/lib/hrm/version-sync-health.ts
 @@ -64,6 +64,7 @@ export function versionSyncVerdict(events: VersionSyncEvent[], now = new Date())

@@ -34,9 +34,10 @@ unit_json() {
 container=$(docker ps -q --filter "label=com.docker.compose.service=$SERVICE" | head -n 1 || true)
 image=$([ -n "$container" ] && docker inspect -f '{{.Config.Image}}' "$container" 2>/dev/null || true)
 started=$([ -n "$container" ] && docker inspect -f '{{.State.StartedAt}}' "$container" 2>/dev/null || true)
-# Patch 0056: whether the running app limits sign-in to the IT admins group. Only whether the
-# setting is present is recorded, never its value.
-access_limited=$([ -n "$container" ] && docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null | grep -c '^HRM_ADMIN_GROUP_IDS=.' || true)
+# Patch 0056: whether the running app limits sign-in to the IT admins group. Like the app, it
+# counts only when at least one entry is a well-formed group ID. Never records the value.
+guid='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+access_limited=$([ -n "$container" ] && docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null | grep -cE "^HRM_ADMIN_GROUP_IDS=(.*,)?[[:space:]]*${guid}[[:space:]]*(,|\$)" || true)
 # Patch 0057: the app's "Version sync after deploy" verdict, read with the cron secret (sent from the
 # root-only header file, never on the command line). Empty when the app or the header isn't there.
 version_sync=$([ -r "$CRON_HEADER" ] && curl -fsS --max-time 10 -H @"$CRON_HEADER" "$APP_URL/api/cron/version-sync-status" 2>/dev/null || true)
@@ -164,13 +165,16 @@ def version_sync():
     except (ValueError, AttributeError):
         value = None
     if not isinstance(value, dict) or not isinstance(value.get('ok'), bool):
-        # Kept for up to 30 minutes (a restart or deploy); after that the row goes away.
+        # A working verdict is kept for up to 30 minutes (a restart or deploy). A Failing one is kept
+        # for up to 24 hours, the app's own window, so an app that stops answering never reads as
+        # cleared to the watchdog. After that the row goes away.
         previous = previous_check('versionSync')
         try:
             age = hours_since(previous.get('readAt')) if previous and isinstance(previous.get('readAt'), str) else None
         except ValueError:
             age = None
-        return previous if age is not None and 0 <= age <= 0.5 else None
+        keep = 24 if previous and previous.get('ok') is False else 0.5
+        return previous if age is not None and 0 <= age <= keep else None
     at = value.get('at') if isinstance(value.get('at'), str) and re.fullmatch(r'[0-9T:.\-]+Z', value.get('at')) else None
     detail = value.get('detail') if isinstance(value.get('detail'), str) and not value['ok'] else None
     return {'ok': value['ok'], 'at': at, 'detail': detail[:200] if detail else None,

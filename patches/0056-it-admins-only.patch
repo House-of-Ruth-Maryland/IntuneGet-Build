@@ -67,10 +67,10 @@ index e700daf83..59d723798 100644
  
 diff --git a/app/api/hrm/access/route.test.ts b/app/api/hrm/access/route.test.ts
 new file mode 100644
-index 000000000..fc476b44e
+index 000000000..27263863a
 --- /dev/null
 +++ b/app/api/hrm/access/route.test.ts
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,55 @@
 +// HRM patch 0056
 +import { NextRequest } from 'next/server';
 +import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,7 +78,7 @@ index 000000000..fc476b44e
 +vi.mock('@/lib/auth-utils', () => ({ verifyAccessToken: mocks.verify }));
 +import { GET } from './route';
 +import { ACCESS_DENIED_CODE, ACCESS_UNAVAILABLE_CODE } from '@/lib/hrm/admin-access';
-+import { accessStateFromStatus } from '@/hooks/useAppAccess';
++import { accessStateFromStatus, stateWhileChecking } from '@/hooks/useAppAccess';
 +
 +const request = () => new NextRequest('http://localhost/api/hrm/access', { headers: { Authorization: 'Bearer x.y.z' } });
 +const user = { userId: 'user-01', tenantId: 'tenant-01', userEmail: 'staff.one@example.test', userName: null };
@@ -115,6 +115,15 @@ index 000000000..fc476b44e
 +    expect(accessStateFromStatus(403)).toBe('denied');
 +    expect(accessStateFromStatus(503)).toBe('unavailable');
 +    expect(accessStateFromStatus(401)).toBe('allowed');
++  });
++});
++
++describe('stateWhileChecking', () => {
++  it('keeps an allowed dashboard on screen while access is checked again', () => {
++    expect(stateWhileChecking('allowed')).toBe('allowed');
++    expect(stateWhileChecking('denied')).toBe('checking');
++    expect(stateWhileChecking('unavailable')).toBe('checking');
++    expect(stateWhileChecking('checking')).toBe('checking');
 +  });
 +});
 diff --git a/app/api/hrm/access/route.ts b/app/api/hrm/access/route.ts
@@ -284,10 +293,10 @@ index b7371dabf..bb40a5b59 100644
      </section>
 diff --git a/hooks/useAppAccess.ts b/hooks/useAppAccess.ts
 new file mode 100644
-index 000000000..f673d708a
+index 000000000..9990ffdc7
 --- /dev/null
 +++ b/hooks/useAppAccess.ts
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,48 @@
 +'use client';
 +
 +// HRM patch 0056: asks the server whether the signed-in user may use IntuneGet, before the
@@ -306,6 +315,11 @@ index 000000000..f673d708a
 +  return 'allowed';
 +}
 +
++/** While checking again (a new token or account), a dashboard already allowed stays on screen. */
++export function stateWhileChecking(previous: AppAccessState): AppAccessState {
++  return previous === 'allowed' ? 'allowed' : 'checking';
++}
++
 +export function useAppAccess(enabled: boolean): { state: AppAccessState; retry: () => void } {
 +  const { getAccessToken } = useMicrosoftAuth();
 +  const [state, setState] = useState<AppAccessState>('checking');
@@ -314,7 +328,7 @@ index 000000000..f673d708a
 +  useEffect(() => {
 +    if (!enabled) return;
 +    let cancelled = false;
-+    setState('checking');
++    setState(stateWhileChecking);
 +    (async () => {
 +      try {
 +        const token = await getAccessToken();

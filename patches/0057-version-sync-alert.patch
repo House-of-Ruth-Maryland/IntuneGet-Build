@@ -478,7 +478,7 @@ index 1108b0e16..0c2f46c2f 100644
      expect(interpretServerStatus(null, NOW)).toEqual({ reported: false, reason: 'missing' });
      expect(interpretServerStatus('{not json', NOW)).toEqual({ reported: false, reason: 'unreadable' });
 diff --git a/lib/hrm/__tests__/mcp-api.test.ts b/lib/hrm/__tests__/mcp-api.test.ts
-index 25d683c29..09d5989ad 100644
+index aa3809716..0b28bb65a 100644
 --- a/lib/hrm/__tests__/mcp-api.test.ts
 +++ b/lib/hrm/__tests__/mcp-api.test.ts
 @@ -83,6 +83,8 @@ describe('server status', () => {
@@ -512,10 +512,10 @@ index 0944740d4..95b5a5b49 100644
      const leaves = (value: unknown, prefix: string[] = []): string[][] => {
 diff --git a/lib/hrm/__tests__/version-sync-health.test.ts b/lib/hrm/__tests__/version-sync-health.test.ts
 new file mode 100644
-index 000000000..89bd65af6
+index 000000000..93ae17bce
 --- /dev/null
 +++ b/lib/hrm/__tests__/version-sync-health.test.ts
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,73 @@
 +// HRM patch 0057: the "Version sync after deploy" verdict.
 +import { describe, expect, it } from 'vitest';
 +import {
@@ -581,6 +581,8 @@ index 000000000..89bd65af6
 +    expect(versionSyncErrorCode(Object.assign(new Error('x'), { code: 'SQLITE_CONSTRAINT' }))).toBe('database_error');
 +    expect(versionSyncErrorCode({ code: 'PGRST301', message: 'x' })).toBe('database_error');
 +    expect(versionSyncErrorCode({ code: '23505', message: 'x' })).toBe('database_error');
++    expect(versionSyncErrorCode({ code: '40P01', message: 'x' })).toBe('database_error');
++    for (const code of ['EPERM', 'EBUSY', 'EPIPE', 'EACCES']) expect(versionSyncErrorCode(Object.assign(new Error('x'), { code }))).toBe('unknown');
 +    expect(versionSyncErrorCode(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toBe('timeout');
 +    expect(versionSyncErrorCode(new Error('fixture detail'))).toBe('unknown');
 +    expect(versionSyncErrorCode(null)).toBe('unknown');
@@ -685,7 +687,7 @@ index a7ee22922..c9fc01031 100644
  
  export interface ServerStatusFile {
 diff --git a/lib/hrm/mcp-api.ts b/lib/hrm/mcp-api.ts
-index 8d58508c1..4045a3546 100644
+index 61de47c62..92a458d52 100644
 --- a/lib/hrm/mcp-api.ts
 +++ b/lib/hrm/mcp-api.ts
 @@ -90,7 +90,7 @@ function boolParam(query: URLSearchParams, name: string): boolean {
@@ -712,7 +714,7 @@ index d79e8f515..719afbc29 100644
  
 diff --git a/lib/hrm/version-sync-health.ts b/lib/hrm/version-sync-health.ts
 new file mode 100644
-index 000000000..0e5d7abe8
+index 000000000..a4210ec98
 --- /dev/null
 +++ b/lib/hrm/version-sync-health.ts
 @@ -0,0 +1,69 @@
@@ -750,7 +752,7 @@ index 000000000..0e5d7abe8
 +  const code = typeof value?.code === 'string' ? value.code : '';
 +  const name = typeof value?.name === 'string' ? value.name : '';
 +  if (code === 'SQLITE_BUSY' || code.startsWith('SQLITE_BUSY_') || code === 'SQLITE_LOCKED' || code.startsWith('SQLITE_LOCKED_')) return 'database_busy';
-+  if (code.startsWith('SQLITE_') || code.startsWith('PGRST') || /^[0-9A-Z]{5}$/.test(code)) return 'database_error';
++  if (code.startsWith('SQLITE_') || code.startsWith('PGRST') || /^(?=.*[0-9])[0-9A-Z]{5}$/.test(code)) return 'database_error'; // SQLSTATE codes have a digit; EPERM or EBUSY don't.
 +  if (name === 'AbortError' || name === 'TimeoutError' || code === 'ETIMEDOUT') return 'timeout';
 +  return 'unknown';
 +}

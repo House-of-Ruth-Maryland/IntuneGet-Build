@@ -200,10 +200,10 @@ index 000000000..f29ccd30c
 +}
 diff --git a/lib/hrm/__tests__/mcp-api.test.ts b/lib/hrm/__tests__/mcp-api.test.ts
 new file mode 100644
-index 000000000..25d683c29
+index 000000000..aa3809716
 --- /dev/null
 +++ b/lib/hrm/__tests__/mcp-api.test.ts
-@@ -0,0 +1,296 @@
+@@ -0,0 +1,311 @@
 +import { beforeEach, describe, expect, it, vi } from 'vitest';
 +const mocks = vi.hoisted(() => ({
 +  sqlite: false, jobs: vi.fn(), history: vi.fn(), updates: vi.fn(), policies: vi.fn(), status: vi.fn(),
@@ -423,6 +423,21 @@ index 000000000..25d683c29
 +    expect((await listApps(context, q('limit=1&cursor=1'))).apps.map((a) => a.intuneAppId)).toEqual([APP2]);
 +    expect(fetchImpl).toHaveBeenCalledTimes(2);
 +    for (const bad of ['limit=500', 'cursor=-1', `search=${'x'.repeat(101)}`]) await expect(listApps(context, q(bad))).rejects.toBeInstanceOf(McpError);
++  });
++
++  it('keeps a shared inventory read going when the first caller goes away', async () => {
++    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
++      await new Promise((resolve) => setTimeout(resolve, 5));
++      if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
++      return json({ value: [graphApp(APP, 'Alpha App')] });
++    });
++    const first = new AbortController();
++    const firstCall = listApps(ctx({ fetchImpl: fetchImpl as typeof fetch, graphToken: async () => 'fake-token', signal: first.signal }), q());
++    const secondCall = listApps(ctx({ fetchImpl: fetchImpl as typeof fetch, graphToken: async () => 'fake-token' }), q());
++    first.abort();
++    expect((await secondCall).total).toBe(1);
++    expect((await firstCall).total).toBe(1);
++    expect(fetchImpl).toHaveBeenCalledTimes(1);
 +  });
 +
 +  it('answers 503 when Intune cannot be read and does not keep the failure', async () => {
@@ -720,10 +735,10 @@ index 7da051964..7711050bf 100644
      id: 'your-settings', category: 'settings', title: 'Find a page or change your theme',
 diff --git a/lib/hrm/mcp-api.ts b/lib/hrm/mcp-api.ts
 new file mode 100644
-index 000000000..8d58508c1
+index 000000000..61de47c62
 --- /dev/null
 +++ b/lib/hrm/mcp-api.ts
-@@ -0,0 +1,470 @@
+@@ -0,0 +1,474 @@
 +/**
 + * HRM patch 0055: the read-only API behind HRM's MCP server (contract: IntuneGet-Build docs/mcp-api.md).
 + *
@@ -932,6 +947,9 @@ index 000000000..8d58508c1
 +
 +const MAX_PAGES = 20;
 +const INVENTORY_CACHE_MS = 60_000;
++// The shared read has its own time limit: it never uses one request's signal, so one caller going
++// away can't fail the others waiting on the same read. Each request still keeps its own deadline.
++const INVENTORY_READ_MS = 6_000;
 +let inventoryCache: { tenantId: string; at: number; apps: Promise<ReturnType<typeof appSummary>[]> } | undefined;
 +
 +/** Every Win32 app in the tenant (up to 2,000), cached for a minute. */
@@ -942,10 +960,11 @@ index 000000000..8d58508c1
 +  const apps = (async () => {
 +    const graphToken = await token(ctx);
 +    const fetchImpl = ctx.fetchImpl ?? fetch;
++    const signal = AbortSignal.timeout(INVENTORY_READ_MS);
 +    const raw: IntuneWin32App[] = [];
 +    let cursor: string | null = null;
 +    for (let page = 0; page < MAX_PAGES; page++) {
-+      const response = await fetchImpl(inventoryPageUrl(cursor), { headers: { Authorization: `Bearer ${graphToken}` }, cache: 'no-store', signal: ctx.signal });
++      const response = await fetchImpl(inventoryPageUrl(cursor), { headers: { Authorization: `Bearer ${graphToken}` }, cache: 'no-store', signal });
 +      if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new McpError(503); }
 +      const data = await response.json() as { value?: IntuneWin32App[]; '@odata.nextLink'?: string };
 +      raw.push(...(data.value ?? []));

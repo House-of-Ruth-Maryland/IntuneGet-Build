@@ -23,7 +23,8 @@
   away. If that fails after 2 or more deploys in 24 hours, Home's Server status shows Version
   sync after deploy as Failing, and IT Ops gets a Teams alert (daily while it lasts, and when it
   clears). The next deploy that corrects App updates clears it, and the 3:30 AM or 3:30 PM check
-  still fixes the rows. The IT dashboard report and the MCP server's status show it too. Only a
+  still fixes the rows. If the app stops answering, the status file keeps a Failing verdict for up
+  to 24 hours, so the alert doesn't clear by itself. The IT dashboard report and the MCP server's status show it too. Only a
   time, the app's WinGet ID and a short code are kept, never error text. David must reinstall
   `intuneget-status` and `intuneget-watchdog` on the VM (CLAUDE.md, "VM setup"). Help matches
   (patch 0057).
@@ -33,7 +34,7 @@
   are asked to contact HRM Support. Every staff API call refuses them too. Adding or removing
   someone can take up to 5 minutes to apply. If the server can't check, the page says so and has
   a Try again button. No new Microsoft permission is needed. Until the group is set, nothing
-  changes and Home's Server status shows "Access isn't limited to a group yet" under Who can sign
+  changes and Home's Server status shows "Not limited to a group" under Who can sign
   in. Cron jobs, the IT dashboard report, workflow callbacks and the MCP read API are not affected.
   The tenant setting is now `HRM_TENANT_ID` for both sign-in and the MCP read API;
   `MCP_TENANT_ID` still works when it is unset. Help matches (patch 0056).

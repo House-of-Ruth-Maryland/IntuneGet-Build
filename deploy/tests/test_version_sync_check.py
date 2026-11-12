@@ -19,8 +19,10 @@ STATUS_SCRIPT = DEPLOY / 'intuneget-status.sh'
 WATCHDOG = DEPLOY / 'intuneget-watchdog.py'
 
 STUBS = {
-    # No running container, timers never ran, nothing in the journal.
-    'docker': '#!/bin/sh\nexit 0\n',
+    # No running container unless FAKE_DOCKER_ENV names a file with the container's settings.
+    # Timers never ran, nothing in the journal.
+    'docker': ('#!/bin/sh\n[ -n "$FAKE_DOCKER_ENV" ] || exit 0\n'
+               'case "$1 $3" in "ps "*) echo fixture-container ;; *Env*) cat "$FAKE_DOCKER_ENV" ;; esac\nexit 0\n'),
     'systemctl': '#!/bin/sh\ncase "$1" in is-enabled) echo disabled ;; is-active) echo inactive ;; esac\nexit 0\n',
     'journalctl': '#!/bin/sh\nexit 0\n',
     'cloudflared': '#!/bin/sh\nexit 1\n',
@@ -99,16 +101,43 @@ class StatusFileTest(unittest.TestCase):
         self.body.write_text(json.dumps({'versionSync': {'ok': False, 'at': None, 'detail': 'x'}}))
         self.assertIsNone(self.write_status()['versionSync'])
 
-    def test_keeps_the_last_verdict_for_30_minutes_when_the_app_does_not_answer(self):
-        self.body.write_text(json.dumps({'versionSync': {'ok': False, 'at': None, 'detail': 'Failing.'}}))
+    def test_keeps_a_working_verdict_for_30_minutes_when_the_app_does_not_answer(self):
+        self.body.write_text(json.dumps({'versionSync': {'ok': True, 'at': None, 'detail': None}}))
         self.write_status()
         self.body.unlink()
-        self.assertIs(self.write_status()['versionSync']['ok'], False)
+        self.assertIs(self.write_status()['versionSync']['ok'], True)
         # Older than 30 minutes: the row goes away instead of showing an old verdict.
         status = json.loads(self.out.read_text())
         status['checks']['versionSync']['readAt'] = stamp(datetime.now(timezone.utc) - timedelta(minutes=31))
         self.out.write_text(json.dumps(status))
         self.assertIsNone(self.write_status()['versionSync'])
+
+    def test_keeps_a_failing_verdict_for_24_hours_when_the_app_does_not_answer(self):
+        self.body.write_text(json.dumps({'versionSync': {'ok': False, 'at': None, 'detail': 'Failing.'}}))
+        self.write_status()
+        self.body.unlink()
+        status = json.loads(self.out.read_text())
+        status['checks']['versionSync']['readAt'] = stamp(datetime.now(timezone.utc) - timedelta(hours=23))
+        self.out.write_text(json.dumps(status))
+        self.assertIs(self.write_status()['versionSync']['ok'], False)
+        status['checks']['versionSync']['readAt'] = stamp(datetime.now(timezone.utc) - timedelta(hours=25))
+        self.out.write_text(json.dumps(status))
+        self.assertIsNone(self.write_status()['versionSync'])
+
+    def test_app_access_counts_only_well_formed_group_ids(self):
+        settings = Path(self.tmp.name) / 'container.env'
+        self.env['FAKE_DOCKER_ENV'] = str(settings)
+        cases = {
+            'HRM_ADMIN_GROUP_IDS=00000000-0000-4000-8000-000000000001\n': True,
+            'HRM_ADMIN_GROUP_IDS=not-a-group, 00000000-0000-4000-8000-000000000001\n': True,
+            'HRM_ADMIN_GROUP_IDS=IT admins\n': False,
+            'HRM_ADMIN_GROUP_IDS=00000000-0000-4000-8000-00000000000\n': False,
+            'HRM_ADMIN_GROUP_IDS=\n': False,
+            'OTHER=1\n': False,
+        }
+        for value, limited in cases.items():
+            settings.write_text(value)
+            self.assertIs(self.write_status()['appAccess']['ok'], limited, value)
 
 
 class WatchdogTest(unittest.TestCase):
