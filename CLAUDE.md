@@ -121,7 +121,8 @@ HRM IT notes.
   when the self-test fails, compare the failing read with Microsoft's Graph changelog.
 - **Version sync after deploy** (patch 0057): a server alert when App updates wasn't corrected
   after 2 or more deploys in 24 hours (patch 0049's step in the deploy callback). The app records
-  each result with a fixed code, never error text; the next successful correction clears it.
+  each result with a fixed code, never error text; the next successful correction, or a 3:30 update
+  check that rebuilt App updates, clears it.
 - When auto-update turns itself off for an app after 3 failed updates in a row, every enabled webhook
   gets one "Auto-update turned off" message (installer-check blocks don't count).
 - **Server alerts** come from two places. The VM watchdog (`intuneget-watchdog`) posts through the
@@ -295,10 +296,19 @@ both answer an empty `503`.
 
 ## Old copies
 
-Patch 0042 removes older Intune copies of an app that IntuneGet deployed, at the update check, once the
-newest copy has been out 7 days with healthy installs, supersedes the old copy and already has all its
-groups. It deletes from Intune, so keep its rules strict: never widen it to copies added by hand or to
-copies whose groups differ. To turn it off, add `HRM_OLD_COPY_CLEANUP=off` to `.env.local`, pass it
+Patch 0042 (with 0050's timing) removes older Intune copies of an app that IntuneGet deployed, at the
+3:30 update check. Each old copy is removed once all of these hold:
+
+- the next version replaced it 7 or more days ago (counted per old copy, so apps released more often
+  than weekly still get cleaned),
+- the newest copy has healthy installs (at least 1 successful install, failures 10% or less),
+- the newest copy supersedes it (directly or through other copies of the app),
+- the newest copy already has every one of its groups, with the same intent and filter,
+- no pilot, retirement, going back or deployment of the app is under way.
+
+The copy you would roll back to (the one the newest replaced) is always kept for its first 7 days.
+It deletes from Intune, so keep these rules strict: never widen it to copies added by hand, removal
+copies, or copies whose groups differ. To turn it off, add `HRM_OLD_COPY_CLEANUP=off` to `.env.local`, pass it
 through `docker-compose.override.yml` (`- HRM_OLD_COPY_CLEANUP=${HRM_OLD_COPY_CLEANUP:-}`) and recreate
 `web` with `--env-file .env.local`.
 

@@ -22,9 +22,11 @@
 - Version sync after deploy. When a deploy finishes, the server corrects App updates straight
   away. If that fails after 2 or more deploys in 24 hours, Home's Server status shows Version
   sync after deploy as Failing, and IT Ops gets a Teams alert (daily while it lasts, and when it
-  clears). The next deploy that corrects App updates clears it, and the 3:30 AM or 3:30 PM check
-  still fixes the rows. If the app stops answering, the status file keeps a Failing verdict for up
-  to 24 hours, so the alert doesn't clear by itself. The IT dashboard report and the MCP server's status show it too. Only a
+  clears). The next deploy that corrects App updates clears it, and so does the 3:30 AM or 3:30 PM
+  update check once it has rebuilt App updates (not when the catalog couldn't be read). New missed
+  deploys raise it again by the same rule. If the app stops answering, the status file keeps a
+  Failing verdict for up to 24 hours, or until a later update check succeeds, so the alert never
+  clears by itself. The IT dashboard report and the MCP server's status show it too. Only a
   time, the app's WinGet ID and a short code are kept, never error text. David must reinstall
   `intuneget-status` and `intuneget-watchdog` on the VM (CLAUDE.md, "VM setup"). Help matches
   (patch 0057).

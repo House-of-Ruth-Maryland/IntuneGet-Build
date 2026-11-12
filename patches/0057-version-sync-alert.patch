@@ -1,3 +1,51 @@
+diff --git a/app/api/cron/check-updates/route.sqlite.test.ts b/app/api/cron/check-updates/route.sqlite.test.ts
+index dc8230402..17592ba5b 100644
+--- a/app/api/cron/check-updates/route.sqlite.test.ts
++++ b/app/api/cron/check-updates/route.sqlite.test.ts
+@@ -53,6 +53,20 @@ describe('check-updates cron in SQLite mode', () => {
+     expect(await response.json()).toMatchObject({ mode: 'sqlite', available: 0, triggered: 0 });
+   });
+ 
++  it('clears Version sync after deploy once it has rebuilt App updates (HRM patch 0057)', async () => {
++    process.env.CRON_SECRET = 'secret';
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    const { versionSyncVerdict } = await import('@/lib/hrm/version-sync-health');
++    const before = new Date(Date.now() - 60_000).toISOString();
++    for (const appId of ['Vendor.One', 'Vendor.Two']) {
++      await sqliteDb.versionSyncEvents.record({ at: before, appId, result: 'failed', code: 'database_busy' });
++    }
++    expect(versionSyncVerdict(await sqliteDb.versionSyncEvents.listRecent()).ok).toBe(false);
++    const response = await route.GET(request('secret'));
++    expect(await response.json()).toMatchObject({ versionSyncCleared: true });
++    expect(versionSyncVerdict(await sqliteDb.versionSyncEvents.listRecent()).ok).toBe(true);
++  });
++
+   it('rejects a wrong secret', async () => {
+     process.env.CRON_SECRET = 'secret';
+     expect((await route.GET(request('other'))).status).toBe(401);
+diff --git a/app/api/cron/check-updates/route.ts b/app/api/cron/check-updates/route.ts
+index dc3a32b5a..4b30b3d30 100644
+--- a/app/api/cron/check-updates/route.ts
++++ b/app/api/cron/check-updates/route.ts
+@@ -14,6 +14,7 @@ import { runSqliteAppInsightsCheck } from '@/lib/hrm/app-insights-check';
+ import { runSqliteInstallCheck } from '@/lib/hrm/install-status-check';
+ import { runSqliteRollbackReadinessCheck } from '@/lib/hrm/rollback-readiness';
+ import { runSqliteOldCopyCleanup } from '@/lib/hrm/old-copy-cleanup';
++import { recordUpdateCheckCorrection } from '@/lib/hrm/version-sync-health';
+ import { alertPausedAutoUpdates } from '@/lib/hrm/paused-auto-update';
+ import { parseVersion, compareVersions } from '@/lib/version-compare';
+ import {
+@@ -295,7 +296,9 @@ export async function GET(request: Request) {
+       const rollbackReadiness = await runSqliteRollbackReadinessCheck().catch(() => ({ checked: 0, missing: 0, unreachable: 0, error: true }));
+       // HRM patch 0042: remove old copies once the newest has settled (after the fresh install counts above).
+       const oldCopies = await runSqliteOldCopyCleanup().catch(() => ({ checked: 0, removed: 0, kept: 0, errors: 1 }));
+-      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates, rollbackReadiness, oldCopies });
++      // HRM patch 0057: App updates is rebuilt now, so earlier version sync failures no longer matter.
++      const versionSyncCleared = await recordUpdateCheckCorrection(getDatabase().versionSyncEvents, summary);
++      return NextResponse.json({ success: true, mode: 'sqlite', ...summary, installStatus, appInsights, pausedAutoUpdates, rollbackReadiness, oldCopies, versionSyncCleared });
+     } catch (error) {
+       return NextResponse.json(
+         { error: error instanceof Error ? error.message : 'Update check failed' },
 diff --git a/app/api/cron/version-sync-status/route.test.ts b/app/api/cron/version-sync-status/route.test.ts
 new file mode 100644
 index 000000000..72c18c431
@@ -236,6 +284,45 @@ index bb40a5b59..7150f8edf 100644
              const check = status.checks?.[key];
              if (!check) return null;
              return (
+diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
+index 60bf4c463..34d311d46 100644
+--- a/lib/auto-update/__tests__/sqlite.test.ts
++++ b/lib/auto-update/__tests__/sqlite.test.ts
+@@ -477,9 +477,10 @@ describe('updates that replace an Intune app', () => {
+     await db.updateCheckResults.markNotified?.([row.id]);
+ 
+     getAppsByWingetIdsMock.mockRejectedValue(new Error('catalog down'));
+-    await runSqliteUpdateCheck(db);
++    // HRM patch 0057: says so, so the check doesn't clear Version sync after deploy.
++    expect(await runSqliteUpdateCheck(db)).toMatchObject({ catalogUnavailable: true });
+     getAppsByWingetIdsMock.mockResolvedValue([]);
+-    await runSqliteUpdateCheck(db);
++    expect(await runSqliteUpdateCheck(db)).toMatchObject({ catalogUnavailable: true });
+     expect(await db.updateCheckResults.list('u1', { includeDismissed: true })).toMatchObject([{ id: row.id }]);
+   });
+ });
+diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
+index a2ec93980..e56fa8ab4 100644
+--- a/lib/auto-update/sqlite.ts
++++ b/lib/auto-update/sqlite.ts
+@@ -78,6 +78,8 @@ export interface SqliteUpdateCheckSummary {
+   errors: number;
+   /** HRM patch 0030: due, but outside the update schedule or in a blackout. */
+   held: number;
++  /** HRM patch 0057: the catalog couldn't be read, so existing App updates rows were kept, not rebuilt. */
++  catalogUnavailable?: true;
+ }
+ 
+ function isMajorBump(current: string, latest: string): boolean {
+@@ -523,7 +525,7 @@ export async function runSqliteUpdateCheck(
+   }
+ 
+   const started = await triggerDueAutoUpdates(db, policies, latestVersionByWinget, isGoneFromIntune, { userId: options?.userId, now });
+-  return { available, ...started };
++  return { available, ...started, ...(catalogUnavailable ? { catalogUnavailable: true as const } : {}) };
+ }
+ 
+ /**
 diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
 index 3d7f6dff7..5ea396f4b 100644
 --- a/lib/db/__tests__/job-create.test.ts
@@ -512,14 +599,16 @@ index 0944740d4..95b5a5b49 100644
      const leaves = (value: unknown, prefix: string[] = []): string[][] => {
 diff --git a/lib/hrm/__tests__/version-sync-health.test.ts b/lib/hrm/__tests__/version-sync-health.test.ts
 new file mode 100644
-index 000000000..93ae17bce
+index 000000000..e19e14e06
 --- /dev/null
 +++ b/lib/hrm/__tests__/version-sync-health.test.ts
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,97 @@
 +// HRM patch 0057: the "Version sync after deploy" verdict.
-+import { describe, expect, it } from 'vitest';
++import { describe, expect, it, vi } from 'vitest';
 +import {
 +  recentVersionSyncEvents,
++  recordUpdateCheckCorrection,
++  UPDATE_CHECK_ENTRY,
 +  versionSyncErrorCode,
 +  versionSyncVerdict,
 +  VERSION_SYNC_KEEP,
@@ -587,6 +676,28 @@ index 000000000..93ae17bce
 +    expect(versionSyncErrorCode(new Error('fixture detail'))).toBe('unknown');
 +    expect(versionSyncErrorCode(null)).toBe('unknown');
 +    expect(versionSyncErrorCode('text')).toBe('unknown');
++  });
++});
++
++describe('recordUpdateCheckCorrection', () => {
++  it('records a success after a full update check, which clears the check', async () => {
++    const events: VersionSyncEvent[] = [failed(2), failed(3)];
++    const store = { record: vi.fn(async (event: VersionSyncEvent) => { events.unshift(event); }) };
++    expect(versionSyncVerdict(events, now).ok).toBe(false);
++    await expect(recordUpdateCheckCorrection(store, {}, new Date(hoursAgo(1)))).resolves.toBe(true);
++    expect(store.record).toHaveBeenCalledWith({ at: hoursAgo(1), appId: UPDATE_CHECK_ENTRY, result: 'ok', code: null });
++    expect(versionSyncVerdict(events, now)).toEqual({ ok: true, at: hoursAgo(1), detail: null });
++    // New failures after the check raise it again by the same rule.
++    events.unshift(failed(0.5), failed(0.25));
++    expect(versionSyncVerdict(events, now).ok).toBe(false);
++  });
++
++  it('records nothing when the catalog was unreadable, and never throws', async () => {
++    const store = { record: vi.fn(async () => {}) };
++    await expect(recordUpdateCheckCorrection(store, { catalogUnavailable: true }, now)).resolves.toBe(false);
++    expect(store.record).not.toHaveBeenCalled();
++    const failing = { record: vi.fn(async () => { throw new Error('fixture'); }) };
++    await expect(recordUpdateCheckCorrection(failing, {}, now)).resolves.toBe(false);
 +  });
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
@@ -714,10 +825,10 @@ index d79e8f515..719afbc29 100644
  
 diff --git a/lib/hrm/version-sync-health.ts b/lib/hrm/version-sync-health.ts
 new file mode 100644
-index 000000000..a4210ec98
+index 000000000..a98277198
 --- /dev/null
 +++ b/lib/hrm/version-sync-health.ts
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,90 @@
 +/**
 + * HRM patch 0057: make repeated failures of the version sync after a deploy (patch 0049) visible.
 + *
@@ -725,7 +836,9 @@ index 000000000..a4210ec98
 + * 3:30 update check repairs it later, so one failure is harmless. Each result is recorded (time,
 + * WinGet ID, result and a short code, never error text), and 2 or more failures in 24 hours with no
 + * success since then fail the "Version sync after deploy" check on Home, the watchdog and the IT
-+ * dashboard report. The VM status script copies the verdict into hrm-status.json.
++ * dashboard report. A full update check that rebuilds App updates records a success too, so it
++ * clears the check; new failures raise it again by the same rule. The VM status script copies the
++ * verdict into hrm-status.json.
 + */
 +import type { VersionSyncCode, VersionSyncEvent } from '@/lib/db/types';
 +
@@ -745,6 +858,25 @@ index 000000000..a4210ec98
 +  timeout: 'timed out',
 +  unknown: 'unknown error',
 +};
++
++/** The entry a full update check records once it has rebuilt App updates (not a WinGet ID). */
++export const UPDATE_CHECK_ENTRY = 'update-check';
++
++/** Patch 0057: the 3:30 check rebuilt App updates for every app, which also clears the check. */
++export async function recordUpdateCheckCorrection(
++  events: { record(event: VersionSyncEvent): Promise<void> },
++  summary: { catalogUnavailable?: boolean },
++  now = new Date(),
++): Promise<boolean> {
++  // With the catalog unreadable, old rows were kept rather than corrected: nothing to record.
++  if (summary.catalogUnavailable) return false;
++  try {
++    await events.record({ at: now.toISOString(), appId: UPDATE_CHECK_ENTRY, result: 'ok', code: null });
++    return true;
++  } catch {
++    return false; // Recording never fails the update check.
++  }
++}
 +
 +/** A short, fixed code for a sync error. The error's own text is never kept or shown. */
 +export function versionSyncErrorCode(error: unknown): VersionSyncCode {
@@ -771,7 +903,7 @@ index 000000000..a4210ec98
 +
 +/**
 + * Failing when 2 or more syncs failed in the last 24 hours after the newest success. A later
-+ * success clears it straight away. `at` is the newest recorded result.
++ * success, or a full update check that rebuilt App updates, clears it straight away. `at` is the newest recorded result.
 + */
 +export function versionSyncVerdict(events: VersionSyncEvent[], now = new Date()): VersionSyncVerdict {
 +  const recent = recentVersionSyncEvents(events, now);

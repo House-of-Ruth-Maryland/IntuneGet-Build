@@ -23,7 +23,7 @@ CRON_HEADER=${CRON_HEADER:-/etc/intuneget/cron-auth.header}
 
 # Last run of a systemd unit: "<result> <exit time>", or empty if it never ran.
 unit_run() {
-  systemctl show --timestamp=utc "$1" -p Result -p ExecMainExitTimestamp --value 2>/dev/null | paste -sd'|' || true
+  systemctl show --timestamp=utc "$1" -p Result -p ExecMainExitTimestamp --value 2>/dev/null | paste -sd'|' - || true
 }
 
 # Last JSON results a cron unit printed (curl writes the app's reply to the journal).
@@ -174,6 +174,11 @@ def version_sync():
         except ValueError:
             age = None
         keep = 24 if previous and previous.get('ok') is False else 0.5
+        # A successful update check since that read rebuilt App updates, which clears a Failing verdict.
+        check = run(os.environ['CHECK_RUN'])
+        if previous and previous.get('ok') is False and check['result'] == 'success' and check['at'] \
+                and isinstance(previous.get('readAt'), str) and check['at'] > previous['readAt']:
+            return None
         return previous if age is not None and 0 <= age <= keep else None
     at = value.get('at') if isinstance(value.get('at'), str) and re.fullmatch(r'[0-9T:.\-]+Z', value.get('at')) else None
     detail = value.get('detail') if isinstance(value.get('detail'), str) and not value['ok'] else None

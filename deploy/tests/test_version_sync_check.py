@@ -23,7 +23,9 @@ STUBS = {
     # Timers never ran, nothing in the journal.
     'docker': ('#!/bin/sh\n[ -n "$FAKE_DOCKER_ENV" ] || exit 0\n'
                'case "$1 $3" in "ps "*) echo fixture-container ;; *Env*) cat "$FAKE_DOCKER_ENV" ;; esac\nexit 0\n'),
-    'systemctl': '#!/bin/sh\ncase "$1" in is-enabled) echo disabled ;; is-active) echo inactive ;; esac\nexit 0\n',
+    # FAKE_UNIT_RUN ("success|<UTC time>") stands in for a unit's last run; unset, nothing ran.
+    'systemctl': ('#!/bin/sh\ncase "$1" in is-enabled) echo disabled ;; is-active) echo inactive ;;\n'
+                  '  show) [ -n "$FAKE_UNIT_RUN" ] && printf \'%s\\n%s\\n\' "${FAKE_UNIT_RUN%%|*}" "${FAKE_UNIT_RUN#*|}" ;; esac\nexit 0\n'),
     'journalctl': '#!/bin/sh\nexit 0\n',
     'cloudflared': '#!/bin/sh\nexit 1\n',
     # Answers with the file named in FAKE_CURL_BODY, or fails like curl -f on an error status.
@@ -122,6 +124,23 @@ class StatusFileTest(unittest.TestCase):
         self.assertIs(self.write_status()['versionSync']['ok'], False)
         status['checks']['versionSync']['readAt'] = stamp(datetime.now(timezone.utc) - timedelta(hours=25))
         self.out.write_text(json.dumps(status))
+        self.assertIsNone(self.write_status()['versionSync'])
+
+    def test_a_successful_update_check_after_the_last_read_clears_a_kept_failing_verdict(self):
+        self.body.write_text(json.dumps({'versionSync': {'ok': False, 'at': None, 'detail': 'Failing.'}}))
+        self.write_status()
+        self.body.unlink()
+        status = json.loads(self.out.read_text())
+        read_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        status['checks']['versionSync']['readAt'] = stamp(read_at)
+        self.out.write_text(json.dumps(status))
+        unit_time = lambda at: at.strftime('Thu %Y-%m-%d %H:%M:%S UTC')
+        # A check that ran before the last read, or failed, doesn't clear it.
+        self.env['FAKE_UNIT_RUN'] = 'success|' + unit_time(read_at - timedelta(hours=1))
+        self.assertIs(self.write_status()['versionSync']['ok'], False)
+        self.env['FAKE_UNIT_RUN'] = 'exit-code|' + unit_time(read_at + timedelta(hours=1))
+        self.assertIs(self.write_status()['versionSync']['ok'], False)
+        self.env['FAKE_UNIT_RUN'] = 'success|' + unit_time(read_at + timedelta(hours=1))
         self.assertIsNone(self.write_status()['versionSync'])
 
     def test_app_access_counts_only_well_formed_group_ids(self):

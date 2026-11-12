@@ -2150,7 +2150,7 @@ index 11a399150..b29d92ba9 100644
    });
    return { ...counts, recentActivity, ...(includeUsers ? { perUser: [...users.values()].sort((a, b) => a.userEmail.localeCompare(b.userEmail)) } : {}) };
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
-index 276beabc8..da47db78e 100644
+index 276beabc8..3ccb0cb6b 100644
 --- a/lib/hrm/__tests__/help-content.test.ts
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -43,7 +43,9 @@ describe('help content', () => {
@@ -2176,7 +2176,7 @@ index 276beabc8..da47db78e 100644
      expect(text('deploying')).toContain('Previous copies waiting for automatic removal are left out');
      expect(text('updating')).toContain('press Check installs now');
      expect(text('updating')).not.toContain('Device results for the new copy');
-@@ -113,6 +118,24 @@ describe('help content', () => {
+@@ -113,11 +118,36 @@ describe('help content', () => {
      expect(HELP_SECTIONS.find((s) => s.id === 'installation-timing')!.points.join(' ')).toContain('reloads the whole app from Intune');
    });
  
@@ -2201,6 +2201,18 @@ index 276beabc8..da47db78e 100644
    it('points to HRM Support, never "contact IT"', () => {
      expect(HELP_SECTIONS.some((s) => s.links?.some((l) => l.href === 'https://support.hruthmd.org'))).toBe(true);
      expect(text.join(' ')).not.toMatch(/contact IT/i);
+   });
+ 
++  it('says the update check and a working deploy clear Version sync after deploy (HRM patch 0057)', () => {
++    const server = HELP_SECTIONS.find((section) => section.id === 'server')!.points.join(' ');
++    expect(server).toContain('The next update check, at 3:30 AM or 3:30 PM, corrects App updates and clears the check');
++    expect(server).toContain('A later deploy that updates App updates also clears it');
++    expect(server).not.toContain('The next deploy that updates App updates clears the check');
++  });
++
+   it('follows HRM writing rules: sentence-case titles, no em dashes', () => {
+     for (const s of HELP_SECTIONS) expect(s.title.slice(1)).not.toMatch(/\b(?!Enrollment|Status|Page|Teams|ESP)[A-Z][a-z]+/);
+     expect(text.join(' ')).not.toContain('—');
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 index 83390390b..2e50522fe 100644
 --- a/lib/hrm/__tests__/help-guides.test.ts
@@ -2360,10 +2372,10 @@ index 95b5a5b49..45312a94c 100644
      const report = build({
        deploys: [
 diff --git a/lib/hrm/__tests__/version-sync-health.test.ts b/lib/hrm/__tests__/version-sync-health.test.ts
-index 93ae17bce..800fcd628 100644
+index e19e14e06..af98aecf0 100644
 --- a/lib/hrm/__tests__/version-sync-health.test.ts
 +++ b/lib/hrm/__tests__/version-sync-health.test.ts
-@@ -26,7 +26,7 @@ describe('versionSyncVerdict', () => {
+@@ -28,7 +28,7 @@ describe('versionSyncVerdict', () => {
      const verdict = versionSyncVerdict([failed(1, 'timeout'), failed(20)], now);
      expect(verdict.ok).toBe(false);
      expect(verdict.at).toBe(hoursAgo(1));
@@ -2395,7 +2407,7 @@ index 4a5db668c..ed76e5448 100644
  
    const row: ReviewRow = { id: item.id, title: `${item.displayName}${version}`, action, groups: takesCurrentGroups ? 'The groups the current copy has in Intune' : describeAssignments(assignments), warnings };
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
-index 93c7b017d..bf2675146 100644
+index 93c7b017d..98806be91 100644
 --- a/lib/hrm/help-content.ts
 +++ b/lib/hrm/help-content.ts
 @@ -17,15 +17,16 @@ export const HELP_SECTIONS: HelpSection[] = [
@@ -2458,7 +2470,7 @@ index 93c7b017d..bf2675146 100644
      ],
      links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Intune availability and deadlines', href: 'https://learn.microsoft.com/en-us/intune/app-management/deployment/win32' }],
    },
-@@ -75,14 +78,15 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -75,47 +78,48 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'updates',
      title: 'App updates',
@@ -2477,7 +2489,12 @@ index 93c7b017d..bf2675146 100644
        'Custom apps installed from a GitHub release download are checked too. A newer release shows in App updates with Deploy new version.',
        'When a deployment finishes as deployed, App updates and Home show the new version straight away, whoever deployed it. The app drops off the list, or shows the new version as current if an even newer one is out.',
        'App updates reads its list again when you come back to the browser tab, and every 45 seconds while one of your deployments is running.',
-@@ -94,28 +98,28 @@ export const HELP_SECTIONS: HelpSection[] = [
+       'Press Refresh in App updates to check now. It clears out-of-date entries for everyone in your tenant. Any automatic updates it starts are for your own Auto-update apps only.',
+       'If App updates still shows the old version after a deploy, the next update check at 3:30 AM or 3:30 PM (Maryland time) corrects it.',
+-      'When this happens after 2 or more deploys in a day, Version sync after deploy shows Failing in Server status on Home.',
++      'When this happens after 2 or more deploys in 24 hours, Version sync after deploy shows Failing in Server status on Home. That update check clears it.',
+     ],
+   },
    {
      id: 'updating',
      title: 'Updating an app',
@@ -2513,7 +2530,7 @@ index 93c7b017d..bf2675146 100644
        'When a custom app installed from a GitHub release has a newer release, App updates shows it. Deploy new version opens the form with the new version, download link and checksum filled in.',
        'Check them, then add it to the Deployment list and deploy it from there. Nothing deploys on its own.',
        'Custom apps from other sites, such as UniFi Endpoint, can\'t be checked. Watch the vendor\'s releases.',
-@@ -127,17 +131,21 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -127,20 +131,24 @@ export const HELP_SECTIONS: HelpSection[] = [
        'Deployed alongside, both versions stay in Intune, and IntuneGet never removes the old one. Use duplicate cleanup in Inventory if you want only one.',
        'For WinGet and curated apps, open the app in Inventory and press Find in App catalog under Actions. The App catalog opens already searching for the app, so you can deploy a newer version.',
        'Inventory reads Intune again when you come back to the tab and its list is over a minute old.',
@@ -2533,10 +2550,15 @@ index 93c7b017d..bf2675146 100644
      points: [
        'Each update, and each Deploy new version of a custom app, adds a new copy to Intune that replaces the previous copy. The previous copy stays in Intune until IntuneGet removes it.',
 -      'An ordinary update moves the previous copy\'s groups to the new copy. After a pilot\'s wider rollout, the previous copy keeps its groups too.',
+-      'At the 3:30 AM and 3:30 PM update checks (Maryland time), IntuneGet removes those old copies of apps it deployed, once the newest copy has settled.',
 +      'An ordinary update moves the previous copy\'s groups to the new copy, with Intune\'s default assignment settings (see Updating an app). After a pilot\'s wider rollout, the previous copy keeps its groups too.',
-       'At the 3:30 AM and 3:30 PM update checks (Maryland time), IntuneGet removes those old copies of apps it deployed, once the newest copy has settled.',
++      'At the 3:30 AM and 3:30 PM update checks (Maryland time), IntuneGet removes those old copies of apps it deployed, once the checks below pass.',
        'It removes an old copy only when all 5 of these are true:',
-       'The old copy was replaced at least 7 days ago: the next copy of the app was deployed 7 or more days ago. Apps updated more than once a week are still cleaned up.',
+-      'The old copy was replaced at least 7 days ago: the next copy of the app was deployed 7 or more days ago. Apps updated more than once a week are still cleaned up.',
++      'The old copy was replaced at least 7 days ago, counted for each old copy from when the next copy was deployed. Apps updated more than once a week are still cleaned up.',
+       'The newest copy has at least 1 successful install, and no more than 1 in 10 of its install results are failures.',
+       'No pilot, retirement, going back or deployment of the app is under way.',
+       'The newest copy supersedes the old copy in Intune, directly or through the copies in between.',
 @@ -148,24 +156,26 @@ export const HELP_SECTIONS: HelpSection[] = [
        'To remove a copy, IntuneGet takes its groups off, removes the links between it and the app\'s other copies, then deletes it from Intune. Deleting can\'t be undone.',
        'Nothing is uninstalled from computers. The newest copy has already replaced the old one on them.',
@@ -2567,14 +2589,14 @@ index 93c7b017d..bf2675146 100644
 -      'If cleanup is keeping the copy, its details say Kept: and the reason instead. Home lists the same copy under Needs attention.',
 -      'If cleanup never removes the app\'s copies, such as startup Beta apps or with cleanup turned off, the details say only which version replaced it.',
 +      'In Inventory, an older copy of an app IntuneGet deployed shows a Previous copy tag. Its details say Newer copy v[version] deployed [date].',
-+      'They also say IntuneGet removes it 7 days later if v[version] replaced it and installs well. The 7 days count from when the newer copy was deployed.',
++      'They also say IntuneGet removes it 7 days later if v[version] replaced it and installs well. With several newer copies, the newest one must install well.',
 +      'If cleanup is holding the copy, the tag and the details say Kept for review, with a warning icon, and give the reason. Home lists the same copy under Needs attention.',
 +      'If cleanup never removes the app\'s copies, such as startup Beta apps or with cleanup turned off, the details say only which newer copy was deployed, and when.',
 +      'A second copy deployed on purpose can also show Previous copy. Cleanup never removes it, because the newer copy didn\'t replace it. To keep only one, use Keep this copy, then Delete from Intune.',
        'Previous copies waiting for removal are left out of the copies listed at the top of Inventory. A copy cleanup is keeping stays there, so you can use Keep this copy.',
      ],
      links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'HRM Support', href: HRM_SUPPORT_URL }],
-@@ -183,7 +193,7 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -183,12 +193,12 @@ export const HELP_SECTIONS: HelpSection[] = [
        'During an active pilot, other updates and deployments for the app are held, including Update all, automatic updates and deploying it from the App catalog. Save to Intune and duplicate cleanup are held for its copies too. Self-updating apps can still update themselves.',
        'Retire app and Go back to previous version are refused during a pilot too.',
        'The Pilot rollouts card, under the App updates title, shows only while a pilot is running. Wait for the pilot deployment to finish, then press Review results and wider rollout.',
@@ -2583,6 +2605,12 @@ index 93c7b017d..bf2675146 100644
        'The counts describe each whole app. They do not check pilot group membership or show individual devices. No successful installations reported means you do not yet have evidence of a successful pilot.',
        'Compare New version currently reaches with New version after approval. The proposed groups come from the previous copy in Intune, including Required or Available, exclusions, filters and assignment settings.',
        'To proceed, select I reviewed the results and approve these wider groups, then press Approve wider rollout. Nothing reaches the wider groups on its own. If the groups changed after your review, close it and open a fresh review.',
+       'Approval replaces the temporary pilot group with the previous copy\'s current groups on the new version. It does not uninstall the app from pilot devices. The previous copy keeps its groups, including if approval fails.',
+-      'After wider rollout, IntuneGet removes the previous copy at an update check, once the new version is at least 7 days old and installing well (see How old copies are removed).',
++      'After wider rollout, IntuneGet removes the previous copy at an update check, once it was replaced 7 or more days ago and the newest copy installs well (see How old copies are removed).',
+       'If packaging fails or is held, open Deployments to inspect it. End failed pilot releases the hold only after the server confirms an unsuccessful finished workflow and no copy from that pilot remains in Intune.',
+       'A pilot held by the installation test before packaging starts can also be ended, after checking no copy exists. If a failed pilot copy remains, inspect and remove that copy in Intune before pressing End failed pilot.',
+       'If a start stalls before packaging begins, wait 2 minutes, then press End stalled start. Packaging that arrives after that is refused.',
 @@ -204,7 +214,7 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'startup-beta',
@@ -2815,7 +2843,7 @@ index 93c7b017d..bf2675146 100644
      ],
      links: [{ label: 'Open Discovered apps', href: '/dashboard/unmanaged' }, { label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open Intune for script results', href: INTUNE_URL }],
    },
-@@ -446,42 +461,48 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -446,42 +461,49 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'server',
      title: 'How the server is updated',
@@ -2837,7 +2865,8 @@ index 93c7b017d..bf2675146 100644
 -      'While it shows Failing, App updates can show an old version until the 3:30 AM or 3:30 PM check. The next deploy that updates App updates clears it.',
 -      'Each of these 4 checks shows Working, or Failing with a short reason. When one fails, Server status shows Check and a Teams alert posts to IT Ops.',
 +      'Version sync after deploy shows Failing when 2 or more deploys in the last 24 hours didn\'t update App updates, and none has worked since. The reason reads App updates missed [n] deploys in 24 hours, with the cause.',
-+      'While it shows Failing, App updates can show an old version until the next update check, at 3:30 AM or 3:30 PM, corrects it. The next deploy that updates App updates clears the check.',
++      'While it shows Failing, App updates can show an old version. The next update check, at 3:30 AM or 3:30 PM, corrects App updates and clears the check.',
++      'A later deploy that updates App updates also clears it. New missed deploys raise it again by the same rule.',
 +      'Each of these 4 checks shows Working, or Failing with a short reason. When one fails, it moves to the top of Server status and a Teams alert posts to IT Ops.',
 +      'If Server status says Last status report [time] ago, the server\'s status timer may have stopped and the checks may be out of date. Open a ticket with HRM Support.',
        'If Failing lasts, open a ticket with HRM Support and include the reason shown.',
@@ -2878,7 +2907,7 @@ index 93c7b017d..bf2675146 100644
      ],
      links: [{ label: 'Open Settings', href: '/dashboard/settings' }, { label: 'Open App updates', href: '/dashboard/updates' }],
    },
-@@ -498,9 +519,9 @@ export const HELP_SECTIONS: HelpSection[] = [
+@@ -498,9 +520,9 @@ export const HELP_SECTIONS: HelpSection[] = [
    {
      id: 'support',
      title: 'When something goes wrong',
@@ -2891,7 +2920,7 @@ index 93c7b017d..bf2675146 100644
        'For anything else, open a ticket with HRM Support.',
      ],
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
-index dc2aeba49..e295441b5 100644
+index dc2aeba49..f645e274d 100644
 --- a/lib/hrm/help-guides.ts
 +++ b/lib/hrm/help-guides.ts
 @@ -22,7 +22,7 @@ const support = { label: 'Open HRM Support', href: 'https://support.hruthmd.org'
@@ -2966,7 +2995,7 @@ index dc2aeba49..e295441b5 100644
      related: ['updating', 'automatic-installation-policy', 'update-schedule'],
 -    troubleshoot: [{ problem: 'An app seems missing', action: 'Check Ignored apps. A copy deleted in Intune drops off at the next check.' }, { problem: 'A custom app has no update alert', action: 'Automatic checks cover GitHub release downloads; watch other vendors’ releases yourself.', guide: 'updating' }, { problem: 'App updates still shows the old version after a deploy', action: 'The 3:30 AM or 3:30 PM check corrects it. If Version sync after deploy shows Failing on Home, tell HRM Support.', guide: 'server' }],
 -    referenceGroups: [reference('Check cadence and new versions', [0, 1, 6]), reference('Update rules and visibility', [2, 3, 4]), reference('Where an update will go', [5]), reference('After a deployment finishes', [7, 8, 9, 10, 11])],
-+    troubleshoot: [{ problem: 'An app seems missing', action: 'Check Ignored apps. A copy deleted in Intune drops off at the next check.' }, { problem: 'A custom app has no update alert', action: 'Automatic checks cover GitHub release downloads; watch other vendors’ releases yourself.', guide: 'updating' }, { problem: 'App updates still shows the old version after a deploy', action: 'The next update check, at 3:30 AM or 3:30 PM, corrects it. If Version sync after deploy shows Failing on Home for long, tell HRM Support.', guide: 'server' }],
++    troubleshoot: [{ problem: 'An app seems missing', action: 'Check Ignored apps. A copy deleted in Intune drops off at the next check.' }, { problem: 'A custom app has no update alert', action: 'Automatic checks cover GitHub release downloads; watch other vendors’ releases yourself.', guide: 'updating' }, { problem: 'App updates still shows the old version after a deploy', action: 'The next update check, at 3:30 AM or 3:30 PM, corrects it. If Version sync after deploy still shows Failing after that, tell HRM Support.', guide: 'server' }],
 +    referenceGroups: [reference('Check cadence and new versions', [0, 1, 7]), reference('Update rules and visibility', [2, 3, 4, 5]), reference('Where an update will go', [6]), reference('After a deployment finishes', [8, 9, 10, 11, 12])],
    },
    {
@@ -3218,8 +3247,8 @@ index dc2aeba49..e295441b5 100644
      related: ['alerts', 'support', 'install-results'],
 -    troubleshoot: [{ problem: 'The IT dashboard shows an older summary', action: 'Open Home for current details. A slow server can leave the last safe summary visible with its original time.' }, { problem: 'Version sync after deploy shows Failing', action: 'App updates can show old versions until the 3:30 AM or 3:30 PM check. Send HRM Support the reason shown.' }, { problem: 'Off-site backup is red', action: 'The last copy failed or is too old. Use the displayed time and failure reason in your support request.' }, { problem: 'A staff member sees No access to IntuneGet', action: 'They are not in the IT admins group. Ask HRM Support to add them; it can take up to 5 minutes to apply.' }, { problem: 'Who can sign in shows Access isn\'t limited to a group yet', action: 'Anyone who gets past HRM\'s sign-in can use IntuneGet. Open a ticket with HRM Support.' }],
 -    referenceGroups: [reference('Server updates and automatic rollback', [0, 1]), reference('Read health and backup checks', [2, 3, 4, 5, 6, 7, 8, 9, 10]), reference('External dashboard freshness', [11, 12]), reference('MCP server reads', [13, 14]), reference('Who can use IntuneGet', [15, 16, 17, 18])],
-+    troubleshoot: [{ problem: 'The IT dashboard shows an older summary', action: 'Open Home for current details. A slow server can leave the last safe summary visible with its original time.' }, { problem: 'Version sync after deploy shows Failing', action: 'App updates can show old versions until the next update check corrects them. If it lasts, send HRM Support the reason shown.' }, { problem: 'Server status says Last status report a while ago', action: 'The server’s status timer may have stopped, so the checks may be out of date. Open a ticket with HRM Support.' }, { problem: 'Off-site backup is red', action: 'The last copy failed or is too old. Use the displayed time and failure reason in your support request.' }, { problem: 'A staff member sees No access to IntuneGet', action: 'Check Signed in as. For the wrong account, press Sign in with another account. Otherwise ask HRM Support to add them; it takes up to 5 minutes.' }, { problem: 'Who can sign in shows Not limited to a group', action: 'Anyone who gets past HRM\'s sign-in can use IntuneGet. Open a ticket with HRM Support.' }],
-+    referenceGroups: [reference('Server updates and automatic rollback', [0, 1]), reference('Read Server status', [2, 3, 4, 5, 12]), reference('Intune and version checks', [6, 7, 8, 9, 10, 11, 13]), reference('External dashboard freshness', [14, 15]), reference('MCP server reads', [16, 17]), reference('Who can use IntuneGet', [18, 19, 20, 21, 22, 23, 24])],
++    troubleshoot: [{ problem: 'The IT dashboard shows an older summary', action: 'Open Home for current details. A slow server can leave the last safe summary visible with its original time.' }, { problem: 'Version sync after deploy shows Failing', action: 'The next update check, at 3:30 AM or 3:30 PM, corrects App updates and clears it. If it stays, send HRM Support the reason shown.' }, { problem: 'Server status says Last status report a while ago', action: 'The server’s status timer may have stopped, so the checks may be out of date. Open a ticket with HRM Support.' }, { problem: 'Off-site backup is red', action: 'The last copy failed or is too old. Use the displayed time and failure reason in your support request.' }, { problem: 'A staff member sees No access to IntuneGet', action: 'Check Signed in as. For the wrong account, press Sign in with another account. Otherwise ask HRM Support to add them; it takes up to 5 minutes.' }, { problem: 'Who can sign in shows Not limited to a group', action: 'Anyone who gets past HRM\'s sign-in can use IntuneGet. Open a ticket with HRM Support.' }],
++    referenceGroups: [reference('Server updates and automatic rollback', [0, 1]), reference('Read Server status', [2, 3, 4, 5, 13]), reference('Intune and version checks', [6, 7, 8, 9, 10, 11, 12, 14]), reference('External dashboard freshness', [15, 16]), reference('MCP server reads', [17, 18]), reference('Who can use IntuneGet', [19, 20, 21, 22, 23, 24, 25])],
    },
    {
      id: 'your-settings', category: 'settings', title: 'Find a page or change your theme',
@@ -3426,10 +3455,10 @@ index 719afbc29..6ed6d256a 100644
    if (jobs === null || deploys === null) {
      flag('Database error', 'down');
 diff --git a/lib/hrm/version-sync-health.ts b/lib/hrm/version-sync-health.ts
-index a4210ec98..0b688e8ca 100644
+index a98277198..3e5715fe0 100644
 --- a/lib/hrm/version-sync-health.ts
 +++ b/lib/hrm/version-sync-health.ts
-@@ -64,6 +64,7 @@ export function versionSyncVerdict(events: VersionSyncEvent[], now = new Date())
+@@ -85,6 +85,7 @@ export function versionSyncVerdict(events: VersionSyncEvent[], now = new Date())
    return {
      ok: false,
      at,
