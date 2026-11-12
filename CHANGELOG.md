@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The sign-in page's button now says Sign in with your HRM account (patch 0059), and the
+  "Use your HRM work account." line under the Sign in heading is gone.
+
 - Clearer screens after a UX review (patch 0058). Inventory tags an old copy that cleanup is
   holding Kept for review, and says which newer copy was deployed and when. The sidebar has two
   groups, Apps and Activity, with App updates under Apps and Help at the bottom. Home's Server
