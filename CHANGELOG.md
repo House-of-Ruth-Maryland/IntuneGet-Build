@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Deploy new version for custom and GitHub-release apps now replaces the previous copy the same way
+  Update does: the new copy takes the groups the previous copy has in Intune when it deploys, and
+  the previous copy is left with none. The review marks it Replaces current copy. Old-copy cleanup
+  now waits 7 days from when each old copy was replaced, not from the newest copy's deployment, so
+  apps updated more than once a week are cleaned up too. The newest copy still needs a successful
+  install and no more than 1 in 10 failures. When the newest copy has been out 7 days with no
+  groups, no installs or too many failures, Home now lists the old copies waiting on it with the
+  reason. Help, the form text and the Inventory hint match (patch 0050).
+
 - App updates, Home's count and the sidebar badge show the new version as soon as a deployment
   finishes, instead of listing the app as out of date until the next 3:30 check. This works for
   every way of deploying: Update, Update all, Auto-update, App catalog, Deploy new version and
