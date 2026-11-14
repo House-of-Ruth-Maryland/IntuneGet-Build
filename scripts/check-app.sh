@@ -31,7 +31,7 @@ if [ "$mode" = related ]; then
   # Keep per-file isolation. Related tests are for iteration, not release sign-off.
   npm exec -- vitest related --run "$@"
 else
-  node --test "$build_repo/scripts/check-help.test.mjs"
+  node --test "$build_repo/scripts/check-help.test.mjs" "$build_repo/scripts/migration-numbers.test.mjs"
   # VM status script and watchdog checks (stub commands only; patch 0057).
   python3 -m unittest discover -s "$build_repo/deploy/tests"
   npm exec -- tsc --noEmit -p .
