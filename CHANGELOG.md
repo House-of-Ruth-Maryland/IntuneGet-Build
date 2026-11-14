@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Every Teams card IntuneGet sends now has the same layout (patch 0004, new
+  `lib/webhooks/teams-card.ts`): a tinted header band with an "IntuneGet · kind" label, the title
+  and the time, then the details and buttons. Neutral for updates, green for deployed, resolved and
+  tests, amber for install failures, red for failed deployments, auto-update turned off and server
+  problems. Times are New York time with the zone instead of UTC without one. The update card
+  shows Installed and Available columns, one line about major-version updates and a Review updates
+  button; a failed deployment puts the error in a What went wrong box. Wording is sentence case
+  ("Major-version updates", "This webhook is connected"). The VM watchdog's server alerts use the
+  same layout, with Server alert, Still a problem and Resolved in the header label instead of the
+  title, and their times in New York time. Slack, Discord and custom webhooks are unchanged. Help
+  names the test card by its new title (patch 0013). David must reinstall `intuneget-watchdog` on
+  the VM (CLAUDE.md, "VM setup") for its alerts to change.
+
 - The 60 patches are regrouped into 13, one per feature, and no two patches change the same file.
   Nothing the server runs changes: the patched app is byte-identical (same git tree). README's
   Patch history table says which new patch holds each old patch number.

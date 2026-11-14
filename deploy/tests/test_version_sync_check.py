@@ -189,7 +189,8 @@ class WatchdogTest(unittest.TestCase):
         }))
 
     def titles(self):
-        return [p['attachments'][0]['content']['body'][0]['text'] for p in self.posts]
+        # (header label, title) from the shared card layout's header band
+        return [tuple(i['text'] for i in p['attachments'][0]['content']['body'][0]['items'][:2]) for p in self.posts]
 
     def test_failing_verdict_is_a_problem_with_its_detail(self):
         at = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
@@ -210,9 +211,10 @@ class WatchdogTest(unittest.TestCase):
         at += timedelta(minutes=5)
         self.write(at, failing)
         self.watchdog.run(at)
-        self.assertEqual(self.titles(), [label])
+        self.assertEqual(self.titles(), [('IntuneGet · Server alert', label)])
         facts = self.posts[0]['attachments'][0]['content']['body'][1]['facts']
         self.assertIn({'title': 'Detail', 'value': 'Fixture detail.'}, facts)
+        self.assertIn({'title': 'Since', 'value': 'Nov 3, 2026, 7:00 AM EST'}, facts)
         at += timedelta(hours=1)
         self.write(at, failing)
         self.watchdog.run(at)
@@ -220,11 +222,11 @@ class WatchdogTest(unittest.TestCase):
         at += timedelta(hours=24)
         self.write(at, failing)
         self.watchdog.run(at)
-        self.assertEqual(self.titles()[-1], f'Still a problem: {label}')
+        self.assertEqual(self.titles()[-1], ('IntuneGet · Still a problem', label))
         at += timedelta(minutes=5)
         self.write(at, {'ok': True, 'at': None, 'detail': None})
         self.watchdog.run(at)
-        self.assertEqual(self.titles()[-1], f'Resolved: {label}')
+        self.assertEqual(self.titles()[-1], ('IntuneGet · Resolved', label))
         self.assertEqual(len(self.posts), 3)
 
 
