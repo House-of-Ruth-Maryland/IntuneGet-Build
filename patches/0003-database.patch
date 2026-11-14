@@ -1,5 +1,87 @@
+diff --git a/lib/db/__tests__/hrm-fleet-queries.test.ts b/lib/db/__tests__/hrm-fleet-queries.test.ts
+new file mode 100644
+index 000000000..1fdae058d
+--- /dev/null
++++ b/lib/db/__tests__/hrm-fleet-queries.test.ts
+@@ -0,0 +1,76 @@
++// HRM security review (November 2026): Home's SQL attention counts and the complete current-deployment read (S6).
++import { beforeEach, afterEach, it, expect, vi } from 'vitest';
++vi.stubEnv('DATABASE_PATH', ':memory:');
++import { sqliteDb, sqliteInstallStatus, closeSqliteDb } from '../sqlite';
++beforeEach(() => closeSqliteDb());
++afterEach(() => {
++  closeSqliteDb();
++  vi.unstubAllEnvs();
++  vi.stubEnv('DATABASE_PATH', ':memory:');
++});
++it('counts only recent failures and old pending work for the selected tenant', async () => {
++  const now = new Date('2026-11-06T12:00:00Z');
++  for (const [id, status, created, tenant] of [
++    ['fail', 'failed', '2026-11-05T00:00:00Z', 'tenant'],
++    ['old-fail', 'failed', '2026-10-01T00:00:00Z', 'tenant'],
++    ['stuck', 'packaging', '2026-11-06T08:00:00Z', 'tenant'],
++    ['new', 'queued', '2026-11-06T11:00:00Z', 'tenant'],
++    ['legacy-new', 'queued', '2026-11-06 11:00:00', 'tenant'],
++    ['other', 'failed', '2026-11-05T00:00:00Z', 'other'],
++    ['archived', 'failed', '2026-11-05T00:00:00Z', 'tenant'],
++  ]) {
++    await sqliteDb.jobs.create({
++      id,
++      user_id: 'user',
++      tenant_id: tenant,
++      winget_id: 'Example.App',
++      display_name: 'Example',
++      version: '1',
++      installer_type: 'exe',
++      installer_url: 'https://example.invalid/setup.exe',
++      status,
++      created_at: created,
++    });
++    await sqliteDb.jobs.update(id, { created_at: created });
++  }
++  await sqliteDb.jobs.update('archived', { archived_at: now.toISOString() });
++  expect(await sqliteDb.jobs.getAttentionCounts('tenant', now)).toEqual({ failedRecent: 1, stuck: 1 });
++});
++it('keeps older active apps beyond 2000 historical versions and isolates tenants', async () => {
++  await sqliteDb.uploadHistory.create({
++    id: 'old',
++    user_id: 'u',
++    intune_tenant_id: 'tenant',
++    winget_id: 'Old.App',
++    version: '1',
++    display_name: 'Old',
++    intune_app_id: 'old-app',
++    deployed_at: '2020-01-01T00:00:00Z',
++  });
++  for (let i = 0; i < 2005; i++)
++    await sqliteDb.uploadHistory.create({
++      id: `v-${i}`,
++      user_id: 'u',
++      intune_tenant_id: 'tenant',
++      winget_id: 'Busy.App',
++      version: String(i),
++      display_name: 'Busy',
++      intune_app_id: `copy-${i}`,
++      deployed_at: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
++    });
++  await sqliteDb.uploadHistory.create({
++    user_id: 'u',
++    intune_tenant_id: 'other',
++    winget_id: 'Old.App',
++    version: '2',
++    display_name: 'Other',
++    intune_app_id: 'other-app',
++  });
++  const rows = await sqliteDb.uploadHistory.currentDeployments('tenant');
++  expect(rows).toHaveLength(2);
++  expect(rows.map((r) => r.intune_app_id)).toContain('old-app');
++  expect(rows[0].intune_app_id).toBe('copy-2004');
++  expect(await sqliteDb.uploadHistory.currentDeployments()).toHaveLength(3);
++  await sqliteInstallStatus.markAttempt!('tenant', 'old-app', '2026-11-06T00:00:00Z');
++  expect(await sqliteInstallStatus.lastAttempt!('tenant', 'old-app')).toBe('2026-11-06T00:00:00Z');
++});
 diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
-index 612cbd4f9..5ea396f4b 100644
+index 612cbd4f9..259b8aa3e 100644
 --- a/lib/db/__tests__/job-create.test.ts
 +++ b/lib/db/__tests__/job-create.test.ts
 @@ -49,8 +49,8 @@ function readStoredJob(id: string): Record<string, unknown> {
@@ -8,8 +90,8 @@ index 612cbd4f9..5ea396f4b 100644
    try {
 -    // Version 8 includes manual mappings and automatic update scope.
 -    expect(stored.pragma('user_version', { simple: true })).toBe(8);
-+    // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts, skipped versions, retirements, rollback readiness, removals) follow manual mappings, automatic update scope, and webhooks.
-+    expect(stored.pragma('user_version', { simple: true })).toBe(24);
++    // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts, skipped versions, retirements, rollback readiness, removals, report checkpoints) follow manual mappings, automatic update scope, and webhooks.
++    expect(stored.pragma('user_version', { simple: true })).toBe(25);
      return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
    } finally {
      stored.close();
@@ -276,10 +358,10 @@ index f4f2dbc07..96ef71f3a 100644
      );
      db.close();
 diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
-index 228492fe3..08734572a 100644
+index 228492fe3..1ca62981f 100644
 --- a/lib/db/sqlite-migrations.ts
 +++ b/lib/db/sqlite-migrations.ts
-@@ -306,6 +306,222 @@ export const MIGRATIONS: SqliteMigration[] = [
+@@ -306,6 +306,234 @@ export const MIGRATIONS: SqliteMigration[] = [
        db.exec("ALTER TABLE app_update_policies ADD COLUMN auto_update_scope TEXT NOT NULL DEFAULT 'all' CHECK (auto_update_scope IN ('all', 'minor', 'major'));");
      },
    },
@@ -499,11 +581,23 @@ index 228492fe3..08734572a 100644
 +    )`);
 +    db.exec('CREATE INDEX IF NOT EXISTS idx_hrm_version_sync_events_at ON hrm_version_sync_events (at)');
 +  } },
++  {
++    version: 25,
++    name: 'complete fleet reads and install report checkpoints (security review, November 2026)',
++    up: db => {
++      if (!(db.pragma('table_info(hrm_app_install_status)') as Array<{name:string}>).some(c=>c.name==='not_installed')) {
++        db.exec('ALTER TABLE hrm_app_install_status ADD COLUMN not_installed INTEGER NOT NULL DEFAULT 0');
++      }
++      if ((db.pragma('table_info(packaging_jobs)') as Array<{name:string}>).some(c=>c.name==='tenant_id')) db.exec('CREATE INDEX IF NOT EXISTS idx_hrm_job_attention ON packaging_jobs(tenant_id,status,julianday(created_at)) WHERE archived_at IS NULL');
++      if ((db.pragma('table_info(upload_history)') as Array<{name:string}>).some(c=>c.name==='intune_tenant_id')) db.exec('CREATE INDEX IF NOT EXISTS idx_hrm_current_deployment ON upload_history(intune_tenant_id,winget_id COLLATE NOCASE,deployed_at DESC,id DESC)');
++      db.exec(`CREATE TABLE IF NOT EXISTS hrm_install_attempts (tenant_id TEXT NOT NULL,app_id TEXT NOT NULL,attempted_at TEXT NOT NULL,PRIMARY KEY(tenant_id,app_id));`);
++    },
++  },
  ];
  
  export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
 diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
-index 5f548532d..05fb49a1b 100644
+index 5f548532d..074333542 100644
 --- a/lib/db/sqlite.ts
 +++ b/lib/db/sqlite.ts
 @@ -1,10 +1,26 @@
@@ -550,7 +644,7 @@ index 5f548532d..05fb49a1b 100644
  import { runSqliteMigrations } from './sqlite-migrations';
  import { INTUNE_APPROVAL_CHECKPOINT_STATUSES } from '@/lib/intune-approval';
  
-@@ -197,6 +216,186 @@ export const sqliteManualMappings = {
+@@ -197,6 +216,191 @@ export const sqliteManualMappings = {
    },
  };
  
@@ -650,6 +744,7 @@ index 5f548532d..05fb49a1b 100644
 +    failed: Number(r.failed),
 +    pending: Number(r.pending),
 +    notApplicable: Number(r.not_applicable),
++    notInstalled: Number(r.not_installed ?? 0),
 +    other: Number(r.other),
 +    topErrors,
 +    previous_failed: Number(r.previous_failed),
@@ -670,20 +765,24 @@ index 5f548532d..05fb49a1b 100644
 +export const sqliteOldCopies = createOldCopyStore(getDb);
 +
 +export const sqliteInstallStatus: InstallStatusStore = {
++  async lastAttempt(tenant,app) { return (getDb().prepare('SELECT attempted_at FROM hrm_install_attempts WHERE tenant_id=? AND app_id=?').get(tenant,app) as {attempted_at:string}|undefined)?.attempted_at ?? ''; },
++  async markAttempt(tenant,app,at) { getDb().prepare(`INSERT INTO hrm_install_attempts (tenant_id,app_id,attempted_at) VALUES (?,?,?)
++    ON CONFLICT (tenant_id,app_id) DO UPDATE SET attempted_at=excluded.attempted_at`).run(tenant,app,at); },
++
 +  async get(tenantId, intuneAppId) {
 +    const row = getDb().prepare('SELECT * FROM hrm_app_install_status WHERE tenant_id = ? AND intune_app_id = ?').get(tenantId, intuneAppId);
 +    return row ? installStatusRow(row) : null;
 +  },
 +  async save(record) {
 +    getDb()
-+      .prepare(`INSERT INTO hrm_app_install_status (tenant_id, intune_app_id, user_id, display_name, installed, failed, pending, not_applicable, other, top_errors, previous_failed, alerted_on, checked_at)
-+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++      .prepare(`INSERT INTO hrm_app_install_status (tenant_id, intune_app_id, user_id, display_name, installed, failed, pending, not_applicable, other, top_errors, previous_failed, alerted_on, checked_at, not_installed)
++        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 +        ON CONFLICT (tenant_id, intune_app_id) DO UPDATE SET user_id = excluded.user_id, display_name = excluded.display_name,
 +          installed = excluded.installed, failed = excluded.failed, pending = excluded.pending, not_applicable = excluded.not_applicable,
-+          other = excluded.other, top_errors = excluded.top_errors, previous_failed = excluded.previous_failed,
++          other = excluded.other, not_installed = excluded.not_installed, top_errors = excluded.top_errors, previous_failed = excluded.previous_failed,
 +          alerted_on = excluded.alerted_on, checked_at = excluded.checked_at`)
 +      .run(record.tenant_id, record.intune_app_id, record.user_id, record.display_name, record.installed, record.failed, record.pending,
-+        record.notApplicable, record.other, JSON.stringify(record.topErrors), record.previous_failed, record.alerted_on, record.checked_at);
++        record.notApplicable, record.other, JSON.stringify(record.topErrors), record.previous_failed, record.alerted_on, record.checked_at, record.notInstalled ?? 0);
 +    sqliteAppInsights.install(record.tenant_id, record.intune_app_id, record.checked_at, record);
 +  },
 +  async markAlerted(records, day) {
@@ -737,7 +836,22 @@ index 5f548532d..05fb49a1b 100644
  /** SQLite implementation of the database adapter. */
  export const sqliteDb: DatabaseAdapter = {
    customAppDefinitions: {
-@@ -647,6 +846,20 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -278,6 +482,14 @@ export const sqliteDb: DatabaseAdapter = {
+       return rows.map(parseJobRow);
+     },
+ 
++    // HRM security review (November 2026): Home's attention counts in SQL, not every job in JavaScript.
++    async getAttentionCounts(tenantId, now = new Date()) {
++      return getDb().prepare(`SELECT
++        (SELECT COUNT(*) FROM packaging_jobs WHERE tenant_id=? AND archived_at IS NULL AND status='failed' AND julianday(created_at)>=julianday(?)) AS failedRecent,
++        (SELECT COUNT(*) FROM packaging_jobs WHERE tenant_id=? AND archived_at IS NULL AND status IN ('queued','packaging','uploading') AND julianday(created_at)<julianday(?)) AS stuck`)
++        .get(tenantId,new Date(now.getTime()-7*86400000).toISOString(),tenantId,new Date(now.getTime()-2*3600000).toISOString()) as {failedRecent:number;stuck:number};
++    },
++
+     async getAnalyticsJobs(scope: AnalyticsJobScope): Promise<AnalyticsJob[]> {
+       const key = scope.tenantId === undefined ? 'user_id' : 'tenant_id';
+       const identity = scope.tenantId ?? scope.userId;
+@@ -647,6 +859,34 @@ export const sqliteDb: DatabaseAdapter = {
        return row ?? null;
      },
  
@@ -755,10 +869,24 @@ index 5f548532d..05fb49a1b 100644
 +      return row ?? null;
 +    },
 +
++    // HRM security review S6 (November 2026): the newest copy of every app, with no history window.
++    async currentDeployments(tenantId) {
++      // Scan the covering family index once, then seek one newest row per family.
++      // No historical payloads are materialized in JavaScript.
++      const where = tenantId ? 'intune_tenant_id = ?' : 'intune_tenant_id IS NOT NULL';
++      return getDb().prepare(`SELECT h.* FROM (
++        SELECT intune_tenant_id,winget_id FROM upload_history WHERE ${where}
++        GROUP BY intune_tenant_id,winget_id COLLATE NOCASE
++      ) f JOIN upload_history h ON h.id = (
++        SELECT n.id FROM upload_history n WHERE n.intune_tenant_id=f.intune_tenant_id AND n.winget_id=f.winget_id COLLATE NOCASE
++        AND n.intune_app_id IS NOT NULL AND n.intune_app_id != '' ORDER BY n.deployed_at DESC,n.id DESC LIMIT 1)
++        ORDER BY h.deployed_at DESC,h.id DESC`).all(...(tenantId ? [tenantId] : [])) as UploadHistoryRecord[];
++    },
++
      async listAll(limit: number = 1000): Promise<UploadHistoryRecord[]> {
        const database = getDb();
        return database
-@@ -805,6 +1018,11 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -805,6 +1045,11 @@ export const sqliteDb: DatabaseAdapter = {
        return parseHistoryRow(row);
      },
  
@@ -770,7 +898,7 @@ index 5f548532d..05fb49a1b 100644
      async update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null> {
        const database = getDb();
        const { clause, values } = buildSetClause(data as Record<string, unknown>);
-@@ -848,10 +1066,12 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -848,10 +1093,12 @@ export const sqliteDb: DatabaseAdapter = {
            h.*,
            p.winget_id AS policy_winget_id,
            p.tenant_id AS policy_tenant_id,
@@ -785,7 +913,7 @@ index 5f548532d..05fb49a1b 100644
          WHERE ${conditions.join(' AND ')}
          ORDER BY h.triggered_at DESC
          LIMIT ? OFFSET ?
-@@ -874,6 +1094,13 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -874,6 +1121,13 @@ export const sqliteDb: DatabaseAdapter = {
            tenant_id: row.policy_tenant_id as string,
          },
          display_name: (row.packaging_display_name as string | null) ?? undefined,
@@ -799,7 +927,7 @@ index 5f548532d..05fb49a1b 100644
        }));
      },
  
-@@ -941,6 +1168,11 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -941,6 +1195,11 @@ export const sqliteDb: DatabaseAdapter = {
               latest_version = excluded.latest_version,
               is_critical = excluded.is_critical,
               is_managed = excluded.is_managed,
@@ -811,7 +939,7 @@ index 5f548532d..05fb49a1b 100644
               updated_at = excluded.updated_at`
          )
          .run(
-@@ -1010,6 +1242,62 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -1010,6 +1269,62 @@ export const sqliteDb: DatabaseAdapter = {
          .run(userId, tenantId, ...values);
        return result.changes;
      },
@@ -874,7 +1002,7 @@ index 5f548532d..05fb49a1b 100644
    },
  
    curatedLicenceAttestations: {
-@@ -1138,3 +1426,7 @@ export function closeSqliteDb(): void {
+@@ -1138,3 +1453,7 @@ export function closeSqliteDb(): void {
      db = null;
    }
  }
@@ -883,7 +1011,7 @@ index 5f548532d..05fb49a1b 100644
 +
 +export const sqliteStartupReports = createStartupReportStore(getDb);
 diff --git a/lib/db/supabase-adapter.ts b/lib/db/supabase-adapter.ts
-index 590493b95..857417aeb 100644
+index 590493b95..3d01c56aa 100644
 --- a/lib/db/supabase-adapter.ts
 +++ b/lib/db/supabase-adapter.ts
 @@ -19,9 +19,13 @@ import type {
@@ -910,7 +1038,26 @@ index 590493b95..857417aeb 100644
  export const supabaseDb: DatabaseAdapter = {
    customAppDefinitions: {
      async list(userId, tenantId, limit, offset) {
-@@ -637,6 +644,27 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -228,6 +235,18 @@ export const supabaseDb: DatabaseAdapter = {
+       return ((data as unknown as PackagingJob[]) || []).filter((job) => !job.archived_at);
+     },
+ 
++    async getAttentionCounts(tenantId,now = new Date()) {
++      const client=createServerClient(); const signal=AbortSignal.timeout(10000);
++      const [failed,pending]=await Promise.all([
++        client.from('packaging_jobs').select('id',{count:'exact',head:true}).eq('tenant_id',tenantId).is('archived_at',null)
++          .eq('status','failed').gte('created_at',new Date(now.getTime()-7*86400000).toISOString()).abortSignal(signal),
++        client.from('packaging_jobs').select('id',{count:'exact',head:true}).eq('tenant_id',tenantId).is('archived_at',null)
++          .in('status',['queued','packaging','uploading']).lt('created_at',new Date(now.getTime()-2*3600000).toISOString()).abortSignal(signal),
++      ]);
++      if(failed.error || pending.error) throw new Error('Attention counts unavailable');
++      return {failedRecent:failed.count ?? 0,stuck:pending.count ?? 0};
++    },
++
+     async getAnalyticsJobs(scope: AnalyticsJobScope): Promise<AnalyticsJob[]> {
+       const key = scope.tenantId === undefined ? 'user_id' : 'tenant_id';
+       const identity = scope.tenantId ?? scope.userId;
+@@ -637,6 +656,46 @@ export const supabaseDb: DatabaseAdapter = {
        return data ?? null;
      },
  
@@ -935,10 +1082,29 @@ index 590493b95..857417aeb 100644
 +      return data ?? null;
 +    },
 +
++    // HRM security review S6 (November 2026): the newest copy of every app, with no history window.
++    async currentDeployments(tenantId) {
++      const client=createServerClient(); const signal=AbortSignal.timeout(15000);
++      const newest=new Map<string,UploadHistoryRecord>();
++      for(let offset=0; ;offset+=1000) {
++        let query=client.from('upload_history').select('*').not('intune_tenant_id','is',null).not('intune_app_id','is',null);
++        if(tenantId) query=query.eq('intune_tenant_id',tenantId);
++        const {data,error}=await query.order('deployed_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+999).abortSignal(signal);
++        if(error) throw new Error('Current deployments unavailable');
++        for(const row of data ?? []) {
++          const record=row as unknown as UploadHistoryRecord;
++          if(!record.intune_app_id) continue;
++          const key=record.intune_tenant_id+'|'+record.winget_id.toLowerCase();
++          if(!newest.has(key)) newest.set(key,record);
++        }
++        if((data?.length ?? 0)<1000) return [...newest.values()];
++      }
++    },
++
      async listAll(limit: number = 1000): Promise<UploadHistoryRecord[]> {
        const supabase = createServerClient();
        const query = getUploadHistoryQuery(supabase);
-@@ -822,6 +850,16 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -822,6 +881,16 @@ export const supabaseDb: DatabaseAdapter = {
        return (updated as unknown as AutoUpdateHistory) ?? null;
      },
  
@@ -955,7 +1121,7 @@ index 590493b95..857417aeb 100644
      async list(userId: string, query: Parameters<DatabaseAdapter['autoUpdateHistory']['list']>[1]): Promise<AutoUpdateHistoryWithPolicy[]> {
        const supabase = createServerClient();
  
-@@ -1037,6 +1075,63 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -1037,6 +1106,63 @@ export const supabaseDb: DatabaseAdapter = {
        }
        return staleIds.length;
      },
@@ -1020,7 +1186,7 @@ index 590493b95..857417aeb 100644
  
    curatedLicenceAttestations: {
 diff --git a/lib/db/types.ts b/lib/db/types.ts
-index adaa21bf6..0252df23b 100644
+index adaa21bf6..c1ad77bea 100644
 --- a/lib/db/types.ts
 +++ b/lib/db/types.ts
 @@ -45,6 +45,26 @@ export interface UpdateCheckResult {
@@ -1050,7 +1216,15 @@ index adaa21bf6..0252df23b 100644
  export interface UpdateCheckQuery {
    tenantId?: string;
    includeDismissed?: boolean;
-@@ -297,6 +317,11 @@ export interface DatabaseAdapter {
+@@ -229,6 +249,7 @@ export interface DatabaseAdapter {
+ 
+     /** Complete summary input, independent of the uploads page limit. */
+     getAnalyticsJobs(scope: AnalyticsJobScope): Promise<AnalyticsJob[]>;
++    getAttentionCounts(tenantId: string, now?: Date): Promise<{failedRecent: number; stuck: number}>;
+ 
+     /**
+      * Create a new job
+@@ -297,11 +318,18 @@ export interface DatabaseAdapter {
       */
      getLatest(userId: string, tenantId: string, wingetId: string): Promise<UploadHistoryRecord | null>;
  
@@ -1062,7 +1236,14 @@ index adaa21bf6..0252df23b 100644
      /**
       * Every recorded deployment, newest first. Used by the update check to scan
       * the whole local fleet without knowing the user ids up front.
-@@ -335,6 +360,12 @@ export interface DatabaseAdapter {
+      */
+     listAll(limit?: number): Promise<UploadHistoryRecord[]>;
++    /** Complete newest deployment per tenant/app; no global history window. */
++    currentDeployments(tenantId?: string): Promise<UploadHistoryRecord[]>;
+   };
+ 
+   updateCheckResults: {
+@@ -335,6 +363,12 @@ export interface DatabaseAdapter {
        tenantId: string,
        keep: Array<{ wingetId: string; intuneAppId: string }>
      ): Promise<number>;
@@ -1075,7 +1256,7 @@ index adaa21bf6..0252df23b 100644
    };
  
    updatePolicies: {
-@@ -391,6 +422,11 @@ export interface DatabaseAdapter {
+@@ -391,6 +425,11 @@ export interface DatabaseAdapter {
       */
      update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null>;
  
@@ -1087,7 +1268,7 @@ index adaa21bf6..0252df23b 100644
      /**
       * List a user's history with the policy target and deployed app name,
       * newest first, honoring the optional filters and pagination.
-@@ -443,4 +479,14 @@ export interface DatabaseAdapter {
+@@ -443,4 +482,14 @@ export interface DatabaseAdapter {
        data: Partial<Pick<ClaimedAppRecord, 'status' | 'intune_app_id'>>
      ): Promise<ClaimedAppRecord | null>;
    };

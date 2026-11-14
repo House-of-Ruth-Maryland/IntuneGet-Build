@@ -912,8 +912,81 @@ index 4ef4c0a2d..a74057e7c 100644
      signOut,
      requestAdminConsent,
      getShareableConsentUrl,
+diff --git a/lib/__tests__/azure-app-credential.test.ts b/lib/__tests__/azure-app-credential.test.ts
+index 1230ec185..b19ef6983 100644
+--- a/lib/__tests__/azure-app-credential.test.ts
++++ b/lib/__tests__/azure-app-credential.test.ts
+@@ -11,6 +11,8 @@ vi.mock('@azure/identity', () => ({
+ import { acquireAppOnlyToken, isManagedIdentityMode } from '@/lib/azure-app-credential';
+ 
+ const ENV_KEYS = [
++  'HRM_TENANT_ID',
++  'MCP_TENANT_ID',
+   'AZURE_AUTH_MODE',
+   'AZURE_MANAGED_IDENTITY_CLIENT_ID',
+   'AZURE_CLIENT_ID',
+@@ -129,6 +131,23 @@ describe('azure-app-credential', () => {
+   describe('managed-identity mode', () => {
+     beforeEach(() => {
+       process.env.AZURE_AUTH_MODE = 'managed-identity';
++      process.env.HRM_TENANT_ID = '11111111-1111-4111-8111-111111111111';
++    });
++
++    // HRM security review S1: another tenant's caller never gets the host identity's token.
++    it('refuses a tenant other than HRM_TENANT_ID before using the host identity', async () => {
++      expect(await acquireAppOnlyToken('22222222-2222-4222-8222-222222222222')).toEqual({ ok: false, error: 'consent_not_granted' });
++      expect(await acquireAppOnlyToken('')).toMatchObject({ ok: false });
++      delete process.env.HRM_TENANT_ID;
++      process.env.MCP_TENANT_ID = '11111111-1111-4111-8111-111111111111';
++      expect(await acquireAppOnlyToken('22222222-2222-4222-8222-222222222222')).toMatchObject({ ok: false });
++      expect(getTokenMock).not.toHaveBeenCalled();
++    });
++
++    it('keeps serving any caller while no tenant is configured (unchanged behavior)', async () => {
++      delete process.env.HRM_TENANT_ID;
++      getTokenMock.mockResolvedValueOnce({ token: 'mi-token', expiresOnTimestamp: Date.now() + 3600_000 });
++      expect(await acquireAppOnlyToken('22222222-2222-4222-8222-222222222222')).toMatchObject({ ok: true });
+     });
+ 
+     it('acquires a token from the managed identity (no fetch)', async () => {
+@@ -139,13 +158,16 @@ describe('azure-app-credential', () => {
+         expiresOnTimestamp: Date.now() + 3600_000,
+       });
+ 
+-      const r = await acquireAppOnlyToken('tenant-ignored');
++      const r = await acquireAppOnlyToken('11111111-1111-4111-8111-111111111111');
+       expect(r.ok).toBe(true);
+       if (r.ok) {
+         expect(r.accessToken).toBe('mi-token');
+         expect(r.expiresIn).toBeGreaterThan(3000);
+       }
+-      expect(getTokenMock).toHaveBeenCalledWith('https://graph.microsoft.com/.default');
++      expect(getTokenMock).toHaveBeenCalledWith(
++        'https://graph.microsoft.com/.default',
++        expect.objectContaining({ abortSignal: expect.any(AbortSignal) })
++      );
+       expect(fetchMock).not.toHaveBeenCalled();
+       vi.unstubAllGlobals();
+     });
+@@ -153,14 +175,14 @@ describe('azure-app-credential', () => {
+     it('maps CredentialUnavailableError to missing_credentials', async () => {
+       const err = Object.assign(new Error('no managed identity'), { name: 'CredentialUnavailableError' });
+       getTokenMock.mockRejectedValueOnce(err);
+-      const r = await acquireAppOnlyToken('tenant-1');
++      const r = await acquireAppOnlyToken('11111111-1111-4111-8111-111111111111');
+       expect(r.ok).toBe(false);
+       if (!r.ok) expect(r.error).toBe('missing_credentials');
+     });
+ 
+     it('maps other errors to network_error', async () => {
+       getTokenMock.mockRejectedValueOnce(new Error('imds timeout'));
+-      const r = await acquireAppOnlyToken('tenant-1');
++      const r = await acquireAppOnlyToken('11111111-1111-4111-8111-111111111111');
+       expect(r.ok).toBe(false);
+       if (!r.ok) expect(r.error).toBe('network_error');
+     });
 diff --git a/lib/auth-utils.ts b/lib/auth-utils.ts
-index c37a2ca67..18eabe49f 100644
+index c37a2ca67..dad6a5417 100644
 --- a/lib/auth-utils.ts
 +++ b/lib/auth-utils.ts
 @@ -5,6 +5,8 @@
@@ -925,7 +998,79 @@ index c37a2ca67..18eabe49f 100644
  
  /**
   * User information extracted from a Microsoft access token
-@@ -98,12 +100,13 @@ async function verifyTokenWithGraph(accessToken: string): Promise<TokenUserInfo
+@@ -26,6 +28,24 @@ const _tokenCache = new Map<string, { result: TokenUserInfo; expiresAt: number }
+ /** Maximum age of a cache entry, regardless of token expiry (5 minutes). */
+ const TOKEN_CACHE_TTL_MS = 5 * 60 * 1000;
+ 
++/** HRM security review S1: the most tokens kept, and the longest Authorization header read. */
++const TOKEN_CACHE_MAX = 1000;
++const MAX_AUTH_HEADER_LENGTH = 16384;
++const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
++
++/**
++ * HRM security review S1: the app's own sign-in client ID, read the same way app/layout.tsx hands it
++ * to the browser (runtime-config), so the browser's tokens always match. A token that another app
++ * obtained for Graph (its azp/appid claim names that app) is refused, even though Graph accepts it.
++ * Unset (or the build's placeholder) means no check, as before.
++ */
++function signInClientId(): string | null {
++  const id = (process.env.AZURE_CLIENT_ID || process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID || '')
++    .trim()
++    .toLowerCase();
++  return GUID.test(id) ? id : null;
++}
++
+ function _tokenCacheKey(token: string): string {
+   return crypto.createHash('sha256').update(token).digest('hex');
+ }
+@@ -49,16 +69,17 @@ async function verifyTokenWithGraph(accessToken: string): Promise<TokenUserInfo
+   }
+ 
+   // Evict stale entries when the map grows large (best-effort housekeeping).
+-  if (_tokenCache.size > 1000) {
++  if (_tokenCache.size > TOKEN_CACHE_MAX) {
+     for (const [key, entry] of _tokenCache) {
+       if (entry.expiresAt <= now) _tokenCache.delete(key);
+     }
+   }
+ 
+   try {
++    // HRM: never cached by fetch, and a slow Graph can't hold the request open.
+     const response = await fetch(
+       'https://graph.microsoft.com/v1.0/me?$select=id,displayName,userPrincipalName,mail',
+-      { headers: { Authorization: `Bearer ${accessToken}` } }
++      { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store', signal: AbortSignal.timeout(5000) }
+     );
+ 
+     if (!response.ok) {
+@@ -78,6 +99,14 @@ async function verifyTokenWithGraph(accessToken: string): Promise<TokenUserInfo
+       return null;
+     }
+ 
++    // HRM security review S1: the token must be unexpired and issued to this app's sign-in client.
++    if (typeof payload.exp !== 'number' || payload.exp * 1000 <= now) return null;
++    const expectedClient = signInClientId();
++    if (expectedClient) {
++      const client = typeof payload.azp === 'string' ? payload.azp : typeof payload.appid === 'string' ? payload.appid : '';
++      if (client.toLowerCase() !== expectedClient) return null;
++    }
++
+     const result: TokenUserInfo = {
+       userId: me.id as string,
+       userEmail: ((me.userPrincipalName || me.mail || 'unknown') as string),
+@@ -86,8 +115,9 @@ async function verifyTokenWithGraph(accessToken: string): Promise<TokenUserInfo
+     };
+ 
+     // Cache until the token expires or TTL elapses, whichever comes first.
+-    const tokenExpMs =
+-      typeof payload.exp === 'number' ? payload.exp * 1000 : now + TOKEN_CACHE_TTL_MS;
++    const tokenExpMs = payload.exp * 1000;
++    // A hard cap, so a burst of distinct valid tokens can't grow the cache without limit.
++    if (_tokenCache.size >= TOKEN_CACHE_MAX) _tokenCache.delete(_tokenCache.keys().next().value!);
+     _tokenCache.set(cacheKey, { result, expiresAt: Math.min(tokenExpMs, now + TOKEN_CACHE_TTL_MS) });
+ 
+     return result;
+@@ -98,13 +128,14 @@ async function verifyTokenWithGraph(accessToken: string): Promise<TokenUserInfo
  }
  
  /**
@@ -938,13 +1083,15 @@ index c37a2ca67..18eabe49f 100644
 + * isn't a genuine Graph token. The proxy uses this to answer refused users with a clear 403.
   */
 -export async function parseAccessToken(authHeader: string | null): Promise<TokenUserInfo | null> {
+-  if (!authHeader?.startsWith('Bearer ')) {
 +export async function verifyAccessToken(
 +  authHeader: string | null
 +): Promise<{ user: TokenUserInfo; access: AccessDecision } | null> {
-   if (!authHeader?.startsWith('Bearer ')) {
++  if (!authHeader?.startsWith('Bearer ') || authHeader.length > MAX_AUTH_HEADER_LENGTH) {
      return null;
    }
-@@ -113,7 +116,23 @@ export async function parseAccessToken(authHeader: string | null): Promise<Token
+ 
+@@ -113,7 +144,23 @@ export async function parseAccessToken(authHeader: string | null): Promise<Token
      return null;
    }
  
@@ -969,6 +1116,60 @@ index c37a2ca67..18eabe49f 100644
  }
  
  /**
+diff --git a/lib/azure-app-credential.ts b/lib/azure-app-credential.ts
+index 42736b6df..7144f70df 100644
+--- a/lib/azure-app-credential.ts
++++ b/lib/azure-app-credential.ts
+@@ -23,8 +23,12 @@
+  */
+ 
+ import { ManagedIdentityCredential } from '@azure/identity';
++// HRM: the managed identity serves only HRM's own tenant (security review S1, November 2026).
++import { configuredTenantId } from '@/lib/hrm/admin-access';
+ 
+ const GRAPH_DEFAULT_SCOPE = 'https://graph.microsoft.com/.default';
++/** HRM: a token request never holds a caller longer than this. */
++const TOKEN_TIMEOUT_MS = 10_000;
+ 
+ export type AppTokenError =
+   | 'missing_credentials'
+@@ -65,9 +69,16 @@ function getManagedIdentityCredential(): ManagedIdentityCredential {
+ /**
+  * Acquire an app-only Microsoft Graph access token for `tenantId`.
+  * In managed-identity mode the tenant is the managed identity's home tenant and
+- * `tenantId` is ignored.
++ * `tenantId` is ignored, so HRM refuses any tenant other than HRM_TENANT_ID (or MCP_TENANT_ID)
++ * when that is set: a signed-in user from another tenant never gets the host tenant's token.
+  */
+ export async function acquireAppOnlyToken(tenantId: string): Promise<AppTokenResult> {
++  if (isManagedIdentityMode()) {
++    const hostTenant = configuredTenantId();
++    if (hostTenant && hostTenant !== String(tenantId ?? '').trim().toLowerCase()) {
++      return { ok: false, error: 'consent_not_granted' };
++    }
++  }
+   return isManagedIdentityMode()
+     ? acquireViaManagedIdentity()
+     : acquireViaClientSecret(tenantId);
+@@ -75,7 +86,9 @@ export async function acquireAppOnlyToken(tenantId: string): Promise<AppTokenRes
+ 
+ async function acquireViaManagedIdentity(): Promise<AppTokenResult> {
+   try {
+-    const token = await getManagedIdentityCredential().getToken(GRAPH_DEFAULT_SCOPE);
++    const token = await getManagedIdentityCredential().getToken(GRAPH_DEFAULT_SCOPE, {
++      abortSignal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
++    });
+     if (!token?.token) {
+       return { ok: false, error: 'missing_credentials' };
+     }
+@@ -109,6 +122,7 @@ async function acquireViaClientSecret(tenantId: string): Promise<AppTokenResult>
+       `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+       {
+         method: 'POST',
++        signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+         body: new URLSearchParams({
+           client_id: clientId,
 diff --git a/lib/hrm/__tests__/admin-access.test.ts b/lib/hrm/__tests__/admin-access.test.ts
 new file mode 100644
 index 000000000..16d191f93
@@ -1941,12 +2142,88 @@ index 000000000..45312a94c
 + expect(report.status).toBe('Check startup reports');
 + expect(report.todos).toContainEqual(expect.objectContaining({id:'startup-outdated',title:'Startup installation reports need review'}));
 +});
+diff --git a/lib/hrm/__tests__/token-binding.test.ts b/lib/hrm/__tests__/token-binding.test.ts
+new file mode 100644
+index 000000000..2e58981b9
+--- /dev/null
++++ b/lib/hrm/__tests__/token-binding.test.ts
+@@ -0,0 +1,70 @@
++/**
++ * HRM security review S1 (November 2026): sign-in tokens must be unexpired, issued to this app's
++ * own sign-in client when one is configured, and of a bounded size. Group membership is covered by
++ * admin-access.test.ts; these run with no group set.
++ */
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { parseAccessToken } from '@/lib/auth-utils';
++
++const TENANT = '11111111-1111-4111-8111-111111111111';
++const USER = '22222222-2222-4222-8222-222222222222';
++const CLIENT = '33333333-3333-4333-8333-333333333333';
++const OTHER_CLIENT = '44444444-4444-4444-8444-444444444444';
++
++let nonce = 0;
++const jwt = (claims: Record<string, unknown> = {}) =>
++  [
++    Buffer.from(JSON.stringify({ alg: 'RS256' })).toString('base64url'),
++    Buffer.from(
++      JSON.stringify({ tid: TENANT, oid: USER, azp: CLIENT, exp: Math.floor(Date.now() / 1000) + 600, nonce: nonce++, ...claims })
++    ).toString('base64url'),
++    'unsigned',
++  ].join('.');
++
++let fetchMock: ReturnType<typeof vi.fn>;
++beforeEach(() => {
++  vi.stubEnv('HRM_ADMIN_GROUP_IDS', '');
++  vi.stubEnv('AZURE_CLIENT_ID', CLIENT);
++  vi.stubEnv('NEXT_PUBLIC_AZURE_AD_CLIENT_ID', '');
++  fetchMock = vi.fn(async () => Response.json({ id: USER, displayName: 'Example', userPrincipalName: 'staff@example.test' }));
++  vi.stubGlobal('fetch', fetchMock);
++});
++afterEach(() => {
++  vi.unstubAllEnvs();
++  vi.unstubAllGlobals();
++});
++
++describe('sign-in token checks', () => {
++  it('accepts a token issued to this app (v2 azp or v1 appid claim)', async () => {
++    expect(await parseAccessToken(`Bearer ${jwt()}`)).toMatchObject({ tenantId: TENANT, userId: USER });
++    expect(await parseAccessToken(`Bearer ${jwt({ azp: undefined, appid: CLIENT })}`)).toMatchObject({ userId: USER });
++  });
++
++  it('refuses a Graph token another app obtained, or one with no client claim', async () => {
++    expect(await parseAccessToken(`Bearer ${jwt({ azp: OTHER_CLIENT })}`)).toBeNull();
++    expect(await parseAccessToken(`Bearer ${jwt({ azp: undefined })}`)).toBeNull();
++  });
++
++  it('skips the client check while no sign-in client is configured', async () => {
++    vi.stubEnv('AZURE_CLIENT_ID', '');
++    expect(await parseAccessToken(`Bearer ${jwt({ azp: OTHER_CLIENT })}`)).toMatchObject({ userId: USER });
++  });
++
++  it('refuses expired tokens and tokens without an expiry, even when Graph answers', async () => {
++    expect(await parseAccessToken(`Bearer ${jwt({ exp: 0 })}`)).toBeNull();
++    expect(await parseAccessToken(`Bearer ${jwt({ exp: undefined })}`)).toBeNull();
++  });
++
++  it('refuses an oversized header without calling Graph', async () => {
++    expect(await parseAccessToken(`Bearer ${'a'.repeat(8000)}.${'b'.repeat(8000)}.${'c'.repeat(500)}`)).toBeNull();
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++
++  it('asks Graph with a deadline and no fetch caching', async () => {
++    await parseAccessToken(`Bearer ${jwt()}`);
++    expect(fetchMock).toHaveBeenCalledWith(
++      expect.stringContaining('graph.microsoft.com/v1.0/me'),
++      expect.objectContaining({ cache: 'no-store', signal: expect.any(AbortSignal) })
++    );
++  });
++});
 diff --git a/lib/hrm/admin-access.ts b/lib/hrm/admin-access.ts
 new file mode 100644
-index 000000000..593d48e74
+index 000000000..135350b0e
 --- /dev/null
 +++ b/lib/hrm/admin-access.ts
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,159 @@
 +/**
 + * HRM patch 0056: only HRM's IT admins may use IntuneGet, behind Cloudflare Access.
 + *
@@ -1989,6 +2266,15 @@ index 000000000..593d48e74
 +
 +type Env = Record<string, string | undefined>;
 +
++/**
++ * HRM_TENANT_ID (or the older MCP_TENANT_ID), lowercased, or null when unset or not a GUID.
++ * Sign-in, the managed identity's Graph tokens and the MCP read API all serve only this tenant.
++ */
++export function configuredTenantId(env: Env = process.env): string | null {
++  const tenant = (env.HRM_TENANT_ID || env.MCP_TENANT_ID || '').trim().toLowerCase();
++  return GUID.test(tenant) ? tenant : null;
++}
++
 +/** The access settings, or null when no valid group is set (access isn't limited). */
 +export function adminAccessConfig(env: Env = process.env): AdminAccessConfig | null {
 +  const groupIds = [...new Set(
@@ -1998,8 +2284,7 @@ index 000000000..593d48e74
 +      .filter((id) => GUID.test(id)),
 +  )].slice(0, MAX_ADMIN_GROUPS);
 +  if (groupIds.length === 0) return null;
-+  const tenant = (env.HRM_TENANT_ID || env.MCP_TENANT_ID || '').trim().toLowerCase();
-+  return { groupIds, tenantId: GUID.test(tenant) ? tenant : null };
++  return { groupIds, tenantId: configuredTenantId(env) };
 +}
 +
 +/** For Home's Server status: whether sign-in is limited to the admins group. */
@@ -2100,17 +2385,17 @@ index 000000000..593d48e74
 +}
 diff --git a/lib/hrm/attention.ts b/lib/hrm/attention.ts
 new file mode 100644
-index 000000000..243726698
+index 000000000..ec771efcc
 --- /dev/null
 +++ b/lib/hrm/attention.ts
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,63 @@
 +/**
 + * HRM patch 0055: the Home page's "Needs attention" lists for one tenant, shared by Home
 + * (app/api/hrm/home) and the MCP read API so both always agree.
 + */
 +
 +import { getDatabase } from '@/lib/db';
-+import { attentionCounts, unreachedApps } from '@/lib/hrm/home';
++import { unreachedApps, type attentionCounts } from '@/lib/hrm/home';
 +import { listInstallStatus } from '@/lib/hrm/install-status-check';
 +import type { InstallStatusRecord } from '@/lib/hrm/install-status';
 +
@@ -2128,12 +2413,14 @@ index 000000000..243726698
 +
 +export async function readTenantAttention(tenantId: string): Promise<TenantAttention> {
 +  const db = getDatabase();
-+  const [jobs, installs, deployments] = await Promise.all([
-+    db.jobs.getAnalyticsJobs({ tenantId }).catch(() => null),
++  const [attention, installs, deployments] = await Promise.all([
++    // Security review (November 2026): counted in the database, not by loading every job.
++    db.jobs.getAttentionCounts(tenantId).catch(() => null),
 +    // HRM patch 0019: apps with devices that failed to install (counts only)
 +    listInstallStatus(tenantId).catch(() => []),
-+    // HRM patch 0032: when each copy was deployed, for apps that reach no devices
-+    db.uploadHistory.listAll(2000).then((rows) => rows.filter((r) => r.intune_tenant_id === tenantId)).catch(() => []),
++    // HRM patch 0032: when each copy was deployed, for apps that reach no devices. The newest copy of
++    // every app, with no history window (security review S6).
++    db.uploadHistory.currentDeployments(tenantId).catch(() => []),
 +  ]);
 +  const installFailures = installs
 +    .filter((app) => app.failed > 0)
@@ -2163,7 +2450,7 @@ index 000000000..243726698
 +  const unreached = unreachedApps(installs, deployments).filter((app) => !retiring.has(app.intuneAppId.toLowerCase()));
 +  // Its uninstall results show in its Inventory details, not as install failures.
 +  const failing = installFailures.filter((app) => !retiring.has(app.intuneAppId.toLowerCase()));
-+  return { attention: jobs ? attentionCounts(jobs) : null, installFailures: failing, unreached, rollbackGaps, oldCopiesKept, installs, retiring };
++  return { attention, installFailures: failing, unreached, rollbackGaps, oldCopiesKept, installs, retiring };
 +}
 diff --git a/lib/hrm/mcp-api.ts b/lib/hrm/mcp-api.ts
 new file mode 100644

@@ -100,6 +100,13 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm ci --prefix packager --ignore-scripts --no-audit --no-fund
+      - name: Audit production dependencies
+        # Security review S8 (November 2026): known advisories in what the image ships (app and
+        # packager), moderate and above, fail the check. Development-only packages are left out.
+        working-directory: upstream
+        run: |
+          npm audit --omit=dev --audit-level=moderate --no-fund
+          npm audit --prefix packager --omit=dev --audit-level=moderate --no-fund
       - name: Require PowerShell for startup Beta fixtures
         run: pwsh -NoProfile -NonInteractive -Command 'exit 0'
       - name: Check Help, app and packager types, and regressions

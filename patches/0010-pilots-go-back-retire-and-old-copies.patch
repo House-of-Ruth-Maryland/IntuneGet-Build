@@ -241,10 +241,10 @@ index 000000000..95f11ad61
 +}
 diff --git a/app/api/hrm/retire/route.test.ts b/app/api/hrm/retire/route.test.ts
 new file mode 100644
-index 000000000..0441e66cc
+index 000000000..317b88dd1
 --- /dev/null
 +++ b/app/api/hrm/retire/route.test.ts
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,174 @@
 +// HRM patch 0038: retiring an app from Inventory.
 +import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 +import {NextRequest} from 'next/server';
@@ -254,6 +254,7 @@ index 000000000..0441e66cc
 +vi.mock('@/lib/intune/graph-client',()=>({getServicePrincipalToken:async()=>'token'}));
 +import {sqliteDb,sqliteRetirements,sqlitePilotRollouts,closeSqliteDb} from '@/lib/db/sqlite';
 +import {pilotHold} from '@/lib/hrm/pilot-guard';
++import {clearInstallCountCache} from '@/lib/hrm/install-count-cache';
 +import {GET,POST} from './route';
 +const APP='11111111-1111-4111-8111-111111111111',G1='22222222-2222-4222-8222-222222222222',OLDER='44444444-4444-4444-8444-444444444444';
 +let groups:Array<Record<string,unknown>>;let calls:Array<{method:string;url:string;body?:unknown}>;let report:unknown[][];let links:unknown[];let failAssign:boolean;
@@ -262,7 +263,7 @@ index 000000000..0441e66cc
 +const get=()=>GET(new NextRequest(`http://localhost/api/hrm/retire?appId=${APP}`,{headers:{Authorization:'Bearer fixture'}}));
 +async function start(){const {preview}=await (await post({action:'preview',appId:APP})).json();return post({action:'start',appId:APP,token:preview.token,confirmed:true});}
 +beforeEach(async()=>{
-+ closeSqliteDb();state.auth=true;groups=[required()];calls=[];report=[['Installed']];links=[{targetId:OLDER,targetType:'child'}];failAssign=false;
++ closeSqliteDb();clearInstallCountCache();state.auth=true;groups=[required()];calls=[];report=[['Installed']];links=[{targetId:OLDER,targetType:'child'}];failAssign=false;
 + const job=await sqliteDb.jobs.create({user_id:'staff',tenant_id:'tenant',winget_id:'Example.App',version:'1.0',display_name:'Example',installer_type:'exe',installer_url:'https://example.invalid/app.exe',package_config:{},status:'queued'});
 + await sqliteDb.jobs.update(job.id,{status:'deployed',intune_app_id:APP,completed_at:'2026-01-01T00:00:00Z'});
 + await sqliteDb.uploadHistory.create({packaging_job_id:job.id,user_id:'staff',intune_tenant_id:'tenant',winget_id:'Example.App',intune_app_id:APP,version:'1.0',display_name:'Example'});
@@ -332,7 +333,7 @@ index 000000000..0441e66cc
 +  await sqliteDb.updatePolicies.upsert({user_id:'staff',tenant_id:'tenant',winget_id:'Example.App',policy_type:'auto_update',is_enabled:true,updated_at:new Date().toISOString()});
 +  await start();const id=(await (await get()).json()).retirement.id;calls=[];
 +  const waiting=await post({action:'delete',appId:APP,id});
-+  expect(waiting.status).toBe(409);expect((await waiting.json()).error).toMatch(/1 installed and 0 pending/);expect(calls).toEqual([]);
++  expect(waiting.status).toBe(409);expect((await waiting.json()).error).toMatch(/1 installed\./);expect(calls).toEqual([]);
 +  report=[['Not installed']];
 +  expect((await post({action:'delete',appId:APP,id})).status).toBe(200);
 +  expect(calls.map((c)=>c.method+' '+c.url.split('/').pop())).toEqual([`POST updateRelationships`,`DELETE ${APP}`]);
@@ -353,17 +354,83 @@ index 000000000..0441e66cc
 +  expect((await post({action:'preview',appId:APP})).status).toBe(409);
 + });
 +});
++
++// Security review S4 and S5 (November 2026).
++describe('retirement safety',()=>{
++ it('requires delete anyway for failed, unknown or empty results, and says when it is ready',async()=>{
++  await start();const id=(await (await get()).json()).retirement.id;links=[];
++  for(const [rows,reason] of [[[['Failed']],/1 failed to uninstall/],[[['unknown']],/1 unknown/],[[],/No computer has reported/]] as const) {
++   report=rows as unknown as unknown[][];calls=[];clearInstallCountCache();
++   expect((await (await get()).json()).ready).toBe(false);
++   const refused=await post({action:'delete',appId:APP,id});
++   expect(refused.status).toBe(409);expect((await refused.json()).error).toMatch(reason);expect(calls).toEqual([]);
++  }
++  report=[['Not installed']];clearInstallCountCache();
++  expect((await (await get()).json())).toMatchObject({ready:true,counts:{notInstalled:1}});
++  report=[['Failed']];
++  expect((await post({action:'delete',appId:APP,id,force:true})).status).toBe(200);
++ });
++ it('refuses to delete when the uninstall report is incomplete, even with delete anyway',async()=>{
++  await start();const id=(await (await get()).json()).retirement.id;links=[];report=[['Not installed']];
++  const original=globalThis.fetch;
++  vi.stubGlobal('fetch',vi.fn(async(url:string,init?:RequestInit)=>url.includes('retrieveDeviceAppInstallationStatusReport')
++   ?Response.json({Schema:[{Column:'AppInstallState'}],Values:[['Not installed']],TotalRowCount:5}):original(url,init)));
++  calls=[];
++  const refused=await post({action:'delete',appId:APP,id,force:true});
++  expect(refused.status).toBe(424);expect((await refused.json()).error).toMatch(/complete uninstall results/);expect(calls).toEqual([]);
++ });
++ it('keeps the hold when Intune does not answer, and settles it from the live groups after a minute',async()=>{
++  const original=globalThis.fetch;
++  vi.stubGlobal('fetch',vi.fn(async(url:string,init?:RequestInit)=>{
++   if(url.endsWith('/assign'))throw new TypeError('connection lost');return original(url,init);
++  }));
++  const response=await start();expect(response.status).toBe(424);expect((await response.json()).error).toMatch(/Check retirement state/);
++  const row=sqliteRetirements.latest('tenant',APP)!;expect(row.phase).toBe('starting');
++  expect((await (await get()).json())).toMatchObject({retirement:{phase:'starting'},hold:null});
++  expect((await post({action:'recover',appId:APP,id:row.id})).status).toBe(409);
++  expect((await post({action:'cancel',appId:APP,id:row.id})).status).toBe(409);
++  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(Date.now()+61000);
++  try {
++   expect((await post({action:'recover',appId:APP,id:row.id})).status).toBe(200);
++   expect(sqliteRetirements.latest('tenant',APP)).toBeNull();expect(await pilotHold('tenant','Example.App')).toBeNull();
++  } finally {vi.useRealTimers();}
++ });
++ it('finishes a start, and a cancel, that Intune applied after their answers were lost',async()=>{
++  const original=globalThis.fetch;
++  vi.stubGlobal('fetch',vi.fn(async(url:string,init?:RequestInit)=>{
++   if(url.endsWith('/assign')){groups=JSON.parse(String(init?.body)).mobileAppAssignments;throw new TypeError('reply lost');}
++   return original(url,init);
++  }));
++  expect((await start()).status).toBe(424);
++  const row=sqliteRetirements.latest('tenant',APP)!;expect(row.phase).toBe('starting');
++  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(Date.now()+61000);
++  try {
++   expect((await post({action:'recover',appId:APP,id:row.id})).status).toBe(200);
++   expect(sqliteRetirements.latest('tenant',APP)?.phase).toBe('uninstalling');
++   expect((await post({action:'cancel',appId:APP,id:row.id})).status).toBe(424);
++   expect((await post({action:'cancel',appId:APP,id:row.id})).status).toBe(200);
++   expect(sqliteRetirements.latest('tenant',APP)?.phase).toBe('cancelled');
++  } finally {vi.useRealTimers();}
++ });
++ it('treats a server error from Intune as unconfirmed, not refused',async()=>{
++  const original=globalThis.fetch;
++  vi.stubGlobal('fetch',vi.fn(async(url:string,init?:RequestInit)=>url.endsWith('/assign')?new Response(null,{status:503}):original(url,init)));
++  expect((await start()).status).toBe(424);
++  expect(sqliteRetirements.latest('tenant',APP)?.phase).toBe('starting');
++ });
++});
 diff --git a/app/api/hrm/retire/route.ts b/app/api/hrm/retire/route.ts
 new file mode 100644
-index 000000000..d0ac169b2
+index 000000000..6d7663016
 --- /dev/null
 +++ b/app/api/hrm/retire/route.ts
-@@ -0,0 +1,210 @@
+@@ -0,0 +1,267 @@
 +// HRM patch 0038: retire an app from Intune.
 +//   GET  ?appId=  this copy's retirement (if any), live install counts while uninstalling, and anything that blocks starting
 +//   POST { action: 'preview', appId }  read the copy and its groups from Intune; returns a review token
 +//   POST { action: 'start', appId, token, confirmed: true }  change every group to Uninstall
 +//   POST { action: 'cancel', appId, id }  put the saved groups back (only if Intune still shows the Uninstall groups)
++//   POST { action: 'recover', appId, id }  settle a start that was interrupted (security review S5)
 +//   POST { action: 'delete', appId, id, force? }  delete the app from Intune once devices report it gone
 +// Everything is checked against Intune again before a change. Failures use 409/424, because
 +// Cloudflare replaces 502 with its own page. Messages carry app names and versions only.
@@ -374,6 +441,8 @@ index 000000000..d0ac169b2
 +import { GUID, summarizeAssignments } from '@/lib/hrm/app-insights';
 +import { pilotGraph, PilotError } from '@/lib/hrm/pilot-graph';
 +import type { GraphAssignment } from '@/lib/hrm/duplicates';
++import { cachedInstallCounts } from '@/lib/hrm/install-count-cache';
++import { notReadyReason, retirementReady } from '@/lib/hrm/retire-readiness';
 +import { retireToken, sameGroups, toUninstallAssignments, type RetirePreview, type RetireStatus } from '@/lib/hrm/retire';
 +import type { Retirement } from '@/lib/hrm/retire-store';
 +
@@ -388,6 +457,12 @@ index 000000000..d0ac169b2
 +  return message ? ` Intune said: ${message.slice(0, 200)}` : '';
 +}
 +
++/** Intune may or may not have applied a group change (no answer, timeout or server error). */
++class UncertainChange extends Error {}
++
++/** Wait this long after an interrupted start before reading its groups, so a slow request can finish. */
++const RECOVER_AFTER_MS = 60_000;
++
 +async function connect(user: User) {
 +  const token = await getServicePrincipalToken(user.tenantId);
 +  if (!token) throw new PilotError("Couldn't reach Intune. Try again.", 424);
@@ -399,7 +474,11 @@ index 000000000..d0ac169b2
 +  return {
 +    ...graph,
 +    async setGroups(appId: string, rows: GraphAssignment[]) {
-+      const response = await call(`/deviceAppManagement/mobileApps/${appId}/assign`, { method: 'POST', body: JSON.stringify({ mobileAppAssignments: graph.input(rows) }) });
++      // Security review S5: no answer, a timeout or a server error doesn't mean Intune refused the
++      // change. It may have applied it, so the caller keeps its hold and checks the live groups later.
++      const response = await call(`/deviceAppManagement/mobileApps/${appId}/assign`, { method: 'POST', body: JSON.stringify({ mobileAppAssignments: graph.input(rows) }) })
++        .catch(() => { throw new UncertainChange(); });
++      if (response.status >= 500 || response.status === 408 || response.status === 429) throw new UncertainChange();
 +      return response.ok ? null : await intuneReason(response);
 +    },
 +    async relationships(appId: string) {
@@ -476,12 +555,16 @@ index 000000000..d0ac169b2
 +  let counts: RetireStatus['counts'] = null;
 +  if (latest?.phase === 'uninstalling') {
 +    try {
-+      const { topErrors: _errors, ...rest } = await (await connect(user)).counts(appId);
++      // Security review: several people looking at the same app share one Intune read for 15 seconds.
++      // Delete always reads fresh counts.
++      const { topErrors: _errors, ...rest } = await cachedInstallCounts(user.tenantId, appId, async () => (await connect(user)).counts(appId));
 +      void _errors;
 +      counts = rest;
 +    } catch { counts = null; }
 +  }
-+  return reply({ supported: true, retirement: latest ? view(latest) : null, counts, hold: latest?.phase === 'uninstalling' ? null : await blockedStart(user, appId) } satisfies RetireStatus);
++  const ready = latest?.phase === 'uninstalling' ? retirementReady(counts, latest.uninstall_assignments.length > 0) : false;
++  const hold = latest?.phase === 'uninstalling' || latest?.phase === 'starting' ? null : await blockedStart(user, appId);
++  return reply({ supported: true, retirement: latest ? view(latest) : null, counts, ready, hold } satisfies RetireStatus);
 +}
 +
 +export async function POST(request: NextRequest) {
@@ -490,7 +573,7 @@ index 000000000..d0ac169b2
 +  if (!isSqliteMode()) return reply({ error: 'Retiring an app needs this server’s SQLite mode.' }, 409);
 +  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
 +  const appId = typeof body?.appId === 'string' ? body.appId : '';
-+  if (!body || !['preview', 'start', 'cancel', 'delete'].includes(String(body.action)) || !GUID.test(appId)) return reply({ error: 'Invalid request' }, 400);
++  if (!body || !['preview', 'start', 'recover', 'cancel', 'delete'].includes(String(body.action)) || !GUID.test(appId)) return reply({ error: 'Invalid request' }, 400);
 +  const actor = user.userEmail || 'a staff member';
 +  try {
 +    if (body.action === 'preview') {
@@ -514,7 +597,14 @@ index 000000000..d0ac169b2
 +        throw new PilotError(error instanceof Error && /still running/.test(error.message) ? 'A deployment for this app is still running. Check Deployments.' : 'This app is already being retired.');
 +      }
 +      const graph = await connect(user);
-+      const refused = uninstall.length > 0 ? await graph.setGroups(checked.appId, uninstall) : null;
++      let refused: string | null;
++      try {
++        refused = uninstall.length > 0 ? await graph.setGroups(checked.appId, uninstall) : null;
++      } catch (error) {
++        // The hold stays: Intune may have changed the groups. Check retirement state settles it.
++        if (error instanceof UncertainChange) throw new PilotError("Intune didn't confirm the group change. Wait 1 minute, then use Check retirement state in this app's details.", 424);
++        throw error;
++      }
 +      if (refused !== null) {
 +        retire.release(user.tenantId, id);
 +        throw new PilotError(`Intune didn't accept the Uninstall groups. Nothing was changed.${refused}`, 424);
@@ -526,15 +616,45 @@ index 000000000..d0ac169b2
 +    }
 +
 +    const row = retire.active(user.tenantId, appId);
-+    if (!row || row.id !== body.id || row.phase !== 'uninstalling') throw new PilotError('This retirement is no longer open. Refresh the app.');
++    if (!row || row.id !== body.id) throw new PilotError('This retirement is no longer open. Refresh the app.');
++    if (body.action === 'recover' && row.phase === 'starting' && Date.now() - Date.parse(row.started_at) < RECOVER_AFTER_MS) {
++      throw new PilotError('The request to change the groups may still be running. Wait 1 minute, then check again.');
++    }
 +    const graph = await connect(user);
 +    const [app, live] = await Promise.all([graph.app(row.app_id), graph.assignments(row.app_id)]);
++
++    // Security review S5: a start whose answer was lost. The live groups say what Intune did.
++    if (body.action === 'recover') {
++      if (row.phase !== 'starting') return reply({ recovered: true });
++      if (sameGroups(live, row.uninstall_assignments)) {
++        retire.started(user.tenantId, row.id);
++        await note(user, row.app_id, app.displayName, app.displayVersion ?? '', row.uninstall_assignments, `Retirement started by ${row.started_by}: groups changed to Uninstall`);
++      } else if (sameGroups(live, row.saved_assignments)) {
++        retire.release(user.tenantId, row.id);
++      } else {
++        throw new PilotError("The app's groups match neither its saved groups nor the Uninstall groups. Set one of them in Intune, then check again. Nothing was changed.");
++      }
++      console.log(JSON.stringify({ route: '/api/hrm/retire', action: 'recover', app: row.app_id }));
++      return reply({ recovered: true });
++    }
++    if (row.phase !== 'uninstalling') throw new PilotError('Retiring this app was interrupted. Use Check retirement state first.');
 +
 +    if (body.action === 'cancel') {
 +      // HRM patch 0040: a removal copy has no groups to put back. Deleting it stops the uninstall.
 +      if (row.purpose === 'removal') throw new PilotError('This copy was added only to remove the app, so there are no groups to put back. Delete it from Intune to stop removing the app.');
++      // Security review S5: an earlier cancel may have reached Intune after its answer was lost.
++      if (sameGroups(live, row.saved_assignments) && !sameGroups(live, row.uninstall_assignments)) {
++        retire.finish(user.tenantId, row.id, 'cancelled', actor);
++        return reply({ cancelled: true });
++      }
 +      if (!sameGroups(live, row.uninstall_assignments)) throw new PilotError("The app's groups changed in Intune since retiring started, so they weren't put back. Set them in Intune, then cancel again.");
-+      const refused = await graph.setGroups(row.app_id, row.saved_assignments);
++      let refused: string | null;
++      try {
++        refused = await graph.setGroups(row.app_id, row.saved_assignments);
++      } catch (error) {
++        if (error instanceof UncertainChange) throw new PilotError("Intune didn't confirm putting the groups back. Wait 1 minute, then cancel again.", 424);
++        throw error;
++      }
 +      if (refused !== null) throw new PilotError(`Intune didn't accept the saved groups. The app still has its Uninstall groups.${refused}`, 424);
 +      retire.finish(user.tenantId, row.id, 'cancelled', actor);
 +      await note(user, row.app_id, app.displayName, app.displayVersion ?? '', row.saved_assignments, `Retirement cancelled by ${actor}: groups put back`);
@@ -542,10 +662,13 @@ index 000000000..d0ac169b2
 +    }
 +
 +    // delete
-+    const counts = await graph.counts(row.app_id);
-+    const remaining = counts.installed + counts.pending;
-+    if (remaining > 0 && body.force !== true) {
-+      throw new PilotError(`${counts.installed} installed and ${counts.pending} pending devices still report this app. Wait for them, or confirm deleting anyway.`);
++    // Security review S4: a complete, fresh report, and failed or unknown results need "delete anyway".
++    const counts = await graph.counts(row.app_id).catch(() => {
++      throw new PilotError("Couldn't read complete uninstall results from Intune. Nothing was deleted. Try again in a few minutes.", 424);
++    });
++    const remaining = counts.installed + counts.pending + counts.failed + counts.other;
++    if (!retirementReady(counts, row.uninstall_assignments.length > 0) && body.force !== true) {
++      throw new PilotError(`${notReadyReason(counts)} Wait for computers to report, or confirm deleting anyway.`);
 +    }
 +    const links = await graph.relationships(row.app_id);
 +    const parents = links.filter((r) => r.targetType === 'parent');
@@ -1138,10 +1261,10 @@ index 000000000..695dae132
 +}
 diff --git a/components/hrm/RetirePanel.tsx b/components/hrm/RetirePanel.tsx
 new file mode 100644
-index 000000000..035413bb4
+index 000000000..51ddb4e65
 --- /dev/null
 +++ b/components/hrm/RetirePanel.tsx
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,191 @@
 +'use client';
 +// HRM patch 0038: retire an app. Change its groups to Uninstall, wait for devices to report it gone,
 +// then delete it from Intune. Cancel retiring puts the saved groups back. Counts only, never devices.
@@ -1159,8 +1282,10 @@ index 000000000..035413bb4
 +  startEmpty: 'Start retiring',
 +  keep: 'Keep it for now',
 +  remove: 'Delete from Intune',
-+  force: 'Delete even though computers still report it',
++  force: 'Delete without confirmation from Intune',
 +  cancel: 'Cancel retiring',
++  // Security review S5: settle a start whose answer from Intune was lost
++  recover: 'Check retirement state',
 +  // HRM patch 0040: a copy added from Discovered apps only to remove the app
 +  removing: 'Removing this app',
 +} as const;
@@ -1168,19 +1293,48 @@ index 000000000..035413bb4
 +const when = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 +
 +export function RetirePanel({ appId, onDeleted }: { appId: string; onDeleted?: () => void }) {
-+  const { data, action } = useRetire(appId);
++  const { data, action, error, isLoading, refetch } = useRetire(appId);
 +  const [open, setOpen] = useState(false);
 +  const [review, setReview] = useState<RetirePreview | null>(null);
 +  const [confirmed, setConfirmed] = useState(false);
 +  const [force, setForce] = useState(false);
 +  const [confirmDelete, setConfirmDelete] = useState(false);
++  // Security review U4 (November 2026): a failed load says so, instead of hiding the panel.
++  if (isLoading) return <p role="status" className="text-sm text-text-muted">Checking whether this app is being retired…</p>;
++  if (error) {
++    return (
++      <p role="alert" className="text-sm text-status-error">
++        {error.message}{' '}
++        <button type="button" className="text-accent-cyan hover:underline" onClick={() => void refetch()}>Try again</button>
++      </p>
++    );
++  }
 +  if (!data?.supported) return null;
 +  const retirement = data.retirement?.phase === 'uninstalling' ? data.retirement : null;
 +
++  // Security review S5: Intune didn't answer when the groups were changed. Updates and deployments stay
++  // held until the live groups show what happened.
++  if (data.retirement?.phase === 'starting') {
++    const starting = data.retirement;
++    return (
++      <div className="rounded-lg border border-status-warning/30 bg-status-warning/5 p-3">
++        <h4 className="text-sm font-semibold text-text-primary mb-1">Retiring was interrupted</h4>
++        <p className="text-sm text-text-secondary">
++          Intune didn&apos;t confirm the group change started {when(starting.startedAt)}, by {starting.startedBy}. Updates and deployments for this app are held until its state is checked. Checking reads the live groups and changes nothing in Intune.
++        </p>
++        {action.error && <p role="alert" className="mt-2 text-sm text-status-error">{action.error.message}</p>}
++        <Button size="sm" variant="outline" className="mt-3 border-overlay/10" disabled={action.isPending}
++          onClick={() => action.mutate({ action: 'recover', id: starting.id })}>
++          {action.isPending ? 'Checking…' : RETIRE_LABELS.recover}
++        </Button>
++      </div>
++    );
++  }
++
 +  if (retirement) {
 +    const c = data.counts;
-+    const remaining = c ? c.installed + c.pending : null;
-+    const ready = remaining === 0;
++    // Security review S4: the server decides; failed, unknown or not-yet-reported results aren't ready.
++    const ready = data.ready === true;
 +    const removal = retirement.purpose === 'removal';
 +    return (
 +      <div className="rounded-lg border border-status-warning/30 bg-status-warning/5 p-3">
@@ -1192,8 +1346,10 @@ index 000000000..035413bb4
 +        </p>
 +        {c ? (
 +          <p className="mt-2 text-sm text-text-secondary">
-+            Intune reports: {c.installed} still installed · {c.pending} pending · {c.failed} failed · {c.notApplicable + c.other} other.
-+            {ready ? ' Computers report it gone, so it can be deleted.' : ' Computers check in over the next hours; refresh to see the latest.'}
++            Intune reports: {c.installed} still installed · {c.pending} pending · {c.failed} failed · {c.notInstalled ?? 0} not installed · {c.notApplicable} not applicable · {c.other} unknown.
++            {ready
++              ? ' Every computer that reported has removed it, so it can be deleted. Computers that are off may not have reported yet.'
++              : ' Computers check in over the next hours; refresh to see the latest.'}
 +          </p>
 +        ) : (
 +          <p className="mt-2 text-sm text-text-muted">Couldn&apos;t read the uninstall results from Intune just now.</p>
@@ -1202,7 +1358,7 @@ index 000000000..035413bb4
 +        {action.error && <p role="alert" className="mt-2 text-sm text-status-error">{action.error.message}</p>}
 +        {confirmDelete ? (
 +          <div className="mt-3 space-y-2">
-+            <p className="text-sm text-text-primary">Delete {retirement.displayName} v{retirement.version} from Intune? This can&apos;t be undone. Links from this app to apps it replaces or depends on are removed first.</p>
++            <p className="text-sm text-text-primary">Delete {retirement.displayName} v{retirement.version} from Intune? Intune then stops uninstalling it, including on computers that haven&apos;t checked in yet. This can&apos;t be undone. Links from this app to apps it replaces or depends on are removed first.</p>
 +            {!ready && (
 +              <label className="flex items-start gap-2 text-sm text-text-primary">
 +                <input type="checkbox" className="mt-1" checked={force} onChange={(e) => setForce(e.target.checked)} />
@@ -1302,10 +1458,10 @@ index 000000000..035413bb4
 +}
 diff --git a/components/hrm/RollbackPanel.tsx b/components/hrm/RollbackPanel.tsx
 new file mode 100644
-index 000000000..908c34332
+index 000000000..2e4621c42
 --- /dev/null
 +++ b/components/hrm/RollbackPanel.tsx
-@@ -0,0 +1,141 @@
+@@ -0,0 +1,151 @@
 +'use client';
 +// HRM patch 0037: go back to the previous version of an app IntuneGet deployed (Inventory app details).
 +import { useState } from 'react';
@@ -1328,11 +1484,21 @@ index 000000000..908c34332
 +const when = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 +
 +export function RollbackPanel({ appId }: { appId: string }) {
-+  const { data, action } = useRollback(appId);
++  const { data, action, error, isLoading, refetch } = useRollback(appId);
 +  const [open, setOpen] = useState(false);
 +  const [review, setReview] = useState<RollbackPreview | null>(null);
 +  const [confirmed, setConfirmed] = useState(false);
 +  const [startedJob, setStartedJob] = useState<string | null>(null);
++  // Security review U4 (November 2026): a failed load says so, instead of hiding the panel.
++  if (isLoading) return <p role="status" className="text-sm text-text-muted">Checking previous versions…</p>;
++  if (error) {
++    return (
++      <p role="alert" className="text-sm text-status-error">
++        {error.message}{' '}
++        <button type="button" className="text-accent-cyan hover:underline" onClick={() => void refetch()}>Try again</button>
++      </p>
++    );
++  }
 +  if (!data?.supported || data.currentVersion === undefined) return null;
 +  const skipped = data.skipped ?? [];
 +  if (!data.available && skipped.length === 0) return null;
@@ -1515,10 +1681,10 @@ index 000000000..76b441bc1
 +}
 diff --git a/hooks/useRetire.ts b/hooks/useRetire.ts
 new file mode 100644
-index 000000000..39062f132
+index 000000000..b4e892ac6
 --- /dev/null
 +++ b/hooks/useRetire.ts
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,40 @@
 +'use client';
 +// HRM patch 0038: retire an app (Inventory app details).
 +import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1548,10 +1714,11 @@ index 000000000..39062f132
 +    mutationFn: request,
 +    onSuccess: async (data) => {
 +      if (data.preview) return;
++      // Security review U3 (November 2026): Inventory, its details and Home (all of 'hrm') show the
++      // change too, and a deleted app leaves the Inventory list.
 +      await Promise.all([
-+        client.invalidateQueries({ queryKey: key }),
-+        client.invalidateQueries({ queryKey: ['hrm', 'app-insights'] }),
-+        client.invalidateQueries({ queryKey: ['hrm', 'rollback'] }),
++        client.invalidateQueries({ queryKey: ['hrm'] }),
++        client.invalidateQueries({ queryKey: ['inventory'] }),
 +        client.invalidateQueries({ queryKey: ['availableUpdates'] }),
 +      ]);
 +    },
@@ -1560,10 +1727,10 @@ index 000000000..39062f132
 +}
 diff --git a/hooks/useRollback.ts b/hooks/useRollback.ts
 new file mode 100644
-index 000000000..746ef38e8
+index 000000000..99977274a
 --- /dev/null
 +++ b/hooks/useRollback.ts
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,50 @@
 +'use client';
 +// HRM patch 0037: go back to the previous version (Inventory app details).
 +import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1607,12 +1774,32 @@ index 000000000..746ef38e8
 +    mutationFn: request,
 +    onSuccess: async (data) => {
 +      if (data.preview) return;
-+      // HRM patch 0038: a rollback holds Retire app too.
-+      await Promise.all([client.invalidateQueries({ queryKey: key }), client.invalidateQueries({ queryKey: ['availableUpdates'] }), client.invalidateQueries({ queryKey: ['hrm', 'retire'] })]);
++      // HRM patch 0038: a rollback holds Retire app too. Security review U3: Inventory, its details and
++      // Home (all of 'hrm') refresh as well.
++      await Promise.all([client.invalidateQueries({ queryKey: ['hrm'] }), client.invalidateQueries({ queryKey: ['availableUpdates'] }), client.invalidateQueries({ queryKey: ['inventory'] })]);
 +    },
 +  });
 +  return { ...query, action };
 +}
+diff --git a/lib/hrm/__tests__/install-count-cache.test.ts b/lib/hrm/__tests__/install-count-cache.test.ts
+new file mode 100644
+index 000000000..72453f549
+--- /dev/null
++++ b/lib/hrm/__tests__/install-count-cache.test.ts
+@@ -0,0 +1,13 @@
++import { it, expect, vi } from 'vitest';
++import { cachedInstallCounts } from '../install-count-cache';
++it('shares only reads for the same tenant/app and retries failures', async () => {
++  const counts = { installed: 1, pending: 0, failed: 0, notApplicable: 0, other: 0, topErrors: [] };
++  const read = vi.fn(async () => counts);
++  await Promise.all([cachedInstallCounts('a', 'app', read), cachedInstallCounts('a', 'app', read)]);
++  expect(read).toHaveBeenCalledTimes(1);
++  await cachedInstallCounts('b', 'app', read);
++  expect(read).toHaveBeenCalledTimes(2);
++  const failing = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce(counts);
++  await expect(cachedInstallCounts('c', 'app', failing)).rejects.toThrow();
++  await expect(cachedInstallCounts('c', 'app', failing)).resolves.toEqual(counts);
++});
 diff --git a/lib/hrm/__tests__/installer-check.test.ts b/lib/hrm/__tests__/installer-check.test.ts
 new file mode 100644
 index 000000000..79ff7e41b
@@ -2292,6 +2479,44 @@ index 000000000..19441175e
 +    expect(await skippedVersionHold('tenant', 'Example.App', '2.0')).toBeNull();
 +  });
 +});
+diff --git a/lib/hrm/install-count-cache.ts b/lib/hrm/install-count-cache.ts
+new file mode 100644
+index 000000000..23215142a
+--- /dev/null
++++ b/lib/hrm/install-count-cache.ts
+@@ -0,0 +1,32 @@
++/**
++ * Security review (November 2026): live install counts for a retiring app, shared for 15 seconds per
++ * tenant and app, so several people looking at it make one Intune read. A failed read isn't kept.
++ * Only for display: deleting an app always reads fresh counts.
++ */
++import type { InstallCounts } from './install-status';
++const cache = new Map<string, { until: number; pending: Promise<InstallCounts> }>();
++export function cachedInstallCounts(
++  tenant: string,
++  app: string,
++  read: () => Promise<InstallCounts>
++): Promise<InstallCounts> {
++  const key = tenant + '|' + app.toLowerCase();
++  const now = Date.now();
++  const entry = cache.get(key);
++  if (entry && entry.until > now) return entry.pending;
++  if (cache.size >= 200) {
++    for (const [key, entry] of cache) if (entry.until <= now) cache.delete(key);
++  }
++  if (cache.size >= 200) cache.delete(cache.keys().next().value!);
++  const value = { until: now + 15000, pending: Promise.resolve().then(read) };
++  cache.set(key, value);
++  void value.pending.catch(() => {
++    if (cache.get(key) === value) cache.delete(key);
++  });
++  return value.pending;
++}
++
++/** Test helper: forget every shared read. */
++export function clearInstallCountCache(): void {
++  cache.clear();
++}
 diff --git a/lib/hrm/installer-check.ts b/lib/hrm/installer-check.ts
 new file mode 100644
 index 000000000..3b0b972df
@@ -3146,6 +3371,42 @@ index 000000000..1c6477a88
 @@ -0,0 +1,2 @@
 +/** HRM patch 0038: the message shown wherever an app being retired holds an action. Browser-safe. */
 +export const RETIRE_HOLD = 'This app is being retired. See its details in Inventory.';
+diff --git a/lib/hrm/retire-readiness.ts b/lib/hrm/retire-readiness.ts
+new file mode 100644
+index 000000000..1b246f8b9
+--- /dev/null
++++ b/lib/hrm/retire-readiness.ts
+@@ -0,0 +1,30 @@
++/**
++ * Security review S4 (November 2026): when a retiring app can be deleted from Intune without
++ * confirming. Only when Intune's report is complete and every reporting computer says the app is
++ * gone. Failed and unknown results, installed or pending computers, or a report where nobody has
++ * said the app is gone yet, all need the explicit "delete anyway" confirmation. A copy with no
++ * Uninstall groups reaches no computers, so an empty report is enough for it.
++ */
++import type { InstallCounts } from './install-status';
++
++export function retirementReady(
++  counts: Omit<InstallCounts, 'topErrors'> | null | undefined,
++  hasUninstallGroups: boolean,
++): boolean {
++  if (!counts) return false;
++  if (counts.installed > 0 || counts.pending > 0 || counts.failed > 0 || counts.other > 0) return false;
++  return !hasUninstallGroups || (counts.notInstalled ?? 0) > 0;
++}
++
++/** Why deleting isn't confirmed yet, in one sentence (counts only). */
++export function notReadyReason(counts: Omit<InstallCounts, 'topErrors'>): string {
++  const parts = [
++    counts.installed > 0 && `${counts.installed} installed`,
++    counts.pending > 0 && `${counts.pending} pending`,
++    counts.failed > 0 && `${counts.failed} failed to uninstall`,
++    counts.other > 0 && `${counts.other} unknown`,
++  ].filter(Boolean);
++  return parts.length > 0
++    ? `Intune doesn't show the app gone yet: ${parts.join(', ')}.`
++    : 'No computer has reported the app gone yet.';
++}
 diff --git a/lib/hrm/retire-store.ts b/lib/hrm/retire-store.ts
 new file mode 100644
 index 000000000..eb5547df6
@@ -3222,10 +3483,10 @@ index 000000000..eb5547df6
 +}
 diff --git a/lib/hrm/retire.ts b/lib/hrm/retire.ts
 new file mode 100644
-index 000000000..86be6a06c
+index 000000000..354f8f29a
 --- /dev/null
 +++ b/lib/hrm/retire.ts
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,49 @@
 +/**
 + * HRM patch 0038: retire an app. Browser-safe helpers (no database or Graph).
 + *
@@ -3270,7 +3531,9 @@ index 000000000..86be6a06c
 +  retirement: null | { id: string; phase: string; displayName: string; version: string; startedBy: string; startedAt: string; finishedAt: string | null; savedGroups: string[];
 +    /** HRM patch 0040: 'removal' when the copy was added only to uninstall an app found on devices. */
 +    purpose: 'retire' | 'removal' };
-+  counts?: { installed: number; failed: number; pending: number; notApplicable: number; other: number } | null;
++  counts?: { notInstalled?: number; installed: number; failed: number; pending: number; notApplicable: number; other: number } | null;
++  /** Security review S4: the server's verdict that it can be deleted without "delete anyway". */
++  ready?: boolean;
 +  hold?: string | null;
 +}
 diff --git a/lib/hrm/rollback-guard.ts b/lib/hrm/rollback-guard.ts

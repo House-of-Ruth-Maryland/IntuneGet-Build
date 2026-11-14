@@ -176,10 +176,12 @@ index 5c48ac26d..8ccb3b898 100644
      }
 diff --git a/app/api/webhooks/route.sqlite.test.ts b/app/api/webhooks/route.sqlite.test.ts
 new file mode 100644
-index 000000000..f864e8b2e
+index 000000000..ceaba5250
 --- /dev/null
 +++ b/app/api/webhooks/route.sqlite.test.ts
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,134 @@
++// Security review S3: deliveries go through the pinned transport; this test stubs fetch instead.
++vi.mock('@/lib/webhooks/transport',()=>({postWebhook:(url:string,init:RequestInit)=>fetch(url,{...init,method:'POST',redirect:'error'})}));
 +import { NextRequest } from 'next/server';
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { mkdtempSync, rmSync } from 'node:fs';
@@ -627,6 +629,111 @@ index 728d2a802..290fc89de 100644
  breaker still apply, and jobs are created in `queued` state for the local
  packager.
  
+diff --git a/lib/__tests__/public-address.test.ts b/lib/__tests__/public-address.test.ts
+new file mode 100644
+index 000000000..df25b4f8a
+--- /dev/null
++++ b/lib/__tests__/public-address.test.ts
+@@ -0,0 +1,21 @@
++import { it, expect } from 'vitest';
++import { isPublicAddress } from '../public-address';
++it.each([
++  '127.0.0.1',
++  '169.254.169.254',
++  '::ffff:7f00:1',
++  '0:0:0:0:0:ffff:a9fe:a9fe',
++  '::ffff:10.0.0.1',
++  '64:ff9b::a9fe:a9fe',
++  '::',
++  '::1',
++  'fd00::1',
++  'fe80::1',
++  'ff02::1',
++  '2002:7f00:1::',
++  '2001:db8::1',
++  'invalid',
++])('blocks %s', (address) => expect(isPublicAddress(address)).toBe(false));
++it.each(['8.8.8.8', '::ffff:808:808', '2606:4700::1111'])('accepts %s', (address) =>
++  expect(isPublicAddress(address)).toBe(true)
++);
+diff --git a/lib/installer-download.ts b/lib/installer-download.ts
+index fd0c51d28..ef6980c67 100644
+--- a/lib/installer-download.ts
++++ b/lib/installer-download.ts
+@@ -1,6 +1,6 @@
+ import { createHash, timingSafeEqual } from 'node:crypto';
+ import { isIP } from 'node:net';
+-import { lookup } from 'node:dns/promises';
++import { resolvePublicAddress as resolvePublicDestination } from '@/lib/public-address';
+ import * as http from 'node:http';
+ import * as https from 'node:https';
+ 
+@@ -83,60 +83,13 @@ interface RangeMetadata {
+   validator: string | null;
+ }
+ 
+-function isPrivateIpv4(address: string): boolean {
+-  const parts = address.split('.').map(Number);
+-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+-    return true;
+-  }
+-
+-  const [a, b] = parts;
+-  return (
+-    a === 0 ||
+-    a === 10 ||
+-    a === 127 ||
+-    (a === 100 && b >= 64 && b <= 127) ||
+-    (a === 169 && b === 254) ||
+-    (a === 172 && b >= 16 && b <= 31) ||
+-    (a === 192 && b === 0) ||
+-    (a === 192 && b === 168) ||
+-    (a === 198 && (b === 18 || b === 19)) ||
+-    a >= 224
+-  );
+-}
+-
+-export function isPublicIpAddress(address: string): boolean {
+-  const normalized = address.toLowerCase().split('%')[0];
+-  const family = isIP(normalized);
+-  if (family === 4) return !isPrivateIpv4(normalized);
+-  if (family !== 6) return false;
+-
+-  if (normalized === '::' || normalized === '::1') return false;
+-  if (normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) {
+-    return false;
+-  }
+-
+-  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+-  return mappedIpv4 ? !isPrivateIpv4(mappedIpv4) : true;
+-}
+-
++export { isPublicAddress as isPublicIpAddress } from '@/lib/public-address';
+ async function resolvePublicAddress(hostname: string): Promise<{ address: string; family: 4 | 6 }> {
+-  const literalFamily = isIP(hostname);
+-  if (literalFamily) {
+-    if (!isPublicIpAddress(hostname)) {
+-      throw new Error('Installer URL resolves to a private or reserved address');
+-    }
+-    return { address: hostname, family: literalFamily as 4 | 6 };
+-  }
+-
+-  const addresses = await lookup(hostname, { all: true, verbatim: true });
+-  if (addresses.length === 0) {
+-    throw new Error('Installer hostname did not resolve');
+-  }
+-  if (addresses.some((entry) => !isPublicIpAddress(entry.address))) {
+-    throw new Error('Installer hostname resolves to a private or reserved address');
++  try { return await resolvePublicDestination(hostname); }
++  catch (error) {
++    if (error instanceof Error && error.message === 'Destination must be a public address') throw new Error(isIP(hostname.replace(/^\[|\]$/g,'')) ? 'Installer URL resolves to a private or reserved address' : 'Installer hostname resolves to a private or reserved address');
++    throw error;
+   }
+-
+-  return addresses[0] as { address: string; family: 4 | 6 };
+ }
+ 
+ function parseMaximumBytes(): number {
 diff --git a/lib/notifications/notify-deployment.test.ts b/lib/notifications/notify-deployment.test.ts
 new file mode 100644
 index 000000000..65bb12283
@@ -889,6 +996,76 @@ index 000000000..92af7aa61
 +
 +  return summary;
 +}
+diff --git a/lib/public-address.ts b/lib/public-address.ts
+new file mode 100644
+index 000000000..eb65df16d
+--- /dev/null
++++ b/lib/public-address.ts
+@@ -0,0 +1,64 @@
++/** HRM security review S2 (November 2026). One public-address policy for all user-controlled outbound requests.
++ * BlockList handles expanded and hexadecimal IPv4-mapped IPv6 consistently.
++ * Only global unicast IPv6 (2000::/3) and public IPv4/mapped IPv4 are accepted.
++ * Translation/tunnel prefixes such as NAT64 are deliberately not accepted.
++ */
++import { BlockList, isIP } from 'node:net';
++import { lookup } from 'node:dns/promises';
++const blocked = new BlockList();
++for (const [address, prefix] of [
++  ['0.0.0.0', 8],
++  ['10.0.0.0', 8],
++  ['127.0.0.0', 8],
++  ['100.64.0.0', 10],
++  ['169.254.0.0', 16],
++  ['172.16.0.0', 12],
++  ['192.0.0.0', 24],
++  ['192.0.2.0', 24],
++  ['192.168.0.0', 16],
++  ['198.18.0.0', 15],
++  ['198.51.100.0', 24],
++  ['203.0.113.0', 24],
++  ['224.0.0.0', 3],
++] as const)
++  blocked.addSubnet(address, prefix, 'ipv4');
++blocked.addSubnet('2001:db8::', 32, 'ipv6');
++blocked.addSubnet('2002::', 16, 'ipv6'); // 6to4 embeds an IPv4 destination
++const global = new BlockList();
++global.addSubnet('2000::', 3, 'ipv6');
++global.addSubnet('0.0.0.0', 0, 'ipv4');
++export function isPublicAddress(address: string): boolean {
++  const version = isIP(address);
++  if (!version || address.includes('%')) return false;
++  const family = version === 4 ? 'ipv4' : 'ipv6';
++  return global.check(address, family) && !blocked.check(address, family);
++}
++export async function resolvePublicAddress(
++  hostname: string,
++  signal?: AbortSignal
++): Promise<{ address: string; family: 4 | 6 }> {
++  const host = hostname.replace(/^\[|\]$/g, '');
++  const family = isIP(host);
++  if (family) {
++    if (!isPublicAddress(host)) throw new Error('Destination must be a public address');
++    return { address: host, family: family as 4 | 6 };
++  }
++  const deadline = AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]);
++  deadline.throwIfAborted();
++  let onAbort: () => void = () => {};
++  try {
++    const addresses = await Promise.race([
++      lookup(host, { all: true, verbatim: true }),
++      new Promise<never>((_, reject) => {
++        onAbort = () => reject(new Error('Destination lookup timed out'));
++        deadline.addEventListener('abort', onAbort, { once: true });
++      }),
++    ]);
++    deadline.throwIfAborted();
++    if (!addresses.length || addresses.some((a) => !isPublicAddress(a.address)))
++      throw new Error('Destination must be a public address');
++    return addresses[0] as { address: string; family: 4 | 6 };
++  } finally {
++    deadline.removeEventListener('abort', onAbort);
++  }
++}
 diff --git a/lib/webhooks/address-guard.test.ts b/lib/webhooks/address-guard.test.ts
 new file mode 100644
 index 000000000..71d571c10
@@ -978,10 +1155,10 @@ index 000000000..71d571c10
 +});
 diff --git a/lib/webhooks/address-guard.ts b/lib/webhooks/address-guard.ts
 new file mode 100644
-index 000000000..3ed744b8f
+index 000000000..c0c03ac5c
 --- /dev/null
 +++ b/lib/webhooks/address-guard.ts
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,53 @@
 +/**
 + * HRM patch: webhook addresses must be public.
 + *
@@ -992,7 +1169,7 @@ index 000000000..3ed744b8f
 + * followed, so a public address can't bounce the request inward.
 + */
 +
-+import { lookup } from 'dns/promises';
++import { isPublicAddress, resolvePublicAddress } from '@/lib/public-address';
 +import { isIP } from 'net';
 +
 +export interface DestinationCheck {
@@ -1002,57 +1179,7 @@ index 000000000..3ed744b8f
 +
 +const BLOCKED_NAMES = /(^|\.)(localhost|local|internal|home\.arpa)$/i;
 +
-+function ipv4Parts(address: string): number[] | null {
-+  const parts = address.split('.').map(Number);
-+  return parts.length === 4 && parts.every((p) => Number.isInteger(p) && p >= 0 && p <= 255) ? parts : null;
-+}
-+
-+function blockedIpv4([a, b, c]: number[]): boolean {
-+  return (
-+    a === 0 || // "this network"
-+    a === 10 ||
-+    a === 127 ||
-+    (a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT
-+    (a === 169 && b === 254) || // link-local, including 169.254.169.254 (cloud metadata)
-+    (a === 172 && b >= 16 && b <= 31) ||
-+    (a === 192 && b === 168) ||
-+    (a === 192 && b === 0 && c === 0) ||
-+    (a === 198 && (b === 18 || b === 19)) || // benchmarking
-+    a >= 224 // multicast and reserved
-+  );
-+}
-+
-+/** The IPv4 address inside an IPv4-mapped (::ffff:0:0/96) or NAT64 (64:ff9b::/96) IPv6 address. */
-+function embeddedIpv4(lower: string): number[] | null {
-+  const prefix = /^(?:::ffff:|0:0:0:0:0:ffff:|64:ff9b::|64:ff9b:0:0:0:0:)(.+)$/.exec(lower);
-+  if (!prefix) return null;
-+  const rest = prefix[1];
-+  if (rest.includes('.')) return ipv4Parts(rest) ?? [0, 0, 0, 0];
-+  const words = rest.split(':');
-+  if (words.length !== 2 || !words.every((w) => /^[0-9a-f]{1,4}$/.test(w))) return [0, 0, 0, 0];
-+  const [hi, lo] = words.map((w) => parseInt(w, 16));
-+  return [hi >> 8, hi & 255, lo >> 8, lo & 255];
-+}
-+
-+/** True for loopback, private, link-local, metadata and other non-public addresses. */
-+export function isBlockedAddress(address: string): boolean {
-+  const version = isIP(address);
-+  if (version === 4) return blockedIpv4(ipv4Parts(address)!);
-+  if (version !== 6) return true;
-+
-+  const lower = address.toLowerCase();
-+  // IPv4 written inside IPv6 is judged as IPv4, whether dotted (::ffff:10.0.0.1) or in hex
-+  // (::ffff:a00:1, 64:ff9b::a00:1), which is how URL parsing writes it. HRM patch 0024.
-+  const embedded = embeddedIpv4(lower);
-+  if (embedded) return blockedIpv4(embedded);
-+  if (lower === '::' || lower === '::1') return true;
-+  const first = parseInt(lower.split(':')[0] || '0', 16);
-+  return (
-+    (first & 0xfe00) === 0xfc00 || // unique local fc00::/7
-+    (first & 0xffc0) === 0xfe80 || // link-local fe80::/10
-+    (first & 0xff00) === 0xff00 // multicast
-+  );
-+}
++export const isBlockedAddress = (address: string) => !isPublicAddress(address);
 +
 +/** The checks that need no network: https, and no local names or private literal addresses. */
 +export function checkWebhookUrlShape(url: string): DestinationCheck {
@@ -1063,7 +1190,8 @@ index 000000000..3ed744b8f
 +    return { ok: false, error: 'Enter a full address starting with https://.' };
 +  }
 +  if (parsed.protocol !== 'https:') return { ok: false, error: 'Enter a full address starting with https://.' };
-+  if (parsed.username || parsed.password) return { ok: false, error: 'Put credentials in a header, not in the address.' };
++  if (parsed.username || parsed.password)
++    return { ok: false, error: 'Put credentials in a header, not in the address.' };
 +  const host = parsed.hostname.replace(/^\[|\]$/g, '');
 +  if (isIP(host) ? isBlockedAddress(host) : BLOCKED_NAMES.test(host) || !host.includes('.')) {
 +    return { ok: false, error: 'Webhook addresses must be public, not this server or the private network.' };
@@ -1078,10 +1206,7 @@ index 000000000..3ed744b8f
 +  const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
 +  if (isIP(host)) return { ok: true };
 +  try {
-+    const addresses = await lookup(host, { all: true, verbatim: true });
-+    if (addresses.length === 0 || addresses.some((a) => isBlockedAddress(a.address))) {
-+      return { ok: false, error: 'Webhook addresses must be public, not this server or the private network.' };
-+    }
++    await resolvePublicAddress(host);
 +    return { ok: true };
 +  } catch {
 +    return { ok: false, error: `Couldn't find ${host}. Check the address.` };
@@ -1720,10 +1845,12 @@ index 000000000..d89776d6f
 +}
 diff --git a/lib/webhooks/managed-identity.test.ts b/lib/webhooks/managed-identity.test.ts
 new file mode 100644
-index 000000000..7eaf83929
+index 000000000..474223061
 --- /dev/null
 +++ b/lib/webhooks/managed-identity.test.ts
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,132 @@
++// Security review S3: deliveries go through the pinned transport; this test stubs fetch instead.
++vi.mock('@/lib/webhooks/transport',()=>({postWebhook:(url: string,init: RequestInit)=>fetch(url,{...init,method:'POST',redirect:'error'})}));
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import type { WebhookConfiguration } from '@/types/notifications';
 +import { isSignedWebhookUrl, resetManagedIdentityTokenCache, webhookAuthHeaders } from './managed-identity';
@@ -1944,20 +2071,59 @@ index 000000000..59fc438d5
 +  cached = null;
 +}
 diff --git a/lib/webhooks/service.ts b/lib/webhooks/service.ts
-index c9e417f8e..332acdd69 100644
+index c9e417f8e..0fad9fd79 100644
 --- a/lib/webhooks/service.ts
 +++ b/lib/webhooks/service.ts
-@@ -19,6 +19,9 @@ import {
+@@ -4,12 +4,7 @@
+  */
+ 
+ import { createHmac } from 'crypto';
+-import type {
+-  WebhookConfiguration,
+-  NotificationPayload,
+-  WebhookTestPayload,
+-  WebhookType,
+-} from '@/types/notifications';
++import type { WebhookConfiguration, NotificationPayload, WebhookTestPayload, WebhookType } from '@/types/notifications';
+ import {
+   formatSlackMessage,
+   formatTeamsMessage,
+@@ -19,6 +14,10 @@ import {
    formatTeamsTestMessage,
    formatDiscordTestMessage,
  } from './formatters';
 +import { appUrl } from '@/lib/hrm/site';
 +import { checkWebhookDestination, checkWebhookUrlShape } from './address-guard';
++import { postWebhook } from './transport';
 +import { webhookAuthHeaders } from './managed-identity';
  
  // Circuit breaker thresholds
  const MAX_FAILURES = 5;
-@@ -113,7 +116,8 @@ export function formatTestPayload(
+@@ -73,10 +72,7 @@ export function generateWebhookSignature(payload: string, secret: string): strin
+ /**
+  * Format payload based on webhook type
+  */
+-export function formatPayload(
+-  webhookType: WebhookType,
+-  payload: NotificationPayload
+-): unknown {
++export function formatPayload(webhookType: WebhookType, payload: NotificationPayload): unknown {
+   switch (webhookType) {
+     case 'slack':
+       return formatSlackMessage(payload);
+@@ -93,10 +89,7 @@ export function formatPayload(
+ /**
+  * Format test payload based on webhook type
+  */
+-export function formatTestPayload(
+-  webhookType: WebhookType,
+-  webhookName: string
+-): unknown {
++export function formatTestPayload(webhookType: WebhookType, webhookName: string): unknown {
+   const testPayload: WebhookTestPayload = {
+     event: 'test',
+     timestamp: new Date().toISOString(),
+@@ -113,7 +106,8 @@ export function formatTestPayload(
        return formatDiscordTestMessage(testPayload);
      case 'custom':
      default:
@@ -1967,7 +2133,7 @@ index c9e417f8e..332acdd69 100644
    }
  }
  
-@@ -124,6 +128,18 @@ export async function deliverWebhook(
+@@ -124,6 +118,18 @@ export async function deliverWebhook(
    webhook: WebhookConfiguration,
    payload: NotificationPayload,
    options: WebhookDeliveryOptions = {}
@@ -1986,7 +2152,7 @@ index c9e417f8e..332acdd69 100644
  ): Promise<WebhookDeliveryResult> {
    const opts = { ...DEFAULT_OPTIONS, ...options };
  
-@@ -136,8 +152,12 @@ export async function deliverWebhook(
+@@ -136,8 +142,12 @@ export async function deliverWebhook(
      };
    }
  
@@ -2001,7 +2167,7 @@ index c9e417f8e..332acdd69 100644
    const payloadString = JSON.stringify(formattedPayload);
  
    // Build headers
-@@ -145,6 +165,8 @@ export async function deliverWebhook(
+@@ -145,6 +155,8 @@ export async function deliverWebhook(
      'Content-Type': 'application/json',
      'User-Agent': 'IntuneGet-Webhook/1.0',
      ...webhook.headers,
@@ -2010,19 +2176,36 @@ index c9e417f8e..332acdd69 100644
    };
  
    // Add signature if secret is configured
-@@ -171,6 +193,8 @@ export async function deliverWebhook(
+@@ -163,17 +175,15 @@ export async function deliverWebhook(
+     }
+ 
+     try {
+-      const controller = new AbortController();
+-      const timeoutId = setTimeout(() => controller.abort(), opts.timeout);
++      const signal = AbortSignal.timeout(opts.timeout ?? 10000);
+ 
+-      const response = await fetch(webhook.url, {
+-        method: 'POST',
++      const response = await postWebhook(webhook.url, {
          headers,
          body: payloadString,
-         signal: controller.signal,
+-        signal: controller.signal,
++        signal,
 +        // HRM patch: never follow a redirect, so a public address can't send the request inward
-+        redirect: 'error',
        });
  
-       clearTimeout(timeoutId);
-@@ -223,6 +247,11 @@ export async function deliverWebhook(
- export async function sendTestWebhook(
-   webhook: WebhookConfiguration
- ): Promise<WebhookDeliveryResult> {
+-      clearTimeout(timeoutId);
+       lastStatusCode = response.status;
+ 
+       if (response.ok) {
+@@ -220,9 +230,12 @@ export async function deliverWebhook(
+ /**
+  * Send test webhook
+  */
+-export async function sendTestWebhook(
+-  webhook: WebhookConfiguration
+-): Promise<WebhookDeliveryResult> {
++export async function sendTestWebhook(webhook: WebhookConfiguration): Promise<WebhookDeliveryResult> {
 +  const destination = await checkWebhookDestination(webhook.url);
 +  if (!destination.ok) {
 +    return { success: false, error: destination.error };
@@ -2031,7 +2214,7 @@ index c9e417f8e..332acdd69 100644
    const formattedPayload = formatTestPayload(webhook.webhook_type, webhook.name);
    const payloadString = JSON.stringify(formattedPayload);
  
-@@ -230,6 +259,8 @@ export async function sendTestWebhook(
+@@ -230,6 +243,8 @@ export async function sendTestWebhook(
      'Content-Type': 'application/json',
      'User-Agent': 'IntuneGet-Webhook/1.0',
      ...webhook.headers,
@@ -2040,16 +2223,30 @@ index c9e417f8e..332acdd69 100644
    };
  
    if (webhook.secret) {
-@@ -245,6 +276,8 @@ export async function sendTestWebhook(
+@@ -237,18 +252,15 @@ export async function sendTestWebhook(
+   }
+ 
+   try {
+-    const controller = new AbortController();
+-    const timeoutId = setTimeout(() => controller.abort(), 10000);
++    const signal = AbortSignal.timeout(10000);
+ 
+-    const response = await fetch(webhook.url, {
+-      method: 'POST',
++    const response = await postWebhook(webhook.url, {
        headers,
        body: payloadString,
-       signal: controller.signal,
+-      signal: controller.signal,
++      signal,
 +      // HRM patch: never follow a redirect, so a public address can't send the request inward
-+      redirect: 'error',
      });
  
-     clearTimeout(timeoutId);
-@@ -286,28 +319,17 @@ export async function sendTestWebhook(
+-    clearTimeout(timeoutId);
+-
+     if (response.ok) {
+       return {
+         success: true,
+@@ -286,28 +298,17 @@ export async function sendTestWebhook(
   * Validate webhook URL
   */
  export function validateWebhookUrl(url: string): { valid: boolean; error?: string } {
@@ -2340,4 +2537,138 @@ index 000000000..6bb004350
 +    data,
 +    attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive' as const, content: teamsCard(options) }],
 +  };
++}
+diff --git a/lib/webhooks/transport.test.ts b/lib/webhooks/transport.test.ts
+new file mode 100644
+index 000000000..e5715915e
+--- /dev/null
++++ b/lib/webhooks/transport.test.ts
+@@ -0,0 +1,57 @@
++import { beforeEach, it, expect, vi } from 'vitest';
++import { EventEmitter } from 'node:events';
++const mocks = vi.hoisted(() => ({ resolve: vi.fn(), request: vi.fn() }));
++vi.mock('@/lib/public-address', () => ({ resolvePublicAddress: mocks.resolve, isPublicAddress: () => true }));
++vi.mock('node:https', () => ({ request: mocks.request }));
++import { postWebhook } from './transport';
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.resolve.mockResolvedValue({ address: '8.8.8.8', family: 4 });
++});
++function respond(status: number, body = 'ok') {
++  mocks.request.mockImplementation((_url, options, callback) => {
++    expect(options.agent).toBe(false);
++    expect(options.rejectUnauthorized).toBe(true);
++    expect(options.family).toBe(4);
++    options.lookup('hooks.example.test', {}, (_error: unknown, address: string, family: number) => {
++      expect(address).toBe('8.8.8.8');
++      expect(family).toBe(4);
++    });
++    const req = new EventEmitter() as EventEmitter & { end: () => void };
++    req.end = () => {
++      const res = new EventEmitter() as EventEmitter & { statusCode: number; destroy: (e: Error) => void };
++      res.statusCode = status;
++      res.destroy = (e) => res.emit('error', e);
++      callback(res);
++      queueMicrotask(() => {
++        res.emit('data', Buffer.from(body));
++        res.emit('end');
++      });
++    };
++    return req;
++  });
++}
++const init = () => ({
++  headers: { 'Content-Type': 'application/json', Host: 'evil.test' },
++  body: '{}',
++  signal: AbortSignal.timeout(5000),
++});
++it('pins the approved address while preserving the TLS URL and strips user framing headers', async () => {
++  respond(200);
++  expect((await postWebhook('https://hooks.example.test/x', init())).status).toBe(200);
++  const [url, options] = mocks.request.mock.calls[0];
++  expect(url.hostname).toBe('hooks.example.test');
++  expect(options.headers.Host).toBeUndefined();
++  expect(mocks.resolve).toHaveBeenCalledTimes(1);
++});
++it('rejects DNS changes on each delivery before opening a socket', async () => {
++  mocks.resolve.mockRejectedValue(new Error('private address'));
++  await expect(postWebhook('https://hooks.example.test/x', init())).rejects.toThrow();
++  expect(mocks.request).not.toHaveBeenCalled();
++});
++it('never follows a redirect and bounds response size', async () => {
++  respond(302);
++  await expect(postWebhook('https://hooks.example.test/x', init())).rejects.toThrow(/redirect/);
++  respond(200, 'x'.repeat(9000));
++  await expect(postWebhook('https://hooks.example.test/x', init())).rejects.toThrow(/large/);
++});
+diff --git a/lib/webhooks/transport.ts b/lib/webhooks/transport.ts
+new file mode 100644
+index 000000000..cc1297235
+--- /dev/null
++++ b/lib/webhooks/transport.ts
+@@ -0,0 +1,65 @@
++/** HRM security review S3 (November 2026). Each delivery resolves once and pins that address through the TLS connection.
++ * No shared agent, redirects, second DNS lookup, or unbounded response bodies.
++ */
++import { request } from 'node:https';
++import { resolvePublicAddress } from '@/lib/public-address';
++import { checkWebhookUrlShape } from './address-guard';
++export async function postWebhook(
++  url: string,
++  init: { headers: Record<string, string>; body: string; signal: AbortSignal }
++): Promise<Response> {
++  const shape = checkWebhookUrlShape(url);
++  if (!shape.ok) throw new Error(shape.error);
++  const target = new URL(url);
++  const pinned = await resolvePublicAddress(target.hostname, init.signal);
++  init.signal.throwIfAborted();
++  const headers = Object.fromEntries(
++    Object.entries(init.headers).filter(
++      ([key]) => !['host', 'content-length', 'transfer-encoding', 'connection'].includes(key.toLowerCase())
++    )
++  );
++  return new Promise((resolve, reject) => {
++    const req = request(
++      target,
++      {
++        method: 'POST',
++        headers: { ...headers, 'Content-Length': String(Buffer.byteLength(init.body)) },
++        signal: init.signal,
++        agent: false,
++        rejectUnauthorized: true,
++        family: pinned.family,
++        // URL and Host/SNI retain the original name; only the connection address is pinned.
++        // Node asks with { all: true } when it tries several addresses; answer that form too.
++        lookup: ((_host: string, opts: { all?: boolean } | undefined, callback: (...args: unknown[]) => void) =>
++          opts?.all
++            ? callback(null, [{ address: pinned.address, family: pinned.family }])
++            : callback(null, pinned.address, pinned.family)) as import('node:net').LookupFunction,
++      },
++      (res) => {
++        const status = res.statusCode ?? 502;
++        const chunks: Buffer[] = [];
++        let bytes = 0;
++        res.on('data', (chunk: Buffer) => {
++          bytes += chunk.length;
++          if (bytes > 8192) {
++            res.destroy(new Error('Webhook response is too large'));
++            return;
++          }
++          chunks.push(chunk);
++        });
++        res.on('error', reject);
++        res.on('end', () => {
++          if (status >= 300 && status < 400) {
++            reject(new Error('Webhook redirects are not allowed'));
++            return;
++          }
++          resolve(
++            new Response([204, 205, 304].includes(status) ? null : Buffer.concat(chunks).toString('utf8'), { status })
++          );
++        });
++      }
++    );
++    req.on('error', reject);
++    req.end(init.body);
++  });
 +}

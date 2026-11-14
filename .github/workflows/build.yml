@@ -33,7 +33,35 @@ env:
   IMAGE: ${{ secrets.ACR_LOGIN_SERVER }}/intuneget
 
 jobs:
+  tested:
+    # Security review S8 (November 2026): build only what passed "Patched app checks passed" on its
+    # pull request. The suite isn't run again here; this reads the PR's result. A run started by hand
+    # (workflow_dispatch) is a deliberate choice and skips this.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    steps:
+      - name: Require the merged PR's checks to have passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "main")][0].head.sha // empty')
+          [ -n "$head" ] || { echo "::error::This commit didn't come from a merged pull request, so its checks can't be confirmed. Merge through a PR, or run this workflow by hand."; exit 1; }
+          result=$(gh api "repos/$REPO/commits/$head/check-runs?check_name=Patched%20app%20checks%20passed&filter=latest" \
+            --jq '[.check_runs[].conclusion] | if length == 0 then "missing" elif all(. == "success") then "success" else "not passed" end')
+          [ "$result" = success ] || { echo "::error::Patched app checks on the PR's last commit: $result. Run or fix them (Actions, Patched app checks), then run this build by hand."; exit 1; }
+
   build:
+    needs: tested
+    # Runs after a passed check on push, or straight away when started by hand.
+    if: ${{ !cancelled() && (needs.tested.result == 'success' || needs.tested.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -182,6 +210,8 @@ jobs:
   propose-deploy:
     # Opens the PR that moves deploy/version. Merging it deploys to the VM.
     needs: build
+    # A skipped "tested" job (a run started by hand) would otherwise skip this too.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
