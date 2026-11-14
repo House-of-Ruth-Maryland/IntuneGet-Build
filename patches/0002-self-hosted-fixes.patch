@@ -1,0 +1,332 @@
+diff --git a/app/api/analytics/route.test.ts b/app/api/analytics/route.test.ts
+new file mode 100644
+index 000000000..8f6159578
+--- /dev/null
++++ b/app/api/analytics/route.test.ts
+@@ -0,0 +1,19 @@
++import { NextRequest } from 'next/server';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getByUserId: mocks.jobs } }) }));
++import { GET } from './route';
++const today = new Date().toISOString();
++const job = (id: string, status: string) => ({ id, status, winget_id: 'Example.App', display_name: 'Example', publisher: 'Example Publisher', error_message: status === 'failed' ? 'fixture error' : null, created_at: today, completed_at: today });
++const request = () => new NextRequest('http://localhost/api/analytics?days=7');
++beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'caller' }); });
++describe('deployment analytics', () => {
++  it('counts deployed jobs from GitHub-mode packaging as successful', async () => {
++    mocks.jobs.mockResolvedValue([job('a', 'deployed'), job('b', 'deployed'), job('c', 'completed'), job('d', 'failed'), job('e', 'queued')]);
++    const v = await (await GET(request())).json();
++    expect(v.summary).toMatchObject({ totalJobs: 5, completedJobs: 3, failedJobs: 1, pendingJobs: 1, successRate: 75 });
++    expect(v.dailyDeployments.reduce((n: number, d: { completed: number }) => n + d.completed, 0)).toBe(3);
++    expect(v.topApps).toEqual([{ wingetId: 'Example.App', displayName: 'Example', publisher: 'Example Publisher', count: 3 }]);
++  });
++});
+diff --git a/app/api/analytics/route.ts b/app/api/analytics/route.ts
+index 69f85145e..5fa5fc0b1 100644
+--- a/app/api/analytics/route.ts
++++ b/app/api/analytics/route.ts
+@@ -28,6 +28,10 @@ interface RecentFailure {
+   createdAt: string;
+ }
+ 
++// GitHub-mode packaging finishes jobs as 'deployed'; the hosted flow uses
++// 'completed'. Count both, as the dashboard statistics do.
++const isSuccessful = (status: string) => status === 'completed' || status === 'deployed';
++
+ export async function GET(request: NextRequest) {
+   try {
+     const user = await parseAccessToken(request.headers.get('Authorization'));
+@@ -74,7 +78,7 @@ export async function GET(request: NextRequest) {
+     const allJobs = (jobs || []) as PackagingJobAnalytics[];
+ 
+     // Calculate success rate
+-    const completedJobs = allJobs.filter((j) => j.status === 'completed').length;
++    const completedJobs = allJobs.filter((j) => isSuccessful(j.status)).length;
+     const failedJobs = allJobs.filter((j) => j.status === 'failed').length;
+     const totalFinished = completedJobs + failedJobs;
+     const successRate = totalFinished > 0 ? Math.round((completedJobs / totalFinished) * 100) : 0;
+@@ -98,7 +102,7 @@ export async function GET(request: NextRequest) {
+ 
+       const existing = dailyMap.get(date);
+       if (existing) {
+-        if (job.status === 'completed') {
++        if (isSuccessful(job.status)) {
+           existing.completed++;
+         } else if (job.status === 'failed') {
+           existing.failed++;
+@@ -118,7 +122,7 @@ export async function GET(request: NextRequest) {
+     const appCounts = new Map<string, { displayName: string; publisher: string; count: number }>();
+ 
+     allJobs
+-      .filter((j) => j.status === 'completed')
++      .filter((j) => isSuccessful(j.status))
+       .forEach((job) => {
+         const existing = appCounts.get(job.winget_id);
+         if (existing) {
+diff --git a/lib/__tests__/app-mappings-winget.test.ts b/lib/__tests__/app-mappings-winget.test.ts
+new file mode 100644
+index 000000000..5210e9d23
+--- /dev/null
++++ b/lib/__tests__/app-mappings-winget.test.ts
+@@ -0,0 +1,69 @@
++import { describe, expect, it } from 'vitest';
++import { APP_MAPPINGS } from '@/lib/app-mappings';
++import { fetchAvailableVersionsLive } from '@/lib/manifest-api';
++
++// Live check that every mapped ID resolves in microsoft/winget-pkgs the same
++// way Claim does. Off by default because it calls the GitHub API; run with
++// VALIDATE_WINGET_IDS=1, and GITHUB_TOKEN set to avoid the anonymous rate limit.
++
++// Mapped so installed copies are recognised, but not distributed through WinGet,
++// so they can't be claimed. Checked 2026-10-23.
++const NOT_IN_WINGET = new Set([
++  'Adobe.AfterEffects',
++  'Adobe.Illustrator',
++  'Adobe.InDesign',
++  'Adobe.Photoshop',
++  'Adobe.PremierePro',
++  'BMCSoftware.FootPrints',
++  'BlueJeans.BlueJeans',
++  'Cisco.CiscoSecureClient',
++  'CrowdStrike.FalconSensor',
++  'ESET.NOD32Antivirus',
++  'Fortinet.FortiClient',
++  'Ivanti.Workspace',
++  'ManageEngine.DesktopCentral',
++  'McAfee.Agent',
++  'Microsoft.Access',
++  'Microsoft.Excel',
++  'Microsoft.PowerPoint',
++  'Microsoft.Project',
++  'Microsoft.Visio',
++  'Microsoft.Word',
++  'NordVPN.NordVPN',
++  'PaloAltoNetworks.GlobalProtect',
++  'Progress.MOVEit.Transfer',
++  'SAP.SAPLogon',
++  'ServiceNow.Agent',
++  'SolarWinds.DamewareRemote',
++  'Sophos.SophosHome',
++  'Symantec.EndpointProtection',
++  'Trend.ApexOne',
++  'VMware.WorkstationPlayer',
++  'VMware.WorkstationPro',
++]);
++
++const ids = [...new Set(APP_MAPPINGS.map((mapping) => mapping.wingetId))];
++
++async function hasVersions(id: string): Promise<boolean> {
++  return (await fetchAvailableVersionsLive(id, { strict: true })).length > 0;
++}
++
++describe.skipIf(!process.env.VALIDATE_WINGET_IDS)('APP_MAPPINGS WinGet IDs', () => {
++  it('resolves every mapped ID to at least one WinGet version', async () => {
++    const missing: string[] = [];
++    for (const id of ids.filter((id) => !NOT_IN_WINGET.has(id))) {
++      if (!(await hasVersions(id))) missing.push(id);
++    }
++    console.log(`MISSING_WINGET_IDS=${missing.join(',')}`);
++    expect(missing).toEqual([]);
++  }, 300_000);
++
++  it('keeps the not-in-WinGet list current', async () => {
++    const stale = [...NOT_IN_WINGET].filter((id) => !ids.includes(id));
++    const nowInWinget: string[] = [];
++    for (const id of [...NOT_IN_WINGET].filter((id) => ids.includes(id))) {
++      if (await hasVersions(id)) nowInWinget.push(id);
++    }
++    expect({ stale, nowInWinget }).toEqual({ stale: [], nowInWinget: [] });
++  }, 300_000);
++});
+diff --git a/lib/app-mappings.ts b/lib/app-mappings.ts
+index 000dc71f6..e40b02deb 100644
+--- a/lib/app-mappings.ts
++++ b/lib/app-mappings.ts
+@@ -33,7 +33,7 @@ export const APP_MAPPINGS: AppMapping[] = [
+     publisher: 'Microsoft',
+   },
+   {
+-    wingetId: 'BraveSoftware.BraveBrowser',
++    wingetId: 'Brave.Brave',
+     aliases: ['brave', 'brave browser'],
+     publisher: 'Brave Software',
+   },
+@@ -153,7 +153,7 @@ export const APP_MAPPINGS: AppMapping[] = [
+     publisher: 'TeamViewer',
+   },
+   {
+-    wingetId: 'AnyDeskSoftwareGmbH.AnyDesk',
++    wingetId: 'AnyDesk.AnyDesk',
+     aliases: ['anydesk', 'any desk'],
+     publisher: 'AnyDesk',
+   },
+@@ -266,7 +266,7 @@ export const APP_MAPPINGS: AppMapping[] = [
+     publisher: 'CrowdStrike',
+   },
+   {
+-    wingetId: '1Password.1Password',
++    wingetId: 'AgileBits.1Password',
+     aliases: ['1password', 'one password'],
+     publisher: 'AgileBits',
+   },
+@@ -359,19 +359,19 @@ export const APP_MAPPINGS: AppMapping[] = [
+ 
+   // Networking Tools
+   {
+-    wingetId: 'Wireshark.Wireshark',
++    wingetId: 'WiresharkFoundation.Wireshark',
+     aliases: ['wireshark', 'wire shark'],
+     publisher: 'Wireshark Foundation',
+   },
+   {
+-    wingetId: 'Nmap.Nmap',
++    wingetId: 'Insecure.Nmap',
+     aliases: ['nmap', 'network mapper'],
+     publisher: 'Nmap Project',
+   },
+ 
+   // Media & Communication
+   {
+-    wingetId: 'Webex.Webex',
++    wingetId: 'Cisco.Webex',
+     aliases: ['webex', 'cisco webex', 'webex meetings'],
+     publisher: 'Cisco',
+   },
+@@ -444,7 +444,7 @@ export const APP_MAPPINGS: AppMapping[] = [
+ 
+   // Database
+   {
+-    wingetId: 'dbeaver.dbeaver',
++    wingetId: 'DBeaver.DBeaver.Community',
+     aliases: ['dbeaver', 'dbeaver community'],
+     publisher: 'DBeaver',
+   },
+diff --git a/lib/qa/gate.test.ts b/lib/qa/gate.test.ts
+index fda5dc4c9..ebdc02eef 100644
+--- a/lib/qa/gate.test.ts
++++ b/lib/qa/gate.test.ts
+@@ -8,7 +8,9 @@ const {
+   packageEqMock,
+   dependencyCoverageMock,
+   resolveDependenciesMock,
++  supabaseConfiguredMock,
+ } = vi.hoisted(() => ({
++  supabaseConfiguredMock: vi.fn(() => true),
+   getQaResultMock: vi.fn(),
+   getPackageCompatibilityBlockMock: vi.fn(),
+   getPackageResultMock: vi.fn(),
+@@ -25,6 +27,7 @@ vi.mock('@/lib/catalog', () => ({
+   getCatalogSource: () => ({ getQaResult: getQaResultMock }),
+ }));
+ vi.mock('@/lib/supabase', () => ({
++  isSupabaseServerConfigured: supabaseConfiguredMock,
+   createServerClient: () => ({
+     from: () => {
+       const builder: Record<string, unknown> = {};
+@@ -110,6 +113,7 @@ describe('enforceQaGate', () => {
+     dependencyCoverageMock.mockResolvedValue(true);
+     resolveDependenciesMock.mockReset();
+     resolveDependenciesMock.mockResolvedValue([]);
++    supabaseConfiguredMock.mockReturnValue(true);
+     getQaResultMock.mockReset();
+     getPackageCompatibilityBlockMock.mockReset();
+     getPackageCompatibilityBlockMock.mockResolvedValue(null);
+@@ -1002,3 +1006,40 @@ describe('enforceQaGate', () => {
+   });
+ 
+ });
++
++describe('enforceQaGate without Supabase (HRM self-hosted SQLite)', () => {
++  const request = { wingetId: 'OpenJS.NodeJS', version: '26.7.0', architecture: 'x64', installerSha256, packageProfileSha256 };
++  beforeEach(() => {
++    supabaseConfiguredMock.mockReturnValue(false);
++    getQaResultMock.mockReset();
++    getPackageResultMock.mockReset();
++    getPackageCompatibilityBlockMock.mockReset();
++  });
++
++  it('never queries Supabase', async () => {
++    getQaResultMock.mockResolvedValue({ ...failedRow, outcome: 'Passed' });
++    await expect(enforceQaGate(request)).resolves.toBeUndefined();
++    expect(getPackageResultMock).not.toHaveBeenCalled();
++    expect(getPackageCompatibilityBlockMock).not.toHaveBeenCalled();
++  });
++
++  it('blocks a version the catalog snapshot marks malicious, even with an override', async () => {
++    getQaResultMock.mockResolvedValue({ ...failedRow, outcome: 'Passed', virustotal_malicious: 3 });
++    await expect(enforceQaGate(request)).rejects.toBeInstanceOf(QaSecurityGateError);
++    await expect(enforceQaGate({ ...request, qaOverride: true })).rejects.toBeInstanceOf(QaSecurityGateError);
++  });
++
++  it('blocks a version whose snapshot test failed unless overridden', async () => {
++    getQaResultMock.mockResolvedValue(failedRow);
++    await expect(enforceQaGate(request)).rejects.toBeInstanceOf(QaGateError);
++    await expect(enforceQaGate({ ...request, qaOverride: true })).resolves.toBeUndefined();
++    await expect(enforceQaGate({ ...request, qaOverride: true, requirePassed: true })).rejects.toBeInstanceOf(QaGateError);
++  });
++
++  it('allows versions the snapshot has no verdict for', async () => {
++    getQaResultMock.mockResolvedValue(null);
++    await expect(enforceQaGate(request)).resolves.toBeUndefined();
++    getQaResultMock.mockResolvedValue({ ...failedRow, tested_version: '26.6.0' });
++    await expect(enforceQaGate(request)).resolves.toBeUndefined();
++  });
++});
+diff --git a/lib/qa/gate.ts b/lib/qa/gate.ts
+index a29661a41..9d865b528 100644
+--- a/lib/qa/gate.ts
++++ b/lib/qa/gate.ts
+@@ -5,7 +5,7 @@ import { getCatalogSource } from '@/lib/catalog';
+ import { CuratedEvidenceMismatchError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
+ import { getApprovedCuratedRelease } from '@/lib/curated-catalog/server';
+ import { classifyQaFailure } from '@/lib/qa/classify';
+-import { createServerClient } from '@/lib/supabase';
++import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import {
+   getPackageCompatibilityBlock,
+   type PackageCompatibilityBlockCode,
+@@ -198,6 +198,15 @@ export async function enforceQaGate(input: {
+   }
+   if (input.sourceType === 'custom') return;
+ 
++  // HRM patch: self-hosted SQLite installs have no Supabase QA results store, so
++  // the Supabase checks below would throw. Still apply the catalog snapshot's
++  // verdict: a malicious VirusTotal result blocks even with an installability
++  // override (as the Supabase security gate does), a failed test respects it.
++  if (!isSupabaseServerConfigured()) {
++    await enforceCatalogQaVerdict(input, { allowFailedOutcome: Boolean(input.qaOverride && !input.requirePassed) });
++    return;
++  }
++
+   const architecture = (input.architecture || 'x64').toLowerCase();
+   const installerSha256 = input.installerSha256?.trim().toUpperCase() || '';
+   const packageProfileSha256 = input.packageProfileSha256?.trim().toUpperCase() || '';
+@@ -314,6 +323,17 @@ export async function enforceQaGate(input: {
+     });
+   }
+ 
++  await enforceCatalogQaVerdict(input, { allowFailedOutcome: false });
++}
++
++/**
++ * Apply the catalog snapshot's QA verdict for this exact version and
++ * architecture (HRM patch: shared with the SQLite path above).
++ */
++async function enforceCatalogQaVerdict(
++  input: { wingetId: string; version: string; architecture?: string },
++  options: { allowFailedOutcome: boolean }
++): Promise<void> {
+   const row = await getCatalogSource().getQaResult(input.wingetId);
+ 
+   if (
+@@ -335,7 +355,7 @@ export async function enforceQaGate(input: {
+     });
+   }
+ 
+-  if (row.outcome !== 'Failed') return;
++  if (row.outcome !== 'Failed' || options.allowFailedOutcome) return;
+ 
+   throw new QaGateError({
+     wingetId: row.winget_id,

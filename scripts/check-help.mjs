@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Checks the in-app Help page (lib/hrm/help-content.ts, patch 0010 and later)
+// Checks the in-app Help page (lib/hrm/help-content.ts, in 0013-help.patch)
 // against what the patched server actually shows and does:
 //   1. Every on-screen label a Help section names (its uiLabels) appears in that
 //      section's text and in the app's source, so a renamed or removed button,

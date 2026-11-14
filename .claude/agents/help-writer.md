@@ -1,6 +1,6 @@
 ---
 name: help-writer
-description: Use before every commit that changes a patch, a deploy script or a VM timer, on every "Build upstream" PR, and whenever a screen, button label, schedule or alert changes. Keeps the in-app Help page (lib/hrm/help-content.ts, added by patch 0010) and HRM's tooltips and hints current with what the server actually does, rewriting them when the app's logic changes, in consistent HRM wording, with step diagrams and links where they help. Edits the patched tree it is given and reports what changed and why; it does not commit or push.
+description: Use before every commit that changes a patch, a deploy script or a VM timer, on every "Build upstream" PR, and whenever a screen, button label, schedule or alert changes. Keeps the in-app Help page (lib/hrm/help-content.ts, in 0013-help.patch) and HRM's tooltips and hints current with what the server actually does, rewriting them when the app's logic changes, in consistent HRM wording, with step diagrams and links where they help. Edits the patched tree it is given and reports what changed and why; it does not commit or push.
 tools: Bash, Read, Edit, Write, Grep, Glob
 ---
 
@@ -29,10 +29,11 @@ wrong, and never leave a "previously..." note behind.
   labels/routes, search, deep links, step/visual synchronization and browser navigation.
 - Tooltips and hints: hover text and short help on screens, in HRM-changed components
   (`<TooltipContent>`, `title=`, `description=`, `placeholder=`, and the helper line under a field
-  or setting row, as in the deploy settings rows of patch 0022). `grep -lE 'TooltipContent|title=|description=' patches/*`
-  in IntuneGet-Build lists the patches that add them.
-- These files exist only in a patched tree. They are added by patch 0010 and changed by later
-  patches (`grep -l help-content patches/*` in IntuneGet-Build lists them).
+  or setting row, as in the deploy panel's settings rows in `components/PackageConfig.tsx`).
+  `grep -lE 'TooltipContent|title=|description=' patches/*` in IntuneGet-Build lists the patches
+  that add them.
+- These files exist only in a patched tree. Help's files (`lib/hrm/help-*.ts`, their tests,
+  `components/hrm/help/` and the Help page) are all in `0013-help.patch`.
 
 ## Getting a tree to work in
 
@@ -45,9 +46,10 @@ wrong, and never leave a "previously..." note behind.
   cd <tree> && for p in ~/Developer/IntuneGet-Build/patches/*.patch; do git apply "$p"; done
   git add -A && git commit -qm "patched base"
   ```
-- Your edits then show as `git diff` in that tree. Help changes go into the patch that changes the
-  behaviour being described. If Help alone changes, say so in your report so it can become its own
-  patch. Do not regenerate patch files yourself unless the brief asks.
+- Your edits then show as `git diff` in that tree. Each changed file belongs to exactly one patch:
+  Help files go into `0013-help.patch`, and a tooltip or hint goes into the patch that already holds
+  its component (`grep -l '^diff --git a/<path> ' patches/*.patch`). Say in your report which files
+  you changed. Do not regenerate patch files yourself unless the brief asks.
 
 ## What to check, every time
 

@@ -1,0 +1,2263 @@
+diff --git a/app/(app)/dashboard/app-requests/error.tsx b/app/(app)/dashboard/app-requests/error.tsx
+index b4f4f8bbd..df4cc9cf9 100644
+--- a/app/(app)/dashboard/app-requests/error.tsx
++++ b/app/(app)/dashboard/app-requests/error.tsx
+@@ -15,7 +15,7 @@ export default function AppRequestsError({
+     <DashboardRouteError
+       error={error}
+       reset={reset}
+-      title={<T>App Requests</T>}
++      title={<T>App requests</T>}
+       description={<T>Request WinGet packages and vote on requests from other users</T>}
+       icon={Lightbulb}
+       logLabel="App Requests"
+diff --git a/app/(app)/dashboard/app-requests/page.tsx b/app/(app)/dashboard/app-requests/page.tsx
+index 87717f758..086a6e3a0 100644
+--- a/app/(app)/dashboard/app-requests/page.tsx
++++ b/app/(app)/dashboard/app-requests/page.tsx
+@@ -8,7 +8,7 @@ export default function DashboardAppRequestsPage() {
+   return (
+     <div className="max-w-5xl mx-auto">
+       <PageHeader
+-        title={<T>App Requests</T>}
++        title={<T>App requests</T>}
+         description={<T>Request WinGet packages you want added to IntuneGet and vote on requests from other users.</T>}
+         gradient
+         gradientColors="cyan"
+diff --git a/app/(app)/dashboard/sccm/error.tsx b/app/(app)/dashboard/sccm/error.tsx
+index f403ae613..857e448ec 100644
+--- a/app/(app)/dashboard/sccm/error.tsx
++++ b/app/(app)/dashboard/sccm/error.tsx
+@@ -15,7 +15,7 @@ export default function SccmError({
+     <DashboardRouteError
+       error={error}
+       reset={reset}
+-      title={<T>SCCM Migration</T>}
++      title={<T>SCCM migration</T>}
+       description={<T>Migrate applications from SCCM to Intune</T>}
+       icon={FolderSync}
+       logLabel="SCCM Migration"
+diff --git a/app/(app)/dashboard/sccm/page.tsx b/app/(app)/dashboard/sccm/page.tsx
+index 33cd4fb91..fe2b7b9fd 100644
+--- a/app/(app)/dashboard/sccm/page.tsx
++++ b/app/(app)/dashboard/sccm/page.tsx
+@@ -123,7 +123,7 @@ export default function SccmMigrationsPage() {
+     return (
+       <div className="space-y-6">
+         <PageHeader
+-          title={<T>SCCM Migration</T>}
++          title={<T>SCCM migration</T>}
+           description={<T>Migrate applications from SCCM to Intune</T>}
+         />
+         <SkeletonGrid count={4} columns={4} variant="stat" />
+@@ -139,7 +139,7 @@ export default function SccmMigrationsPage() {
+   return (
+     <div className="space-y-6">
+       <PageHeader
+-        title={<T>SCCM Migration</T>}
++        title={<T>SCCM migration</T>}
+         description={<T>Migrate applications from SCCM to Intune</T>}
+         gradient
+         gradientColors="mixed"
+diff --git a/app/(app)/dashboard/unmanaged/error.tsx b/app/(app)/dashboard/unmanaged/error.tsx
+index d1370f88f..e5e33ccf6 100644
+--- a/app/(app)/dashboard/unmanaged/error.tsx
++++ b/app/(app)/dashboard/unmanaged/error.tsx
+@@ -15,10 +15,10 @@ export default function UnmanagedAppsError({
+     <DashboardRouteError
+       error={error}
+       reset={reset}
+-      title={<T>Unmanaged Apps</T>}
+-      description={<T>Unmanaged apps detected across your devices</T>}
++      title={<T>Discovered apps</T>}
++      description={<T>Apps found on your devices that IntuneGet doesn't manage yet</T>}
+       icon={Radar}
+-      logLabel="Unmanaged Apps"
++      logLabel="Discovered apps"
+     />
+   );
+ }
+diff --git a/app/(app)/dashboard/unmanaged/page.tsx b/app/(app)/dashboard/unmanaged/page.tsx
+index e7bce7351..7cfec681a 100644
+--- a/app/(app)/dashboard/unmanaged/page.tsx
++++ b/app/(app)/dashboard/unmanaged/page.tsx
+@@ -32,6 +32,8 @@ import { UnmanagedToolbar } from '@/components/unmanaged/UnmanagedToolbar';
+ import { UnmanagedListRow } from '@/components/unmanaged/UnmanagedListRow';
+ import { UnmanagedEmptyState } from '@/components/unmanaged/UnmanagedEmptyState';
+ import { UnmanagedPageSkeleton } from '@/components/unmanaged/UnmanagedLoadingSkeleton';
++import { RemoveAppModal } from '@/components/unmanaged/RemoveAppModal';
++import { DiscoveredGuide } from '@/components/unmanaged/DiscoveredGuide';
+ import { useUnmanagedApps } from '@/hooks/use-unmanaged-apps';
+ import { useCartStore } from '@/stores/cart-store';
+ import { staggerContainerFast, fadeUp } from '@/lib/animations/variants';
+@@ -79,6 +81,11 @@ export default function UnmanagedAppsPage() {
+     cancelClaimAll,
+     retryFailedClaims,
+     clearFilters,
++    removalModalApp,
++    setRemovalModalApp,
++    checkRemoval,
++    handleRemoveApp,
++    cartRemovalCount,
+   } = useUnmanagedApps();
+ 
+   // Actual number of apps in the cart. The banner says "in your cart", so it
+@@ -141,10 +148,6 @@ export default function UnmanagedAppsPage() {
+     ? { hidden: { opacity: 0 }, visible: { opacity: 1 } }
+     : fadeUp;
+ 
+-  // Claimed percentage for stat card description
+-  const claimedPercentage = computedStats.matched > 0
+-    ? Math.round((computedStats.claimed / computedStats.matched) * 100)
+-    : 0;
+ 
+   // Loading state
+   if (isLoading) {
+@@ -156,8 +159,8 @@ export default function UnmanagedAppsPage() {
+     return (
+       <div className="space-y-8">
+         <PageHeader
+-          title={<T>Unmanaged Apps</T>}
+-          description={<T>Unmanaged apps detected across your devices</T>}
++          title={<T>Discovered apps</T>}
++          description={<T>Apps found on your devices that IntuneGet doesn't manage yet</T>}
+           icon={Radar}
+         />
+ 
+@@ -170,7 +173,7 @@ export default function UnmanagedAppsPage() {
+               <div className="absolute -inset-1 rounded-2xl bg-amber-500/20 blur-xl opacity-50" />
+             </div>
+ 
+-            <h2 className="text-2xl font-semibold text-text-primary mb-3"><T>Additional Permission Required</T></h2>
++            <h2 className="text-2xl font-semibold text-text-primary mb-3"><T>Additional permission required</T></h2>
+             <p className="text-text-secondary mb-8">
+               <T>To access unmanaged apps, your Azure AD application needs the <Var>{permissionError}</Var> permission.</T>
+             </p>
+@@ -178,12 +181,12 @@ export default function UnmanagedAppsPage() {
+             <div className="w-full bg-bg-elevated/50 rounded-xl p-6 text-left mb-8 border border-overlay/5">
+               <h3 className="text-sm font-semibold text-text-primary mb-4 flex items-center gap-2">
+                 <Sparkles className="w-4 h-4 text-accent-cyan" />
+-                <T>Quick Setup Guide</T>
++                <T>Quick setup guide</T>
+               </h3>
+               <ol className="space-y-3">
+                 <li className="flex gap-3 text-sm text-text-secondary">
+                   <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent-cyan/10 text-accent-cyan flex items-center justify-center text-xs font-bold">1</span>
+-                  <span className="pt-0.5"><T>Go to Azure Portal &gt; App registrations &gt; Your app</T></span>
++                  <span className="pt-0.5"><T>Go to Azure portal &gt; App registrations &gt; Your app</T></span>
+                 </li>
+                 <li className="flex gap-3 text-sm text-text-secondary">
+                   <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent-cyan/10 text-accent-cyan flex items-center justify-center text-xs font-bold">2</span>
+@@ -211,7 +214,7 @@ export default function UnmanagedAppsPage() {
+                 rel="noopener noreferrer"
+                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-accent-cyan to-accent-cyan-bright text-black font-medium rounded-xl hover:opacity-90 transition-opacity"
+               >
+-                <T>Open Azure Portal</T>
++                <T>Open Azure portal</T>
+                 <ExternalLink className="w-4 h-4" />
+               </a>
+               <Button
+@@ -236,8 +239,8 @@ export default function UnmanagedAppsPage() {
+     <div className="space-y-6">
+       {/* Header */}
+       <PageHeader
+-        title={<T>Unmanaged Apps</T>}
+-        description={<T>Unmanaged apps detected across your devices. Claim them to enable managed deployment.</T>}
++        title={<T>Discovered apps</T>}
++        description={<T>Apps found on your computers that IntuneGet doesn't manage yet. Claim one to install and update it with IntuneGet, or remove it from computers.</T>}
+         icon={Radar}
+         badge={lastSynced ? {
+           text: fromCache ? 'Cached' : 'Live',
+@@ -320,10 +323,13 @@ export default function UnmanagedAppsPage() {
+         )}
+       </AnimatePresence>
+ 
++      {/* HRM patch 0040: what Claim and Remove from computers do */}
++      <DiscoveredGuide />
++
+       {/* Stat Cards (5) */}
+       <StatCardGrid columns={4}>
+         <AnimatedStatCard
+-          title={<T>Total Apps</T>}
++          title={<T>Total apps</T>}
+           value={computedStats.total}
+           icon={Package}
+           color="cyan"
+@@ -340,7 +346,7 @@ export default function UnmanagedAppsPage() {
+           loading={isLoading}
+         />
+         <AnimatedStatCard
+-          title={<T>Partial Match</T>}
++          title={<T>Partial match</T>}
+           value={computedStats.partial}
+           icon={AlertCircle}
+           color="warning"
+@@ -348,7 +354,7 @@ export default function UnmanagedAppsPage() {
+           loading={isLoading}
+         />
+         <AnimatedStatCard
+-          title={<T>Unmatched</T>}
++          title={<T>No match</T>}
+           value={computedStats.unmatched}
+           icon={HelpCircle}
+           color="neutral"
+@@ -365,7 +371,7 @@ export default function UnmanagedAppsPage() {
+             value={computedStats.claimed}
+             icon={ShoppingCart}
+             color="violet"
+-            description={<T><Var>{claimedPercentage}</Var>% of matched apps</T>}
++            description={<T>In the Deployment list, not deployed yet</T>}
+             delay={0.4}
+             loading={isLoading}
+           />
+@@ -378,7 +384,7 @@ export default function UnmanagedAppsPage() {
+           <div className="flex items-center gap-3">
+             <ShoppingCart className="w-5 h-5 text-accent-violet" />
+             <p className="text-sm text-text-secondary">
+-              <T><span className="font-medium text-text-primary"><Var>{cartItemCount}</Var> {cartItemCount === 1 ? 'app' : 'apps'}</span> in your cart ready for deployment</T>
++              <T><span className="font-medium text-text-primary"><Var>{cartItemCount}</Var> {cartItemCount === 1 ? 'app' : 'apps'}</span> in the Deployment list<Var>{cartRemovalCount > 0 ? ` (${cartRemovalCount} to remove)` : ''}</Var>. Nothing changes on computers until you deploy.</T>
+             </p>
+           </div>
+           <Button asChild size="sm" className="bg-gradient-to-r from-accent-violet to-accent-violet-bright hover:opacity-90 text-white border-0 flex-shrink-0">
+@@ -420,7 +426,7 @@ export default function UnmanagedAppsPage() {
+           renderItem={app => {
+             const Item = viewMode === 'grid' ? UnmanagedAppCard : UnmanagedListRow;
+             return <Item app={app} onClaim={() => setClaimModalApp(app)}
+-              onLink={() => setLinkModalApp(app)} onDeviceCountClick={() => setDeviceListApp(app)}
++              onLink={() => setLinkModalApp(app)} onRemove={() => setRemovalModalApp(app)} onDeviceCountClick={() => setDeviceListApp(app)}
+               isClaimLoading={claimingAppId === app.discoveredAppId} />;
+           }} />
+       )}
+@@ -468,6 +474,16 @@ export default function UnmanagedAppsPage() {
+         />
+       )}
+ 
++      {removalModalApp && (
++        <RemoveAppModal
++          app={removalModalApp}
++          onClose={() => setRemovalModalApp(null)}
++          onCheck={checkRemoval}
++          onConfirm={handleRemoveApp}
++          onLink={setLinkModalApp}
++        />
++      )}
++
+       {deviceListApp && (
+         <DeviceListModal
+           app={deviceListApp}
+diff --git a/app/api/intune/unmanaged-apps/route.ts b/app/api/intune/unmanaged-apps/route.ts
+index 72a2b30c2..95c6eea2e 100644
+--- a/app/api/intune/unmanaged-apps/route.ts
++++ b/app/api/intune/unmanaged-apps/route.ts
+@@ -8,7 +8,8 @@ import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
+ import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
+ import { parseAccessToken } from '@/lib/auth-utils';
+ import { getDatabase, isSqliteMode } from '@/lib/db';
+-import { matchDiscoveredApp, filterUserApps, isSystemApp, normalizeAppName } from '@/lib/matching/app-matcher';
++import { filterUserApps, isSystemApp, normalizeAppName } from '@/lib/matching/app-matcher';
++import { matchDiscoveredAppWithCatalog } from '@/lib/matching/catalog-matcher';
+ import { compareVersions } from '@/lib/version-compare';
+ import { getServicePrincipalToken, invalidateServicePrincipalToken } from '@/lib/intune/graph-client';
+ import type {
+@@ -584,9 +585,11 @@ export async function GET(request: NextRequest) {
+           wingetName: null,
+           confidence: 1.0,
+           partialMatches: [],
++          isStoreApp: false,
+         };
+       } else {
+-        matchResult = matchDiscoveredApp(app);
++        // HRM patch: built-in mappings, then the full catalog by name words
++        matchResult = await matchDiscoveredAppWithCatalog(app);
+       }
+ 
+       unmanagedApps.push({
+@@ -602,6 +605,7 @@ export async function GET(request: NextRequest) {
+         matchedPackageName: matchResult.wingetName,
+         matchConfidence: matchResult.confidence,
+         partialMatches: matchResult.partialMatches,
++        isStoreApp: matchResult.isStoreApp,
+         isClaimed: claimedMap.has(app.id),
+         claimStatus: claimedMap.get(app.id) as UnmanagedApp['claimStatus'],
+         lastSynced: now,
+diff --git a/app/api/intune/unmanaged-apps/sqlite-parity.test.ts b/app/api/intune/unmanaged-apps/sqlite-parity.test.ts
+index 6f70c2f5d..bab5f8862 100644
+--- a/app/api/intune/unmanaged-apps/sqlite-parity.test.ts
++++ b/app/api/intune/unmanaged-apps/sqlite-parity.test.ts
+@@ -1,7 +1,9 @@
+ import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
+ import { NextRequest } from 'next/server';
+-const session = vi.hoisted(() => { vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('DATABASE_PATH', ':memory:'); return { tenant: 'scan-tenant' }; });
++const session = vi.hoisted(() => { vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('DATABASE_PATH', ':memory:'); return { tenant: 'scan-tenant', catalogSearch: vi.fn().mockResolvedValue([]) }; });
+ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => ({ userId: 'scan-user', tenantId: session.tenant }) }));
++// This route/database test must not download the live catalog on a clean CI runner.
++vi.mock('@/lib/catalog', () => ({ getCatalogSource: () => ({ searchCuratedAppsByNameWords: session.catalogSearch }) }));
+ vi.mock('@/lib/supabase', () => ({ isSupabaseConfigured: () => false, createServerClient: vi.fn(() => { throw Error('No hosted database'); }) }));
+ vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'synthetic-token', invalidateServicePrincipalToken: vi.fn() }));
+ vi.mock('@/lib/matching/app-matcher', () => ({ filterUserApps: (apps: unknown[]) => apps, isSystemApp: () => false, normalizeAppName: (name: string) => name.toLowerCase(), matchDiscoveredApp: () => ({ status: 'unmatched', wingetId: null, wingetName: null, confidence: 0, partialMatches: [] }) }));
+@@ -9,7 +11,7 @@ vi.mock('@/lib/db', async () => { const { sqliteDb } = await vi.importActual<typ
+ import { sqliteDb, sqliteManualMappings, closeSqliteDb } from '@/lib/db/sqlite';
+ import { createServerClient } from '@/lib/supabase';
+ import { GET } from './route';
+-beforeEach(() => { closeSqliteDb(); session.tenant = 'scan-tenant'; vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ value: [{ id: 'detected-one', displayName: 'Fixture Scanner', platform: 'windows', deviceCount: 2 }] }), { status: 200 }))); });
++beforeEach(() => { closeSqliteDb(); session.tenant = 'scan-tenant'; session.catalogSearch.mockClear(); vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ value: [{ id: 'detected-one', displayName: 'Fixture Scanner', platform: 'windows', deviceCount: 2 }] }), { status: 200 }))); });
+ afterEach(() => { closeSqliteDb(); vi.unstubAllGlobals(); });
+ afterAll(() => { vi.unstubAllEnvs(); });
+ it('shows a locally persisted claim and hides it only after deployment', async () => {
+@@ -24,6 +26,8 @@ it('shows a locally persisted claim and hides it only after deployment', async (
+   session.tenant = 'other-scan-tenant';
+   expect((await (await GET(request())).json()).apps[0]).toMatchObject({ isClaimed: false, matchedPackageId: null });
+   expect(createServerClient).not.toHaveBeenCalled();
++  expect(session.catalogSearch).toHaveBeenCalledExactlyOnceWith(['fixture', 'scanner'], 25);
++  expect(vi.mocked(fetch).mock.calls.every(([url]) => String(url).startsWith('https://graph.microsoft.com/'))).toBe(true);
+ });
+ it('refuses a foreign tenant header before Graph access', async () => {
+   expect((await GET(new NextRequest('http://localhost/api/intune/unmanaged-apps', { headers: { Authorization: 'Bearer fixture', 'X-MSP-Tenant-Id': 'other-scan-tenant' } }))).status).toBe(403);
+diff --git a/components/CuratedCatalog.tsx b/components/CuratedCatalog.tsx
+index 9a1d66d2e..d8648add0 100644
+--- a/components/CuratedCatalog.tsx
++++ b/components/CuratedCatalog.tsx
+@@ -289,7 +289,7 @@ export function CuratedCatalog() {
+         <div className="absolute right-0 top-0 h-28 w-28 md:h-40 md:w-40 bg-gradient-to-bl from-accent-violet/10 via-accent-cyan/5 to-transparent blur-2xl" />
+ 
+         <div className="relative">
+-          <h1 className="text-display-sm text-text-primary"><T>Curated Catalog</T></h1>
++          <h1 className="text-display-sm text-text-primary"><T>Curated apps</T></h1>
+           <p className="text-text-secondary mt-2 max-w-2xl">
+             <T>Applications downloaded straight from their publishers. New releases are checked every 30 minutes and become available once they pass an automated install, upgrade and uninstall test in an isolated virtual machine.</T>
+           </p>
+diff --git a/components/sccm/SccmManualMatchModal.tsx b/components/sccm/SccmManualMatchModal.tsx
+index 1a3f51635..b11ffa850 100644
+--- a/components/sccm/SccmManualMatchModal.tsx
++++ b/components/sccm/SccmManualMatchModal.tsx
+@@ -142,7 +142,7 @@ export function SccmManualMatchModal({
+         {/* Header */}
+         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
+           <div className="min-w-0 flex-1">
+-            <h2 className="text-lg font-semibold text-white">Link WinGet Package</h2>
++            <h2 className="text-lg font-semibold text-white">Link WinGet package</h2>
+             <p className="text-sm text-zinc-400 mt-1 truncate">
+               Manually link &quot;{app.displayName}&quot; to a WinGet package
+             </p>
+@@ -311,7 +311,7 @@ export function SccmManualMatchModal({
+               ) : (
+                 <Link2 className="w-4 h-4 mr-2" />
+               )}
+-              Link Package
++              Link package
+             </Button>
+           </div>
+         </div>
+diff --git a/components/sccm/SccmMatchStatusBadge.tsx b/components/sccm/SccmMatchStatusBadge.tsx
+index fc9fb18ac..2313b73be 100644
+--- a/components/sccm/SccmMatchStatusBadge.tsx
++++ b/components/sccm/SccmMatchStatusBadge.tsx
+@@ -29,7 +29,7 @@ const statusConfig: Record<
+ > = {
+   matched: { label: 'Matched', icon: CheckCircle2, tone: 'success' },
+   partial: { label: 'Partial', icon: AlertCircle, tone: 'warning' },
+-  unmatched: { label: 'No Match', icon: HelpCircle, tone: 'neutral' },
++  unmatched: { label: 'No match', icon: HelpCircle, tone: 'neutral' },
+   pending: { label: 'Pending', icon: Clock, tone: 'info' },
+   manual: { label: 'Manual', icon: UserCheck, tone: 'accent' },
+   excluded: { label: 'Excluded', icon: XCircle, tone: 'muted' },
+diff --git a/components/unmanaged/ClaimAllModal.tsx b/components/unmanaged/ClaimAllModal.tsx
+index d5ce89cbe..f472d4407 100644
+--- a/components/unmanaged/ClaimAllModal.tsx
++++ b/components/unmanaged/ClaimAllModal.tsx
+@@ -64,9 +64,9 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+         <DialogHeader>
+           <DialogTitle>
+             {phase === 'confirm'
+-              ? 'Claim All Matched Apps'
++              ? 'Claim all matched apps'
+               : isComplete
+-                ? 'Claim Complete'
++                ? 'Claim complete'
+                 : `Claiming ${apps.length} apps...`}
+           </DialogTitle>
+           <DialogDescription className="sr-only">
+@@ -87,7 +87,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+                     {apps.length} {apps.length === 1 ? 'app' : 'apps'} will be claimed
+                   </p>
+                   <p className="text-text-secondary text-sm mt-1">
+-                    Each app will be fetched from WinGet and added to your deployment cart. This may take a moment.
++                    Each app is added to the Deployment list with no groups. Nothing changes on devices until you choose groups for each one and press Deploy to Intune.
+                   </p>
+                 </div>
+               </div>
+@@ -175,7 +175,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+               {isComplete && (
+                 <div className="text-center p-4 rounded-lg bg-overlay/[0.02] border border-black/[0.03]">
+                   <p className="text-text-primary font-medium">
+-                    {successCount} of {apps.length} apps added to cart
++                    {successCount} of {apps.length} apps added to the Deployment list
+                   </p>
+                   {failCount > 0 && (
+                     <p className="text-red-400 text-sm mt-1">
+@@ -205,7 +205,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+                 className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white border-0"
+               >
+                 <ShoppingCart className="w-4 h-4 mr-2" />
+-                Claim {apps.length} Apps
++                Claim {apps.length} apps
+               </Button>
+             </>
+           )}
+diff --git a/components/unmanaged/ClaimAppModal.tsx b/components/unmanaged/ClaimAppModal.tsx
+index c6b4cbd92..8fc0c20dc 100644
+--- a/components/unmanaged/ClaimAppModal.tsx
++++ b/components/unmanaged/ClaimAppModal.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+ import { useState } from 'react';
+-import { Monitor, Package, ShoppingCart, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
++import { Monitor, Package, ShoppingCart, Loader2, AlertTriangle } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import {
+   Dialog,
+@@ -12,6 +12,7 @@ import {
+   DialogDescription,
+ } from '@/components/ui/dialog';
+ import { AppIcon } from '@/components/AppIcon';
++import { FlowSteps, installSteps } from './FlowSteps';
+ import type { UnmanagedApp } from '@/types/unmanaged';
+ 
+ interface ClaimAppModalProps {
+@@ -54,9 +55,9 @@ export function ClaimAppModal({ app, isOpen, onClose, onConfirm }: ClaimAppModal
+         }}
+       >
+         <DialogHeader>
+-          <DialogTitle>Claim Unmanaged App</DialogTitle>
++          <DialogTitle>Claim discovered app</DialogTitle>
+           <DialogDescription className="sr-only">
+-            Add {app.displayName} to your deployment cart
++            Add {app.displayName} to the Deployment list
+           </DialogDescription>
+         </DialogHeader>
+ 
+@@ -89,7 +90,7 @@ export function ClaimAppModal({ app, isOpen, onClose, onConfirm }: ClaimAppModal
+             <div className="bg-bg-elevated rounded-xl p-4 border border-overlay/5">
+               <div className="flex items-center gap-2 text-text-secondary mb-1">
+                 <Package className="w-4 h-4" />
+-                <span className="text-xs uppercase tracking-wide">WinGet Package</span>
++                <span className="text-xs uppercase tracking-wide">WinGet package</span>
+               </div>
+               <p className="text-sm font-mono text-accent-cyan truncate">
+                 {app.matchedPackageId}
+@@ -108,23 +109,10 @@ export function ClaimAppModal({ app, isOpen, onClose, onConfirm }: ClaimAppModal
+             </div>
+           )}
+ 
+-          {/* What happens next */}
++          {/* HRM patch 0040: what claiming means and what comes after it */}
+           <div className="bg-bg-elevated/50 rounded-xl p-4 border border-overlay/5">
+-            <h4 className="text-sm font-medium text-text-primary mb-3">What happens next?</h4>
+-            <ul className="space-y-2">
+-              <li className="flex items-start gap-2 text-sm text-text-secondary">
+-                <CheckCircle2 className="w-4 h-4 text-status-success flex-shrink-0 mt-0.5" />
+-                <span>The WinGet package will be added to your cart</span>
+-              </li>
+-              <li className="flex items-start gap-2 text-sm text-text-secondary">
+-                <CheckCircle2 className="w-4 h-4 text-status-success flex-shrink-0 mt-0.5" />
+-                <span>You can configure deployment options before uploading</span>
+-              </li>
+-              <li className="flex items-start gap-2 text-sm text-text-secondary">
+-                <CheckCircle2 className="w-4 h-4 text-status-success flex-shrink-0 mt-0.5" />
+-                <span>After deployment, this app will become managed in Intune</span>
+-              </li>
+-            </ul>
++            <h4 className="text-sm font-medium text-text-primary mb-3">How installing works</h4>
++            <FlowSteps steps={installSteps(app.displayName)} tone="install" />
+           </div>
+         </div>
+ 
+@@ -147,12 +135,12 @@ export function ClaimAppModal({ app, isOpen, onClose, onConfirm }: ClaimAppModal
+             {isLoading ? (
+               <>
+                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
+-                Adding to Cart...
++                Adding…
+               </>
+             ) : (
+               <>
+                 <ShoppingCart className="w-4 h-4 mr-2" />
+-                {error ? 'Retry' : 'Add to Cart'}
++                {error ? 'Try again' : 'Add to Deployment list'}
+               </>
+             )}
+           </Button>
+diff --git a/components/unmanaged/DiscoveredGuide.tsx b/components/unmanaged/DiscoveredGuide.tsx
+new file mode 100644
+index 000000000..c539f591a
+--- /dev/null
++++ b/components/unmanaged/DiscoveredGuide.tsx
+@@ -0,0 +1,84 @@
++'use client';
++
++// HRM patch 0040: how Discovered apps works, at the top of the page. Hiding it is remembered in this browser.
++import { useEffect, useState } from 'react';
++import Link from 'next/link';
++import { ChevronDown, ChevronUp, PackageCheck, Trash2 } from 'lucide-react';
++import { Button } from '@/components/ui/button';
++import { cn } from '@/lib/utils';
++
++const KEY = 'hrm.discovered.guide.hidden';
++export const GUIDE_LABELS = { title: 'How Discovered apps works', show: 'How this works', hide: 'Hide' } as const;
++
++const lanes = [
++  {
++    tone: 'install' as const, icon: PackageCheck, title: 'Keep it and let IntuneGet update it',
++    steps: ['Claim', 'Choose groups', 'Deploy to Intune', 'Get updates'],
++  },
++  {
++    tone: 'remove' as const, icon: Trash2, title: 'Remove it from computers',
++    steps: ['Remove', 'Check groups', 'Deploy to Intune', 'Delete when done'],
++  },
++];
++
++const terms: Array<[string, string]> = [
++  ['Claimed', 'In the Deployment list, waiting to be installed. Nothing has changed on computers yet. Deploy it, or take it out of the list.'],
++  ['To remove', 'In the Deployment list, waiting to be uninstalled. Nothing has changed on computers yet.'],
++  ['Matched', 'IntuneGet knows which WinGet package it is, so it can install it. Remove from computers checks whether it can also remove it.'],
++  ['Partial match / No match', 'IntuneGet isn\'t sure which package it is. Use Link package to pick one first.'],
++  ['Microsoft Store app', 'Comes from the Store. Install or remove it in Intune as a Microsoft Store app.'],
++];
++
++export function DiscoveredGuide() {
++  const [hidden, setHidden] = useState(false);
++  useEffect(() => {
++    try { setHidden(window.localStorage.getItem(KEY) === '1'); } catch { /* storage unavailable: show it */ }
++  }, []);
++  const toggle = () => {
++    const next = !hidden;
++    setHidden(next);
++    try { window.localStorage.setItem(KEY, next ? '1' : '0'); } catch { /* not remembered */ }
++  };
++
++  return (
++    <section aria-labelledby="discovered-guide" className="glass-light rounded-xl border border-overlay/10">
++      <div className="flex items-center justify-between gap-3 px-5 py-3">
++        <h2 id="discovered-guide" className="text-sm font-semibold text-text-primary">{GUIDE_LABELS.title}</h2>
++        <Button type="button" size="sm" variant="ghost" onClick={toggle} aria-expanded={!hidden} className="text-text-secondary">
++          {hidden ? <>{GUIDE_LABELS.show}<ChevronDown className="w-4 h-4 ml-1" /></> : <>{GUIDE_LABELS.hide}<ChevronUp className="w-4 h-4 ml-1" /></>}
++        </Button>
++      </div>
++      {!hidden && (
++        <div className="px-5 pb-5 space-y-4">
++          <p className="text-sm text-text-secondary">
++            These apps are on HRM devices but IntuneGet doesn&apos;t manage them. Nothing on this page changes a device by itself:
++            every change goes through the Deployment list and Deploy to Intune.
++          </p>
++          <div className="grid gap-3 md:grid-cols-2">
++            {lanes.map((lane) => (
++              <div key={lane.title} className={cn('rounded-lg border p-4', lane.tone === 'remove' ? 'border-status-error/20 bg-status-error/5' : 'border-accent-cyan/20 bg-accent-cyan/5')}>
++                <p className="flex items-center gap-2 text-sm font-medium text-text-primary mb-3">
++                  <lane.icon className={cn('w-4 h-4', lane.tone === 'remove' ? 'text-status-error' : 'text-accent-cyan')} />{lane.title}
++                </p>
++                <ol className="grid grid-cols-2 gap-1.5 text-xs text-text-secondary">
++                  {lane.steps.map((step, i) => (
++                    <li key={step} className="flex items-center gap-1.5 rounded-md bg-bg-elevated border border-overlay/10 px-2 py-1.5">
++                      <span className={cn('flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold', lane.tone === 'remove' ? 'bg-status-error/15 text-status-error' : 'bg-accent-cyan/15 text-accent-cyan')}>{i + 1}</span>
++                      <span className="truncate">{step}</span>
++                    </li>
++                  ))}
++                </ol>
++              </div>
++            ))}
++          </div>
++          <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 text-xs">
++            {terms.map(([term, meaning]) => (
++              <div key={term}><dt className="inline font-semibold text-text-primary">{term}: </dt><dd className="inline text-text-secondary">{meaning}</dd></div>
++            ))}
++          </dl>
++          <p className="text-xs text-text-muted">More in Help: <Link href="/dashboard/help#discovered" className="text-accent-cyan hover:underline">Discovered apps</Link> and <Link href="/dashboard/help#remove-discovered" className="text-accent-cyan hover:underline">Removing an app found on computers</Link>.</p>
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/components/unmanaged/FlowSteps.tsx b/components/unmanaged/FlowSteps.tsx
+new file mode 100644
+index 000000000..c34271cc8
+--- /dev/null
++++ b/components/unmanaged/FlowSteps.tsx
+@@ -0,0 +1,43 @@
++'use client';
++
++// HRM patch 0040: numbered steps for the install and remove flows on Discovered apps.
++import { cn } from '@/lib/utils';
++
++export interface FlowStep { title: string; detail?: string }
++
++export function FlowSteps({ steps, tone = 'install', current = 0, className }: {
++  steps: FlowStep[]; tone?: 'install' | 'remove'; current?: number; className?: string;
++}) {
++  const color = tone === 'remove'
++    ? { now: 'bg-status-error text-white', next: 'bg-status-error/10 text-status-error border border-status-error/30' }
++    : { now: 'bg-accent-cyan text-black', next: 'bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/30' };
++  return (
++    <ol className={cn('space-y-3', className)}>
++      {steps.map((step, i) => (
++        <li key={step.title} className="flex gap-3">
++          <span className={cn('flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold', i === current ? color.now : color.next)}>
++            {i + 1}
++          </span>
++          <div className="min-w-0 pt-0.5">
++            <p className="text-sm font-medium text-text-primary">{step.title}{i === current && <span className="ml-2 text-xs font-normal text-text-muted">(this step)</span>}</p>
++            {step.detail && <p className="text-xs text-text-secondary mt-0.5">{step.detail}</p>}
++          </div>
++        </li>
++      ))}
++    </ol>
++  );
++}
++
++export const installSteps = (name: string): FlowStep[] => [
++  { title: 'Claim', detail: `Adds ${name} to the Deployment list. Claimed means it is waiting there. Nothing changes on computers yet.` },
++  { title: 'Choose groups in the Deployment list', detail: 'Required installs it automatically. Available lets staff install it from Company Portal.' },
++  { title: 'Deploy to Intune', detail: "IntuneGet packages it, adds it to Intune and assigns your groups. Computers in Required groups install IntuneGet's copy, including ones that already have it." },
++  { title: 'IntuneGet keeps it up to date', detail: 'New versions show under App updates, and the app appears in Inventory.' },
++];
++
++export const removeSteps = (name: string): FlowStep[] => [
++  { title: 'Add removal to Deployment list', detail: 'Nothing changes on computers yet.' },
++  { title: 'Check the groups in the Deployment list', detail: 'Every group must be Uninstall. All devices removes it everywhere it is found.' },
++  { title: 'Deploy to Intune', detail: `IntuneGet adds "${name} (uninstall only)" to Intune with those Uninstall groups.` },
++  { title: 'Watch it in Inventory, then delete it', detail: `Computers that have ${name} remove it when they check in. Inventory shows how many still have it. When none are left, press Delete from Intune.` },
++];
+diff --git a/components/unmanaged/LinkPackageModal.tsx b/components/unmanaged/LinkPackageModal.tsx
+index b9ee4ff1a..6105df0db 100644
+--- a/components/unmanaged/LinkPackageModal.tsx
++++ b/components/unmanaged/LinkPackageModal.tsx
+@@ -121,7 +121,7 @@ export function LinkPackageModal({ app, isOpen, onClose, onLink, onLinkAndClaim
+         }}
+       >
+         <DialogHeader>
+-          <DialogTitle>Link WinGet Package</DialogTitle>
++          <DialogTitle>Link WinGet package</DialogTitle>
+           <DialogDescription>
+             Search for a WinGet package to link with &ldquo;{app.displayName}&rdquo;
+           </DialogDescription>
+@@ -278,7 +278,7 @@ export function LinkPackageModal({ app, isOpen, onClose, onLink, onLinkAndClaim
+             {isLinking && !onLinkAndClaim ? (
+               <Loader2 className="w-4 h-4 animate-spin mr-2" />
+             ) : null}
+-            Link Package
++            Link package
+           </Button>
+         </DialogFooter>
+       </DialogContent>
+diff --git a/components/unmanaged/MatchStatusBadge.tsx b/components/unmanaged/MatchStatusBadge.tsx
+index d8ae157f9..f6f48812c 100644
+--- a/components/unmanaged/MatchStatusBadge.tsx
++++ b/components/unmanaged/MatchStatusBadge.tsx
+@@ -1,6 +1,6 @@
+ 'use client';
+ 
+-import { CheckCircle2, AlertCircle, HelpCircle, Clock } from 'lucide-react';
++import { CheckCircle2, AlertCircle, HelpCircle, Clock, Store } from 'lucide-react';
+ import {
+   Tooltip,
+   TooltipContent,
+@@ -14,6 +14,8 @@ import type { MatchStatus } from '@/types/unmanaged';
+ interface MatchStatusBadgeProps {
+   status: MatchStatus;
+   confidence?: number | null;
++  /** HRM patch: Microsoft Store app, which can't be matched to WinGet */
++  storeApp?: boolean;
+   className?: string;
+ }
+ 
+@@ -23,8 +25,9 @@ const statusConfig: Record<MatchStatus, {
+   tone: StatusTone;
+ }> = {
+   matched: { label: 'Matched', icon: CheckCircle2, tone: 'success' },
+-  partial: { label: 'Partial Match', icon: AlertCircle, tone: 'warning' },
+-  unmatched: { label: 'No Match', icon: HelpCircle, tone: 'neutral' },
++  // HRM patch 0036: sentence case, and "No match" is the one name for unmatched apps (stat, filter, badge).
++  partial: { label: 'Partial match', icon: AlertCircle, tone: 'warning' },
++  unmatched: { label: 'No match', icon: HelpCircle, tone: 'neutral' },
+   pending: { label: 'Pending', icon: Clock, tone: 'info' },
+ };
+ 
+@@ -45,7 +48,24 @@ function getConfidenceTooltip(status: MatchStatus, confidence: number | null | u
+   return `${pct}% confidence - weak match. Consider linking a different package.`;
+ }
+ 
+-export function MatchStatusBadge({ status, confidence, className }: MatchStatusBadgeProps) {
++export function MatchStatusBadge({ status, confidence, storeApp, className }: MatchStatusBadgeProps) {
++  if (storeApp) {
++    return (
++      <TooltipProvider>
++        <Tooltip>
++          <TooltipTrigger asChild>
++            <StatusBadge tone="info" icon={Store} className={cn('cursor-default', className)}>
++              <span>Microsoft Store app</span>
++            </StatusBadge>
++          </TooltipTrigger>
++          <TooltipContent side="top" className="max-w-[260px]">
++            <p>Installed from the Microsoft Store, not WinGet. Deploy it in Intune as a Microsoft Store app.</p>
++          </TooltipContent>
++        </Tooltip>
++      </TooltipProvider>
++    );
++  }
++
+   const config = statusConfig[status];
+ 
+   const showConfidence = confidence !== null && confidence !== undefined && status !== 'unmatched';
+diff --git a/components/unmanaged/RemoveAppModal.tsx b/components/unmanaged/RemoveAppModal.tsx
+new file mode 100644
+index 000000000..0d8ff22bf
+--- /dev/null
++++ b/components/unmanaged/RemoveAppModal.tsx
+@@ -0,0 +1,136 @@
++'use client';
++
++// HRM patch 0040: guided removal of an app found on computers.
++import { useEffect, useState } from 'react';
++import { AlertTriangle, Loader2, Monitor, Trash2 } from 'lucide-react';
++import { Button } from '@/components/ui/button';
++import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
++import { AppIcon } from '@/components/AppIcon';
++import { FlowSteps, removeSteps } from './FlowSteps';
++import { REMOVAL_LABELS } from '@/lib/hrm/removal';
++import type { RemovalCheck, RemovalTarget } from '@/hooks/use-unmanaged-apps';
++import type { UnmanagedApp } from '@/types/unmanaged';
++
++interface Props {
++  app: UnmanagedApp;
++  onClose: () => void;
++  onCheck: (app: UnmanagedApp) => Promise<RemovalCheck>;
++  onConfirm: (app: UnmanagedApp, check: RemovalCheck, target: RemovalTarget) => void;
++  onLink: (app: UnmanagedApp) => void;
++}
++
++/** What staff can do when IntuneGet can't remove the app itself. */
++function alternatives(app: UnmanagedApp): string[] {
++  if (app.isStoreApp) return [
++    'In Intune, add it as a Microsoft Store app (new) and assign it to groups as Uninstall.',
++  ];
++  if (app.matchStatus !== 'matched') return [
++    'If it is in WinGet, use Link package to pick the right package, then press Remove from computers again.',
++    "Otherwise, remove it with a script in Intune (Devices, Scripts and remediations) or the vendor's own removal tool.",
++  ];
++  return ["Remove it with a script in Intune (Devices, Scripts and remediations) or the vendor's own removal tool."];
++}
++
++export function RemoveAppModal({ app, onClose, onCheck, onConfirm, onLink }: Props) {
++  const [check, setCheck] = useState<RemovalCheck | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [target, setTarget] = useState<RemovalTarget>('allDevices');
++  const [confirmed, setConfirmed] = useState(false);
++  const inList = app.cartPurpose === 'install';
++
++  useEffect(() => {
++    let live = true;
++    if (inList) return;
++    onCheck(app).then((r) => { if (live) setCheck(r); }).catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Try again.'); });
++    return () => { live = false; };
++  }, [app, onCheck, inList]);
++
++  const blocked = inList
++    ? { reason: 'It is claimed: it is in the Deployment list to be installed. Take it out of the Deployment list first.' }
++    : check && !check.ok ? check : null;
++
++  return (
++    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
++      <DialogContent className="max-w-lg mx-4">
++        <DialogHeader>
++          <DialogTitle>{REMOVAL_LABELS.remove}</DialogTitle>
++          <DialogDescription className="sr-only">Uninstall {app.displayName} from computers through Intune</DialogDescription>
++        </DialogHeader>
++
++        <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
++          <div className="flex items-center gap-4">
++            <AppIcon packageId={app.matchedPackageId || app.displayName} packageName={app.displayName} size="lg" />
++            <div className="min-w-0">
++              <h3 className="text-text-primary font-semibold truncate">{app.displayName}</h3>
++              <p className="text-text-secondary text-sm truncate">{app.publisher || 'Unknown publisher'}</p>
++              <p className="text-text-muted text-xs mt-1 flex items-center gap-1"><Monitor className="w-3.5 h-3.5" />Found on {app.deviceCount.toLocaleString()} {app.deviceCount === 1 ? 'computer' : 'computers'}</p>
++            </div>
++          </div>
++
++          {!blocked && !check && !error && (
++            <p className="flex items-center gap-2 text-sm text-text-secondary"><Loader2 className="w-4 h-4 animate-spin" />Checking whether IntuneGet can remove it…</p>
++          )}
++
++          {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
++
++          {blocked && (
++            <div className="rounded-xl border border-status-warning/30 bg-status-warning/5 p-4 space-y-2">
++              <p className="text-sm font-medium text-text-primary flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-status-warning" />IntuneGet can&apos;t remove this app</p>
++              <p className="text-sm text-text-secondary">{blocked.reason}</p>
++              {!inList && (
++                <>
++                  <p className="text-sm font-medium text-text-primary pt-1">What you can do instead</p>
++                  <ul className="list-disc pl-5 space-y-1 text-sm text-text-secondary">{alternatives(app).map((a) => <li key={a}>{a}</li>)}</ul>
++                </>
++              )}
++            </div>
++          )}
++
++          {check?.ok && (
++            <>
++              <div className="rounded-xl border border-overlay/10 bg-bg-elevated/50 p-4">
++                <h4 className="text-sm font-medium text-text-primary mb-3">How removing works</h4>
++                <FlowSteps steps={removeSteps(app.displayName)} tone="remove" />
++              </div>
++
++              <div className="rounded-xl border border-overlay/10 p-4 space-y-1 text-sm text-text-secondary">
++                <p className="font-medium text-text-primary">What gets removed</p>
++                <p>Each computer in the groups uninstalls the program named exactly &quot;{app.displayName}&quot;, using the program&apos;s own uninstaller.</p>
++                <p>Other products from the same publisher aren&apos;t touched. Copies installed for one user only aren&apos;t removed.</p>
++              </div>
++
++              <fieldset className="space-y-2">
++                <legend className="text-sm font-medium text-text-primary mb-1">Remove it from</legend>
++                <label className="flex items-start gap-2 text-sm text-text-primary">
++                  <input type="radio" name="removal-target" className="mt-1" checked={target === 'allDevices'} onChange={() => setTarget('allDevices')} />
++                  <span>All devices<span className="block text-xs text-text-secondary">For software HRM doesn&apos;t want anywhere.</span></span>
++                </label>
++                <label className="flex items-start gap-2 text-sm text-text-primary">
++                  <input type="radio" name="removal-target" className="mt-1" checked={target === 'choose'} onChange={() => setTarget('choose')} />
++                  <span>Groups I choose in the Deployment list<span className="block text-xs text-text-secondary">Every group you add there is set to Uninstall.</span></span>
++                </label>
++              </fieldset>
++
++              <label className="flex items-start gap-2 text-sm text-text-primary">
++                <input type="checkbox" className="mt-1" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
++                {REMOVAL_LABELS.confirm}
++              </label>
++            </>
++          )}
++        </div>
++
++        <DialogFooter>
++          <Button type="button" variant="outline" onClick={onClose} className="border-overlay/10">{blocked ? 'Close' : 'Cancel'}</Button>
++          {blocked && !inList && !app.isStoreApp && app.matchStatus !== 'matched' && (
++            <Button type="button" variant="outline" onClick={() => { onClose(); onLink(app); }} className="border-overlay/10">Link package</Button>
++          )}
++          {check?.ok && (
++            <Button type="button" variant="destructive" disabled={!confirmed} onClick={() => onConfirm(app, check, target)}>
++              <Trash2 className="w-4 h-4 mr-2" />{REMOVAL_LABELS.add}
++            </Button>
++          )}
++        </DialogFooter>
++      </DialogContent>
++    </Dialog>
++  );
++}
+diff --git a/components/unmanaged/UnmanagedAppCard.tsx b/components/unmanaged/UnmanagedAppCard.tsx
+index cd49c673d..313fb1118 100644
+--- a/components/unmanaged/UnmanagedAppCard.tsx
++++ b/components/unmanaged/UnmanagedAppCard.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+ import { memo } from 'react';
+-import { Monitor, Link as LinkIcon, ShoppingCart, Check, Loader2, Lightbulb } from 'lucide-react';
++import { Monitor, Link as LinkIcon, ShoppingCart, Check, Loader2, Lightbulb, Trash2, HelpCircle } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { AppIcon } from '@/components/AppIcon';
+ import { MatchStatusBadge } from './MatchStatusBadge';
+@@ -12,6 +12,8 @@ interface UnmanagedAppCardProps {
+   app: UnmanagedApp;
+   onClaim?: (app: UnmanagedApp) => void;
+   onLink?: (app: UnmanagedApp) => void;
++  /** HRM patch 0040 */
++  onRemove?: (app: UnmanagedApp) => void;
+   onDeviceCountClick?: () => void;
+   isClaimLoading?: boolean;
+ }
+@@ -27,11 +29,15 @@ function UnmanagedAppCardComponent({
+   app,
+   onClaim,
+   onLink,
++  onRemove,
+   onDeviceCountClick,
+   isClaimLoading = false,
+ }: UnmanagedAppCardProps) {
+   const canClaim = app.matchStatus === 'matched' && !app.isClaimed;
+-  const canLink = app.matchStatus === 'unmatched' || app.matchStatus === 'partial';
++  // HRM patch 0040: only matched apps can be removed by IntuneGet; others get guidance instead
++  const removable = app.matchStatus === 'matched' && !app.isStoreApp;
++  // HRM patch: Microsoft Store apps can't be linked to a WinGet package
++  const canLink = !app.isStoreApp && (app.matchStatus === 'unmatched' || app.matchStatus === 'partial');
+   const hasPartialSuggestions = app.partialMatches && app.partialMatches.length > 0;
+ 
+   return (
+@@ -52,8 +58,8 @@ function UnmanagedAppCardComponent({
+             className="group-hover:border-accent-cyan/30 transition-all duration-300"
+           />
+           {app.isClaimed && (
+-            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-status-success rounded-full flex items-center justify-center">
+-              <Check className="w-3 h-3 text-white" />
++            <div className={cn('absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center', app.cartPurpose === 'remove' ? 'bg-status-error' : 'bg-status-success')}>
++              {app.cartPurpose === 'remove' ? <Trash2 className="w-3 h-3 text-white" /> : <Check className="w-3 h-3 text-white" />}
+             </div>
+           )}
+         </div>
+@@ -77,13 +83,13 @@ function UnmanagedAppCardComponent({
+           </div>
+ 
+           {/* Device count + status */}
+-          <div className="flex items-center gap-4 mt-3">
++          <div className="flex flex-wrap items-center gap-2 mt-3">
+             {onDeviceCountClick ? (
+               <button
+                 type="button"
+                 onClick={onDeviceCountClick}
+                 aria-label={`View ${app.deviceCount.toLocaleString()} ${app.deviceCount === 1 ? 'device' : 'devices'} for ${app.displayName}`}
+-                className="flex items-center gap-1.5 bg-bg-elevated/80 px-2.5 py-1 rounded-lg border border-overlay/5 transition-colors hover:border-accent-cyan/40 hover:bg-bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
++                className="flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 bg-bg-elevated/80 px-2.5 py-1 rounded-lg border border-overlay/5 transition-colors hover:border-accent-cyan/40 hover:bg-bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
+               >
+                 <Monitor className="w-4 h-4 text-accent-cyan" />
+                 <span className="text-sm font-semibold text-text-primary tabular-nums">
+@@ -94,7 +100,7 @@ function UnmanagedAppCardComponent({
+                 </span>
+               </button>
+             ) : (
+-              <div className="flex items-center gap-1.5 bg-bg-elevated/80 px-2.5 py-1 rounded-lg border border-overlay/5">
++              <div className="flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 bg-bg-elevated/80 px-2.5 py-1 rounded-lg border border-overlay/5">
+                 <Monitor className="w-4 h-4 text-accent-cyan" />
+                 <span className="text-sm font-semibold text-text-primary tabular-nums">
+                   {app.deviceCount.toLocaleString()}
+@@ -104,7 +110,7 @@ function UnmanagedAppCardComponent({
+                 </span>
+               </div>
+             )}
+-            <MatchStatusBadge status={app.matchStatus} confidence={app.matchConfidence} />
++            <MatchStatusBadge status={app.matchStatus} confidence={app.matchConfidence} storeApp={app.isStoreApp} />
+           </div>
+ 
+           {/* Matched package info */}
+@@ -132,9 +138,12 @@ function UnmanagedAppCardComponent({
+       <div className="flex items-center justify-between mt-4 pt-4 border-t border-overlay/5">
+         <div className="flex items-center gap-2">
+           {app.isClaimed && (
+-            <span className="text-xs text-status-success flex items-center gap-1">
+-              <Check className="w-3.5 h-3.5" />
+-              Claimed
++            <span
++              title={app.cartPurpose === 'remove' ? 'In the Deployment list to be uninstalled. Nothing has changed on computers yet.' : 'In the Deployment list to be installed. Nothing has changed on computers yet.'}
++              className={cn('text-xs flex items-center gap-1', app.cartPurpose === 'remove' ? 'text-status-error' : 'text-status-success')}
++            >
++              {app.cartPurpose === 'remove' ? <Trash2 className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
++              {app.cartPurpose === 'remove' ? 'To remove' : 'Claimed'}: in Deployment list
+             </span>
+           )}
+           {app.claimStatus === 'deployed' && (
+@@ -146,6 +155,18 @@ function UnmanagedAppCardComponent({
+         </div>
+ 
+         <div className="flex items-center gap-2">
++          {onRemove && !app.isClaimed && (
++            <Button
++              type="button"
++              size="sm"
++              variant="outline"
++              onClick={() => onRemove(app)}
++              className="border-overlay/10 text-text-secondary hover:text-status-error hover:bg-status-error/5"
++            >
++              {removable ? <Trash2 className="w-4 h-4 mr-1.5" /> : <HelpCircle className="w-4 h-4 mr-1.5" />}
++              {removable ? 'Remove from computers' : 'How to remove'}
++            </Button>
++          )}
+           {canLink && (
+             <Button
+               type="button"
+@@ -155,7 +176,7 @@ function UnmanagedAppCardComponent({
+               className="border-overlay/10 hover:bg-overlay/5 text-text-secondary"
+             >
+               <LinkIcon className="w-4 h-4 mr-1.5" />
+-              Link Package
++              Link package
+             </Button>
+           )}
+           {canClaim && (
+@@ -176,17 +197,7 @@ function UnmanagedAppCardComponent({
+               )}
+             </Button>
+           )}
+-          {app.isClaimed && !app.claimStatus?.includes('deploy') && (
+-            <Button
+-              type="button"
+-              size="sm"
+-              disabled
+-              className="bg-status-success/10 text-status-success cursor-default border-0"
+-            >
+-              <Check className="w-4 h-4 mr-1.5" />
+-              In Cart
+-            </Button>
+-          )}
++
+         </div>
+       </div>
+     </div>
+@@ -201,9 +212,12 @@ export const UnmanagedAppCard = memo(UnmanagedAppCardComponent, (prev, next) =>
+     prev.app.version === next.app.version &&
+     prev.app.deviceCount === next.app.deviceCount &&
+     prev.app.matchStatus === next.app.matchStatus &&
++    prev.app.isStoreApp === next.app.isStoreApp &&
+     prev.app.matchedPackageId === next.app.matchedPackageId &&
+     prev.app.matchConfidence === next.app.matchConfidence &&
+     prev.app.isClaimed === next.app.isClaimed &&
++    prev.app.cartPurpose === next.app.cartPurpose &&
++    prev.onRemove === next.onRemove &&
+     prev.app.claimStatus === next.app.claimStatus &&
+     prev.app.partialMatches === next.app.partialMatches &&
+     prev.isClaimLoading === next.isClaimLoading &&
+diff --git a/components/unmanaged/UnmanagedListRow.tsx b/components/unmanaged/UnmanagedListRow.tsx
+index 6b56bbc07..c8431de05 100644
+--- a/components/unmanaged/UnmanagedListRow.tsx
++++ b/components/unmanaged/UnmanagedListRow.tsx
+@@ -9,6 +9,8 @@ import {
+   Loader2,
+   CheckCircle2,
+   Lightbulb,
++  Trash2,
++  HelpCircle,
+ } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { AppIcon } from '@/components/AppIcon';
+@@ -20,6 +22,8 @@ interface UnmanagedListRowProps {
+   app: UnmanagedApp;
+   onClaim: () => void;
+   onLink: () => void;
++  /** HRM patch 0040 */
++  onRemove?: () => void;
+   onDeviceCountClick?: () => void;
+   isClaimLoading: boolean;
+ }
+@@ -35,12 +39,16 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+   app,
+   onClaim,
+   onLink,
++  onRemove,
+   onDeviceCountClick,
+   isClaimLoading,
+ }: UnmanagedListRowProps) {
+   const prefersReducedMotion = useReducedMotion();
+   const canClaim = app.matchStatus === 'matched' && !app.isClaimed;
+-  const canLink = app.matchStatus === 'unmatched' || app.matchStatus === 'partial';
++  // HRM patch 0040: only matched apps can be removed by IntuneGet; others get guidance instead
++  const removable = app.matchStatus === 'matched' && !app.isStoreApp;
++  // HRM patch: Microsoft Store apps can't be linked to a WinGet package
++  const canLink = !app.isStoreApp && (app.matchStatus === 'unmatched' || app.matchStatus === 'partial');
+   const hasPartialSuggestions = app.partialMatches && app.partialMatches.length > 0;
+ 
+   return (
+@@ -67,8 +75,8 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+             className="group-hover:scale-105 transition-transform duration-200"
+           />
+           {app.isClaimed && (
+-            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center ring-2 ring-bg-surface">
+-              <CheckCircle2 className="w-2.5 h-2.5 text-white" />
++            <div className={cn('absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-bg-surface', app.cartPurpose === 'remove' ? 'bg-status-error' : 'bg-emerald-500')}>
++              {app.cartPurpose === 'remove' ? <Trash2 className="w-2.5 h-2.5 text-white" /> : <CheckCircle2 className="w-2.5 h-2.5 text-white" />}
+             </div>
+           )}
+         </div>
+@@ -113,7 +121,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+           )}
+ 
+           {/* Status badge */}
+-          <MatchStatusBadge status={app.matchStatus} confidence={app.matchConfidence} />
++          <MatchStatusBadge status={app.matchStatus} confidence={app.matchConfidence} storeApp={app.isStoreApp} />
+ 
+           {/* Actions */}
+           <div className="flex items-center gap-2">
+@@ -129,6 +137,19 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+                 <span className="hidden lg:inline">Link</span>
+               </Button>
+             )}
++            {onRemove && !app.isClaimed && (
++              <Button
++                type="button"
++                size="sm"
++                variant="outline"
++                onClick={onRemove}
++                aria-label={removable ? `Remove ${app.displayName} from computers` : `How to remove ${app.displayName}`}
++                className="h-8 px-3 text-text-secondary hover:text-status-error border-overlay/10 hover:bg-status-error/5"
++              >
++                {removable ? <Trash2 className="w-4 h-4 lg:mr-1.5" /> : <HelpCircle className="w-4 h-4 lg:mr-1.5" />}
++                <span className="hidden lg:inline">{removable ? 'Remove' : 'How to remove'}</span>
++              </Button>
++            )}
+             {canClaim && (
+               <Button
+                 type="button"
+@@ -148,9 +169,12 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+               </Button>
+             )}
+             {app.isClaimed && (
+-              <span className="flex items-center gap-1 text-xs text-emerald-400">
+-                <CheckCircle2 className="w-3.5 h-3.5" />
+-                Claimed
++              <span
++                title={app.cartPurpose === 'remove' ? 'In the Deployment list to be uninstalled. Nothing has changed on computers yet.' : 'In the Deployment list to be installed. Nothing has changed on computers yet.'}
++                className={cn('flex items-center gap-1 text-xs', app.cartPurpose === 'remove' ? 'text-status-error' : 'text-emerald-400')}
++              >
++                {app.cartPurpose === 'remove' ? <Trash2 className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
++                {app.cartPurpose === 'remove' ? 'To remove' : 'Claimed'}: in Deployment list
+               </span>
+             )}
+           </div>
+diff --git a/components/unmanaged/UnmanagedToolbar.tsx b/components/unmanaged/UnmanagedToolbar.tsx
+index 47deadceb..af8edf7ba 100644
+--- a/components/unmanaged/UnmanagedToolbar.tsx
++++ b/components/unmanaged/UnmanagedToolbar.tsx
+@@ -57,8 +57,8 @@ function getFilterContextText(filters: UnmanagedAppsFilters): string {
+   if (filters.matchStatus !== 'all') {
+     const labels: Record<string, string> = {
+       matched: 'Matched',
+-      partial: 'Partial',
+-      unmatched: 'Unmatched',
++      partial: 'Partial match',
++      unmatched: 'No match',
+     };
+     parts.push(labels[filters.matchStatus] || filters.matchStatus);
+   }
+@@ -156,7 +156,7 @@ export function UnmanagedToolbar({
+             )}
+           >
+             <ShoppingCart className="w-4 h-4 mr-2" />
+-            Claim All
++            Claim all matched apps
+             {claimableCount > 0 && (
+               <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-white/20 text-xs tabular-nums">
+                 {claimableCount}
+@@ -246,7 +246,7 @@ export function UnmanagedToolbar({
+                     })
+                   }
+                 >
+-                  {filters.sortOrder === 'asc' ? 'Sort Descending' : 'Sort Ascending'}
++                  {filters.sortOrder === 'asc' ? 'Sort descending' : 'Sort ascending'}
+                 </DropdownMenuItem>
+               </DropdownMenuContent>
+             </DropdownMenu>
+@@ -292,7 +292,7 @@ export function UnmanagedToolbar({
+           active={filters.matchStatus === 'all'}
+           onClick={() => handleMatchStatusChange('all')}
+           count={statusCounts.all}
+-          color="#06b6d4"
++          color="#855aa6"
+         >
+           All
+         </FilterChip>
+@@ -312,7 +312,7 @@ export function UnmanagedToolbar({
+           color="#f59e0b"
+           icon={AlertCircle}
+         >
+-          Partial
++          Partial match
+         </FilterChip>
+         <FilterChip
+           active={filters.matchStatus === 'unmatched'}
+@@ -321,18 +321,21 @@ export function UnmanagedToolbar({
+           color="#71717a"
+           icon={HelpCircle}
+         >
+-          Unmatched
++          No match
+         </FilterChip>
+ 
+         <div className="h-6 w-px bg-overlay/10 mx-1" />
+ 
+-        <FilterChip
+-          active={!filters.showClaimed}
+-          onClick={() => onFiltersChange({ ...filters, showClaimed: !filters.showClaimed })}
+-          color="#8b5cf6"
+-        >
+-          {filters.showClaimed ? 'Showing Claimed' : 'Hiding Claimed'}
+-        </FilterChip>
++        {/* HRM patch 0040: claimed and to-remove apps are in the Deployment list, not deployed yet */}
++        <span title="Claimed and To remove apps are in the Deployment list and haven't been deployed yet.">
++          <FilterChip
++            active={!filters.showClaimed}
++            onClick={() => onFiltersChange({ ...filters, showClaimed: !filters.showClaimed })}
++            color="#5dc19d"
++          >
++            {filters.showClaimed ? 'Showing claimed' : 'Hiding claimed'}
++          </FilterChip>
++        </span>
+ 
+         <div className="ml-auto text-sm text-text-muted">
+           Showing <span className="text-text-primary font-medium">{filteredCount}</span> of{' '}
+diff --git a/hooks/use-unmanaged-apps.ts b/hooks/use-unmanaged-apps.ts
+index 6a46ef642..b4ea4f965 100644
+--- a/hooks/use-unmanaged-apps.ts
++++ b/hooks/use-unmanaged-apps.ts
+@@ -9,6 +9,8 @@ import { generateDetectionRules, generateInstallCommand, generateUninstallComman
+ import { buildCartItemRequirementRules } from '@/lib/requirement-rules';
+ import { DEFAULT_PSADT_CONFIG, getDefaultProcessesToClose } from '@/types/psadt';
+ import { toast } from '@/hooks/use-toast';
++import { removalBlockReason, removalDetectionRules, removalDisplayName, removalUninstallCommand } from '@/lib/hrm/removal';
++import type { PackageAssignment } from '@/types/upload';
+ import type {
+   UnmanagedApp,
+   UnmanagedAppsResponse,
+@@ -73,8 +75,19 @@ export interface UseUnmanagedAppsReturn {
+   cancelClaimAll: () => void;
+   retryFailedClaims: () => Promise<void>;
+   clearFilters: () => void;
++  // HRM patch 0040: remove an app found on devices
++  removalModalApp: UnmanagedApp | null;
++  setRemovalModalApp: (app: UnmanagedApp | null) => void;
++  checkRemoval: (app: UnmanagedApp) => Promise<RemovalCheck>;
++  handleRemoveApp: (app: UnmanagedApp, check: RemovalCheck, target: RemovalTarget) => void;
++  cartRemovalCount: number;
+ }
+ 
++export type RemovalTarget = 'allDevices' | 'choose';
++export type RemovalCheck =
++  | { ok: true; manifest: { name?: string; publisher?: string; version?: string } | null; installer: Record<string, unknown> & { type: string; url: string } }
++  | { ok: false; reason: string };
++
+ function isMicrosoftApp(app: UnmanagedApp): boolean {
+   const publisherLower = (app.publisher || '').toLowerCase();
+   const packageIdLower = (app.matchedPackageId || '').toLowerCase();
+@@ -130,6 +143,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+   const [claimingAppId, setClaimingAppId] = useState<string | null>(null);
+   const [claimAllModal, setClaimAllModal] = useState<ClaimAllModalState | null>(null);
+   const [deviceListApp, setDeviceListApp] = useState<UnmanagedApp | null>(null);
++  const [removalModalApp, setRemovalModalApp] = useState<UnmanagedApp | null>(null);
+ 
+   // Get current access token
+   const getToken = useCallback(async (): Promise<string | null> => {
+@@ -266,6 +280,11 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+   const cartWingetIds = useMemo(() => {
+     return new Set(cartItems.map(item => item.wingetId));
+   }, [cartItems]);
++  // HRM patch 0040: packages in the Deployment list only to be removed
++  const cartRemovalIds = useMemo(() => new Set(cartItems.filter((item) => item.hrmRemoval).map((item) => item.wingetId)), [cartItems]);
++  const purposeOf = useCallback((app: UnmanagedApp): UnmanagedApp['cartPurpose'] =>
++    !app.matchedPackageId || !cartWingetIds.has(app.matchedPackageId) ? undefined : cartRemovalIds.has(app.matchedPackageId) ? 'remove' : 'install',
++  [cartWingetIds, cartRemovalIds]);
+ 
+   // Non-Microsoft apps (base filtering + dedup by discoveredAppId)
+   const nonMicrosoftApps = useMemo(() => {
+@@ -310,8 +329,8 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+       (!needle || search.includes(needle)) &&
+       (filters.matchStatus === 'all' || app.matchStatus === filters.matchStatus) &&
+       (filters.showClaimed || !app.matchedPackageId || !cartWingetIds.has(app.matchedPackageId))
+-    ).map(({ app }) => ({ ...app, isClaimed: !!app.matchedPackageId && cartWingetIds.has(app.matchedPackageId) }));
+-  }, [indexedApps, deferredSearch, filters.matchStatus, filters.showClaimed, cartWingetIds]);
++    ).map(({ app }) => ({ ...app, isClaimed: !!app.matchedPackageId && cartWingetIds.has(app.matchedPackageId), cartPurpose: purposeOf(app) }));
++  }, [indexedApps, deferredSearch, filters.matchStatus, filters.showClaimed, cartWingetIds, purposeOf]);
+ 
+   // Status counts
+   const statusCounts = useMemo(() => {
+@@ -751,6 +770,52 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+     setFilters(defaultFilters);
+   }, []);
+ 
++  // HRM patch 0040: can IntuneGet remove this app? Reads the matched package's installer.
++  const checkRemoval = useCallback(async (app: UnmanagedApp): Promise<RemovalCheck> => {
++    if (app.isStoreApp) return { ok: false, reason: 'This is a Microsoft Store app. IntuneGet can\'t remove it.' };
++    if (app.matchStatus !== 'matched' || !app.matchedPackageId) return { ok: false, reason: 'IntuneGet needs to know which WinGet package this is first.' };
++    const response = await fetch(`/api/winget/manifest?id=${encodeURIComponent(app.matchedPackageId)}&arch=x64`);
++    if (!response.ok) throw new Error('Couldn\'t read the package from WinGet. Try again.');
++    const { recommendedInstaller, manifest } = await response.json();
++    if (!recommendedInstaller) return { ok: false, reason: 'WinGet has no installer for this package that IntuneGet can use.' };
++    const reason = removalBlockReason(recommendedInstaller);
++    return reason ? { ok: false, reason } : { ok: true, manifest: manifest ?? null, installer: recommendedInstaller };
++  }, []);
++
++  // HRM patch 0040: add a removal to the Deployment list. Nothing changes on devices until it is deployed.
++  const handleRemoveApp = useCallback((app: UnmanagedApp, check: RemovalCheck, target: RemovalTarget) => {
++    if (!check.ok || !app.matchedPackageId) return;
++    const installer = check.installer as unknown as Parameters<typeof generateInstallCommand>[0];
++    const name = check.manifest?.name || app.displayName;
++    const detectionRules = removalDetectionRules(app.displayName);
++    const assignments: PackageAssignment[] = target === 'allDevices' ? [{ type: 'allDevices', intent: 'uninstall' }] : [];
++    addItem({
++      appSource: 'win32',
++      wingetId: app.matchedPackageId,
++      displayName: removalDisplayName(name),
++      publisher: check.manifest?.publisher || app.publisher || '',
++      version: check.manifest?.version || app.version || '',
++      architecture: installer.architecture,
++      installScope: 'machine',
++      installerType: installer.type,
++      nestedInstallerType: installer.nestedInstallerType,
++      nestedInstallerPath: installer.nestedInstallerPath,
++      manifestDependencies: installer.packageDependencies,
++      installerUrl: installer.url,
++      installerSha256: installer.sha256,
++      installCommand: generateInstallCommand(installer, 'machine'),
++      uninstallCommand: removalUninstallCommand(app.displayName),
++      detectionRules,
++      requirementRules: [],
++      psadtConfig: { ...DEFAULT_PSADT_CONFIG, processesToClose: getDefaultProcessesToClose(name, installer.type), detectionRules },
++      assignments,
++      updatePolicy: 'ignore',
++      hrmRemoval: { discoveredName: app.displayName, deviceCount: app.deviceCount },
++    });
++    setRemovalModalApp(null);
++  }, [addItem]);
++  const cartRemovalCount = useMemo(() => cartItems.filter((item) => item.hrmRemoval).length, [cartItems]);
++
+   return {
+     apps,
+     filteredApps,
+@@ -788,5 +853,10 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+     cancelClaimAll,
+     retryFailedClaims,
+     clearFilters,
++    removalModalApp,
++    setRemovalModalApp,
++    checkRemoval,
++    handleRemoveApp,
++    cartRemovalCount,
+   };
+ }
+diff --git a/lib/catalog/snapshot-source.test.ts b/lib/catalog/snapshot-source.test.ts
+index acd955b80..c1a2f45b9 100644
+--- a/lib/catalog/snapshot-source.test.ts
++++ b/lib/catalog/snapshot-source.test.ts
+@@ -381,6 +381,14 @@ describe('SnapshotCatalogSource', () => {
+     });
+   });
+ 
++  it('searchCuratedAppsByNameWords needs every word in the name (HRM patch)', async () => {
++    expect((await source.searchCuratedAppsByNameWords(['google', 'chrome'], 10)).map((m) => m.wingetId)).toContain('Google.Chrome');
++    expect(await source.searchCuratedAppsByNameWords(['chrome', 'nonexistentword'], 10)).toEqual([]);
++    expect(await source.searchCuratedAppsByNameWords([], 10)).toEqual([]);
++    // Quotes can't break out of the full-text query.
++    await expect(source.searchCuratedAppsByNameWords(['chr"ome', '"'], 10)).resolves.toBeInstanceOf(Array);
++  });
++
+   it('existence checks behave like the Supabase source', async () => {
+     expect(await source.appExists('Google.Chrome')).toBe(true);
+     expect(await source.appExists('Does.NotExist')).toBe(false);
+diff --git a/lib/catalog/snapshot-source.ts b/lib/catalog/snapshot-source.ts
+index 4c975bc8d..6ccf3ce17 100644
+--- a/lib/catalog/snapshot-source.ts
++++ b/lib/catalog/snapshot-source.ts
+@@ -819,6 +819,42 @@ export class SnapshotCatalogSource implements CatalogSource {
+   // matching
+   // ---------------------------------------------------------------------------
+ 
++  async searchCuratedAppsByNameWords(words: string[], limit: number): Promise<CuratedAppMatch[]> {
++    const terms = words.map((word) => word.replace(/"/g, '').trim()).filter(Boolean);
++    if (terms.length === 0) return [];
++    // FTS5 column filter: every word must appear in the name.
++    const match = `name : (${terms.map((term) => `"${term}"`).join(' AND ')})`;
++    return withDb(
++      (db) => {
++        const rows = db
++          .prepare(
++            `SELECT ca.winget_id, ca.name, ca.publisher, ca.latest_version
++             FROM curated_fts f
++             JOIN curated_apps ca ON ca.id = f.rowid
++             WHERE curated_fts MATCH @match
++               AND ca.is_verified = 1
++               AND ca.latest_version IS NOT NULL
++               AND ca.is_locale_variant = 0
++             ORDER BY ca.popularity_rank IS NULL, ca.popularity_rank ASC
++             LIMIT @limit`
++          )
++          .all({ match, limit }) as {
++          winget_id: string;
++          name: string;
++          publisher: string;
++          latest_version: string | null;
++        }[];
++        return rows.map((app) => ({
++          wingetId: app.winget_id,
++          name: app.name,
++          publisher: app.publisher,
++          latestVersion: app.latest_version,
++        }));
++      },
++      () => []
++    );
++  }
++
+   async searchCuratedAppsForMatching(term: string): Promise<CuratedAppMatch[]> {
+     if (!term || term.length < 2) {
+       return [];
+diff --git a/lib/catalog/types.ts b/lib/catalog/types.ts
+index a39448e86..c097880bf 100644
+--- a/lib/catalog/types.ts
++++ b/lib/catalog/types.ts
+@@ -266,6 +266,13 @@ export interface CatalogSource {
+   /** searchCuratedApps body from lib/app-mappings (ILIKE on name/publisher/id). */
+   searchCuratedAppsForMatching(term: string): Promise<CuratedAppMatch[]>;
+ 
++  /**
++   * HRM patch: catalog apps whose name contains every word (full-text, name
++   * column only), for Discovered Apps matching. Optional: sources without it
++   * skip the catalog step.
++   */
++  searchCuratedAppsByNameWords?(words: string[], limit: number): Promise<CuratedAppMatch[]>;
++
+   /** sccm_winget_mappings resolution from lib/matching/sccm-matcher checkSccmMapping. */
+   getSccmMapping(query: SccmMappingQuery, tenantId: string): Promise<SccmMappingResult | null>;
+ 
+diff --git a/lib/curated-catalog/server.ts b/lib/curated-catalog/server.ts
+index 119ada8d5..4bdb560f2 100644
+--- a/lib/curated-catalog/server.ts
++++ b/lib/curated-catalog/server.ts
+@@ -11,6 +11,7 @@ import { isCuratedPackageId } from './core.mjs';
+ import { extractSilentSwitches } from '@/lib/msp/silent-switches';
+ import { authorizeCuratedExecution } from './custom-config';
+ import { testedCuratedSettings } from './settings';
++import { readRefreshedCatalog } from '@/lib/hrm/curated-refresh';
+ 
+ export function getCuratedCatalog(): { payload: CuratedCatalogEnvelope['payload']; entries: CuratedCatalogEntry[] } {
+   let trustedKeys: Record<string, string>;
+@@ -18,7 +19,19 @@ export function getCuratedCatalog(): { payload: CuratedCatalogEnvelope['payload'
+   catch { throw new CuratedCatalogError('The curated catalog trust configuration is invalid.'); }
+   // Serving tolerates a definitions change that the automation has not
+   // re-signed yet; every release is still revalidated individually.
+-  const { payload } = verifyCatalogReleases(envelope, CURATED_APPS, { ...committedKeys, ...trustedKeys });
++  const keys = { ...committedKeys, ...trustedKeys };
++  // HRM patch: also try the newer signed list the VM downloads daily, and
++  // serve whichever list verifies and was signed most recently.
++  let builtIn: ReturnType<typeof verifyCatalogReleases> | null = null;
++  let builtInError: unknown = null;
++  try { builtIn = verifyCatalogReleases(envelope, CURATED_APPS, keys); } catch (error) { builtInError = error; }
++  let refreshed: ReturnType<typeof verifyCatalogReleases> | null = null;
++  const downloaded = readRefreshedCatalog();
++  if (downloaded) { try { refreshed = verifyCatalogReleases(downloaded, CURATED_APPS, keys); } catch { refreshed = null; } }
++  const signedAt = (result: ReturnType<typeof verifyCatalogReleases> | null) => Date.parse(result?.payload.generatedAt ?? '') || 0;
++  const chosen = refreshed && signedAt(refreshed) >= signedAt(builtIn) ? refreshed : builtIn;
++  if (!chosen) throw builtInError;
++  const { payload } = chosen;
+   // A release whose packaging profile is no longer current is withheld until
+   // the automation verifies it again; other apps stay deployable meanwhile.
+   const entries = catalogEntries(CURATED_APPS, payload).map(entry => {
+diff --git a/lib/hrm/__tests__/catalog-links.test.ts b/lib/hrm/__tests__/catalog-links.test.ts
+new file mode 100644
+index 000000000..581aa1bd1
+--- /dev/null
++++ b/lib/hrm/__tests__/catalog-links.test.ts
+@@ -0,0 +1,33 @@
++// HRM patch 0035: links into the App catalog must use parameters it reads
++// (Find in App catalog sent ?search=, which the catalog ignores).
++import { readdirSync, readFileSync, statSync } from 'node:fs';
++import { join, relative } from 'node:path';
++import { describe, expect, it } from 'vitest';
++
++const root = join(__dirname, '../../..');
++const catalog = readFileSync(join(root, 'app/(app)/dashboard/apps/page.tsx'), 'utf8');
++const read = new Set([...catalog.matchAll(/searchParams\.get\('([A-Za-z]+)'\)/g)].map((m) => m[1]));
++
++function* files(dir: string): Generator<string> {
++  for (const name of readdirSync(dir)) {
++    const path = join(dir, name);
++    if (/node_modules|__tests__|\.test\./.test(path)) continue;
++    if (statSync(path).isDirectory()) yield* files(path);
++    else if (/\.tsx?$/.test(name)) yield path;
++  }
++}
++
++describe('links into the App catalog', () => {
++  it('only use query parameters the App catalog reads', () => {
++    expect(read.has('q')).toBe(true);
++    const bad: string[] = [];
++    for (const dir of ['app', 'components', 'hooks', 'lib']) {
++      for (const file of files(join(root, dir))) {
++        for (const m of readFileSync(file, 'utf8').matchAll(/\/dashboard\/apps\?([A-Za-z]+)=/g)) {
++          if (!read.has(m[1])) bad.push(`${relative(root, file)}: ?${m[1]}=`);
++        }
++      }
++    }
++    expect(bad).toEqual([]);
++  });
++});
+diff --git a/lib/hrm/__tests__/curated-refresh.test.ts b/lib/hrm/__tests__/curated-refresh.test.ts
+new file mode 100644
+index 000000000..b1ef75e9b
+--- /dev/null
++++ b/lib/hrm/__tests__/curated-refresh.test.ts
+@@ -0,0 +1,92 @@
++import { mkdtempSync, rmSync, writeFileSync } from 'fs';
++import { tmpdir } from 'os';
++import path from 'path';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { releaseFixture, signedFixture } from '@/lib/curated-catalog/test-fixtures';
++import { resetRefreshedCatalogCache } from '../curated-refresh';
++
++const state = vi.hoisted(() => ({ envelope: {} as Record<string, unknown> }));
++vi.mock('@/catalog/curated/catalog.json', () => ({ default: state.envelope }));
++import { getCuratedCatalog } from '@/lib/curated-catalog/server';
++
++const DAY = 86_400_000;
++let dir: string;
++const setBuiltIn = (envelope: object) => {
++  Object.keys(state.envelope).forEach((key) => delete state.envelope[key]);
++  Object.assign(state.envelope, envelope);
++};
++const download = (content: string) => {
++  writeFileSync(path.join(dir, 'curated-catalog.json'), content);
++  resetRefreshedCatalogCache();
++};
++
++// signedFixture always uses keyId 'unit-test'; rename so two fixtures can both be trusted.
++const withKeyId = (fixture: ReturnType<typeof signedFixture>, keyId: string) => ({
++  envelope: { ...fixture.envelope, keyId },
++  keys: { [keyId]: fixture.keys['unit-test'] },
++});
++
++beforeEach(() => {
++  dir = mkdtempSync(path.join(tmpdir(), 'curated-refresh-'));
++  vi.stubEnv('DATABASE_PATH', path.join(dir, 'intuneget.db'));
++  resetRefreshedCatalogCache();
++  vi.useFakeTimers({ now: new Date('2026-10-20T12:00:00Z'), toFake: ['Date'] });
++});
++afterEach(() => {
++  vi.useRealTimers();
++  vi.unstubAllEnvs();
++  rmSync(dir, { recursive: true, force: true });
++});
++
++describe('curated catalog refreshed by the VM', () => {
++  it('serves the downloaded list once the built-in one has expired', () => {
++    const builtIn = withKeyId(signedFixture(), 'built-in');
++    vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
++    const fresh = withKeyId(signedFixture([releaseFixture(undefined, '121.0.0.0')]), 'fresh');
++    setBuiltIn(builtIn.envelope);
++    vi.stubEnv('CURATED_CATALOG_PUBLIC_KEYS', JSON.stringify({ ...builtIn.keys, ...fresh.keys }));
++    expect(() => getCuratedCatalog()).toThrow();
++    download(JSON.stringify(fresh.envelope));
++    const { payload, entries } = getCuratedCatalog();
++    expect(payload.generatedAt).toBe(fresh.envelope.payload.generatedAt);
++    expect(entries.find((entry) => entry.release)?.release?.candidate.version).toBe('121.0.0.0');
++  });
++
++  it('ignores a downloaded list that is tampered with, signed by an unknown key, or unreadable', () => {
++    const builtIn = withKeyId(signedFixture(), 'built-in');
++    setBuiltIn(builtIn.envelope);
++    vi.setSystemTime(new Date('2026-10-20T13:00:00Z'));
++    const fresh = withKeyId(signedFixture([releaseFixture(undefined, '121.0.0.0')]), 'fresh');
++    vi.stubEnv('CURATED_CATALOG_PUBLIC_KEYS', JSON.stringify({ ...builtIn.keys, ...fresh.keys }));
++
++    const tampered = structuredClone(fresh.envelope) as typeof fresh.envelope;
++    tampered.payload.releases[0].candidate.version = '999.0.0.0';
++    download(JSON.stringify(tampered));
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++
++    download(JSON.stringify({ ...fresh.envelope, keyId: 'someone-else' }));
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++
++    download('{not json');
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++  });
++
++  it('keeps the built-in list when it is newer than the download', () => {
++    const older = withKeyId(signedFixture(), 'older');
++    vi.setSystemTime(new Date('2026-10-20T15:00:00Z'));
++    const builtIn = withKeyId(signedFixture(), 'built-in');
++    setBuiltIn(builtIn.envelope);
++    vi.stubEnv('CURATED_CATALOG_PUBLIC_KEYS', JSON.stringify({ ...builtIn.keys, ...older.keys }));
++    download(JSON.stringify(older.envelope));
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++  });
++
++  it('behaves as before when nothing was downloaded', () => {
++    const builtIn = withKeyId(signedFixture(), 'built-in');
++    setBuiltIn(builtIn.envelope);
++    vi.stubEnv('CURATED_CATALOG_PUBLIC_KEYS', JSON.stringify(builtIn.keys));
++    expect(getCuratedCatalog().payload.generatedAt).toBe(builtIn.envelope.payload.generatedAt);
++    vi.setSystemTime(new Date(Date.now() + 2 * DAY));
++    expect(() => getCuratedCatalog()).toThrow(/expired/);
++  });
++});
+diff --git a/lib/hrm/__tests__/removal.test.ts b/lib/hrm/__tests__/removal.test.ts
+new file mode 100644
+index 000000000..77659dd08
+--- /dev/null
++++ b/lib/hrm/__tests__/removal.test.ts
+@@ -0,0 +1,141 @@
++// HRM patch 0040: removing an app found on devices.
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import Database from 'better-sqlite3';
++import { runSqliteMigrations } from '@/lib/db/sqlite-migrations';
++import { createRetireStore } from '../retire-store';
++import { normalizeCatalogDetectionRules } from '@/lib/catalog-detection';
++import {
++  REMOVAL_SCRIPT_HEADER, isRemovalItem, removalBlockReason, removalDetectionRules, removalDetectionScript, removalDisplayName,
++  removalGroupProblems, removalOf, removalUninstallCommand, validRemovalName,
++} from '../removal';
++import { startRemovalTracking } from '../removal-start';
++import { reviewRow } from '../deploy-review';
++import type { CartItem } from '@/types/upload';
++import type { GraphAssignment } from '../duplicates';
++
++const APP = '11111111-1111-4111-8111-111111111111';
++
++describe('which installers can be removed', () => {
++  it('allows EXE-family machine installers', () => {
++    for (const type of ['exe', 'inno', 'nullsoft', 'burn']) expect(removalBlockReason({ type, scope: 'machine' })).toBeNull();
++  });
++  it('refuses MSI, MSIX, portable, ZIP and per-user packages with a reason', () => {
++    expect(removalBlockReason({ type: 'msi' })).toMatch(/MSI/);
++    expect(removalBlockReason({ type: 'wix' })).toMatch(/MSI/);
++    expect(removalBlockReason({ type: 'zip', nestedInstallerType: 'msi' })).toMatch(/MSI/);
++    expect(removalBlockReason({ type: 'msix' })).toMatch(/MSIX/);
++    expect(removalBlockReason({ type: 'portable' })).toMatch(/installed programs/);
++    expect(removalBlockReason({ type: 'zip', nestedInstallerType: 'exe' })).toMatch(/installed programs/);
++    expect(removalBlockReason({ type: 'exe', scope: 'user' })).toMatch(/one user/);
++    expect(removalBlockReason({ type: 'pwa' })).toMatch(/can't remove/);
++  });
++});
++
++describe('groups of a removal', () => {
++  it('needs at least one included group, all Uninstall', () => {
++    expect(removalGroupProblems(undefined)).toEqual(['Choose at least one group to remove it from.']);
++    expect(removalGroupProblems([{ type: 'exclusionGroup', intent: 'required', groupId: 'g' }])).toEqual(['Choose at least one group to remove it from.']);
++    expect(removalGroupProblems([{ type: 'allDevices', intent: 'uninstall' }])).toEqual([]);
++    expect(removalGroupProblems([{ type: 'allDevices', intent: 'uninstall' }, { type: 'group', intent: 'required', groupId: 'g' }]))
++      .toEqual(['Every group must be set to Uninstall.']);
++    // Exclusions keep the intent they have always been sent with.
++    expect(removalGroupProblems([{ type: 'allDevices', intent: 'uninstall' }, { type: 'exclusionGroup', intent: 'required', groupId: 'g' }])).toEqual([]);
++  });
++});
++
++describe('detection and uninstall target the same exact program', () => {
++  it('builds a script that only reports a removable, machine-wide program with exactly that name', () => {
++    const script = removalDetectionScript('McAfee');
++    expect(script.startsWith(REMOVAL_SCRIPT_HEADER)).toBe(true);
++    expect(script).toContain("$name = 'McAfee'");
++    expect(script).toContain('-ine $name');
++    expect(script).not.toMatch(/-like|-match|Contains/);
++    expect(script).toContain('HKLM:\\SOFTWARE\\WOW6432Node');
++    expect(script).not.toContain('HKCU');
++    expect(script).toContain('SystemComponent');
++    expect(script).toContain("Write-Output 'Installed'");
++    expect(removalUninstallCommand('McAfee')).toBe('REGISTRY_UNINSTALL:McAfee');
++  });
++  it('quotes names safely for PowerShell, including typographic quotes', () => {
++    const script = removalDetectionScript("Bob's \u2019Tool\u2019");
++    expect(script).toContain("$name = 'Bob''s \u2019\u2019Tool\u2019\u2019'");
++  });
++  it('folds control characters and line breaks the same way in detection and uninstall', () => {
++    const name = 'Evil\r\nWrite-Output x\u2028App';
++    expect(removalUninstallCommand(name)).toBe('REGISTRY_UNINSTALL:Evil Write-Output x App');
++    expect(removalDetectionScript(name)).toContain("$name = 'Evil Write-Output x App'");
++    expect(removalDetectionScript(name).split('\r\n')).toHaveLength(removalDetectionScript('A').split('\r\n').length);
++  });
++  it('rejects empty and overlong names', () => {
++    expect(validRemovalName('  ')).toBe(false);
++    expect(validRemovalName('x'.repeat(201))).toBe(false);
++    expect(validRemovalName('McAfee')).toBe(true);
++  });
++  it('keeps the removal detection through catalog normalization at dispatch', () => {
++    const rules = removalDetectionRules('McAfee');
++    const out = normalizeCatalogDetectionRules({ detectionRules: rules, wingetId: 'McAfee.WebAdvisor', version: '4.1.1', installScope: 'machine', installerType: 'exe' });
++    expect(out).toEqual(rules);
++  });
++  it('labels the Intune copy once', () => {
++    expect(removalDisplayName('McAfee')).toBe('McAfee (uninstall only)');
++    expect(removalDisplayName('McAfee (uninstall only)')).toBe('McAfee (uninstall only)');
++  });
++});
++
++describe('removal items', () => {
++  const item = (extra: Partial<CartItem> = {}) => ({
++    id: 'i1', appSource: 'win32', wingetId: 'Example.Tool', displayName: 'Example Tool (uninstall only)', publisher: 'Example', version: '2.0',
++    addedAt: '2026-01-01T00:00:00Z', assignments: [{ type: 'allDevices', intent: 'uninstall' }], ...extra,
++  }) as unknown as CartItem;
++  it('recognizes a removal only with a valid name', () => {
++    expect(isRemovalItem(item({ hrmRemoval: { discoveredName: 'Example Tool', deviceCount: 4 } }))).toBe(true);
++    expect(removalOf({ hrmRemoval: { discoveredName: '' } })).toBeNull();
++    expect(isRemovalItem(item())).toBe(false);
++  });
++  it('describes a removal plainly before deploying', () => {
++    const row = reviewRow(item({ hrmRemoval: { discoveredName: 'Example Tool' } }));
++    expect(row.action).toBe('Adds it to Intune only to uninstall "Example Tool"');
++    expect(row.groups).toBe('All devices · Uninstall');
++    expect(row.updates).toBe('Updates: Ignore');
++    expect(row.warnings).toEqual([]);
++    expect(reviewRow(item({ hrmRemoval: { discoveredName: 'Example Tool' }, assignments: [] })).warnings).toEqual(['Choose at least one group to remove it from.']);
++  });
++});
++
++describe('tracking a removal after it deploys', () => {
++  let db: Database.Database;
++  let store: ReturnType<typeof createRetireStore>;
++  const rows = [{ intent: 'uninstall', target: { '@odata.type': '#microsoft.graph.allDevicesAssignmentTarget' } }] as GraphAssignment[];
++  const job = (config: unknown) => ({ id: 'job1', tenant_id: 'tenant', winget_id: 'Example.Tool', version: '2.0', display_name: 'Example Tool (uninstall only)', user_email: 'staff@example.test', package_config: config });
++  const deps = (overrides: Record<string, unknown> = {}) => ({
++    sqlite: true, token: async () => 'token', read: async () => ({ displayName: 'Example Tool (uninstall only)', version: '2.0', rows }), store, ...overrides,
++  }) as Parameters<typeof startRemovalTracking>[2];
++  beforeEach(() => { db = new Database(':memory:'); runSqliteMigrations(db); store = createRetireStore(() => db); });
++  afterEach(() => db.close());
++
++  it('starts an uninstalling record marked as a removal, with no groups to put back', async () => {
++    expect(await startRemovalTracking(job({ hrmRemoval: { discoveredName: 'Example Tool' } }), APP, deps())).toBe('started');
++    const r = store.active('tenant', APP);
++    expect(r).toMatchObject({ phase: 'uninstalling', purpose: 'removal', saved_assignments: [], uninstall_assignments: rows, started_by: 'staff@example.test' });
++    expect(store.holdsFamily('tenant', 'example.tool')).toBe(true);
++  });
++  it('does nothing for ordinary deployments', async () => {
++    expect(await startRemovalTracking(job({}), APP, deps())).toBe('skipped');
++    expect(store.active('tenant', APP)).toBeNull();
++  });
++  it('never throws when Intune can\'t be read', async () => {
++    expect(await startRemovalTracking(job({ hrmRemoval: { discoveredName: 'Example Tool' } }), APP, deps({ read: async () => { throw new Error('down'); } }))).toBe('failed');
++    expect(store.active('tenant', APP)).toBeNull();
++  });
++  it('records ordinary retirements as retire', () => {
++    store.reserve({ id: 'r1', tenant_id: 'tenant', app_id: APP, winget_id: 'Example.Tool', display_name: 'Example', version: '1', saved_assignments: [], uninstall_assignments: [], started_by: 'staff@example.test', started_at: '2026-01-01T00:00:00Z' });
++    expect(store.active('tenant', APP)?.purpose).toBe('retire');
++  });
++  it('adds the column once, keeping existing retirements', () => {
++    const fresh = new Database(':memory:');
++    runSqliteMigrations(fresh);
++    const columns = (fresh.prepare('PRAGMA table_info(hrm_retirements)').all() as Array<{ name: string }>).filter((c) => c.name === 'purpose');
++    expect(columns).toHaveLength(1);
++    fresh.close();
++  });
++});
+diff --git a/lib/hrm/curated-refresh.ts b/lib/hrm/curated-refresh.ts
+new file mode 100644
+index 000000000..1689f5119
+--- /dev/null
++++ b/lib/hrm/curated-refresh.ts
+@@ -0,0 +1,43 @@
++/**
++ * HRM patch: a newer signed curated catalog from the data folder.
++ *
++ * The curated catalog is a signed list built into the image that expires
++ * 7 days after upstream signs it, so a self-hosted image stops serving it a
++ * week after its release. The VM downloads upstream's latest signed list
++ * daily (IntuneGet-Build deploy/intuneget-curated-refresh.sh) next to the
++ * database. This only reads that file; the caller still verifies its
++ * signature against the keys built into the image, and its expiry, and falls
++ * back to the built-in list when it doesn't verify.
++ */
++
++import { readFileSync, statSync } from 'fs';
++import path from 'path';
++
++const MAX_BYTES = 20 * 1024 * 1024;
++
++let cached: { file: string; mtimeMs: number; size: number; envelope: unknown } | null = null;
++
++export function refreshedCatalogPath(): string {
++  const dbPath = process.env.DATABASE_PATH || './data/intuneget.db';
++  return path.join(path.dirname(dbPath), 'curated-catalog.json');
++}
++
++/** The downloaded envelope, or null when there is none or it can't be read. */
++export function readRefreshedCatalog(): unknown | null {
++  const file = refreshedCatalogPath();
++  try {
++    const { mtimeMs, size } = statSync(file);
++    if (size > MAX_BYTES) return null;
++    if (cached && cached.file === file && cached.mtimeMs === mtimeMs && cached.size === size) return cached.envelope;
++    const envelope = JSON.parse(readFileSync(file, 'utf8'));
++    cached = { file, mtimeMs, size, envelope };
++    return envelope;
++  } catch {
++    return null;
++  }
++}
++
++/** Test hook. */
++export function resetRefreshedCatalogCache() {
++  cached = null;
++}
+diff --git a/lib/hrm/removal-start.ts b/lib/hrm/removal-start.ts
+new file mode 100644
+index 000000000..23833c910
+--- /dev/null
++++ b/lib/hrm/removal-start.ts
+@@ -0,0 +1,60 @@
++/**
++ * HRM patch 0040: once a removal copy is in Intune, track it the same way as an app being retired
++ * (patch 0038). Inventory then shows "Removing this app" with live counts and Delete from Intune,
++ * updates and new deployments of the app are held, and Home leaves it out of install failures.
++ * Runs from the packaging callback; failures are logged and never fail the callback.
++ */
++import { removalOf } from './removal';
++import type { GraphAssignment } from './duplicates';
++
++interface Job { id: string; tenant_id: string | null; winget_id: string; version: string; display_name: string; user_email?: string | null; package_config: unknown }
++interface Deps {
++  sqlite: boolean;
++  token: (tenantId: string) => Promise<string | null>;
++  read: (token: string, appId: string) => Promise<{ displayName: string; version: string; rows: GraphAssignment[] }>;
++  store: {
++    reserve: (row: { id: string; tenant_id: string; app_id: string; winget_id: string | null; display_name: string; version: string;
++      saved_assignments: GraphAssignment[]; uninstall_assignments: GraphAssignment[]; purpose: 'removal'; started_by: string; started_at: string }) => void;
++    started: (tenant: string, id: string) => boolean;
++  };
++}
++
++export async function startRemovalTracking(job: Job, intuneAppId: string, deps?: Deps): Promise<'started' | 'skipped' | 'failed'> {
++  if (!removalOf(job.package_config) || !job.tenant_id) return 'skipped';
++  const d = deps ?? await defaultDeps();
++  if (!d.sqlite) return 'skipped';
++  try {
++    const token = await d.token(job.tenant_id);
++    if (!token) throw new Error('No Intune token');
++    const live = await d.read(token, intuneAppId);
++    const id = crypto.randomUUID();
++    d.store.reserve({
++      id, tenant_id: job.tenant_id, app_id: intuneAppId, winget_id: job.winget_id, display_name: live.displayName || job.display_name,
++      version: live.version || job.version, saved_assignments: [], uninstall_assignments: live.rows, purpose: 'removal',
++      started_by: job.user_email || 'a staff member', started_at: new Date().toISOString(),
++    });
++    d.store.started(job.tenant_id, id);
++    return 'started';
++  } catch (error) {
++    console.error(`[Removal] Could not start tracking for job ${job.id}:`, error instanceof Error ? error.message : error);
++    return 'failed';
++  }
++}
++
++async function defaultDeps(): Promise<Deps> {
++  const { isSqliteMode } = await import('@/lib/db');
++  if (!isSqliteMode()) return { sqlite: false } as Deps;
++  const { getServicePrincipalToken } = await import('@/lib/intune/graph-client');
++  const { pilotGraph } = await import('./pilot-graph');
++  const { sqliteRetirements } = await import('@/lib/db/sqlite');
++  return {
++    sqlite: true,
++    token: getServicePrincipalToken,
++    async read(token, appId) {
++      const graph = pilotGraph(token, fetch, 'Could not read the removal copy from Intune.');
++      const [app, rows] = await Promise.all([graph.app(appId), graph.assignments(appId)]);
++      return { displayName: app.displayName, version: app.displayVersion ?? '', rows };
++    },
++    store: sqliteRetirements,
++  };
++}
+diff --git a/lib/hrm/removal.ts b/lib/hrm/removal.ts
+new file mode 100644
+index 000000000..65ad91dea
+--- /dev/null
++++ b/lib/hrm/removal.ts
+@@ -0,0 +1,125 @@
++/**
++ * HRM patch 0040: remove an app found on computers (Discovered apps → Remove from computers).
++ * Browser-safe helpers shared by the page, the Deployment list and the server.
++ *
++ * IntuneGet normally detects its apps by a registry marker that only its own installer writes,
++ * so an Uninstall assignment does nothing where the app was installed another way. A removal
++ * therefore gets its own detection: a script that looks for a program with exactly the name
++ * Intune reported on devices, in the machine-wide installed programs list. The uninstall uses
++ * the same exact name, so detection and uninstall always point at the same program.
++ */
++import type { CartItem, PackageAssignment } from '@/types/upload';
++import type { DetectionRule, ScriptDetectionRule } from '@/types/intune';
++
++export interface HrmRemoval {
++  /** The program name Intune reported on devices (Discovered apps). */
++  discoveredName: string;
++  /** How many devices reported it when it was added. Shown only. */
++  deviceCount?: number;
++}
++
++/** Added to the Intune app name, so a removal copy is never mistaken for a normal one. */
++export const REMOVAL_SUFFIX = ' (uninstall only)';
++export const REMOVAL_SCRIPT_HEADER = '# IntuneGet removal detection (HRM patch 0040)';
++
++export const REMOVAL_LABELS = {
++  remove: 'Remove from computers',
++  confirm: 'I understand this uninstalls the app from every computer in the groups I choose',
++  add: 'Add removal to Deployment list',
++  badge: 'Removal',
++  claimed: 'Claimed',
++  toRemove: 'To remove',
++} as const;
++
++/** Control characters and Unicode line breaks folded to spaces, then trimmed, as the uninstall marker does. */
++export function normalizeRemovalName(name: unknown): string {
++  return typeof name === 'string' ? name.replace(/[\x00-\x1F\x7F-\x9F\u2028\u2029]+/g, ' ').trim() : '';
++}
++
++export function validRemovalName(name: unknown): boolean {
++  const value = normalizeRemovalName(name);
++  return value.length > 0 && value.length <= 200;
++}
++
++/**
++ * Why IntuneGet can't remove an app that uses this installer, or null when it can.
++ * MSI packages: the packager always uninstalls by the newest MSI's product code, which older
++ * installs don't have. Store, MSIX and portable apps aren't listed in installed programs the
++ * same way. Per-user packages: Intune runs the uninstall as the system account, which can't
++ * see a single user's programs.
++ */
++export function removalBlockReason(installer: { type?: string | null; nestedInstallerType?: string | null; scope?: string | null }): string | null {
++  const type = (installer.nestedInstallerType || installer.type || '').toLowerCase();
++  if (type === 'msi' || type === 'wix') return 'This app uses an MSI installer. IntuneGet can only uninstall the exact MSI version it deploys, so older copies on computers would stay.';
++  if (type === 'msix' || type === 'appx') return 'This app is an MSIX package, which IntuneGet can\'t remove from computers it didn\'t install it on.';
++  if (type === 'portable' || (installer.type || '').toLowerCase() === 'zip') return 'This app has no installer that Windows lists under installed programs, so there is nothing for Intune to uninstall.';
++  if ((installer.scope || '').toLowerCase() === 'user') return 'This package installs for one user at a time. Intune uninstalls as the system account, which can\'t see one user\'s programs.';
++  if (!['exe', 'inno', 'nullsoft', 'burn'].includes(type)) return 'IntuneGet can\'t remove apps with this kind of installer.';
++  return null;
++}
++
++/** Problems with the groups of a removal. Empty when it can deploy. */
++export function removalGroupProblems(assignments: PackageAssignment[] | undefined): string[] {
++  const list = assignments ?? [];
++  const problems: string[] = [];
++  if (!list.some((a) => a.type !== 'exclusionGroup')) problems.push('Choose at least one group to remove it from.');
++  if (list.some((a) => a.type !== 'exclusionGroup' && a.intent !== 'uninstall')) problems.push('Every group must be set to Uninstall.');
++  return problems;
++}
++
++/** PowerShell single-quoted text. PowerShell also ends single-quoted strings at U+2018 to U+201B. */
++function psQuoted(value: string): string {
++  return value.replace(/['\u2018-\u201B]/g, (q) => q + q);
++}
++
++/**
++ * Detection script: "installed" only when a removable program with exactly this name is in the
++ * machine-wide installed programs list (64-bit and 32-bit). Hidden system components and entries
++ * without an uninstall command are skipped, because the uninstall can't remove them either.
++ */
++export function removalDetectionScript(name: string): string {
++  const exact = normalizeRemovalName(name);
++  return [
++    REMOVAL_SCRIPT_HEADER,
++    `$name = '${psQuoted(exact)}'`,
++    "$paths = @('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall')",
++    'foreach ($path in $paths) {',
++    '    foreach ($key in @(Get-ChildItem -LiteralPath $path -ErrorAction SilentlyContinue)) {',
++    '        $entry = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue',
++    '        if (-not $entry -or [string]$entry.DisplayName -ine $name) { continue }',
++    '        if ([string]$entry.SystemComponent -eq \'1\') { continue }',
++    '        if ([string]::IsNullOrWhiteSpace([string]$entry.QuietUninstallString) -and [string]::IsNullOrWhiteSpace([string]$entry.UninstallString)) { continue }',
++    "        Write-Output 'Installed'",
++    '        exit 0',
++    '    }',
++    '}',
++    'exit 0',
++  ].join('\r\n');
++}
++
++export function removalDetectionRules(name: string): DetectionRule[] {
++  return [{ type: 'script', scriptContent: removalDetectionScript(name), enforceSignatureCheck: false, runAs32Bit: false } as ScriptDetectionRule];
++}
++
++/** The packager's exact-name uninstall: finds the program by this name and runs its own uninstall. */
++export function removalUninstallCommand(name: string): string {
++  return `REGISTRY_UNINSTALL:${normalizeRemovalName(name)}`;
++}
++
++export function removalDisplayName(name: string): string {
++  const base = normalizeRemovalName(name).replace(/\s*\(uninstall only\)$/i, '');
++  return `${base}${REMOVAL_SUFFIX}`;
++}
++
++/** The removal details of a cart item or a stored package config, if it is a removal. */
++export function removalOf(value: unknown): HrmRemoval | null {
++  if (!value || typeof value !== 'object') return null;
++  const removal = (value as { hrmRemoval?: unknown }).hrmRemoval;
++  if (!removal || typeof removal !== 'object') return null;
++  const name = (removal as { discoveredName?: unknown }).discoveredName;
++  if (!validRemovalName(name)) return null;
++  const count = (removal as { deviceCount?: unknown }).deviceCount;
++  return { discoveredName: normalizeRemovalName(name), ...(typeof count === 'number' && Number.isFinite(count) ? { deviceCount: count } : {}) };
++}
++
++export const isRemovalItem = (item: CartItem): boolean => removalOf(item) !== null;
+diff --git a/lib/matching/__tests__/catalog-matcher.test.ts b/lib/matching/__tests__/catalog-matcher.test.ts
+new file mode 100644
+index 000000000..8f86d85e7
+--- /dev/null
++++ b/lib/matching/__tests__/catalog-matcher.test.ts
+@@ -0,0 +1,107 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import type { CuratedAppMatch } from '@/lib/app-mappings';
++import type { GraphUnmanagedApp } from '@/types/unmanaged';
++
++const catalog = vi.hoisted(() => ({ search: vi.fn(), withWordSearch: true }));
++vi.mock('@/lib/catalog', () => ({
++  getCatalogSource: () => (catalog.withWordSearch ? { searchCuratedAppsByNameWords: catalog.search } : {}),
++}));
++
++import { isStoreApp, matchDiscoveredAppWithCatalog } from '../catalog-matcher';
++
++const entry = (wingetId: string, name: string, publisher: string): CuratedAppMatch => ({ wingetId, name, publisher, latestVersion: '1.0' });
++const CATALOG = [
++  entry('Intermedia.Unite', 'Intermedia Unite', 'Intermedia.net, Inc.'),
++  entry('Cisco.Webex', 'Webex', 'Cisco Systems, Inc'),
++  entry('Ubiquiti.UniFiOSServer', 'UniFi OS Server', 'Ubiquiti Inc.'),
++  entry('Adobe.Acrobat.Pro.2020', 'Adobe Acrobat 2020', 'Adobe Inc.'),
++  entry('Microsoft.VCRedist.2015+.arm64', 'Microsoft Visual C++ 2015-2022 Redistributable (Arm64)', 'Microsoft Corporation'),
++  entry('Microsoft.VCRedist.2015+.x64', 'Microsoft Visual C++ 2015-2022 Redistributable (x64)', 'Microsoft Corporation'),
++  entry('Contoso.Editor', 'Contoso Editor', 'Contoso Ltd'),
++  entry('Contoso.Editor.Preview', 'Contoso Editor', 'Contoso Ltd'),
++  entry('Fabrikam.Notes', 'Fabrikam Notes', 'Fabrikam'),
++];
++// Fake full-text search: every word must appear in the catalog name.
++const searchByWords = async (words: string[]) =>
++  CATALOG.filter((app) => words.every((word) => app.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').includes(word.replace(/[^a-z0-9]+/g, ' ').trim())));
++
++const app = (displayName: string, publisher: string | null = null): GraphUnmanagedApp =>
++  ({ id: `id-${displayName}`, displayName, publisher, version: '1.0', deviceCount: 1, platform: 'windows' }) as unknown as GraphUnmanagedApp;
++
++beforeEach(() => {
++  catalog.withWordSearch = true;
++  catalog.search.mockReset();
++  catalog.search.mockImplementation(searchByWords);
++});
++
++describe('Microsoft Store apps', () => {
++  it('recognises package-style names and certificate publishers', () => {
++    expect(isStoreApp(app('XeroxCorp.PrintExperience', 'CN=8D94148D-A6AB-4A8E-9DBF-1D4D1E2F1A2B'))).toBe(true);
++    expect(isStoreApp(app('AD2F1837.HPSupportAssistant', null))).toBe(true);
++    expect(isStoreApp(app('HP Support Assistant', 'CN=ED346674-0FA1-4272-85CE-3187C9C86E26'))).toBe(true);
++    expect(isStoreApp(app('Notepad++', 'Notepad++ Team'))).toBe(false);
++    expect(isStoreApp(app('Google Chrome', 'Google LLC'))).toBe(false);
++  });
++
++  it('marks them and never looks them up', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('XeroxCorp.PrintExperience', 'CN=8D94148D'));
++    expect(result).toMatchObject({ status: 'unmatched', isStoreApp: true, partialMatches: [] });
++    expect(catalog.search).not.toHaveBeenCalled();
++  });
++});
++
++describe('catalog matching', () => {
++  it('matches an app only the catalog knows, ignoring the version in its name', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('Intermedia Unite 2.33.58', 'Intermedia.net, Inc.'));
++    expect(result).toMatchObject({ status: 'matched', wingetId: 'Intermedia.Unite', confidence: 1, isStoreApp: false });
++  });
++
++  it('keeps exact built-in mappings without a catalog lookup', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('Google Chrome', 'Google LLC'));
++    expect(result).toMatchObject({ status: 'matched', wingetId: 'Google.Chrome', confidence: 1 });
++    expect(catalog.search).not.toHaveBeenCalled();
++  });
++
++  it('suggests instead of matching when two catalog entries are equally close', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('Contoso Editor', 'Contoso Ltd'));
++    expect(result.status).toBe('partial');
++    expect(result.partialMatches.map((m) => m.wingetId)).toEqual(expect.arrayContaining(['Contoso.Editor', 'Contoso.Editor.Preview']));
++  });
++
++  it('suggests instead of matching when the publisher is unknown or different', async () => {
++    expect((await matchDiscoveredAppWithCatalog(app('Fabrikam Notes', null))).status).toBe('partial');
++    expect((await matchDiscoveredAppWithCatalog(app('Fabrikam Notes', 'Someone Else'))).status).toBe('partial');
++    expect((await matchDiscoveredAppWithCatalog(app('Fabrikam Notes', 'Fabrikam'))).status).toBe('matched');
++  });
++
++  it('does not offer ARM-only packages for an x64 app', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.40.33810', 'Microsoft Corporation'));
++    expect(result.partialMatches.map((m) => m.wingetId)).not.toContain('Microsoft.VCRedist.2015+.arm64');
++    expect(result.wingetId).toBe('Microsoft.VCRedist.2015+.x64');
++  });
++});
++
++describe('suggestions need a shared meaningful word', () => {
++  it('never suggests security agents for "UniFi Endpoint"', async () => {
++    const result = await matchDiscoveredAppWithCatalog(app('UniFi Endpoint', 'Ubiquiti Inc'));
++    const ids = result.partialMatches.map((m) => m.wingetId);
++    expect(ids).not.toContain('McAfee.Agent');
++    expect(ids).not.toContain('Symantec.EndpointProtection');
++    expect(result.wingetId).not.toBe('McAfee.Agent');
++  });
++
++  it('works without a catalog word search (hosted catalog)', async () => {
++    catalog.withWordSearch = false;
++    const result = await matchDiscoveredAppWithCatalog(app('UniFi Endpoint', 'Ubiquiti Inc'));
++    expect(result).toMatchObject({ status: 'unmatched', isStoreApp: false });
++  });
++
++  it('carries on without the catalog when the lookup fails', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    catalog.search.mockRejectedValue(new Error('snapshot unavailable'));
++    const result = await matchDiscoveredAppWithCatalog(app('Intermedia Unite', 'Intermedia.net, Inc.'));
++    expect(result.status).toBe('unmatched');
++    expect(warn).toHaveBeenCalled();
++    warn.mockRestore();
++  });
++});
+diff --git a/lib/matching/catalog-matcher.ts b/lib/matching/catalog-matcher.ts
+new file mode 100644
+index 000000000..c97a1106f
+--- /dev/null
++++ b/lib/matching/catalog-matcher.ts
+@@ -0,0 +1,164 @@
++/**
++ * Discovered Apps matching against the full catalog (HRM patch).
++ *
++ * Upstream matches discovered apps only against the ~90 built-in mappings, and
++ * scores suggestions by letter similarity ("UniFi Endpoint" vs "McAfee
++ * Endpoint" scores 67%). This wraps that matcher:
++ *   1. Microsoft Store apps are recognised and never matched to WinGet.
++ *   2. Exact built-in mappings still win.
++ *   3. Other apps are matched against the catalog by name words. A match is
++ *      automatic only when the names are identical, the publisher agrees and no
++ *      other candidate comes close; anything else becomes a suggestion.
++ *   4. Built-in suggestions are kept only when they share a meaningful word
++ *      with the app's name.
++ */
++
++import { getCatalogSource } from '@/lib/catalog';
++import type { CuratedAppMatch } from '@/lib/app-mappings';
++import type { GraphUnmanagedApp, PartialMatch } from '@/types/unmanaged';
++import { matchDiscoveredApp, normalizeAppName, normalizePublisher, type MatchResult } from './app-matcher';
++
++export interface CatalogMatchResult extends MatchResult {
++  isStoreApp: boolean;
++}
++
++// Words too common to identify an app on their own.
++const GENERIC_WORDS = new Set([
++  'microsoft', 'the', 'for', 'and', 'agent', 'client', 'endpoint', 'update', 'updater', 'tool', 'tools',
++  'service', 'services', 'driver', 'drivers', 'software', 'plugin', 'app', 'pro', 'dc', 'en', 'us',
++  'media', 'player', 'manager', 'suite', 'edition', 'runtime', 'support', 'assistant', 'helper',
++]);
++const AUTO_MATCH_MARGIN = 0.15;
++const SUGGESTION_MIN_SCORE = 0.6;
++const MAX_SUGGESTIONS = 3;
++const CANDIDATE_LIMIT = 25;
++
++const noMatch = (isStoreApp: boolean): CatalogMatchResult => ({
++  status: 'unmatched', wingetId: null, wingetName: null, confidence: 0, partialMatches: [], isStoreApp,
++});
++
++function words(text: string): string[] {
++  return text.toLowerCase().split(/[\s\-_.]+/).filter((word) => word.length >= 2);
++}
++
++function meaningfulWords(text: string): string[] {
++  return words(text).filter((word) => !GENERIC_WORDS.has(word));
++}
++
++/**
++ * Microsoft Store (MSIX) apps report a package-style name such as
++ * "XeroxCorp.PrintExperience" or a certificate subject ("CN=...") as publisher.
++ * IntuneGet deploys WinGet packages, so these can't be claimed here.
++ */
++export function isStoreApp(app: Pick<GraphUnmanagedApp, 'displayName' | 'publisher'>): boolean {
++  const name = app.displayName.trim();
++  const packageStyleName = /^[A-Za-z0-9]+(\.[A-Za-z0-9]+)+$/.test(name) && !/\s/.test(name);
++  return packageStyleName || /^CN=/i.test(app.publisher?.trim() || '');
++}
++
++function publisherAgrees(discovered: string | null, catalog: string): boolean {
++  const a = normalizePublisher(discovered).split(' ')[0];
++  const b = normalizePublisher(catalog).split(' ')[0];
++  return Boolean(a && b) && (a === b || a.startsWith(b) || b.startsWith(a));
++}
++
++// ARM-only packages aren't offered for apps whose name doesn't mention ARM.
++function isArmOnly(wingetId: string, appName: string): boolean {
++  return /(^|\.)arm(64)?($|\.)/i.test(wingetId) && !/\barm/i.test(appName);
++}
++
++interface ScoredCandidate { app: CuratedAppMatch; score: number; exact: boolean; publisherMatch: boolean }
++
++function scoreCandidate(name: string, publisher: string | null, candidate: CuratedAppMatch): ScoredCandidate {
++  const candidateName = normalizeAppName(candidate.name);
++  const nameWords = new Set(words(name));
++  const candidateWords = new Set(words(candidateName));
++  const shared = [...nameWords].filter((word) => candidateWords.has(word)).length;
++  const union = new Set([...nameWords, ...candidateWords]).size || 1;
++  const exact = candidateName === name;
++  const prefix = !exact && (candidateName.startsWith(`${name} `) || name.startsWith(`${candidateName} `));
++  const publisherMatch = publisherAgrees(publisher, candidate.publisher);
++  const score = (exact ? 1 : prefix ? 0.8 : shared / union) + (publisherMatch ? 0.15 : 0);
++  return { app: candidate, score, exact, publisherMatch };
++}
++
++function sharesMeaningfulWord(name: string, suggestion: PartialMatch): boolean {
++  const nameWords = new Set(meaningfulWords(name));
++  const suggestionWords = [...meaningfulWords(suggestion.name), ...meaningfulWords(suggestion.wingetId.split('.').slice(1).join(' '))];
++  return suggestionWords.some((word) => nameWords.has(word));
++}
++
++async function catalogCandidates(name: string): Promise<CuratedAppMatch[]> {
++  const catalog = getCatalogSource();
++  if (!catalog.searchCuratedAppsByNameWords) return [];
++  const key = meaningfulWords(name);
++  const searchWords = key.length > 0 ? key : words(name);
++  if (searchWords.length === 0) return [];
++  try {
++    return await catalog.searchCuratedAppsByNameWords(searchWords, CANDIDATE_LIMIT);
++  } catch (error) {
++    console.warn('[Discovered apps] Catalog lookup failed:', error instanceof Error ? error.message : error);
++    return [];
++  }
++}
++
++/**
++ * Match one discovered app: built-in mappings, then the catalog, with
++ * suggestions only where a meaningful word is shared.
++ */
++export async function matchDiscoveredAppWithCatalog(app: GraphUnmanagedApp): Promise<CatalogMatchResult> {
++  if (isStoreApp(app)) return noMatch(true);
++
++  const builtIn = matchDiscoveredApp(app);
++  if (builtIn.status === 'matched' && builtIn.confidence >= 1) return { ...builtIn, isStoreApp: false };
++
++  const name = normalizeAppName(app.displayName);
++  const scored = (await catalogCandidates(name))
++    .filter((candidate) => !isArmOnly(candidate.wingetId, app.displayName))
++    .map((candidate) => scoreCandidate(name, app.publisher, candidate))
++    .sort((a, b) => b.score - a.score);
++
++  const [best, runnerUp] = scored;
++  if (best && best.exact && best.publisherMatch && (!runnerUp || best.score - runnerUp.score >= AUTO_MATCH_MARGIN)) {
++    return {
++      status: 'matched',
++      wingetId: best.app.wingetId,
++      wingetName: best.app.name,
++      confidence: 1,
++      partialMatches: [],
++      isStoreApp: false,
++    };
++  }
++
++  const fromCatalog: PartialMatch[] = scored
++    .filter((candidate) => candidate.score >= SUGGESTION_MIN_SCORE)
++    .map((candidate) => ({
++      wingetId: candidate.app.wingetId,
++      name: candidate.app.name,
++      publisher: candidate.app.publisher,
++      version: candidate.app.latestVersion,
++      confidence: Math.min(candidate.score, 0.99),
++    }));
++  const builtInSuggestions: PartialMatch[] = [
++    ...(builtIn.wingetId && builtIn.status !== 'unmatched'
++      ? [{ wingetId: builtIn.wingetId, name: builtIn.wingetName || builtIn.wingetId, publisher: '', version: null, confidence: Math.min(builtIn.confidence, 0.99) }]
++      : []),
++    ...builtIn.partialMatches,
++  ].filter((suggestion) => sharesMeaningfulWord(name, suggestion));
++
++  const seen = new Set<string>();
++  const suggestions = [...fromCatalog, ...builtInSuggestions]
++    .sort((a, b) => b.confidence - a.confidence)
++    .filter((suggestion) => !seen.has(suggestion.wingetId.toLowerCase()) && seen.add(suggestion.wingetId.toLowerCase()))
++    .slice(0, MAX_SUGGESTIONS);
++
++  if (suggestions.length === 0) return noMatch(false);
++  return {
++    status: 'partial',
++    wingetId: suggestions[0].wingetId,
++    wingetName: suggestions[0].name,
++    confidence: suggestions[0].confidence,
++    partialMatches: suggestions,
++    isStoreApp: false,
++  };
++}
+diff --git a/types/unmanaged.ts b/types/unmanaged.ts
+index 4bc758c5c..fcbf566e3 100644
+--- a/types/unmanaged.ts
++++ b/types/unmanaged.ts
+@@ -42,7 +42,11 @@ export interface UnmanagedApp {
+   matchedPackageName: string | null;
+   matchConfidence: number | null;
+   partialMatches?: PartialMatch[];
++  /** HRM patch: a Microsoft Store (MSIX) app, which IntuneGet can't deploy from WinGet */
++  isStoreApp?: boolean;
+   isClaimed: boolean;
++  /** HRM patch 0040: what the Deployment list will do with it: install (claimed) or remove */
++  cartPurpose?: 'install' | 'remove';
+   claimStatus?: ClaimStatus;
+   lastSynced: string;
+ }

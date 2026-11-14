@@ -14,7 +14,7 @@ HRM IT notes.
 | Path | What it is |
 |---|---|
 | `upstream-ref` | Upstream release tag the build uses (for example `v0.8.2`) and, on the second line, the commit it pointed at when it was checked. The build fails if the tag has moved since. |
-| `patches/*.patch` | HRM changes, applied in name order with `git apply`. Why each exists: README. |
+| `patches/*.patch` | HRM changes, one patch per feature, applied in name order with `git apply`. No two patches change the same file. What each covers and why: README. |
 | `deploy/version` | Image tag the server should run (for example `v0.8.2-hrm.1`) and, on the second line, the image digest the build recorded. The VM refuses the tag if it no longer points at that digest. **Changing it on `main` deploys to production.** |
 | `deploy/intuneget-deploy.sh` | The VM's deploy script (installed as `/usr/local/sbin/intuneget-deploy`). |
 | `deploy/systemd/` | VM timers: deploy check every 5 minutes, update check and notifications twice a day, scheduled update start hourly (patch 0030), optional startup Beta report collection hourly (patch 0044), Intune self-test daily at 7:15 AM New York (patch 0032). |
@@ -64,8 +64,16 @@ HRM IT notes.
 
 ## Changing or reworking a patch
 
-- The working copy of the edits is a clone of upstream in `~/Developer/third-party/intuneget-deploy`.
-  Make the change there, then regenerate the patch with `git diff <base> > patches/000N-....patch`.
+- Patches are grouped by feature (README, "Patches"), and **every changed file belongs to exactly one
+  patch**, so the patches don't overlap and apply in any order. A change to a file goes in the patch
+  that already holds it (`grep -l '^diff --git a/<path> ' patches/*.patch`); a new file goes in the
+  patch for its feature. Never let two patches touch the same file.
+- Old patch numbers (0001 to 0060) in this file, in code comments ("HRM patch NNNN") and in
+  CHANGELOG.md are history. README's "Patch history" table says which current patch holds each one.
+- The working copy of the edits is a clone of upstream in `~/Developer/third-party/intuneget-deploy`,
+  at the commit in `upstream-ref` with all patches applied. Make the change there, then regenerate
+  each patch you touched from the upstream commit with only that patch's files:
+  `git diff <upstream commit> -- $(grep '^diff --git' patches/00NN-<feature>.patch | awk '{print substr($4,3)}') <new files> > patches/00NN-<feature>.patch`.
   New files must be staged (`git add -N`) to appear in the diff.
 - Check every patch applies, in order, to a clean checkout of the tag in `upstream-ref`, the same way
   the build does (`git apply`).
@@ -85,10 +93,11 @@ HRM IT notes.
   because GitHub does not trigger another workflow from a PR opened with the Actions token.
 - When a patch calls something new from a module that upstream tests mock with `vi.mock`, add it to
   that mock in the same patch.
-- **Migration numbers:** patches that add SQLite migrations take the next number after upstream's
-  highest. Use `IF NOT EXISTS` so a table created by an earlier build is kept. If upstream reaches the
+- **Migration numbers:** every HRM SQLite migration is in `lib/db/sqlite-migrations.ts`, which is in
+  `0003-database.patch` (HRM uses 9 to 24 today; upstream v0.8.5 goes up to 8). A new migration takes
+  the next number after the highest of both. Use `IF NOT EXISTS` so a table created by an earlier build is kept. If upstream reaches the
   same number, renumber the HRM migration above upstream's highest before building. The weekly check flags this.
-- **App mapping IDs:** patch 0004 checks that every built-in app mapping resolves in WinGet. Run it on a
+- **App mapping IDs:** `0002-self-hosted-fixes.patch` (was patch 0004) checks that every built-in app mapping resolves in WinGet. Run it on a
   patched tree with `VALIDATE_WINGET_IDS=1 GITHUB_TOKEN=$(gh auth token) npx vitest run lib/__tests__/app-mappings-winget.test.ts`.
   Fix a failing ID only after confirming the replacement's package name matches the product; add products
   that WinGet doesn't distribute to `NOT_IN_WINGET` in that test.

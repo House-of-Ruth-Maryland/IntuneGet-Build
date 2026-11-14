@@ -1,0 +1,3227 @@
+diff --git a/app/(app)/auth/signin/SignInClient.tsx b/app/(app)/auth/signin/SignInClient.tsx
+index cf4cc155d..e45795c29 100644
+--- a/app/(app)/auth/signin/SignInClient.tsx
++++ b/app/(app)/auth/signin/SignInClient.tsx
+@@ -2,9 +2,8 @@
+ 
+ import { useRouter } from 'next/navigation';
+ import { useEffect, useState, useCallback } from 'react';
+-import Link from 'next/link';
+ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+-import { Shield, Loader2, Package, ChevronDown, Copy, Check, AlertTriangle, Users, Boxes, ArrowLeft } from 'lucide-react';
++import { Shield, Loader2, ChevronDown, Copy, Check, AlertTriangle, LifeBuoy } from 'lucide-react';
+ import dynamic from 'next/dynamic';
+ import { T, Var } from "gt-next";
+ import { VerificationSceneFallback } from '@/components/auth/verification-scene/VerificationSceneFallback';
+@@ -12,11 +11,10 @@ import { Button } from '@/components/ui/button';
+ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+ import { getAdminConsentUrl } from '@/lib/msal-config';
+ import { markOnboardingComplete, clearOnboardingCache } from '@/lib/onboarding-utils';
+-import { trackSigninClick, useLandingStats } from '@/hooks/useLandingStats';
++import { trackSigninClick } from '@/hooks/useLandingStats';
+ import { GradientOrb } from '@/components/landing/ui/GradientOrb';
+ import { GridBackground } from '@/components/landing/ui/GridBackground';
+ import { FadeIn } from '@/components/landing/animations/FadeIn';
+-import { CountUp } from '@/components/landing/animations/CountUp';
+ import { springPresets } from '@/lib/animations/variants';
+ import {
+   rememberPostAuthRedirect,
+@@ -46,7 +44,6 @@ function MicrosoftLogo({ className }: { className?: string }) {
+ 
+ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+   const { isAuthenticated, signIn, signInRedirect, signOut, getAccessToken } = useMicrosoftAuth();
+-  const { signinClicks, appsSupported } = useLandingStats();
+   const router = useRouter();
+   const shouldReduceMotion = useReducedMotion();
+   const [isSigningIn, setIsSigningIn] = useState(false);
+@@ -262,11 +259,11 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+         />
+         <div
+           className="absolute -top-24 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full"
+-          style={{ background: 'radial-gradient(circle, rgba(8, 145, 178, 0.22) 0%, transparent 68%)' }}
++          style={{ background: 'radial-gradient(circle, rgba(103, 48, 144, 0.22) 0%, transparent 68%)' }}
+         />
+         <div
+           className="absolute bottom-[-180px] right-[-140px] h-[420px] w-[420px] rounded-full"
+-          style={{ background: 'radial-gradient(circle, rgba(124, 58, 237, 0.16) 0%, transparent 70%)' }}
++          style={{ background: 'radial-gradient(circle, rgba(90, 131, 140, 0.16) 0%, transparent 70%)' }}
+         />
+       </div>
+ 
+@@ -293,7 +290,7 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+         <div
+           className="absolute left-[-12%] right-[-8%] top-[28%] h-72 -rotate-3 pointer-events-none"
+           style={{
+-            background: 'linear-gradient(90deg, transparent 0%, rgba(8, 145, 178, 0.13) 18%, rgba(124, 58, 237, 0.1) 52%, transparent 86%)',
++            background: 'linear-gradient(90deg, transparent 0%, rgba(103, 48, 144, 0.13) 18%, rgba(90, 131, 140, 0.1) 52%, transparent 86%)',
+           }}
+         />
+         <div
+@@ -330,13 +327,11 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+             <div className="mb-7 flex items-center gap-4">
+               <div className="relative">
+                 <div className="absolute -inset-3 rounded-2xl bg-accent-cyan/20 blur-2xl" />
+-                <div className="relative flex h-14 w-14 items-center justify-center rounded-xl border border-white/20 bg-gradient-to-br from-accent-cyan to-accent-violet shadow-glow-cyan">
+-                  <Package className="h-7 w-7 text-white" />
+-                </div>
++                <img src="/favicon.svg" alt="" className="relative h-14 w-14 rounded-xl" />
+               </div>
+               <div>
+                 <h1 className="text-2xl font-bold text-text-primary"><T>IntuneGet</T></h1>
+-                <p className="text-sm font-medium text-text-muted"><T>Winget for Intune</T></p>
++                <p className="text-sm font-medium text-text-muted">House of Ruth Maryland</p>
+               </div>
+             </div>
+           </FadeIn>
+@@ -348,15 +343,14 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+             animate={{ opacity: 1, scale: 1, y: 0 }}
+             transition={{ duration: 0.5, delay: 0.05, ease: [0.25, 0.46, 0.45, 0.94] }}
+           >
+-            <span className="gradient-text-cyan"><T><Var>{appsSupported.toLocaleString()}</Var> Apps.</T></span>
++            <span className="gradient-text-cyan">App deployments</span>
+             <br />
+-            <span className="text-text-primary"><T>One Click.</T></span>
++            <span className="text-text-primary">for HRM computers</span>
+           </motion.h2>
+ 
+           <FadeIn animateOnMount delay={0.1}>
+             <p className="mb-6 max-w-md text-lg leading-relaxed text-text-secondary">
+-              <T>Deploy Win32 applications to Microsoft Intune with ease.
+-              Search Winget, configure, and upload in minutes.</T>
++              Deploy and update the apps on HRM computers through Intune.
+             </p>
+           </FadeIn>
+ 
+@@ -367,75 +361,13 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+             <div className="h-px w-16 bg-gradient-to-r from-accent-violet/35 to-transparent" />
+           </div>
+ 
+-          {/* Trust stats */}
+-          <FadeIn animateOnMount delay={0.15}>
+-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted"><T>Trusted by IT admins</T></p>
+-            <div className="flex flex-wrap gap-3">
+-              <motion.div
+-                whileHover={shouldReduceMotion ? {} : { y: -4 }}
+-                transition={springPresets.snappy}
+-                className="group relative flex min-w-[176px] items-center gap-3 overflow-hidden rounded-xl border border-accent-cyan/20 bg-bg-elevated/75 p-3.5 shadow-soft-md backdrop-blur-md transition-colors hover:border-accent-cyan/35"
+-              >
+-                <div
+-                  className="absolute inset-y-0 left-0 w-1 bg-accent-cyan"
+-                  aria-hidden="true"
+-                />
+-                <div
+-                  className="absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+-                  style={{ background: 'linear-gradient(135deg, rgba(8, 145, 178, 0.08), transparent 58%)' }}
+-                  aria-hidden="true"
+-                />
+-                <div className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-accent-cyan/20 bg-accent-cyan/10">
+-                  <Users className="h-5 w-5 text-accent-cyan" />
+-                </div>
+-                <div className="relative">
+-                  <p className="gradient-text-cyan text-2xl font-extrabold leading-none">
+-                    <CountUp end={signinClicks} suffix="+" duration={1.5} delay={0.3} />
+-                  </p>
+-                  <p className="mt-1 text-sm font-medium text-text-muted"><T>Admins</T></p>
+-                </div>
+-              </motion.div>
+-              <motion.div
+-                whileHover={shouldReduceMotion ? {} : { y: -4 }}
+-                transition={springPresets.snappy}
+-                className="group relative flex min-w-[176px] items-center gap-3 overflow-hidden rounded-xl border border-accent-violet/20 bg-bg-elevated/75 p-3.5 shadow-soft-md backdrop-blur-md transition-colors hover:border-accent-violet/35"
+-              >
+-                <div
+-                  className="absolute inset-y-0 left-0 w-1 bg-accent-violet"
+-                  aria-hidden="true"
+-                />
+-                <div
+-                  className="absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+-                  style={{ background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.08), transparent 58%)' }}
+-                  aria-hidden="true"
+-                />
+-                <div className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-accent-violet/20 bg-accent-violet/10">
+-                  <Boxes className="h-5 w-5 text-accent-violet" />
+-                </div>
+-                <div className="relative">
+-                  <p className="gradient-text-violet text-2xl font-extrabold leading-none">
+-                    <CountUp end={appsSupported} suffix="+" duration={1.5} delay={0.4} />
+-                  </p>
+-                  <p className="mt-1 text-sm font-medium text-text-muted"><T>Apps available</T></p>
+-                </div>
+-              </motion.div>
+-            </div>
+-          </FadeIn>
+-
+-          {/* Multi-tenant badge */}
+-          <FadeIn animateOnMount delay={0.2}>
+-            <div className="mt-5 inline-flex w-fit items-center gap-2 rounded-full border border-emerald-500/20 bg-bg-elevated/60 px-3 py-2 text-sm font-medium text-text-secondary shadow-soft backdrop-blur-md">
+-              <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_14px_rgba(16,185,129,0.45)]" />
+-              <span><T>Multi-tenant support - works with any Entra ID tenant</T></span>
+-            </div>
+-          </FadeIn>
+         </div>
+ 
+         {/* Cyan glow accent along divider */}
+         <div
+           className="absolute top-0 right-0 bottom-0 w-px pointer-events-none"
+           style={{
+-            background: 'linear-gradient(to bottom, transparent 8%, rgba(8, 145, 178, 0.42) 34%, rgba(124, 58, 237, 0.28) 58%, transparent 90%)',
++            background: 'linear-gradient(to bottom, transparent 8%, rgba(103, 48, 144, 0.42) 34%, rgba(90, 131, 140, 0.28) 58%, transparent 90%)',
+           }}
+         />
+       </div>
+@@ -460,11 +392,11 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+           />
+           <div
+             className="absolute left-1/2 top-[44%] h-[680px] w-[680px] -translate-x-1/2 -translate-y-1/3 rounded-full"
+-            style={{ background: 'radial-gradient(circle, rgba(8, 145, 178, 0.12) 0%, rgba(124, 58, 237, 0.06) 38%, transparent 68%)' }}
++            style={{ background: 'radial-gradient(circle, rgba(103, 48, 144, 0.12) 0%, rgba(90, 131, 140, 0.06) 38%, transparent 68%)' }}
+           />
+           <div
+             className="absolute bottom-[-260px] left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full lg:hidden"
+-            style={{ background: 'radial-gradient(circle, rgba(124, 58, 237, 0.14) 0%, transparent 68%)' }}
++            style={{ background: 'radial-gradient(circle, rgba(90, 131, 140, 0.14) 0%, transparent 68%)' }}
+           />
+         </div>
+ 
+@@ -473,30 +405,17 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+           <FadeIn animateOnMount className="mb-7 flex flex-col items-center rounded-2xl border border-overlay/10 bg-bg-elevated/70 px-5 py-4 shadow-soft-md backdrop-blur-md lg:hidden">
+             <div className="relative mb-4">
+               <div className="absolute -inset-4 rounded-2xl bg-accent-cyan/25 blur-2xl" />
+-              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-white/20 bg-gradient-to-br from-accent-cyan to-accent-violet shadow-glow-cyan">
+-                <Package className="h-8 w-8 text-white" />
+-              </div>
++              <img src="/favicon.svg" alt="" className="relative h-16 w-16 rounded-2xl" />
+             </div>
+             <h1 className="text-2xl font-bold text-text-primary"><T>IntuneGet</T></h1>
+-            <p className="text-sm font-medium text-text-muted"><T>Winget for Intune</T></p>
+-            {/* Mobile trust strip */}
+-            <div className="mt-4 flex w-full items-center justify-center gap-2 text-xs font-medium text-text-secondary">
+-              <span className="flex items-center gap-1.5 rounded-full border border-accent-cyan/20 bg-accent-cyan/10 px-2.5 py-1">
+-                <Users className="h-3 w-3 text-accent-cyan" />
+-                <T><Var>{signinClicks.toLocaleString()}</Var>+ admins</T>
+-              </span>
+-              <span className="flex items-center gap-1.5 rounded-full border border-accent-violet/20 bg-accent-violet/10 px-2.5 py-1">
+-                <Boxes className="h-3 w-3 text-accent-violet" />
+-                <T><Var>{appsSupported.toLocaleString()}</Var>+ apps</T>
+-              </span>
+-            </div>
++            <p className="text-sm font-medium text-text-muted">House of Ruth Maryland</p>
+           </FadeIn>
+ 
+           {/* Sign in card */}
+           <motion.div
+             className="relative rounded-[1.35rem] bg-gradient-to-br from-accent-cyan/35 via-overlay/10 to-accent-violet/30 p-px"
+             style={{
+-              boxShadow: '0 24px 70px rgba(8, 145, 178, 0.14), 0 10px 28px rgb(var(--overlay) / 0.08)',
++              boxShadow: '0 24px 70px rgba(103, 48, 144, 0.14), 0 10px 28px rgb(var(--overlay) / 0.08)',
+             }}
+             initial={false}
+             animate={{ opacity: 1, y: 0, scale: 1 }}
+@@ -505,20 +424,17 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+             <div className="relative overflow-hidden rounded-[1.28rem] border border-white/10 bg-bg-elevated/95 backdrop-blur-xl">
+               <div
+                 className="absolute inset-x-0 top-0 h-1.5"
+-                style={{ background: 'linear-gradient(90deg, rgba(8, 145, 178, 0.95), rgba(124, 58, 237, 0.85), rgba(8, 145, 178, 0.55))' }}
++                style={{ background: 'linear-gradient(90deg, rgba(103, 48, 144, 0.95), rgba(90, 131, 140, 0.85), rgba(103, 48, 144, 0.55))' }}
+               />
+               <div
+                 className="absolute inset-x-8 top-0 h-20 pointer-events-none"
+-                style={{ background: 'radial-gradient(ellipse at top, rgba(8, 145, 178, 0.16), transparent 70%)' }}
++                style={{ background: 'radial-gradient(ellipse at top, rgba(103, 48, 144, 0.16), transparent 70%)' }}
+               />
+ 
+               {/* Card content with intentional spacing */}
+               <div className="relative px-8 pb-6 pt-10 sm:px-10 sm:pb-7 sm:pt-11">
+                 <div className="mb-8 text-center">
+-                  <h2 className="text-2xl font-extrabold tracking-tight text-text-primary"><T>Start Deploying</T></h2>
+-                  <p className="mx-auto mt-2 max-w-[300px] text-sm leading-relaxed text-text-muted">
+-                    <T>Sign in with your work account to get started</T>
+-                  </p>
++                  <h2 className="text-2xl font-extrabold tracking-tight text-text-primary">Sign in</h2>
+                 </div>
+ 
+                 {/* Error message */}
+@@ -556,7 +472,7 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+                     ) : (
+                       <>
+                         <MicrosoftLogo className="h-[19px] w-[19px]" />
+-                        <T>Sign in with Microsoft</T>
++                        <T>Sign in with your HRM account</T>
+                       </>
+                     )}
+                   </Button>
+@@ -588,11 +504,6 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+                   <p>
+                     <T>Intune actions run server-side through an app registration your admin approves, so privileged Graph access is never handed to the browser.</T>
+                   </p>
+-                  <p>
+-                    <Link href="/security" className="font-medium text-accent-cyan hover:underline">
+-                      <T>See the full permission list and data flow</T>
+-                    </Link>
+-                  </p>
+                 </div>
+               </div>
+ 
+@@ -675,17 +586,15 @@ export default function SignInClient({ callbackUrl }: { callbackUrl: string }) {
+           {/* Footer links */}
+           <FadeIn animateOnMount delay={0.15}>
+             <div className="mt-6 flex items-center justify-center gap-2 text-sm font-medium text-text-muted">
+-              <Link href="/" className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors hover:bg-overlay/[0.04] hover:text-text-primary">
+-                <ArrowLeft className="h-3.5 w-3.5" />
+-                <T>Back to home</T>
+-              </Link>
+-              <span className="h-4 w-px bg-overlay/15" />
+-              <Link
+-                href="/docs/docker"
+-                className="rounded-full px-3 py-1.5 transition-colors hover:bg-overlay/[0.04] hover:text-text-primary"
++              <a
++                href="https://support.hruthmd.org"
++                target="_blank"
++                rel="noopener noreferrer"
++                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors hover:bg-overlay/[0.04] hover:text-text-primary"
+               >
+-                <T>Self-host guide</T>
+-              </Link>
++                <LifeBuoy className="h-3.5 w-3.5" aria-hidden="true" />
++                Trouble signing in? Contact HRM Support
++              </a>
+             </div>
+           </FadeIn>
+         </div>
+diff --git a/app/api/hrm/access/route.test.ts b/app/api/hrm/access/route.test.ts
+new file mode 100644
+index 000000000..27263863a
+--- /dev/null
++++ b/app/api/hrm/access/route.test.ts
+@@ -0,0 +1,55 @@
++// HRM patch 0056
++import { NextRequest } from 'next/server';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ verify: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ verifyAccessToken: mocks.verify }));
++import { GET } from './route';
++import { ACCESS_DENIED_CODE, ACCESS_UNAVAILABLE_CODE } from '@/lib/hrm/admin-access';
++import { accessStateFromStatus, stateWhileChecking } from '@/hooks/useAppAccess';
++
++const request = () => new NextRequest('http://localhost/api/hrm/access', { headers: { Authorization: 'Bearer x.y.z' } });
++const user = { userId: 'user-01', tenantId: 'tenant-01', userEmail: 'staff.one@example.test', userName: null };
++beforeEach(() => vi.clearAllMocks());
++
++describe('HRM access route', () => {
++  it('requires sign-in', async () => {
++    mocks.verify.mockResolvedValue(null);
++    expect((await GET(request())).status).toBe(401);
++  });
++
++  it('says yes to a member, never cached', async () => {
++    mocks.verify.mockResolvedValue({ user, access: 'allowed' });
++    const response = await GET(request());
++    expect(response.status).toBe(200);
++    expect(response.headers.get('cache-control')).toBe('private, no-store');
++  });
++
++  it('refuses a non-member or another tenant with 403, and a failed check with 503', async () => {
++    for (const access of ['not_member', 'wrong_tenant']) {
++      mocks.verify.mockResolvedValue({ user, access });
++      const response = await GET(request());
++      expect(response.status).toBe(403);
++      expect((await response.json()).code).toBe(ACCESS_DENIED_CODE);
++    }
++    mocks.verify.mockResolvedValue({ user, access: 'unavailable' });
++    const response = await GET(request());
++    expect(response.status).toBe(503);
++    expect((await response.json()).code).toBe(ACCESS_UNAVAILABLE_CODE);
++  });
++
++  it('picks the dashboard screen from the answer', () => {
++    expect(accessStateFromStatus(200)).toBe('allowed');
++    expect(accessStateFromStatus(403)).toBe('denied');
++    expect(accessStateFromStatus(503)).toBe('unavailable');
++    expect(accessStateFromStatus(401)).toBe('allowed');
++  });
++});
++
++describe('stateWhileChecking', () => {
++  it('keeps an allowed dashboard on screen while access is checked again', () => {
++    expect(stateWhileChecking('allowed')).toBe('allowed');
++    expect(stateWhileChecking('denied')).toBe('checking');
++    expect(stateWhileChecking('unavailable')).toBe('checking');
++    expect(stateWhileChecking('checking')).toBe('checking');
++  });
++});
+diff --git a/app/api/hrm/access/route.ts b/app/api/hrm/access/route.ts
+new file mode 100644
+index 000000000..1cb1973ae
+--- /dev/null
++++ b/app/api/hrm/access/route.ts
+@@ -0,0 +1,13 @@
++// HRM patch 0056: whether the signed-in user may use IntuneGet. The dashboard asks this first and
++// shows the "no access" page on a 403, before any other screen loads.
++
++import { NextRequest, NextResponse } from 'next/server';
++import { verifyAccessToken } from '@/lib/auth-utils';
++import { accessRefusedResponse } from '@/lib/hrm/admin-access';
++
++export async function GET(request: NextRequest) {
++  const verified = await verifyAccessToken(request.headers.get('Authorization'));
++  if (!verified) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
++  if (verified.access !== 'allowed') return accessRefusedResponse(verified.access);
++  return NextResponse.json({ allowed: true }, { headers: { 'Cache-Control': 'private, no-store' } });
++}
+diff --git a/app/api/hrm/mcp/[...path]/route.test.ts b/app/api/hrm/mcp/[...path]/route.test.ts
+new file mode 100644
+index 000000000..281de18f0
+--- /dev/null
++++ b/app/api/hrm/mcp/[...path]/route.test.ts
+@@ -0,0 +1,80 @@
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ authorize: vi.fn(), handle: vi.fn() }));
++vi.mock('@/lib/hrm/mcp-auth', async (original) => ({ ...(await original<typeof import('@/lib/hrm/mcp-auth')>()), authorizeMcpRequest: mocks.authorize }));
++vi.mock('@/lib/hrm/mcp-api', async (original) => ({ ...(await original<typeof import('@/lib/hrm/mcp-api')>()), handleMcpRequest: mocks.handle }));
++import * as route from './route';
++import { McpError } from '@/lib/hrm/mcp-api';
++
++// Fake values only.
++const TENANT = '00000000-0000-4000-8000-000000000001';
++const call = (path: string[], headers: Record<string, string> = {}, query = '') =>
++  route.GET(new NextRequest(`https://example.test/api/hrm/mcp/${path.join('/')}${query}`, { headers }), { params: Promise.resolve({ path }) });
++
++let info: ReturnType<typeof vi.spyOn>;
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.authorize.mockResolvedValue({ tenantId: TENANT });
++  mocks.handle.mockResolvedValue({ health: 'ok' });
++  info = vi.spyOn(console, 'info').mockImplementation(() => {});
++});
++afterEach(() => { info.mockRestore(); vi.useRealTimers(); });
++
++describe('MCP read API route', () => {
++  it('answers unauthorized calls with an empty 401 before reading or logging anything', async () => {
++    mocks.authorize.mockResolvedValue(null);
++    const response = await call(['status'], { 'x-hrm-requested-by': 'staff@example.test' });
++    expect(response.status).toBe(401);
++    expect(await response.text()).toBe('');
++    expect(response.headers.get('cache-control')).toBe('no-store');
++    expect(mocks.handle).not.toHaveBeenCalled();
++    expect(info).not.toHaveBeenCalled();
++  });
++
++  it('serves the configured tenant, never cached, and logs the requester only', async () => {
++    const response = await call(['status'], { 'x-hrm-requested-by': 'Staff@Example.test' });
++    expect(response.status).toBe(200);
++    expect(response.headers.get('cache-control')).toBe('no-store');
++    const text = await response.text();
++    expect(JSON.parse(text)).toEqual({ health: 'ok' });
++    expect(text).not.toContain('example.test');
++    expect(mocks.handle.mock.calls[0][2]).toMatchObject({ tenantId: TENANT });
++    expect(info).toHaveBeenCalledWith('[mcp-api] GET status for staff@example.test');
++  });
++
++  it('logs a fixed endpoint name, not the raw path', async () => {
++    await call(['apps', '11111111-1111-4111-8111-111111111111']);
++    expect(info).toHaveBeenCalledWith('[mcp-api] GET apps/{id} for unknown');
++    const unknown = await call(['package']);
++    expect(unknown.status).toBe(404);
++    expect(await unknown.text()).toBe('');
++    expect(info).toHaveBeenLastCalledWith('[mcp-api] GET unknown for unknown');
++  });
++
++  it('maps failures to empty statuses without error text', async () => {
++    mocks.handle.mockRejectedValueOnce(new McpError(400));
++    expect((await call(['jobs'], {}, '?limit=0')).status).toBe(400);
++    mocks.handle.mockRejectedValueOnce(new Error('FORBIDDEN database detail'));
++    const failed = await call(['jobs']);
++    expect(failed.status).toBe(503);
++    expect(await failed.text()).toBe('');
++  });
++
++  it('gives up after the deadline', async () => {
++    vi.useFakeTimers();
++    mocks.handle.mockImplementation(() => new Promise(() => {}));
++    const pending = call(['apps']);
++    await vi.advanceTimersByTimeAsync(6_001);
++    const response = await pending;
++    expect(response.status).toBe(503);
++  });
++
++  it('refuses oversized answers', async () => {
++    mocks.handle.mockResolvedValue({ apps: 'x'.repeat(300 * 1024) });
++    expect((await call(['apps'])).status).toBe(503);
++  });
++
++  it('offers GET only', () => {
++    expect(Object.keys(route).filter((name) => /^[A-Z]+$/.test(name))).toEqual(['GET']);
++  });
++});
+diff --git a/app/api/hrm/mcp/[...path]/route.ts b/app/api/hrm/mcp/[...path]/route.ts
+new file mode 100644
+index 000000000..f29ccd30c
+--- /dev/null
++++ b/app/api/hrm/mcp/[...path]/route.ts
+@@ -0,0 +1,43 @@
++// HRM patch 0055: read-only API for HRM's MCP server (contract: IntuneGet-Build docs/mcp-api.md).
++// GET only. Needs MCP_API_KEY and the MCP Worker's Cloudflare Access service token; anything else is an empty 401.
++import { NextRequest, NextResponse } from 'next/server';
++import { authorizeMcpRequest, requesterForLog } from '@/lib/hrm/mcp-auth';
++import { handleMcpRequest, McpError, mcpEndpoint } from '@/lib/hrm/mcp-api';
++
++export const dynamic = 'force-dynamic';
++export const runtime = 'nodejs';
++const DEADLINE_MS = 6_000; // Inside the Worker's 8-second timeout.
++const MAX_BYTES = 256 * 1024;
++const NO_STORE = { 'Cache-Control': 'no-store' };
++const empty = (status: number) => new NextResponse(null, { status, headers: NO_STORE });
++
++export async function GET(request: NextRequest, { params }: { params: Promise<{ path?: string[] }> }) {
++  try {
++    const config = await authorizeMcpRequest(request.headers);
++    if (!config) return empty(401);
++    const path = (await params).path ?? [];
++    const endpoint = mcpEndpoint(path);
++    // Server log only: which endpoint and who asked. The requester is never returned.
++    console.info(`[mcp-api] GET ${endpoint ?? 'unknown'} for ${requesterForLog(request.headers.get('x-hrm-requested-by'))}`);
++    if (!endpoint) return empty(404);
++
++    const controller = new AbortController();
++    let timer: ReturnType<typeof setTimeout> | undefined;
++    const deadline = new Promise<never>((_, reject) => {
++      timer = setTimeout(() => { controller.abort(); reject(new McpError(503)); }, DEADLINE_MS);
++    });
++    try {
++      const signal = AbortSignal.any([controller.signal, request.signal]);
++      const body = await Promise.race([handleMcpRequest(path, request.nextUrl.searchParams, { tenantId: config.tenantId, signal, now: new Date() }), deadline]);
++      const text = JSON.stringify(body);
++      if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) return empty(503);
++      return new NextResponse(text, { status: 200, headers: { ...NO_STORE, 'Content-Type': 'application/json' } });
++    } finally {
++      if (timer) clearTimeout(timer);
++      controller.abort();
++    }
++  } catch (error) {
++    // Never return or log error text.
++    return empty(error instanceof McpError ? error.status : 503);
++  }
++}
+diff --git a/app/api/status-report/route.test.ts b/app/api/status-report/route.test.ts
+new file mode 100644
+index 000000000..f3e680150
+--- /dev/null
++++ b/app/api/status-report/route.test.ts
+@@ -0,0 +1,120 @@
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ byStatus: vi.fn(), history: vi.fn(), status: vi.fn(), factory: vi.fn() }));
++vi.mock('@/lib/db', () => ({ isSqliteMode: () => false, getDatabase: () => mocks.factory() }));
++vi.mock('@/lib/hrm/status-report-data', async original => ({
++  ...(await original<typeof import('@/lib/hrm/status-report-data')>()), readReportServerStatus: mocks.status,
++}));
++let GET: typeof import('./route')['GET'];
++const KEY = 'a'.repeat(64);
++const request = (authorization?: string) => new NextRequest('https://example.test/api/status-report', {
++  headers: authorization ? { authorization } : {},
++});
++const authorized = () => request(`Bearer ${KEY}`);
++
++beforeEach(async () => {
++  vi.resetModules();
++  vi.useFakeTimers();
++  vi.setSystemTime(new Date('2026-11-03T12:00:00Z'));
++  process.env.STATUS_REPORT_KEY = KEY;
++  mocks.byStatus.mockReset().mockResolvedValue([]);
++  mocks.history.mockReset().mockResolvedValue([]);
++  mocks.status.mockReset().mockResolvedValue({ reported: false, reason: 'missing' });
++  mocks.factory.mockReset().mockImplementation(() => ({ jobs: { getByStatus: mocks.byStatus }, uploadHistory: { listAll: mocks.history } }));
++  GET = (await import('./route')).GET;
++});
++afterEach(() => { vi.useRealTimers(); delete process.env.STATUS_REPORT_KEY; });
++
++async function down(response: Response) {
++  expect(response.status).toBe(200);
++  const text = await response.text();
++  expect(text).not.toContain('FORBIDDEN');
++  expect(text).not.toContain(KEY);
++  expect(JSON.parse(text)).toMatchObject({ health: 'down', status: 'Report unavailable' });
++}
++
++describe('status report route', () => {
++  it('always rejects missing or wrong keys with empty 401s without reading anything', async () => {
++    for (let i = 0; i < 30; i++) {
++      for (const header of [undefined, `Bearer wrong-${i}`, `Basic ${KEY}`]) {
++        const response = await GET(request(header));
++        expect(response.status).toBe(401);
++        expect(await response.text()).toBe('');
++      }
++    }
++    expect(mocks.factory).not.toHaveBeenCalled();
++    expect(mocks.status).not.toHaveBeenCalled();
++    expect((await GET(authorized())).status).toBe(200);
++  });
++
++  it('rejects every key when unset or shorter than 32 characters', async () => {
++    for (const key of [undefined, 's'.repeat(31)]) {
++      process.env.STATUS_REPORT_KEY = key ?? '';
++      for (let i = 0; i < 25; i++) expect((await GET(request(`Bearer ${key ?? ''}`))).status).toBe(401);
++    }
++  });
++
++  it('serves cached 200 reports and rebuilds at most once a minute', async () => {
++    const first = await GET(authorized());
++    expect(first.status).toBe(200);
++    expect(first.headers.get('cache-control')).toBe('no-store');
++    const report = await first.json();
++    for (let i = 0; i < 30; i++) expect(await (await GET(authorized())).json()).toEqual(report);
++    expect(mocks.factory).toHaveBeenCalledTimes(1);
++    vi.advanceTimersByTime(60_001);
++    expect((await GET(authorized())).status).toBe(200);
++    expect(mocks.factory).toHaveBeenCalledTimes(2);
++  });
++
++  it('shares one build between simultaneous valid requests', async () => {
++    await Promise.all(Array.from({ length: 10 }, () => GET(authorized())));
++    expect(mocks.factory).toHaveBeenCalledTimes(1);
++  });
++
++  it('does not reuse another key cache after rotation', async () => {
++    const first = await (await GET(authorized())).json();
++    process.env.STATUS_REPORT_KEY = 'b'.repeat(64);
++    vi.advanceTimersByTime(1_000);
++    const next = await GET(request(`Bearer ${process.env.STATUS_REPORT_KEY}`));
++    expect((await next.json()).generatedAt).not.toBe(first.generatedAt);
++    expect(mocks.factory).toHaveBeenCalledTimes(2);
++    expect((await GET(authorized())).status).toBe(401);
++  });
++
++  it('sanitizes query failures and database factory throws', async () => {
++    mocks.factory.mockImplementation(() => { throw new Error('FORBIDDEN_FACTORY'); });
++    await down(await GET(authorized()));
++    expect(mocks.status).toHaveBeenCalled();
++    vi.advanceTimersByTime(60_001);
++    mocks.factory.mockReturnValue({ jobs: { getByStatus: mocks.byStatus }, uploadHistory: { listAll: mocks.history } });
++    mocks.history.mockRejectedValue(new Error('FORBIDDEN_QUERY'));
++    const response = await GET(authorized());
++    const text = await response.text();
++    expect(response.status).toBe(200);
++    expect(JSON.parse(text).health).toBe('down');
++    expect(text).not.toContain('FORBIDDEN');
++  });
++
++  it('sanitizes malformed status data when building the report throws', async () => {
++    mocks.status.mockResolvedValue({ reported: true, problems: null });
++    await down(await GET(authorized()));
++  });
++
++  it('answers a cold slow build within three seconds and cancels its reads', async () => {
++    let signal: AbortSignal | undefined;
++    mocks.status.mockImplementation((value: AbortSignal) => { signal = value; return new Promise(() => {}); });
++    const response = GET(authorized());
++    await vi.advanceTimersByTimeAsync(2_250);
++    await down(await response);
++    expect(signal?.aborted).toBe(true);
++  });
++
++  it('returns the last safe report on a slow refresh without changing its generatedAt', async () => {
++    const first = await (await GET(authorized())).json();
++    vi.advanceTimersByTime(60_001);
++    mocks.history.mockImplementation(() => new Promise(() => {}));
++    const response = GET(authorized());
++    await vi.advanceTimersByTimeAsync(2_250);
++    expect(await (await response).json()).toEqual(first);
++  });
++});
+diff --git a/app/api/status-report/route.ts b/app/api/status-report/route.ts
+new file mode 100644
+index 000000000..1853c2710
+--- /dev/null
++++ b/app/api/status-report/route.ts
+@@ -0,0 +1,73 @@
++// HRM patch: protected by STATUS_REPORT_KEY alone; the report path bypasses sign-in.
++import { createHash } from 'node:crypto';
++import { NextRequest, NextResponse } from 'next/server';
++import { readReportCounts, readReportServerStatus } from '@/lib/hrm/status-report-data';
++import { buildStatusReport, degradedReport, reportKeyMatches, type StatusReport } from '@/lib/hrm/status-report';
++import { serverHttpsOrigin } from '@/lib/hrm/site';
++import { adminAccessState } from '@/lib/hrm/admin-access';
++
++export const dynamic = 'force-dynamic';
++export const runtime = 'nodejs';
++const CACHE_MS = 60_000;
++const BUILD_MS = 2_250; // Leave headroom inside the dashboard contract's three-second budget.
++interface Cache {
++  key: string;
++  attemptedAt: number;
++  report?: StatusReport;
++  lastGood?: StatusReport;
++  pending?: Promise<StatusReport>;
++}
++let cache: Cache | undefined;
++
++async function rebuild(entry: Cache, now: Date): Promise<StatusReport> {
++  const controller = new AbortController();
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  try {
++    const work = Promise.resolve().then(async () => {
++      const [server, counts] = await Promise.all([
++        readReportServerStatus(controller.signal, now),
++        readReportCounts(controller.signal, now),
++      ]);
++      // HRM patch 0036: same address as webhook links. Patch 0058: a to-do while sign-in isn't limited.
++      return buildStatusReport({ server, counts, jobs: [], deploys: [], origin: serverHttpsOrigin(), appAccess: adminAccessState(), now });
++    });
++    const deadline = new Promise<StatusReport>(resolve => {
++      timer = setTimeout(() => {
++        // Keep the original generatedAt when serving older numbers.
++        resolve(entry.lastGood ?? degradedReport(now));
++        controller.abort();
++      }, BUILD_MS);
++    });
++    entry.report = await Promise.race([work, deadline]);
++    if (!controller.signal.aborted && entry.report.health !== 'down') entry.lastGood = entry.report;
++  } catch {
++    entry.report = degradedReport(now);
++  } finally {
++    if (timer) clearTimeout(timer);
++    controller.abort();
++  }
++  return entry.report;
++}
++
++export async function GET(request: NextRequest) {
++  const authorization = request.headers.get('authorization');
++  // Invalid credentials never touch the cache or consume an authenticated request's allowance.
++  if (!reportKeyMatches(authorization, process.env.STATUS_REPORT_KEY)) {
++    return new NextResponse(null, { status: 401, headers: { 'Cache-Control': 'no-store' } });
++  }
++  try {
++    const key = createHash('sha256').update(process.env.STATUS_REPORT_KEY!).digest('hex');
++    const now = new Date();
++    if (!cache || cache.key !== key) cache = { key, attemptedAt: -Infinity };
++    const entry = cache;
++    if (!entry.pending && now.getTime() - entry.attemptedAt >= CACHE_MS) {
++      entry.attemptedAt = now.getTime();
++      entry.pending = rebuild(entry, now).finally(() => { entry.pending = undefined; });
++    }
++    const report = await (entry.pending ?? entry.report ?? degradedReport(now));
++    return NextResponse.json(report, { headers: { 'Cache-Control': 'no-store' } });
++  } catch {
++    // Includes factory/setup, malformed status, query, build and serialization failures. Never log errors or keys.
++    return NextResponse.json(degradedReport(), { headers: { 'Cache-Control': 'no-store' } });
++  }
++}
+diff --git a/components/hrm/AccessDenied.test.ts b/components/hrm/AccessDenied.test.ts
+new file mode 100644
+index 000000000..cc2e48153
+--- /dev/null
++++ b/components/hrm/AccessDenied.test.ts
+@@ -0,0 +1,38 @@
++// @vitest-environment happy-dom
++// HRM patch 0058 (choice 5B): the No access page shows the signed-in account and offers another one.
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++import { AccessDenied, HRM_SUPPORT_URL } from './AccessDenied';
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++let root: Root;
++beforeEach(() => { const node = document.createElement('div'); document.body.append(node); root = createRoot(node); });
++afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
++const button = (label: string) => [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
++
++it('names the account, links HRM Support and offers another account', async () => {
++  const onSwitchAccount = vi.fn();
++  const onSignOut = vi.fn();
++  await act(async () => root.render(createElement(AccessDenied, { account: 'staff@example.test', onRetry: vi.fn(), onSwitchAccount, onSignOut })));
++  expect(document.querySelector('h1')?.textContent).toBe('No access to IntuneGet');
++  expect(document.body.textContent).toContain('Ask HRM Support (opens in a new tab) to add you to the IT admins group.');
++  expect(document.body.textContent).not.toContain('https://');
++  expect(document.querySelector('a')?.getAttribute('href')).toBe(HRM_SUPPORT_URL);
++  expect(document.querySelector('[data-testid="access-denied-account"]')?.textContent).toBe('Signed in as staff@example.test');
++  expect(button('Try again')).toBeUndefined();
++  await act(async () => button('Sign in with another account')!.click());
++  expect(onSwitchAccount).toHaveBeenCalledOnce();
++  await act(async () => button('Sign out')!.click());
++  expect(onSignOut).toHaveBeenCalledOnce();
++});
++
++it('says what to do when the check failed, and hides the account line when unknown', async () => {
++  const onRetry = vi.fn();
++  await act(async () => root.render(createElement(AccessDenied, { unavailable: true, account: null, onRetry, onSwitchAccount: vi.fn(), onSignOut: vi.fn() })));
++  expect(document.querySelector('h1')?.textContent).toBe("Couldn't check your access");
++  expect(document.body.textContent).toContain('Try again in a minute. If this keeps happening, tell HRM Support');
++  expect(document.querySelector('[data-testid="access-denied-account"]')).toBeNull();
++  await act(async () => button('Try again')!.click());
++  expect(onRetry).toHaveBeenCalledOnce();
++});
+diff --git a/components/hrm/AccessDenied.tsx b/components/hrm/AccessDenied.tsx
+new file mode 100644
+index 000000000..472f97326
+--- /dev/null
++++ b/components/hrm/AccessDenied.tsx
+@@ -0,0 +1,61 @@
++'use client';
++
++// HRM patch 0056: shown instead of the dashboard when the signed-in user isn't in HRM's IT admins
++// group, or when the server couldn't check.
++// HRM patch 0058 (David's choice 5B): the page says which account is signed in and offers Sign in with
++// another account, since the usual cause is the wrong account. The API keeps its own fixed message.
++
++import { Lock, RefreshCw, LogOut, UserRound } from 'lucide-react';
++import { Button } from '@/components/ui/button';
++
++export const HRM_SUPPORT_URL = 'https://support.hruthmd.org';
++
++function SupportLink() {
++  return (
++    <a href={HRM_SUPPORT_URL} target="_blank" rel="noopener noreferrer" className="text-accent-cyan underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded">
++      HRM Support<span className="sr-only"> (opens in a new tab)</span>
++    </a>
++  );
++}
++
++export function AccessDenied({ unavailable, account, onRetry, onSwitchAccount, onSignOut }: {
++  unavailable?: boolean;
++  /** The signed-in account's email, shown so staff can tell they used the wrong one. */
++  account?: string | null;
++  onRetry: () => void;
++  onSwitchAccount: () => void;
++  onSignOut: () => void;
++}) {
++  return (
++    <main className="min-h-screen flex items-center justify-center bg-bg-deepest px-4">
++      <section aria-labelledby="access-denied-title" className="glass-light rounded-xl p-6 max-w-md w-full text-center">
++        <Lock className="w-8 h-8 text-status-warning mx-auto mb-3" aria-hidden="true" />
++        <h1 id="access-denied-title" className="text-lg font-semibold text-text-primary">
++          {unavailable ? "Couldn't check your access" : 'No access to IntuneGet'}
++        </h1>
++        <p className="text-sm text-text-secondary mt-2">
++          {unavailable
++            ? <>Try again in a minute. If this keeps happening, tell <SupportLink />.</>
++            : <>Ask <SupportLink /> to add you to the IT admins group.</>}
++        </p>
++        {account && <p className="text-sm text-text-muted mt-3" data-testid="access-denied-account">Signed in as <span className="font-medium text-text-primary break-all">{account}</span></p>}
++        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 justify-center mt-5">
++          {unavailable && (
++            <Button onClick={onRetry} className="focus-visible:ring-2 focus-visible:ring-accent-cyan">
++              <RefreshCw className="w-4 h-4 mr-2" aria-hidden="true" />
++              Try again
++            </Button>
++          )}
++          <Button variant={unavailable ? 'outline' : 'default'} onClick={onSwitchAccount} className="focus-visible:ring-2 focus-visible:ring-accent-cyan">
++            <UserRound className="w-4 h-4 mr-2" aria-hidden="true" />
++            Sign in with another account
++          </Button>
++          <Button variant="outline" onClick={onSignOut} className="focus-visible:ring-2 focus-visible:ring-accent-cyan">
++            <LogOut className="w-4 h-4 mr-2" aria-hidden="true" />
++            Sign out
++          </Button>
++        </div>
++      </section>
++    </main>
++  );
++}
+diff --git a/hooks/useAppAccess.ts b/hooks/useAppAccess.ts
+new file mode 100644
+index 000000000..9990ffdc7
+--- /dev/null
++++ b/hooks/useAppAccess.ts
+@@ -0,0 +1,48 @@
++'use client';
++
++// HRM patch 0056: asks the server whether the signed-in user may use IntuneGet, before the
++// dashboard loads anything else. The server enforces this on every route; this only picks the
++// screen to show.
++
++import { useCallback, useEffect, useState } from 'react';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++
++export type AppAccessState = 'checking' | 'allowed' | 'denied' | 'unavailable';
++
++/** Maps the server's answer to a screen. Anything unexpected lets the dashboard load (routes still refuse). */
++export function accessStateFromStatus(status: number): Exclude<AppAccessState, 'checking'> {
++  if (status === 403) return 'denied';
++  if (status === 503) return 'unavailable';
++  return 'allowed';
++}
++
++/** While checking again (a new token or account), a dashboard already allowed stays on screen. */
++export function stateWhileChecking(previous: AppAccessState): AppAccessState {
++  return previous === 'allowed' ? 'allowed' : 'checking';
++}
++
++export function useAppAccess(enabled: boolean): { state: AppAccessState; retry: () => void } {
++  const { getAccessToken } = useMicrosoftAuth();
++  const [state, setState] = useState<AppAccessState>('checking');
++  const [attempt, setAttempt] = useState(0);
++
++  useEffect(() => {
++    if (!enabled) return;
++    let cancelled = false;
++    setState(stateWhileChecking);
++    (async () => {
++      try {
++        const token = await getAccessToken();
++        if (!token) { if (!cancelled) setState('allowed'); return; }
++        const response = await fetch('/api/hrm/access', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
++        if (!cancelled) setState(accessStateFromStatus(response.status));
++      } catch {
++        if (!cancelled) setState('allowed');
++      }
++    })();
++    return () => { cancelled = true; };
++  }, [enabled, getAccessToken, attempt]);
++
++  const retry = useCallback(() => setAttempt((n) => n + 1), []);
++  return { state, retry };
++}
+diff --git a/hooks/useMicrosoftAuth.ts b/hooks/useMicrosoftAuth.ts
+index 4ef4c0a2d..a74057e7c 100644
+--- a/hooks/useMicrosoftAuth.ts
++++ b/hooks/useMicrosoftAuth.ts
+@@ -180,6 +180,26 @@ export function useMicrosoftAuth() {
+     }
+   }, [instance]);
+ 
++  /**
++   * HRM patch 0058: sign in again with the account picker, for staff signed in with the wrong account
++   * (the No access page). The refused account is forgotten in this browser only (no Microsoft sign-out),
++   * so the account chosen in the picker is the one the app uses on return.
++   */
++  const signInWithAnotherAccount = useCallback(async () => {
++    try {
++      cachedTokenRef.current = null;
++      tokenExpiryRef.current = null;
++      const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
++      if (account) await instance.clearCache({ account });
++      instance.setActiveAccount(null);
++      document.cookie = 'msal-auth-hint=1; path=/; SameSite=Lax; max-age=86400';
++      await instance.loginRedirect({ scopes: graphScopes, prompt: 'select_account' });
++      return true;
++    } catch {
++      return false;
++    }
++  }, [instance]);
++
+   /**
+    * Sign out and redirect to home
+    */
+@@ -256,6 +276,7 @@ export function useMicrosoftAuth() {
+     getTokenExpiryTime,
+     signIn,
+     signInRedirect,
++    signInWithAnotherAccount,
+     signOut,
+     requestAdminConsent,
+     getShareableConsentUrl,
+diff --git a/lib/auth-utils.ts b/lib/auth-utils.ts
+index c37a2ca67..18eabe49f 100644
+--- a/lib/auth-utils.ts
++++ b/lib/auth-utils.ts
+@@ -5,6 +5,8 @@
+ 
+ import crypto from 'crypto';
+ import { decodeJwt } from 'jose';
++// HRM patch 0056: only HRM's IT admins group may use the app.
++import { checkAdminAccess, type AccessDecision } from '@/lib/hrm/admin-access';
+ 
+ /**
+  * User information extracted from a Microsoft access token
+@@ -98,12 +100,13 @@ async function verifyTokenWithGraph(accessToken: string): Promise<TokenUserInfo
+ }
+ 
+ /**
+- * Parse and verify a Microsoft Graph access token from an Authorization header.
+- * The token's authenticity is confirmed by presenting it to the Microsoft Graph
+- * API — Microsoft verifies the signature, issuer, audience, and expiry.
+- * Results are cached to minimise latency on hot paths.
++ * HRM patch 0056: verify the token, then decide whether this user may use the app (members of
++ * HRM_ADMIN_GROUP_IDS in HRM_TENANT_ID; everyone while no group is set). Null when the token
++ * isn't a genuine Graph token. The proxy uses this to answer refused users with a clear 403.
+  */
+-export async function parseAccessToken(authHeader: string | null): Promise<TokenUserInfo | null> {
++export async function verifyAccessToken(
++  authHeader: string | null
++): Promise<{ user: TokenUserInfo; access: AccessDecision } | null> {
+   if (!authHeader?.startsWith('Bearer ')) {
+     return null;
+   }
+@@ -113,7 +116,23 @@ export async function parseAccessToken(authHeader: string | null): Promise<Token
+     return null;
+   }
+ 
+-  return verifyTokenWithGraph(accessToken);
++  const user = await verifyTokenWithGraph(accessToken);
++  if (!user) return null;
++  return { user, access: await checkAdminAccess(user, accessToken) };
++}
++
++/**
++ * Parse and verify a Microsoft Graph access token from an Authorization header.
++ * The token's authenticity is confirmed by presenting it to the Microsoft Graph
++ * API — Microsoft verifies the signature, issuer, audience, and expiry.
++ * Results are cached to minimise latency on hot paths.
++ *
++ * HRM patch 0056: users outside HRM's IT admins group (or tenant) get null too, so every
++ * route that checks a user refuses them even if the proxy's 403 were skipped.
++ */
++export async function parseAccessToken(authHeader: string | null): Promise<TokenUserInfo | null> {
++  const verified = await verifyAccessToken(authHeader);
++  return verified?.access === 'allowed' ? verified.user : null;
+ }
+ 
+ /**
+diff --git a/lib/hrm/__tests__/admin-access.test.ts b/lib/hrm/__tests__/admin-access.test.ts
+new file mode 100644
+index 000000000..16d191f93
+--- /dev/null
++++ b/lib/hrm/__tests__/admin-access.test.ts
+@@ -0,0 +1,184 @@
++// HRM patch 0056: only HRM's IT admins group may use IntuneGet. Fake IDs only.
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import {
++  ACCESS_CACHE_MS,
++  ACCESS_DENIED_CODE,
++  ACCESS_DENIED_MESSAGE,
++  adminAccessConfig,
++  adminAccessState,
++  checkAdminAccess,
++  clearAdminAccessCache,
++  isMachineApiPath,
++} from '../admin-access';
++
++const ADMINS = '00000000-0000-4000-8000-0000000000a1';
++const OTHER_GROUP = '00000000-0000-4000-8000-0000000000b2';
++const TENANT = '00000000-0000-4000-8000-0000000000c3';
++const OTHER_TENANT = '00000000-0000-4000-8000-0000000000d4';
++const env = { HRM_ADMIN_GROUP_IDS: ADMINS, HRM_TENANT_ID: TENANT };
++const user = { userId: 'user-01', tenantId: TENANT };
++
++function graph(groups: string[] | null, status = 200) {
++  return vi.fn(async () => (groups === null
++    ? new Response('{"error":{"message":"fake detail"}}', { status })
++    : Response.json({ value: groups }, { status })));
++}
++
++beforeEach(() => clearAdminAccessCache());
++
++describe('access settings', () => {
++  it('is off when no group is set, so nothing changes', () => {
++    expect(adminAccessConfig({})).toBeNull();
++    expect(adminAccessState({})).toBe('not_limited');
++    expect(adminAccessState(env)).toBe('limited');
++  });
++
++  it('keeps only well-formed group IDs and ignores a malformed tenant', () => {
++    expect(adminAccessConfig({ HRM_ADMIN_GROUP_IDS: ` ${ADMINS.toUpperCase()}, not-a-guid,${OTHER_GROUP},${ADMINS}`, HRM_TENANT_ID: 'example.test' }))
++      .toEqual({ groupIds: [ADMINS, OTHER_GROUP], tenantId: null });
++    expect(adminAccessConfig({ HRM_ADMIN_GROUP_IDS: 'not-a-guid' })).toBeNull();
++  });
++
++  it("reads patch 0055's tenant setting when HRM_TENANT_ID is unset", () => {
++    expect(adminAccessConfig({ HRM_ADMIN_GROUP_IDS: ADMINS, MCP_TENANT_ID: TENANT })?.tenantId).toBe(TENANT);
++    expect(adminAccessConfig({ HRM_ADMIN_GROUP_IDS: ADMINS, MCP_TENANT_ID: OTHER_TENANT, HRM_TENANT_ID: TENANT })?.tenantId).toBe(TENANT);
++  });
++});
++
++describe('checkAdminAccess', () => {
++  it('allows everyone without asking Graph when no group is set', async () => {
++    const fetchImpl = graph([]);
++    expect(await checkAdminAccess(user, 'token', { env: {}, fetchImpl })).toBe('allowed');
++    expect(fetchImpl).not.toHaveBeenCalled();
++  });
++
++  it("allows a member, asking with the user's own token", async () => {
++    const fetchImpl = graph([ADMINS]);
++    expect(await checkAdminAccess(user, 'user-token', { env, fetchImpl })).toBe('allowed');
++    expect(fetchImpl).toHaveBeenCalledWith('https://graph.microsoft.com/v1.0/me/checkMemberGroups', expect.objectContaining({
++      method: 'POST',
++      headers: expect.objectContaining({ Authorization: 'Bearer user-token' }),
++      body: JSON.stringify({ groupIds: [ADMINS] }),
++    }));
++  });
++
++  it('refuses a non-member', async () => {
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl: graph([]) })).toBe('not_member');
++  });
++
++  it('refuses another tenant without asking Graph', async () => {
++    const fetchImpl = graph([ADMINS]);
++    expect(await checkAdminAccess({ userId: 'user-02', tenantId: OTHER_TENANT }, 'token', { env, fetchImpl })).toBe('wrong_tenant');
++    expect(fetchImpl).not.toHaveBeenCalled();
++  });
++
++  it('keeps a decision for 5 minutes, then asks again', async () => {
++    const fetchImpl = graph([ADMINS]);
++    const now = 1_000_000;
++    await checkAdminAccess(user, 'token', { env, fetchImpl, now });
++    await checkAdminAccess(user, 'token', { env, fetchImpl, now: now + ACCESS_CACHE_MS - 1 });
++    expect(fetchImpl).toHaveBeenCalledTimes(1);
++    fetchImpl.mockImplementation(async () => Response.json({ value: [] }));
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl, now: now + ACCESS_CACHE_MS })).toBe('not_member');
++    expect(fetchImpl).toHaveBeenCalledTimes(2);
++  });
++
++  it('asks again when the group setting changes', async () => {
++    const fetchImpl = graph([ADMINS]);
++    await checkAdminAccess(user, 'token', { env, fetchImpl });
++    await checkAdminAccess(user, 'token', { env: { ...env, HRM_ADMIN_GROUP_IDS: OTHER_GROUP }, fetchImpl });
++    expect(fetchImpl).toHaveBeenCalledTimes(2);
++  });
++
++  it('refuses, and keeps nothing, when Graph fails', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    const failing = graph(null, 500);
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl: failing })).toBe('unavailable');
++    expect(warn.mock.calls.flat().join(' ')).not.toContain('fake detail');
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl: vi.fn(async () => { throw new Error('offline'); }) })).toBe('unavailable');
++    expect(await checkAdminAccess(user, 'token', { env, fetchImpl: graph([ADMINS]) })).toBe('allowed');
++    warn.mockRestore();
++  });
++});
++
++describe('machine routes', () => {
++  it('never checks cron, status report, workflow callbacks or the MCP read API', () => {
++    for (const path of ['/api/cron/check-updates', '/api/status-report', '/api/hrm/mcp', '/api/hrm/mcp/status', '/api/package/callback', '/api/packager/jobs', '/api/qa/cohort', '/api/health']) {
++      expect(isMachineApiPath(path), path).toBe(true);
++    }
++    for (const path of ['/api/hrm/home', '/api/hrm/retire', '/api/hrm/mcpx', '/api/package', '/api/intune/apps', '/api/status-reports']) {
++      expect(isMachineApiPath(path), path).toBe(false);
++    }
++  });
++});
++
++// The shared token check and the proxy, end to end with a faked Graph.
++describe('every user route', () => {
++  const fetchMock = vi.fn();
++  const jwt = (tid: string, oid = 'user-01') =>
++    ['e30', Buffer.from(JSON.stringify({ tid, oid, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url'), 'sig'].join('.');
++  const answer = (groups: string[]) => fetchMock.mockImplementation(async (url: string) => url.includes('checkMemberGroups')
++    ? Response.json({ value: groups })
++    : Response.json({ id: 'user-01', displayName: 'Staff One', userPrincipalName: 'staff.one@example.test' }));
++
++  beforeEach(() => {
++    vi.resetModules();
++    fetchMock.mockReset();
++    vi.stubGlobal('fetch', fetchMock);
++    vi.stubEnv('HRM_ADMIN_GROUP_IDS', ADMINS);
++    vi.stubEnv('HRM_TENANT_ID', TENANT);
++  });
++  afterEach(() => {
++    vi.unstubAllEnvs();
++    vi.unstubAllGlobals();
++  });
++
++  const call = async (path: string, token: string) => {
++    const { proxy } = await import('@/proxy');
++    return proxy(new NextRequest(`https://intune.example.test${path}`, { headers: { Authorization: `Bearer ${token}` } }));
++  };
++
++  it('lets a member through', async () => {
++    answer([ADMINS]);
++    const { parseAccessToken } = await import('@/lib/auth-utils');
++    const token = jwt(TENANT);
++    expect((await call('/api/hrm/home', token)).status).toBe(200);
++    expect(await parseAccessToken(`Bearer ${token}`)).toMatchObject({ userId: 'user-01', tenantId: TENANT });
++  });
++
++  it('answers a non-member with a clear 403, and the shared check refuses them too', async () => {
++    answer([]);
++    const { parseAccessToken } = await import('@/lib/auth-utils');
++    const token = jwt(TENANT, 'user-02');
++    const response = await call('/api/hrm/retire', token);
++    expect(response.status).toBe(403);
++    expect(await response.json()).toEqual({ error: ACCESS_DENIED_MESSAGE, code: ACCESS_DENIED_CODE });
++    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
++    expect(await parseAccessToken(`Bearer ${token}`)).toBeNull();
++  });
++
++  it('answers another tenant with a 403', async () => {
++    answer([ADMINS]);
++    expect((await call('/api/intune/apps', jwt(OTHER_TENANT))).status).toBe(403);
++  });
++
++  it('changes nothing while no group is set', async () => {
++    vi.stubEnv('HRM_ADMIN_GROUP_IDS', '');
++    answer([]);
++    const { parseAccessToken } = await import('@/lib/auth-utils');
++    const token = jwt(OTHER_TENANT);
++    expect((await call('/api/hrm/home', token)).status).toBe(200);
++    expect(await parseAccessToken(`Bearer ${token}`)).toMatchObject({ tenantId: OTHER_TENANT });
++    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('checkMemberGroups'))).toBe(false);
++  });
++
++  it('leaves machine routes and non-staff credentials alone', async () => {
++    answer([]);
++    for (const path of ['/api/cron/check-updates', '/api/status-report', '/api/hrm/mcp/status', '/api/package/callback']) {
++      expect((await call(path, jwt(TENANT))).status, path).toBe(200);
++    }
++    expect((await call('/api/hrm/home', 'a'.repeat(64))).status).toBe(200);
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++});
+diff --git a/lib/hrm/__tests__/mcp-api.test.ts b/lib/hrm/__tests__/mcp-api.test.ts
+new file mode 100644
+index 000000000..0b28bb65a
+--- /dev/null
++++ b/lib/hrm/__tests__/mcp-api.test.ts
+@@ -0,0 +1,313 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({
++  sqlite: false, jobs: vi.fn(), history: vi.fn(), updates: vi.fn(), policies: vi.fn(), status: vi.fn(),
++  installs: vi.fn(), readiness: vi.fn(), retiring: vi.fn(), pilots: vi.fn(), schedule: vi.fn(), blackouts: vi.fn(),
++}));
++vi.mock('@/lib/db', () => ({
++  isSqliteMode: () => mocks.sqlite,
++  getDatabase: () => ({
++    jobs: { getByTenantId: mocks.jobs },
++    uploadHistory: { listAll: mocks.history },
++    updateCheckResults: { list: mocks.updates },
++    updatePolicies: { listAll: mocks.policies },
++  }),
++}));
++vi.mock('@/lib/db/sqlite', () => ({
++  sqliteInstallStatus: { listForTenant: mocks.installs },
++  sqliteRollbackReadiness: { get: mocks.readiness },
++  sqliteRetirements: { active: mocks.retiring },
++  sqlitePilotRollouts: { list: mocks.pilots },
++  sqliteUpdateSchedule: { get: mocks.schedule, blackouts: mocks.blackouts },
++}));
++vi.mock('@/lib/hrm/home', async (original) => ({ ...(await original<typeof import('@/lib/hrm/home')>()), readServerStatus: mocks.status }));
++import {
++  attentionView, errorView, getApp, handleMcpRequest, installFailuresView, listApps, listJobs, listPilots, listUpdates,
++  McpError, mcpEndpoint, resetMcpInventoryCache, serverStatusView, updateScheduleView, type McpContext,
++} from '../mcp-api';
++
++// Fake values only. FORBIDDEN marks text that must never appear in an answer.
++const TENANT = '00000000-0000-4000-8000-000000000001';
++const OTHER_TENANT = '00000000-0000-4000-8000-000000000002';
++const APP = '11111111-1111-4111-8111-111111111111';
++const APP2 = '22222222-2222-4222-8222-222222222222';
++const NOW = new Date('2026-11-03T12:00:00Z');
++const ctx = (extra: Partial<McpContext> = {}): McpContext => ({ tenantId: TENANT, signal: new AbortController().signal, now: NOW, ...extra });
++const q = (value = '') => new URLSearchParams(value);
++const noForbidden = (value: unknown) => {
++  const text = JSON.stringify(value);
++  for (const marker of ['FORBIDDEN', 'staff@example.test', 'user-one', OTHER_TENANT, 'https://installer.example.test', 'DEVICE-01']) expect(text).not.toContain(marker);
++};
++const job = (id: string, extra: Record<string, unknown> = {}) => ({
++  id, tenant_id: TENANT, user_id: 'user-one', user_email: 'staff@example.test', winget_id: 'Example.App', version: '1.0.0', display_name: 'Example App',
++  status: 'deployed', status_message: 'FORBIDDEN status', error_message: 'FORBIDDEN error', error_code: null, error_category: null,
++  installer_url: 'https://installer.example.test/setup.exe', github_run_url: 'https://installer.example.test/run', intune_app_id: APP,
++  created_at: '2026-11-01T10:00:00Z', completed_at: '2026-11-01T10:10:00Z', cancelled_at: null, cancelled_by: 'staff@example.test', ...extra,
++});
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.sqlite = false;
++  resetMcpInventoryCache();
++  mocks.history.mockResolvedValue([]);
++  mocks.policies.mockResolvedValue([]);
++  mocks.updates.mockResolvedValue([]);
++  mocks.status.mockResolvedValue({ reported: false, reason: 'missing' });
++});
++
++describe('endpoint names', () => {
++  it('knows only the documented paths', () => {
++    expect(mcpEndpoint(['status'])).toBe('status');
++    expect(mcpEndpoint(['apps', APP])).toBe('apps/{id}');
++    expect(mcpEndpoint(['update-schedule'])).toBe('update-schedule');
++    for (const path of [[], ['status', 'x'], ['apps', APP, 'x'], ['home'], ['package'], ['jobs', '1']]) expect(mcpEndpoint(path)).toBeNull();
++  });
++  it('answers unknown paths with 404', async () => {
++    await expect(handleMcpRequest(['nope'], q(), ctx())).rejects.toMatchObject({ status: 404 });
++  });
++});
++
++describe('server status', () => {
++  it('maps the status file to fixed check states without its detail text', () => {
++    const view = serverStatusView({
++      reported: true, diskRatio: 0.9, diskWarning: true, problems: ['disk', 'intuneSelfTest'],
++      generatedAt: '2026-11-03T11:58:00Z', version: 'v0.8.5-hrm.9', startedAt: null,
++      lastDeploy: { time: '2026-11-02T10:00:00Z', result: 'deployed', from: 'a', to: 'b' },
++      lastBackup: { at: '2026-11-03T05:30:00Z', sizeKb: 10 }, offsiteBackup: { result: 'success', at: '2026-11-03T05:31:00Z' },
++      disk: { totalKb: 100, usedKb: 90 }, updateCheck: { result: 'success', at: '2026-11-03T07:30:00Z' }, notifications: { result: null, at: null },
++      tunnel: { version: '1', running: true, lastUpdate: { result: 'success', at: null } },
++      checks: { intuneSelfTest: { ok: false, at: '2026-11-03T11:15:00Z', detail: 'FORBIDDEN Graph error' }, intuneReads: null },
++    });
++    noForbidden(view);
++    expect(view).toMatchObject({ health: 'degraded', version: 'v0.8.5-hrm.9', diskPercentUsed: 90, lastUpdateCheckAt: '2026-11-03T07:30:00.000Z', lastOffsiteBackupAt: '2026-11-03T05:31:00.000Z' });
++    const states = Object.fromEntries(view.checks.map((c) => [c.name, c.state]));
++    expect(states).toMatchObject({ disk: 'warning', intuneSelfTest: 'failed', intuneReads: 'unknown', notifications: 'unknown', deploy: 'ok', tunnel: 'ok' });
++    expect(serverStatusView({ reported: true, ...({} as never), problems: [], diskRatio: 0, diskWarning: false, generatedAt: NOW.toISOString(), version: 'FORBIDDEN', disk: { totalKb: 1, usedKb: 0 }, tunnel: { running: true } } as never).version).toBeNull();
++    expect(serverStatusView({ reported: false, reason: 'stale', generatedAt: '2026-11-03T10:00:00Z' })).toMatchObject({ health: 'unknown', statusFile: 'stale', checks: [] });
++    // HRM patch 0057
++    expect(states).toMatchObject({ versionSync: 'unknown' });
++  });
++});
++
++describe('install errors', () => {
++  it('keeps normalized codes and HRM categories, never Intune descriptions', () => {
++    const view = errorView([
++      { code: '-2147023293', description: 'FORBIDDEN on DEVICE-01', count: 3 },
++      { code: '0x87D1041C', description: 'FORBIDDEN', count: 5 },
++      { code: '0x12345678', description: 'FORBIDDEN', count: 1 },
++      { code: 'FORBIDDEN text', description: 'FORBIDDEN', count: 2 },
++      { code: 'more FORBIDDEN', description: 'x', count: 1 },
++    ], 10);
++    noForbidden(view);
++    expect(view).toEqual([
++      { code: '0x87D1041C', category: 'Intune could not detect the installed app', count: 5 },
++      { code: '0x80070643', category: 'The installer reported a failure', count: 3 },
++      { code: 'other', category: null, count: 3 },
++      { code: '0x12345678', category: null, count: 1 },
++    ]);
++  });
++});
++
++const attention = {
++  attention: { failedRecent: 2, stuck: 1 },
++  installFailures: [{ displayName: 'Example App', intuneAppId: APP, failed: 4 }],
++  unreached: [{ displayName: 'Quiet App', intuneAppId: APP2, deployedAt: '2026-10-20T00:00:00Z' }],
++  rollbackGaps: [{ displayName: 'Example App', intuneAppId: APP, previousVersion: '0.9' }],
++  oldCopiesKept: [{ displayName: 'Example App', intuneAppId: APP2, version: '0.8', newestAppId: APP, reason: 'FORBIDDEN Intune said no' }],
++  installs: [
++    { tenant_id: TENANT, intune_app_id: APP, user_id: 'user-one', display_name: 'Example App', installed: 10, failed: 4, pending: 1, notApplicable: 0, other: 0, topErrors: [{ code: '0x80070643', description: 'FORBIDDEN', count: 4 }], previous_failed: 0, alerted_on: null, checked_at: '2026-11-03T07:30:00Z' },
++    { tenant_id: TENANT, intune_app_id: APP2, user_id: 'user-one', display_name: 'Retiring App', installed: 0, failed: 9, pending: 0, notApplicable: 0, other: 0, topErrors: [], previous_failed: 0, alerted_on: null, checked_at: '2026-11-03T07:30:00Z' },
++  ],
++  retiring: new Set([APP2]),
++};
++
++describe('attention and install failures', () => {
++  it('lists names, IDs and counts only', () => {
++    const view = attentionView(attention);
++    noForbidden(view);
++    expect(view.counts).toEqual({ failedJobsLast7Days: 2, stuckJobs: 1, appsWithInstallFailures: 1, appsNotReached: 1, rollbackGaps: 1, oldCopiesKept: 1 });
++    expect(view.oldCopiesKept[0]).toEqual({ appName: 'Example App', intuneAppId: APP2, version: '0.8', newestAppId: APP });
++    expect(view.unreached[0]).toEqual({ appName: 'Quiet App', intuneAppId: APP2, deployedAt: '2026-10-20T00:00:00.000Z' });
++  });
++  it('leaves out apps being retired and sorts by failures', () => {
++    const view = installFailuresView(attention, 25, NOW);
++    noForbidden(view);
++    expect(view.apps).toEqual([{ appName: 'Example App', intuneAppId: APP, failed: 4, checkedAt: '2026-11-03T07:30:00.000Z', topErrors: [{ code: '0x80070643', category: 'The installer reported a failure', count: 4 }] }]);
++  });
++});
++
++describe('jobs', () => {
++  it('returns tenant jobs newest first without staff, messages or URLs', async () => {
++    mocks.jobs.mockResolvedValue([
++      job('job-a', { created_at: '2026-11-01T10:00:00Z' }),
++      job('job-b', { created_at: '2026-11-02T10:00:00Z', status: 'failed', error_code: 'HASH_MISMATCH', error_category: 'installer', intune_app_id: null }),
++      job('job-c', { created_at: '2026-11-02T11:00:00Z', status: 'failed', error_code: 'FORBIDDEN text with spaces', error_category: 'FORBIDDEN Category' }),
++      job('job-x', { tenant_id: OTHER_TENANT }),
++    ]);
++    const view = await listJobs(ctx(), q());
++    expect(mocks.jobs).toHaveBeenCalledWith(TENANT, 500);
++    noForbidden(view);
++    expect(view.jobs.map((j) => j.jobId)).toEqual(['job-c', 'job-b', 'job-a']);
++    expect(view.jobs[1]).toEqual({ jobId: 'job-b', appName: 'Example App', wingetId: 'Example.App', version: '1.0.0', status: 'failed', errorCode: 'HASH_MISMATCH', errorCategory: 'installer', intuneAppId: null, automatic: false, createdAt: '2026-11-02T10:00:00.000Z', completedAt: '2026-11-01T10:10:00.000Z' });
++    expect(view.jobs[0]).toMatchObject({ errorCode: null, errorCategory: null });
++  });
++
++  it('filters, pages with a cursor and rejects bad parameters', async () => {
++    mocks.jobs.mockResolvedValue(['1', '2', '3', '4', '5'].map((n) => job(`job-${n}`, { created_at: `2026-11-0${n}T10:00:00Z`, status: n === '3' ? 'failed' : 'deployed' })));
++    const first = await listJobs(ctx(), q('limit=2'));
++    expect(first.jobs.map((j) => j.jobId)).toEqual(['job-5', 'job-4']);
++    const second = await listJobs(ctx(), q(`limit=2&cursor=${first.nextCursor}`));
++    expect(second.jobs.map((j) => j.jobId)).toEqual(['job-3', 'job-2']);
++    const third = await listJobs(ctx(), q(`limit=2&cursor=${second.nextCursor}`));
++    expect(third).toMatchObject({ nextCursor: null });
++    expect(third.jobs.map((j) => j.jobId)).toEqual(['job-1']);
++    expect((await listJobs(ctx(), q('status=failed'))).jobs.map((j) => j.jobId)).toEqual(['job-3']);
++    expect((await listJobs(ctx(), q('since=2026-11-04T00:00:00Z'))).jobs.map((j) => j.jobId)).toEqual(['job-5', 'job-4']);
++    for (const bad of ['status=FORBIDDEN', 'since=yesterday', 'limit=0', 'limit=101', 'limit=abc', 'cursor=../etc', 'cursor=1~a b']) {
++      await expect(listJobs(ctx(), q(bad))).rejects.toBeInstanceOf(McpError);
++    }
++  });
++});
++
++describe('available updates', () => {
++  it('merges every deployer’s rows for the tenant and adds the policy', async () => {
++    mocks.history.mockResolvedValue([
++      { user_id: 'user-one', intune_tenant_id: TENANT, intune_app_id: APP, winget_id: 'Example.App', version: '1.0', deployed_at: '2026-10-01T00:00:00Z' },
++      { user_id: 'user-two', intune_tenant_id: TENANT, intune_app_id: APP2, winget_id: 'Other.App', version: '2.0', deployed_at: '2026-10-01T00:00:00Z' },
++      { user_id: 'user-three', intune_tenant_id: OTHER_TENANT, intune_app_id: APP2, winget_id: 'Other.App', version: '2.0', deployed_at: '2026-10-01T00:00:00Z' },
++    ]);
++    const row = (extra: Record<string, unknown>) => ({ tenant_id: TENANT, user_id: 'user-one', winget_id: 'Example.App', intune_app_id: APP, display_name: 'Example App', current_version: '1.0', latest_version: '1.1', dismissed_at: null, detected_at: '2026-11-03T07:30:00Z', updated_at: '2026-11-03T07:30:00Z', ...extra });
++    mocks.updates.mockImplementation(async (user: string) => user === 'user-one'
++      ? [row({}), row({ updated_at: '2026-11-01T00:00:00Z', latest_version: '1.05' })]
++      : [row({ user_id: user, winget_id: 'Other.App', intune_app_id: APP2, display_name: 'Other App', current_version: '2.0', latest_version: '2.0' })]);
++    mocks.policies.mockResolvedValue([{ tenant_id: TENANT, winget_id: 'Example.App', policy_type: 'auto_update', user_id: 'user-one' }, { tenant_id: OTHER_TENANT, winget_id: 'Other.App', policy_type: 'ignore' }]);
++    mocks.status.mockResolvedValue({ reported: true, updateCheck: { result: 'success', at: '2026-11-03T07:30:00Z' } });
++    const view = await listUpdates(ctx(), q('includeDismissed=true'));
++    expect(mocks.updates.mock.calls.map((c) => c[0]).sort()).toEqual(['user-one', 'user-two']);
++    expect(mocks.updates).toHaveBeenCalledWith('user-one', { tenantId: TENANT, includeDismissed: true });
++    noForbidden(view);
++    expect(view).toEqual({
++      updates: [{ appName: 'Example App', wingetId: 'Example.App', intuneAppId: APP, currentVersion: '1.0', latestVersion: '1.1', policy: 'auto_update', dismissed: false, detectedAt: '2026-11-03T07:30:00.000Z' }],
++      lastCheckedAt: '2026-11-03T07:30:00.000Z',
++    });
++    await expect(listUpdates(ctx(), q('includeDismissed=yes'))).rejects.toBeInstanceOf(McpError);
++  });
++});
++
++describe('Intune apps', () => {
++  const graphApp = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
++    '@odata.type': '#microsoft.graph.win32LobApp', id, displayName: name, displayVersion: '1.0', publisher: 'Example Publisher',
++    description: 'FORBIDDEN description', notes: 'FORBIDDEN notes', owner: 'staff@example.test', developer: 'FORBIDDEN',
++    createdDateTime: '2026-01-01T00:00:00Z', lastModifiedDateTime: '2026-02-01T00:00:00Z', ...extra,
++  });
++  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
++
++  it('lists, searches and pages the inventory, reading Intune once a minute', async () => {
++    const fetchImpl = vi.fn(async (url: string | URL | Request) => String(url).includes('skiptoken=page2')
++      ? json({ value: [graphApp(APP2, 'Zeta Tool')] })
++      : json({ value: [graphApp(APP, 'Alpha App')], '@odata.nextLink': 'https://graph.microsoft.com/beta/x?$skiptoken=page2' }));
++    mocks.history.mockResolvedValue([{ intune_tenant_id: TENANT, intune_app_id: APP, winget_id: 'Example.Alpha' }]);
++    const context = ctx({ fetchImpl: fetchImpl as typeof fetch, graphToken: async () => 'fake-token' });
++    const all = await listApps(context, q());
++    noForbidden(all);
++    expect(all).toEqual({ total: 2, nextCursor: null, apps: [
++      { intuneAppId: APP, displayName: 'Alpha App', version: '1.0', publisher: 'Example Publisher', wingetId: 'Example.Alpha', createdAt: '2026-01-01T00:00:00.000Z', modifiedAt: '2026-02-01T00:00:00.000Z' },
++      expect.objectContaining({ intuneAppId: APP2, wingetId: null }),
++    ] });
++    expect((await listApps(context, q('search=example.alpha'))).apps.map((a) => a.intuneAppId)).toEqual([APP]);
++    const page = await listApps(context, q('limit=1'));
++    expect(page).toMatchObject({ total: 2, nextCursor: '1' });
++    expect((await listApps(context, q('limit=1&cursor=1'))).apps.map((a) => a.intuneAppId)).toEqual([APP2]);
++    expect(fetchImpl).toHaveBeenCalledTimes(2);
++    for (const bad of ['limit=500', 'cursor=-1', `search=${'x'.repeat(101)}`]) await expect(listApps(context, q(bad))).rejects.toBeInstanceOf(McpError);
++  });
++
++  it('keeps a shared inventory read going when the first caller goes away', async () => {
++    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
++      await new Promise((resolve) => setTimeout(resolve, 5));
++      if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
++      return json({ value: [graphApp(APP, 'Alpha App')] });
++    });
++    const first = new AbortController();
++    const firstCall = listApps(ctx({ fetchImpl: fetchImpl as typeof fetch, graphToken: async () => 'fake-token', signal: first.signal }), q());
++    const secondCall = listApps(ctx({ fetchImpl: fetchImpl as typeof fetch, graphToken: async () => 'fake-token' }), q());
++    first.abort();
++    expect((await secondCall).total).toBe(1);
++    expect((await firstCall).total).toBe(1);
++    expect(fetchImpl).toHaveBeenCalledTimes(1);
++  });
++
++  it('answers 503 when Intune cannot be read and does not keep the failure', async () => {
++    const fetchImpl = vi.fn(async () => json({ error: { message: 'FORBIDDEN' } }, 500));
++    await expect(listApps(ctx({ fetchImpl: fetchImpl as typeof fetch, graphToken: async () => 'fake-token' }), q())).rejects.toMatchObject({ status: 503 });
++    await expect(listApps(ctx({ graphToken: async () => null }), q())).rejects.toMatchObject({ status: 503 });
++  });
++
++  it('shows one app with group labels, install counts and HRM states', async () => {
++    mocks.sqlite = true;
++    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
++      const text = String(url);
++      if (text.endsWith('/assignments')) return json({ value: [
++        { id: 'a1', intent: 'required', target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: '33333333-3333-4333-8333-333333333333' } },
++        { id: 'a2', intent: 'availableWithoutEnrollment', target: { '@odata.type': '#microsoft.graph.allLicensedUsersAssignmentTarget' } },
++        { id: 'a3', intent: 'required', target: { '@odata.type': '#microsoft.graph.exclusionGroupAssignmentTarget', groupId: '44444444-4444-4444-8444-444444444444' } },
++      ] });
++      if (text.includes('/groups/33333333')) return json({ id: '33333333-3333-4333-8333-333333333333', displayName: 'Pilot computers' });
++      if (text.includes('/groups/44444444')) return json({}, 404);
++      return json(graphApp(APP, 'Alpha App'));
++    });
++    vi.stubGlobal('fetch', fetchImpl);
++    try {
++      mocks.installs.mockResolvedValue(attention.installs);
++      mocks.readiness.mockReturnValue({ status: 'ready', checksum_status: 'match' });
++      mocks.retiring.mockReturnValue(null);
++      mocks.pilots.mockReturnValue([{ phase: 'testing', previous_app_id: APP, new_app_id: APP2 }]);
++      const view = await getApp(ctx({ fetchImpl: fetchImpl as typeof fetch, graphToken: async () => 'fake-token' }), APP);
++      noForbidden(view);
++      expect(view).toMatchObject({
++        intuneAppId: APP, displayName: 'Alpha App',
++        assignments: [
++          { groupLabel: 'Pilot computers', intent: 'required' },
++          { groupLabel: 'All users', intent: 'available' },
++          { groupLabel: 'Excluded: Group name not available', intent: 'required' },
++        ],
++        installCounts: { installed: 10, failed: 4, pending: 1, notApplicable: 0 },
++        topErrors: [{ code: '0x80070643', category: 'The installer reported a failure', count: 4 }],
++        rollbackAvailable: true, retirementPhase: null, pilotPhase: 'testing',
++      });
++    } finally { vi.unstubAllGlobals(); }
++  });
++
++  it('answers 404 for unknown or non-Win32 apps and 400 for bad IDs', async () => {
++    const context = (body: unknown, status = 200) => ctx({ fetchImpl: (async () => json(body, status)) as typeof fetch, graphToken: async () => 'fake-token' });
++    await expect(getApp(context({}, 404), APP)).rejects.toMatchObject({ status: 404 });
++    await expect(getApp(context(graphApp(APP, 'Store app', { '@odata.type': '#microsoft.graph.winGetApp' })), APP)).rejects.toMatchObject({ status: 404 });
++    await expect(getApp(context(graphApp(APP2, 'Other')), APP)).rejects.toMatchObject({ status: 404 });
++    await expect(getApp(context({}), '../me')).rejects.toMatchObject({ status: 400 });
++  });
++});
++
++describe('update schedule and pilots', () => {
++  it('reports the schedule in Maryland time and is off without SQLite', async () => {
++    expect(await updateScheduleView(ctx())).toEqual({ supported: false, paused: false });
++    mocks.sqlite = true;
++    mocks.schedule.mockReturnValue({ enabled: true, paused: false, days: [1, 3], startHour: 22, endHour: 6 });
++    mocks.blackouts.mockReturnValue([{ id: 'b1', startsOn: '2026-12-24', endsOn: '2026-12-26', label: 'Holiday freeze' }]);
++    const view = await updateScheduleView(ctx());
++    expect(view).toMatchObject({
++      supported: true, enabled: true, paused: false, open: false,
++      window: { days: ['Monday', 'Wednesday'], start: '22:00', end: '06:00', timeZone: 'America/New_York' },
++      blackouts: [{ start: '2026-12-24', end: '2026-12-26', label: 'Holiday freeze' }],
++    });
++    expect(typeof (view as { nextRunAt: unknown }).nextRunAt).toBe('string');
++  });
++
++  it('lists pilots without who approved them', async () => {
++    expect(await listPilots(ctx())).toEqual({ pilots: [] });
++    mocks.sqlite = true;
++    mocks.pilots.mockReturnValue([{ id: 'p1', tenant_id: TENANT, winget_id: 'Example.App', display_name: 'Example App', group_id: 'g', group_name: 'Pilot computers', previous_app_id: APP, previous_version: '1.0', job_id: 'j', phase: 'testing', revision: 1, lease_until: null, created_at: '2026-11-02T00:00:00Z', approved_by: 'staff@example.test', job_status: 'deployed', new_app_id: APP2, new_version: '1.1' }]);
++    const view = await listPilots(ctx());
++    expect(mocks.pilots).toHaveBeenCalledWith(TENANT);
++    noForbidden(view);
++    expect(view.pilots[0]).toEqual({ pilotId: 'p1', appName: 'Example App', wingetId: 'Example.App', phase: 'testing', fromVersion: '1.0', toVersion: '1.1', pilotGroupLabel: 'Pilot computers', previousAppId: APP, newAppId: APP2, jobStatus: 'deployed', startedAt: '2026-11-02T00:00:00.000Z', updatedAt: null });
++  });
++});
+diff --git a/lib/hrm/__tests__/mcp-auth.test.ts b/lib/hrm/__tests__/mcp-auth.test.ts
+new file mode 100644
+index 000000000..3e03692ed
+--- /dev/null
++++ b/lib/hrm/__tests__/mcp-auth.test.ts
+@@ -0,0 +1,108 @@
++import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTVerifyGetKey } from 'jose';
++import { beforeAll, describe, expect, it, vi } from 'vitest';
++import { accessTokenMatches, authorizeMcpRequest, mcpConfig, requesterForLog } from '../mcp-auth';
++
++// Fake values only.
++const TEAM = 'example-team.cloudflareaccess.com';
++const AUD = 'fake-audience-tag-0123456789abcdef';
++const CLIENT = 'fake-client-id.access';
++const TENANT = '00000000-0000-4000-8000-000000000001';
++const KEY = 'k'.repeat(48);
++const env = { MCP_API_KEY: KEY, ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: AUD, MCP_ACCESS_CLIENT_ID: CLIENT, MCP_TENANT_ID: TENANT };
++
++let keys: JWTVerifyGetKey;
++let otherKeys: JWTVerifyGetKey;
++let privateKey: CryptoKey;
++let otherPrivate: CryptoKey;
++beforeAll(async () => {
++  const pair = await generateKeyPair('RS256');
++  const other = await generateKeyPair('RS256');
++  privateKey = pair.privateKey; otherPrivate = other.privateKey;
++  keys = createLocalJWKSet({ keys: [{ ...(await exportJWK(pair.publicKey)), kid: 'one', alg: 'RS256' }] });
++  otherKeys = createLocalJWKSet({ keys: [{ ...(await exportJWK(other.publicKey)), kid: 'two', alg: 'RS256' }] });
++});
++
++function jwt(claims: Record<string, unknown> = {}, opts: { key?: CryptoKey; kid?: string; iss?: string; aud?: string; exp?: string | number } = {}) {
++  return new SignJWT({ common_name: CLIENT, type: 'app', ...claims })
++    .setProtectedHeader({ alg: 'RS256', kid: opts.kid ?? 'one' })
++    .setIssuer(opts.iss ?? `https://${TEAM}`)
++    .setAudience(opts.aud ?? AUD)
++    .setIssuedAt()
++    .setExpirationTime(opts.exp ?? '5m')
++    .sign(opts.key ?? privateKey);
++}
++const headers = (values: Record<string, string>) => new Headers(values);
++
++describe('MCP API settings', () => {
++  it('turns the API off when any setting is missing or malformed', () => {
++    expect(mcpConfig(env)).toEqual({ apiKey: KEY, teamDomain: TEAM, audience: AUD, clientId: CLIENT, tenantId: TENANT });
++    expect(mcpConfig({ ...env, ACCESS_TEAM_DOMAIN: `https://${TEAM}/` })?.teamDomain).toBe(TEAM);
++    for (const change of [
++      { MCP_API_KEY: undefined }, { MCP_API_KEY: 's'.repeat(31) }, { ACCESS_TEAM_DOMAIN: '' }, { ACCESS_AUD: '' },
++      { MCP_ACCESS_CLIENT_ID: '' }, { MCP_TENANT_ID: '' }, { MCP_TENANT_ID: 'not-a-guid' },
++      // Keys are fetched only from a Cloudflare Access team domain.
++      { ACCESS_TEAM_DOMAIN: 'keys.example.test' }, { ACCESS_TEAM_DOMAIN: 'evil.example.test/x.cloudflareaccess.com' },
++    ]) expect(mcpConfig({ ...env, ...change })).toBeNull();
++  });
++
++  // HRM patch 0056: one tenant setting for sign-in and this API.
++  it('reads the tenant from HRM_TENANT_ID first', () => {
++    const { MCP_TENANT_ID: _unused, ...rest } = env;
++    expect(mcpConfig({ ...rest, HRM_TENANT_ID: TENANT })?.tenantId).toBe(TENANT);
++    expect(mcpConfig({ ...env, HRM_TENANT_ID: 'not-a-guid' })).toBeNull();
++  });
++});
++
++describe('Cloudflare Access token', () => {
++  const config = mcpConfig(env)!;
++  it('accepts only an unexpired token for this team, audience and service token', async () => {
++    expect(await accessTokenMatches(await jwt(), config, keys)).toBe(true);
++    expect(await accessTokenMatches(await jwt({ common_name: 'other-client.access' }), config, keys)).toBe(false);
++    expect(await accessTokenMatches(await jwt({ common_name: undefined, email: 'person@example.test' }), config, keys)).toBe(false);
++    expect(await accessTokenMatches(await jwt({}, { aud: 'other-audience-0000000000' }), config, keys)).toBe(false);
++    expect(await accessTokenMatches(await jwt({}, { iss: 'https://other.cloudflareaccess.com' }), config, keys)).toBe(false);
++    expect(await accessTokenMatches(await jwt({}, { exp: Math.floor(Date.now() / 1000) - 120 }), config, keys)).toBe(false);
++    expect(await accessTokenMatches(await jwt({}, { key: otherPrivate, kid: 'two' }), config, keys)).toBe(false);
++    expect(await accessTokenMatches(await jwt({}, { key: otherPrivate, kid: 'one' }), config, keys)).toBe(false);
++    expect(await accessTokenMatches(await jwt(), config, otherKeys)).toBe(false);
++    expect(await accessTokenMatches(null, config, keys)).toBe(false);
++    expect(await accessTokenMatches('not.a.jwt', config, keys)).toBe(false);
++    expect(await accessTokenMatches('x'.repeat(9000), config, keys)).toBe(false);
++  });
++
++  it('refuses unsigned and shared-secret tokens', async () => {
++    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
++    const body = encode({ common_name: CLIENT, iss: `https://${TEAM}`, aud: AUD, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300 });
++    expect(await accessTokenMatches(`${encode({ alg: 'none' })}.${body}.`, config, keys)).toBe(false);
++    const hs = await new SignJWT({ common_name: CLIENT }).setProtectedHeader({ alg: 'HS256' }).setIssuer(`https://${TEAM}`)
++      .setAudience(AUD).setIssuedAt().setExpirationTime('5m').sign(new TextEncoder().encode(KEY));
++    expect(await accessTokenMatches(hs, config, keys)).toBe(false);
++  });
++});
++
++describe('authorizeMcpRequest', () => {
++  it('needs both the API key and the Access token', async () => {
++    const token = await jwt();
++    expect(await authorizeMcpRequest(headers({ authorization: `Bearer ${KEY}`, 'cf-access-jwt-assertion': token }), env, keys)).toMatchObject({ tenantId: TENANT });
++    expect(await authorizeMcpRequest(headers({ authorization: `Bearer ${KEY}` }), env, keys)).toBeNull();
++    expect(await authorizeMcpRequest(headers({ 'cf-access-jwt-assertion': token }), env, keys)).toBeNull();
++    expect(await authorizeMcpRequest(headers({ authorization: `Bearer ${KEY}x`, 'cf-access-jwt-assertion': token }), env, keys)).toBeNull();
++    expect(await authorizeMcpRequest(headers({ authorization: `Basic ${KEY}`, 'cf-access-jwt-assertion': token }), env, keys)).toBeNull();
++    expect(await authorizeMcpRequest(headers({ authorization: `Bearer ${KEY}`, 'cf-access-jwt-assertion': token }), { ...env, MCP_TENANT_ID: undefined }, keys)).toBeNull();
++  });
++
++  it('checks the key before touching the Access keys', async () => {
++    const spy = vi.fn(keys);
++    expect(await authorizeMcpRequest(headers({ authorization: 'Bearer wrong', 'cf-access-jwt-assertion': await jwt() }), env, spy)).toBeNull();
++    expect(spy).not.toHaveBeenCalled();
++  });
++});
++
++describe('requesterForLog', () => {
++  it('keeps a plain email and nothing else', () => {
++    expect(requesterForLog('Staff.Member@Example.test')).toBe('staff.member@example.test');
++    for (const value of [null, '', 'not an email', 'a@example.test\n[mcp-api] forged', 'a@example.test b', `${'a'.repeat(300)}@example.test`]) {
++      expect(requesterForLog(value)).toBe('unknown');
++    }
++  });
++});
+diff --git a/lib/hrm/__tests__/status-report-data.test.ts b/lib/hrm/__tests__/status-report-data.test.ts
+new file mode 100644
+index 000000000..4b5166a48
+--- /dev/null
++++ b/lib/hrm/__tests__/status-report-data.test.ts
+@@ -0,0 +1,80 @@
++import { afterEach, describe, expect, it } from 'vitest';
++import Database from 'better-sqlite3';
++import { mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import path from 'node:path';
++import { readReportServerStatus, readSqliteReportCounts } from '../status-report-data';
++const NOW = new Date('2026-11-03T12:00:00Z');
++const dirs: string[] = [];
++const originalPath = process.env.DATABASE_PATH;
++afterEach(async () => {
++  if (originalPath === undefined) delete process.env.DATABASE_PATH;
++  else process.env.DATABASE_PATH = originalPath;
++  for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
++});
++async function directory() {
++  const dir = await mkdtemp(path.join(tmpdir(), 'report-counts-'));
++  dirs.push(dir);
++  process.env.DATABASE_PATH = path.join(dir, 'test.db');
++  return dir;
++}
++
++describe('isolated report reads', () => {
++  it('aggregates complete counts in UTC without exposing records or changing the app connection', async () => {
++    await directory();
++    const db = new Database(process.env.DATABASE_PATH!);
++    try {
++      db.exec(`CREATE TABLE packaging_jobs (status TEXT, created_at TEXT, updated_at TEXT, archived_at TEXT, display_name TEXT);
++        CREATE TABLE upload_history (deployed_at TEXT, display_name TEXT);`);
++      const insert = db.prepare('INSERT INTO upload_history VALUES (?, ?)');
++      db.transaction(() => {
++        for (let i = 0; i < 1_205; i++) insert.run('2026-11-02T23:59:00Z', 'FORBIDDEN_APP');
++      })();
++      insert.run('2026-11-03T00:00:00Z', 'FORBIDDEN_APP');
++      insert.run('2026-11-04T00:00:00Z', 'FORBIDDEN_FUTURE');
++      db.prepare('INSERT INTO packaging_jobs VALUES (?, ?, ?, ?, ?)').run('failed', NOW.toISOString(), NOW.toISOString(), null, 'FORBIDDEN_ERROR');
++      db.prepare('INSERT INTO packaging_jobs VALUES (?, ?, ?, ?, ?)').run('queued', '2026-11-02T00:00:00Z', NOW.toISOString(), null, 'FORBIDDEN_STAFF');
++      db.prepare('INSERT INTO packaging_jobs VALUES (?, ?, ?, ?, ?)').run('failed', NOW.toISOString(), NOW.toISOString(), NOW.toISOString(), 'FORBIDDEN_ARCHIVED');
++      const timeout = db.pragma('busy_timeout', { simple: true });
++      const result = await readSqliteReportCounts(new AbortController().signal, NOW);
++      expect(result).toMatchObject({ failedRecent: 1, stuck: 1 });
++      expect(result.days.slice(-2)).toEqual([1_205, 1]);
++      expect(result.deployed.reduce((sum, group) => sum + group.count, 0)).toBe(1_206);
++      expect(result.failed.reduce((sum, group) => sum + group.count, 0)).toBe(1);
++      expect(JSON.stringify(result)).not.toContain('FORBIDDEN');
++      expect(db.pragma('busy_timeout', { simple: true })).toBe(timeout);
++    } finally { db.close(); }
++  });
++
++  it('cancels an isolated reader without waiting for a busy database', async () => {
++    await directory();
++    const db = new Database(process.env.DATABASE_PATH!);
++    try {
++      db.exec('CREATE TABLE packaging_jobs (status TEXT); BEGIN EXCLUSIVE;');
++      const controller = new AbortController();
++      const result = readSqliteReportCounts(controller.signal, NOW);
++      controller.abort();
++      await expect(result).rejects.toThrow('Report unavailable');
++    } finally { db.exec('ROLLBACK'); db.close(); }
++  });
++
++  it('bounds status-file bytes and keeps missing status distinct from malformed input', async () => {
++    const dir = await directory();
++    const signal = new AbortController().signal;
++    expect(await readReportServerStatus(signal, NOW)).toEqual({ reported: false, reason: 'missing' });
++    await writeFile(path.join(dir, 'hrm-status.json'), 'x'.repeat(32_769));
++    await expect(readReportServerStatus(signal, NOW)).rejects.toThrow('Report unavailable');
++    await writeFile(path.join(dir, 'hrm-status.json'), JSON.stringify({ generatedAt: NOW.toISOString(), disk: {}, tunnel: { running: true, lastUpdate: null } }));
++    await expect(readReportServerStatus(signal, NOW)).rejects.toThrow();
++  });
++});
++
++it('reads only startup summary counts, never names or per-device output',async()=>{
++ await directory();const db=new Database(process.env.DATABASE_PATH!);
++ try{
++  db.exec('CREATE TABLE packaging_jobs (status TEXT, created_at TEXT, updated_at TEXT, archived_at TEXT); CREATE TABLE upload_history (deployed_at TEXT); CREATE TABLE hrm_startup_reports (payload TEXT, checked_at TEXT, error TEXT)');
++  db.prepare('INSERT INTO hrm_startup_reports VALUES (?,?,?)').run(JSON.stringify({summary:{waiting:2,failed:1,outdated:0},unknownDevices:7,omitted:20,rows:[{name:'FORBIDDEN_APP',deviceName:'FORBIDDEN_DEVICE',user:'FORBIDDEN_STAFF'}]}),NOW.toISOString(),null);
++  const result=await readSqliteReportCounts(new AbortController().signal,NOW);
++  expect(result.startup).toEqual({waiting:2,failed:1,outdated:0,unknown:7,omitted:20});expect(JSON.stringify(result)).not.toContain('FORBIDDEN');
++ }finally{db.close()}
++});
+diff --git a/lib/hrm/__tests__/status-report.test.ts b/lib/hrm/__tests__/status-report.test.ts
+new file mode 100644
+index 000000000..45312a94c
+--- /dev/null
++++ b/lib/hrm/__tests__/status-report.test.ts
+@@ -0,0 +1,257 @@
++import { describe, expect, it } from 'vitest';
++import { interpretServerStatus } from '../home';
++import { APP_ACCESS_TODO, buildStatusReport, reportKeyMatches, constrainReport } from '../status-report';
++
++const NOW = new Date('2026-11-03T12:00:00Z');
++const ORIGIN = 'https://intuneget.example.test';
++const server = (over: Record<string, unknown> = {}) => interpretServerStatus(JSON.stringify({
++  generatedAt: '2026-11-03T11:58:00Z',
++  version: 'v0.8.5-hrm.7',
++  startedAt: '2026-11-03T10:00:00Z',
++  lastDeploy: { time: '2026-11-03T10:00:00Z', result: 'deployed', from: 'v0.8.5-hrm.6', to: 'v0.8.5-hrm.7' },
++  lastBackup: { at: '2026-11-03T09:59:00Z', sizeKb: 90000 },
++  offsiteBackup: { result: 'success', at: '2026-11-03T05:30:00Z', compressedBytes: 1000 },
++  disk: { totalKb: 1000, usedKb: 420 },
++  updateCheck: { result: 'success', at: '2026-11-03T07:30:00Z' },
++  notifications: { result: 'success', at: '2026-11-03T08:00:00Z' },
++  tunnel: { version: '2026.10.4', running: true, lastUpdate: { result: 'success', at: '2026-11-03T00:00:00Z' } },
++  ...over,
++}), NOW);
++const job = (status: string, created_at: string) => ({ status, created_at, updated_at: created_at });
++const build = (over: Partial<Parameters<typeof buildStatusReport>[0]> = {}) =>
++  buildStatusReport({ server: server(), jobs: [], deploys: [], origin: ORIGIN, now: NOW, ...over });
++
++describe('status report', () => {
++  // HRM patch 0058: a to-do while patch 0056's IT admins group isn't set; the pill is unchanged.
++  it('adds the sign-in limit to-do only while access is not limited', () => {
++    const open = constrainReport(build({ appAccess: 'not_limited' }), NOW);
++    expect(open).toMatchObject({ health: 'ok', status: 'Up' });
++    expect(open.todos).toEqual([{ id: 'app-access-not-limited', title: 'Limit IntuneGet sign-in to IT-Admins', detail: APP_ACCESS_TODO.detail, link: `${ORIGIN}/dashboard` }]);
++    expect(APP_ACCESS_TODO.title.length).toBeLessThanOrEqual(100);
++    expect(APP_ACCESS_TODO.detail.length).toBeLessThanOrEqual(100);
++    expect(build({ appAccess: 'limited' }).todos).toEqual([]);
++    expect(build().todos).toEqual([]);
++    expect(build({ appAccess: 'not_limited', origin: undefined }).todos[0]).not.toHaveProperty('link');
++  });
++
++  it('reports a healthy server with deploy counts per day', () => {
++    const report = build({
++      deploys: [
++        { deployed_at: '2026-11-03T11:10:00Z' },
++        { deployed_at: '2026-11-03T11:40:00Z' },
++        { deployed_at: '2026-11-01T09:00:00Z' },
++        { deployed_at: '2026-10-01T09:00:00Z' },
++      ],
++    });
++    expect(report).toMatchObject({
++      version: 1, tool: 'intuneget', generatedAt: '2026-11-03T12:00:00.000Z', health: 'ok', status: 'Up',
++      metric: { value: 3, label: 'apps deployed in 14 days' },
++      foot: ['Running v0.8.5-hrm.7', 'Disk 42% used'],
++      todos: [],
++    });
++    expect(report.series.values).toHaveLength(14);
++    expect(report.series.values.slice(-3)).toEqual([1, 0, 2]);
++    expect(report.events).toEqual([
++      { at: '2026-11-03T11:40:00.000Z', text: '2 apps deployed to Intune', tone: 'ok' },
++      { at: '2026-11-03T10:00:00.000Z', text: 'Server updated to v0.8.5-hrm.7', tone: 'ok' },
++      { at: '2026-11-03T05:30:00.000Z', text: 'Off-site backup finished', tone: 'ok' },
++    ]);
++  });
++
++  it('turns server problems into to-dos, worst first in the pill', () => {
++    const report = build({
++      server: server({
++        disk: { totalKb: 100, usedKb: 91 },
++        lastDeploy: { time: '2026-11-03T10:00:00Z', result: 'rolled_back', from: 'a', to: 'b' },
++      }),
++    });
++    expect(report).toMatchObject({ health: 'warn', status: 'Deploy failed' });
++    expect(report.todos).toEqual([
++      { id: 'server-deploy', title: 'The last deploy did not finish', link: `${ORIGIN}/dashboard` },
++      { id: 'server-disk', title: 'Disk space is running low', link: `${ORIGIN}/dashboard` },
++    ]);
++    expect(report.events).toContainEqual({ at: '2026-11-03T10:00:00.000Z', text: 'Server update did not finish', tone: 'down' });
++  });
++
++  it('warns when the status file is missing or stale, without guessing', () => {
++    expect(build({ server: interpretServerStatus(null, NOW) })).toMatchObject({
++      health: 'warn', status: 'No server status', foot: [],
++      todos: [{ id: 'server-status', title: 'The server status file has stopped updating' }],
++    });
++    expect(build({ server: server({ generatedAt: '2026-11-03T11:00:00Z' }) }).status).toBe('Status file stale');
++  });
++
++  it('counts failed and stuck packaging jobs', () => {
++    const report = build({
++      jobs: [
++        job('failed', '2026-11-03T09:00:00Z'),
++        job('failed', '2026-11-02T09:00:00Z'),
++        job('failed', '2026-10-01T09:00:00Z'),
++        job('queued', '2026-11-03T08:00:00Z'),
++        job('queued', '2026-11-03T11:30:00Z'),
++      ],
++    });
++    expect(report).toMatchObject({ health: 'warn', status: '2 failed' });
++    expect(report.todos).toEqual([
++      { id: 'jobs-failed', title: '2 packaging jobs failed in the last 7 days', link: `${ORIGIN}/dashboard/uploads?status=failed` },
++      { id: 'jobs-stuck', title: '1 packaging job waiting more than 2 hours', link: `${ORIGIN}/dashboard/uploads?status=pending` },
++    ]);
++    expect(report.events.filter((event) => event.tone === 'warn')).toHaveLength(2);
++  });
++
++  it('marks the tool down when the database cannot be read', () => {
++    expect(build({ jobs: null })).toMatchObject({ health: 'down', status: 'Database error' });
++    expect(build({ deploys: null, server: interpretServerStatus(null, NOW) })).toMatchObject({ health: 'down', status: 'Database error' });
++  });
++
++  it('leaves links out unless the server address is https', () => {
++    const report = build({ origin: 'http://localhost:3000', jobs: [job('failed', '2026-11-03T09:00:00Z')] });
++    expect(report.todos[0]).not.toHaveProperty('link');
++  });
++
++  it('drops independent forbidden markers from every raw input field', () => {
++    const marker = (field: string) => `FORBIDDEN_${field}`;
++    const raw = (fields: string[]) => Object.fromEntries(fields.map(field => [field, marker(field)]));
++    const report = build({
++      server: server({
++        ...raw(['version', 'startedAt', 'extra', 'device_name', 'staff_name', 'error']),
++        lastDeploy: { ...raw(['from', 'to', 'error']), time: NOW.toISOString(), result: marker('result') },
++        lastBackup: raw(['at', 'sizeKb']), offsiteBackup: { at: NOW.toISOString(), result: marker('backup_result') },
++        tunnel: { ...raw(['version', 'device_name']), running: false, lastUpdate: raw(['result', 'at']) },
++        updateCheck: raw(['result', 'at']), notifications: raw(['result', 'at']),
++      }),
++      jobs: [{ ...raw(['display_name', 'user_email', 'tenant_id', 'status_message', 'staff_name', 'device_name', 'id']),
++        ...job('failed', NOW.toISOString()) }, { ...job(marker('job_status'), marker('created_at')), updated_at: marker('updated_at') }],
++      deploys: [{ ...raw(['display_name', 'user_id', 'tenant_id', 'device_name', 'error']), deployed_at: NOW.toISOString() },
++        { deployed_at: marker('deployed_at') }],
++      origin: `${ORIGIN}/FORBIDDEN_path?value=FORBIDDEN_query#FORBIDDEN_fragment`,
++    });
++    expect(JSON.stringify(report)).not.toContain('FORBIDDEN');
++    for (const field of ['generatedAt', 'disk']) {
++      const bad = build({ server: server({ [field]: marker(field) }) });
++      expect(JSON.stringify(bad)).not.toContain('FORBIDDEN');
++    }
++    for (const field of ['totalKb', 'usedKb']) {
++      expect(JSON.stringify(build({ server: server({ disk: { totalKb: 1, usedKb: 1, [field]: marker(field) } }) }))).not.toContain('FORBIDDEN');
++    }
++  });
++
++  // HRM patch 0057: a state and a fixed title only, never the check's detail text
++  it('reports a failing version sync after deploy without its detail', () => {
++    const report = build({ server: server({ checks: { versionSync: { ok: false, at: '2026-11-03T11:00:00Z', detail: 'FORBIDDEN detail' } } }) });
++    expect(report).toMatchObject({ health: 'warn', status: 'Version sync failing' });
++    expect(report.todos).toEqual([{ id: 'server-versionSync', title: "App updates wasn't corrected after 2 or more recent deploys", link: `${ORIGIN}/dashboard` }]);
++    expect(JSON.stringify(report)).not.toContain('FORBIDDEN');
++    expect(build({ server: server({ checks: { versionSync: { ok: true, at: null, detail: null } } }) }).todos).toEqual([]);
++  });
++
++  it('checks each server-status leaf independently with a synthetic forbidden marker', () => {
++    const fixture = server() as unknown as Record<string, unknown>;
++    const leaves = (value: unknown, prefix: string[] = []): string[][] => {
++      if (value && typeof value === 'object' && !Array.isArray(value)) {
++        return Object.entries(value).flatMap(([key, child]) => leaves(child, [...prefix, key]));
++      }
++      return [prefix];
++    };
++    for (const fields of leaves(fixture)) {
++      const copy = structuredClone(fixture);
++      let parent = copy;
++      for (const field of fields.slice(0, -1)) parent = parent[field] as Record<string, unknown>;
++      parent[fields.at(-1)!] = 'FORBIDDEN_SERVER_FIELD';
++      const report = build({ server: interpretServerStatus(JSON.stringify(copy), NOW) });
++      expect(JSON.stringify(report), fields.join('.')).not.toContain('FORBIDDEN');
++    }
++  });
++
++  it('uses parsed https origins only, without credentials, paths, queries or fragments', () => {
++    const jobs = [job('failed', NOW.toISOString())];
++    for (const origin of ['https://', 'invalid', 'http://example.test', 'https://FORBIDDEN:FORBIDDEN@example.test']) {
++      expect(build({ origin, jobs }).todos[0]).not.toHaveProperty('link');
++    }
++    expect(build({ origin: `${ORIGIN}/discard?discard=yes#discard`, jobs }).todos[0].link).toBe(`${ORIGIN}/dashboard/uploads?status=failed`);
++  });
++
++  it('omits waiting deployments and accepts only release tags as version text', () => {
++    expect(build({ server: server({ version: 'FORBIDDEN', lastDeploy: { time: NOW.toISOString(), result: 'waiting', to: 'FORBIDDEN' } }) }).events.some(event => event.text.startsWith('Server updated'))).toBe(false);
++    for (const version of ['FORBIDDEN', 'x'.repeat(100_000), 'v1.2.3-extra', 'v1.2.3\n', 'v1.2.3\nFORBIDDEN']) {
++      const report = build({ server: server({ version, lastDeploy: { time: NOW.toISOString(), result: 'deployed', to: version } }) });
++      expect(report.foot.some(line => line.startsWith('Running'))).toBe(false);
++      expect(report.events).toContainEqual({ at: NOW.toISOString(), text: 'Server updated', tone: 'ok' });
++    }
++  });
++
++  it('uses UTC calendar buckets at midnight and noon and ignores future deployments', () => {
++    for (const time of ['2026-11-03T00:00:00Z', '2026-11-03T12:00:00Z']) {
++      const report = build({ now: new Date(time), deploys: [
++        { deployed_at: '2026-11-02T23:59:59Z' }, { deployed_at: '2026-11-03T00:00:00Z' },
++        { deployed_at: '2026-11-04T00:00:00Z' },
++      ] });
++      expect(report.series.values.slice(-2)).toEqual([1, 1]);
++    }
++  });
++
++  it('enforces all text and item limits centrally and stays below 64 KB in UTF-8', () => {
++    const report = build();
++    const long = '界'.repeat(10_000);
++    report.status = long;
++    report.metric.label = long;
++    report.series.label = long;
++    report.foot = [long, long, long];
++    report.todos = Array.from({ length: 30 }, () => ({ id: long, title: long, detail: long }));
++    report.events = Array.from({ length: 30 }, () => ({ at: NOW.toISOString(), text: long, tone: 'ok' as const }));
++    const bounded = constrainReport(report, NOW);
++    expect(bounded.status.length).toBe(24);
++    expect(bounded.metric.label.length).toBe(40);
++    expect(bounded.series.label.length).toBeLessThanOrEqual(60);
++    expect(bounded.foot).toHaveLength(2);
++    expect(bounded.foot.every(line => line.length <= 60)).toBe(true);
++    expect(bounded.todos).toHaveLength(20);
++    expect(bounded.todos.every(todo => todo.id.length <= 80 && todo.title.length <= 100 && todo.detail!.length <= 100)).toBe(true);
++    expect(bounded.events).toHaveLength(20);
++    expect(bounded.events.every(event => event.text.length <= 80)).toBe(true);
++    expect(Buffer.byteLength(JSON.stringify(bounded))).toBeLessThan(65_536);
++    bounded.todos = bounded.todos.map(todo => ({ ...todo, link: `${ORIGIN}/${'界'.repeat(1_900)}` }));
++    const oversized = constrainReport(bounded, NOW);
++    expect(oversized.health).toBe('down');
++    expect(Buffer.byteLength(JSON.stringify(oversized))).toBeLessThan(65_536);
++  });
++
++  it('keeps events only within the last 48 hours, newest first, at most 20', () => {
++    const deploys = Array.from({ length: 60 }, (_, hour) => ({ deployed_at: new Date(NOW.getTime() - hour * 3_600_000).toISOString() }));
++    deploys.push({ deployed_at: new Date(NOW.getTime() + 3_600_000).toISOString() });
++    const report = build({ deploys });
++    expect(report.events).toHaveLength(20);
++    expect(report.events.every(event => Date.parse(event.at) <= NOW.getTime() && Date.parse(event.at) >= NOW.getTime() - 48 * 3_600_000)).toBe(true);
++    expect(report.events.map(event => event.at)).toEqual(report.events.map(event => event.at).sort().reverse());
++  });
++
++});
++
++describe('report key', () => {
++  const key = 'k'.repeat(64);
++  it('accepts only the exact bearer key, and nothing when the key is unset or short', () => {
++    expect(reportKeyMatches(`Bearer ${key}`, key)).toBe(true);
++    expect(reportKeyMatches(`Bearer ${'s'.repeat(32)}`, 's'.repeat(32))).toBe(true);
++    expect(reportKeyMatches(`Bearer ${key}x`, key)).toBe(false);
++    expect(reportKeyMatches(`Bearer ${key}\n`, key)).toBe(false);
++    expect(reportKeyMatches(key, key)).toBe(false);
++    expect(reportKeyMatches(null, key)).toBe(false);
++    expect(reportKeyMatches('Bearer ', undefined)).toBe(false);
++    expect(reportKeyMatches('Bearer short', 'short')).toBe(false);
++  });
++});
++
++it('keeps startup Beta counts separate from deploying and links to the existing overview',()=>{
++ const counts={failedRecent:0,stuck:0,days:Array(14).fill(0),failed:[],deployed:[],startup:{waiting:4,failed:1,outdated:2}};
++ const report=build({counts});
++ expect(report.todos).toContainEqual(expect.objectContaining({id:'startup-waiting',title:'4 startup installations waiting for restart',link:ORIGIN+'/dashboard/updates#startup-installations'}));
++ expect(report.status).toBe('Startup installs failed');
++ expect(JSON.stringify(report)).not.toMatch(/tenant_id|deviceName|userPrincipalName/);
++});
++
++it('flags unknown or omitted startup reports without pretending installations failed',()=>{
++ const counts={failedRecent:0,stuck:0,days:Array(14).fill(0),failed:[],deployed:[],startup:{waiting:0,failed:0,outdated:0,unknown:7,omitted:20}};
++ const report=build({counts});
++ expect(report.status).toBe('Check startup reports');
++ expect(report.todos).toContainEqual(expect.objectContaining({id:'startup-outdated',title:'Startup installation reports need review'}));
++});
+diff --git a/lib/hrm/admin-access.ts b/lib/hrm/admin-access.ts
+new file mode 100644
+index 000000000..593d48e74
+--- /dev/null
++++ b/lib/hrm/admin-access.ts
+@@ -0,0 +1,151 @@
++/**
++ * HRM patch 0056: only HRM's IT admins may use IntuneGet, behind Cloudflare Access.
++ *
++ * Settings, on the VM only (never in the repo):
++ *  - HRM_ADMIN_GROUP_IDS: comma-separated Entra group object IDs (up to 20). Unset means access
++ *    isn't limited to a group: nothing changes, and Home's Server status says so.
++ *  - HRM_TENANT_ID: the one Entra tenant allowed to sign in. Patch 0055's MCP_TENANT_ID is read
++ *    when it is unset, so one setting names the tenant for both.
++ *
++ * Membership uses POST /me/checkMemberGroups with the signed-in user's own token. Microsoft lists
++ * User.Read (which sign-in already requests) as enough for the signed-in user, and the check is
++ * transitive, so nested groups count. No new permission or admin consent is needed.
++ *
++ * Decisions are kept in memory for 5 minutes per user. A failed check is never kept, and it
++ * refuses the request (503) rather than letting it through.
++ *
++ * Machine routes (cron, status report, workflow callbacks, the MCP read API) never use a user
++ * token, so this check never applies to them.
++ */
++
++export type AccessDecision = 'allowed' | 'not_member' | 'wrong_tenant' | 'unavailable';
++
++export interface AdminAccessConfig {
++  groupIds: string[];
++  tenantId: string | null;
++}
++
++export const ACCESS_CACHE_MS = 5 * 60 * 1000;
++export const ACCESS_CHECK_TIMEOUT_MS = 5_000;
++/** checkMemberGroups takes at most 20 group IDs per request. */
++export const MAX_ADMIN_GROUPS = 20;
++export const ACCESS_DENIED_CODE = 'hrm_access_denied';
++export const ACCESS_UNAVAILABLE_CODE = 'hrm_access_unavailable';
++export const ACCESS_DENIED_MESSAGE =
++  "You don't have access to IntuneGet. Ask HRM Support (https://support.hruthmd.org) to add you to the IT admins group.";
++export const ACCESS_UNAVAILABLE_MESSAGE = "IntuneGet couldn't check your access. Try again in a minute.";
++
++const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
++const CHECK_URL = 'https://graph.microsoft.com/v1.0/me/checkMemberGroups';
++
++type Env = Record<string, string | undefined>;
++
++/** The access settings, or null when no valid group is set (access isn't limited). */
++export function adminAccessConfig(env: Env = process.env): AdminAccessConfig | null {
++  const groupIds = [...new Set(
++    (env.HRM_ADMIN_GROUP_IDS ?? '')
++      .split(',')
++      .map((id) => id.trim().toLowerCase())
++      .filter((id) => GUID.test(id)),
++  )].slice(0, MAX_ADMIN_GROUPS);
++  if (groupIds.length === 0) return null;
++  const tenant = (env.HRM_TENANT_ID || env.MCP_TENANT_ID || '').trim().toLowerCase();
++  return { groupIds, tenantId: GUID.test(tenant) ? tenant : null };
++}
++
++/** For Home's Server status: whether sign-in is limited to the admins group. */
++export function adminAccessState(env: Env = process.env): 'limited' | 'not_limited' {
++  return adminAccessConfig(env) ? 'limited' : 'not_limited';
++}
++
++const decisions = new Map<string, { decision: AccessDecision; expiresAt: number }>();
++
++/** Test helper: forget every cached decision. */
++export function clearAdminAccessCache(): void {
++  decisions.clear();
++}
++
++async function memberOfAny(accessToken: string, groupIds: string[], fetchImpl: typeof fetch): Promise<boolean | null> {
++  try {
++    const response = await fetchImpl(CHECK_URL, {
++      method: 'POST',
++      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
++      body: JSON.stringify({ groupIds }),
++      signal: AbortSignal.timeout(ACCESS_CHECK_TIMEOUT_MS),
++    });
++    if (!response.ok) {
++      // Status code only: the body can carry user or tenant details.
++      console.warn(`[HRM access] Group check failed with status ${response.status}`);
++      return null;
++    }
++    const body = (await response.json()) as { value?: unknown };
++    if (!Array.isArray(body.value)) return null;
++    const found = new Set(body.value.filter((id): id is string => typeof id === 'string').map((id) => id.toLowerCase()));
++    return groupIds.some((id) => found.has(id));
++  } catch {
++    console.warn('[HRM access] Group check could not reach Microsoft Graph');
++    return null;
++  }
++}
++
++/**
++ * Whether this verified user may use the app. The token must already be verified with Graph
++ * (parseAccessToken does that first). Allowed for everyone while no group is set.
++ */
++export async function checkAdminAccess(
++  user: { userId: string; tenantId: string },
++  accessToken: string,
++  options: { env?: Env; fetchImpl?: typeof fetch; now?: number } = {},
++): Promise<AccessDecision> {
++  const config = adminAccessConfig(options.env);
++  if (!config) return 'allowed';
++  const now = options.now ?? Date.now();
++  const tenantId = user.tenantId.toLowerCase();
++  const key = `${config.tenantId ?? ''}|${config.groupIds.join(',')}|${tenantId}|${user.userId}`;
++  const cached = decisions.get(key);
++  if (cached && cached.expiresAt > now) return cached.decision;
++
++  let decision: AccessDecision;
++  if (config.tenantId && tenantId !== config.tenantId) {
++    decision = 'wrong_tenant';
++  } else {
++    const member = await memberOfAny(accessToken, config.groupIds, options.fetchImpl ?? fetch);
++    if (member === null) return 'unavailable';
++    decision = member ? 'allowed' : 'not_member';
++  }
++
++  if (decisions.size > 1000) {
++    for (const [entry, value] of decisions) if (value.expiresAt <= now) decisions.delete(entry);
++  }
++  decisions.set(key, { decision, expiresAt: now + ACCESS_CACHE_MS });
++  return decision;
++}
++
++/** The answer for a refused user: 403 for non-members and other tenants, 503 when the check failed. */
++export function accessRefusedResponse(decision: Exclude<AccessDecision, 'allowed'>): Response {
++  const unavailable = decision === 'unavailable';
++  return Response.json(
++    unavailable
++      ? { error: ACCESS_UNAVAILABLE_MESSAGE, code: ACCESS_UNAVAILABLE_CODE }
++      : { error: ACCESS_DENIED_MESSAGE, code: ACCESS_DENIED_CODE },
++    { status: unavailable ? 503 : 403, headers: { 'Cache-Control': 'no-store' } },
++  );
++}
++
++/**
++ * API paths that never take a staff member's token. They have their own keys or signatures, so
++ * the proxy leaves them alone. (They don't call parseAccessToken either.)
++ */
++const MACHINE_API_PREFIXES = [
++  '/api/cron',
++  '/api/status-report',
++  '/api/hrm/mcp',
++  '/api/package/callback',
++  '/api/packager',
++  '/api/qa',
++  '/api/health',
++];
++
++export function isMachineApiPath(pathname: string): boolean {
++  return MACHINE_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
++}
+diff --git a/lib/hrm/attention.ts b/lib/hrm/attention.ts
+new file mode 100644
+index 000000000..243726698
+--- /dev/null
++++ b/lib/hrm/attention.ts
+@@ -0,0 +1,61 @@
++/**
++ * HRM patch 0055: the Home page's "Needs attention" lists for one tenant, shared by Home
++ * (app/api/hrm/home) and the MCP read API so both always agree.
++ */
++
++import { getDatabase } from '@/lib/db';
++import { attentionCounts, unreachedApps } from '@/lib/hrm/home';
++import { listInstallStatus } from '@/lib/hrm/install-status-check';
++import type { InstallStatusRecord } from '@/lib/hrm/install-status';
++
++export interface TenantAttention {
++  attention: ReturnType<typeof attentionCounts> | null;
++  installFailures: Array<{ displayName: string; intuneAppId: string; failed: number }>;
++  unreached: Array<{ displayName: string; intuneAppId: string; deployedAt: string }>;
++  rollbackGaps: Array<{ displayName: string; intuneAppId: string; previousVersion: string }>;
++  oldCopiesKept: Array<{ displayName: string; intuneAppId: string; version: string; newestAppId: string; reason: string }>;
++  /** Install records, for callers that also need error codes (the MCP read API). */
++  installs: InstallStatusRecord[];
++  /** Intune app IDs being retired (lowercase). */
++  retiring: Set<string>;
++}
++
++export async function readTenantAttention(tenantId: string): Promise<TenantAttention> {
++  const db = getDatabase();
++  const [jobs, installs, deployments] = await Promise.all([
++    db.jobs.getAnalyticsJobs({ tenantId }).catch(() => null),
++    // HRM patch 0019: apps with devices that failed to install (counts only)
++    listInstallStatus(tenantId).catch(() => []),
++    // HRM patch 0032: when each copy was deployed, for apps that reach no devices
++    db.uploadHistory.listAll(2000).then((rows) => rows.filter((r) => r.intune_tenant_id === tenantId)).catch(() => []),
++  ]);
++  const installFailures = installs
++    .filter((app) => app.failed > 0)
++    .map((app) => ({ displayName: app.display_name, intuneAppId: app.intune_app_id, failed: app.failed }));
++  // HRM patch 0038: an app being retired is meant to reach nobody, and its failures are uninstall failures.
++  let retiring = new Set<string>();
++  let rollbackGaps: TenantAttention['rollbackGaps'] = [];
++  let oldCopiesKept: TenantAttention['oldCopiesKept'] = [];
++  if (process.env.DATABASE_MODE?.toLowerCase() === 'sqlite') {
++    try { const { sqliteRetirements } = await import('@/lib/db/sqlite'); retiring = new Set(sqliteRetirements.activeAppIds(tenantId)); } catch { /* optional */ }
++    // HRM patch 0039: newest copies that can't go back, because their previous installer is gone or has changed.
++    try {
++      const { sqliteRollbackReadiness, sqliteAppInsights } = await import('@/lib/db/sqlite');
++      const newest = new Map(sqliteAppInsights.tracked(tenantId).map((d) => [d.appId.toLowerCase(), d.displayName]));
++      rollbackGaps = sqliteRollbackReadiness.gaps(tenantId)
++        .filter((g) => newest.has(g.app_id.toLowerCase()) && !retiring.has(g.app_id.toLowerCase()))
++        .map((g) => ({ displayName: newest.get(g.app_id.toLowerCase())!, intuneAppId: g.app_id, previousVersion: g.previous_version }));
++    } catch { /* optional */ }
++    // HRM patch 0042: old copies IntuneGet couldn't remove after an update (still in Intune).
++    try {
++      const { sqliteOldCopies } = await import('@/lib/db/sqlite');
++      oldCopiesKept = sqliteOldCopies.kept(tenantId)
++        .filter((c) => !retiring.has(c.app_id.toLowerCase()))
++        .map((c) => ({ displayName: c.display_name, intuneAppId: c.app_id, version: c.version, newestAppId: c.newest_app_id, reason: c.reason ?? '' }));
++    } catch { /* optional */ }
++  }
++  const unreached = unreachedApps(installs, deployments).filter((app) => !retiring.has(app.intuneAppId.toLowerCase()));
++  // Its uninstall results show in its Inventory details, not as install failures.
++  const failing = installFailures.filter((app) => !retiring.has(app.intuneAppId.toLowerCase()));
++  return { attention: jobs ? attentionCounts(jobs) : null, installFailures: failing, unreached, rollbackGaps, oldCopiesKept, installs, retiring };
++}
+diff --git a/lib/hrm/mcp-api.ts b/lib/hrm/mcp-api.ts
+new file mode 100644
+index 000000000..92a458d52
+--- /dev/null
++++ b/lib/hrm/mcp-api.ts
+@@ -0,0 +1,474 @@
++/**
++ * HRM patch 0055: the read-only API behind HRM's MCP server (contract: IntuneGet-Build docs/mcp-api.md).
++ *
++ * Every answer is built here from fields picked one by one. Never added: staff emails or names,
++ * user IDs, tenant IDs, device names, installer or GitHub URLs, Intune descriptions, or raw error,
++ * status or reason text. Install errors become a normalized code plus HRM's own fixed category.
++ * Nothing here writes to the database or Intune.
++ */
++
++import { getDatabase, isSqliteMode } from '@/lib/db';
++import type { PackagingJob, UploadHistoryRecord, UpdateCheckResult } from '@/lib/db/types';
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++import { inventoryPageUrl } from '@/lib/intune/inventory-list';
++import { resolveAssignmentGroupNames } from '@/lib/intune/assignment-group-names';
++import { compareVersions } from '@/lib/version-compare';
++import type { IntuneAppAssignment, IntuneWin32App } from '@/types/inventory';
++import { readTenantAttention } from './attention';
++import { effectiveCurrentVersion } from './deployed-version-sync';
++import { readServerStatus, type ServerStatus } from './home';
++import { installErrorGuidance, normalizeInstallCode } from './install-error-guidance';
++import type { InstallError, InstallStatusRecord } from './install-status';
++import { safeVersion } from './status-report';
++import { DAY_NAMES, UPDATE_TIME_ZONE, updateWindowState } from './update-window';
++
++/** A request the API answers with an empty body and this status. */
++export class McpError extends Error {
++  constructor(readonly status: 400 | 404 | 503) { super('MCP request failed'); }
++}
++
++export interface McpContext {
++  tenantId: string;
++  signal: AbortSignal;
++  now: Date;
++  graphToken?: (tenantId: string) => Promise<string | null>;
++  fetchImpl?: typeof fetch;
++}
++
++const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++const GRAPH = 'https://graph.microsoft.com/beta/deviceAppManagement/mobileApps';
++
++// ---------- small, strict text helpers ----------
++
++/** Plain text without control characters, cut to max characters. */
++export function clean(value: unknown, max = 200): string | null {
++  if (typeof value !== 'string') return null;
++  const text = value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').trim();
++  return text ? text.slice(0, max) : null;
++}
++/** An ISO timestamp, or null for anything that isn't a time. */
++export function isoTime(value: unknown): string | null {
++  if (typeof value !== 'string' || value.length > 40) return null;
++  const at = Date.parse(value);
++  return Number.isFinite(at) ? new Date(at).toISOString() : null;
++}
++const GENERIC_GUIDANCE = installErrorGuidance('').title;
++/** Install error code (0x hex) and HRM's fixed category for known codes. Intune's description is never used. */
++export function errorView(errors: InstallError[], max: number) {
++  const merged = new Map<string, { code: string; category: string | null; count: number }>();
++  for (const error of errors) {
++    const code = normalizeInstallCode(String(error.code ?? '')) ?? 'other';
++    const title = code === 'other' ? null : installErrorGuidance(code).title;
++    const entry = merged.get(code) ?? { code, category: title && title !== GENERIC_GUIDANCE ? title : null, count: 0 };
++    entry.count += Number.isSafeInteger(error.count) && error.count > 0 ? error.count : 0;
++    merged.set(code, entry);
++  }
++  return [...merged.values()].sort((a, b) => b.count - a.count).slice(0, max);
++}
++const JOB_STATUSES = new Set(['queued', 'packaging', 'uploading', 'deployed', 'failed', 'cancelled', 'awaiting_qa', 'qa_failed', 'duplicate_skipped']);
++export const MCP_JOB_STATUSES = [...JOB_STATUSES];
++const jobStatus = (value: unknown) => (typeof value === 'string' && JOB_STATUSES.has(value) ? value : 'other');
++const ERROR_CODE = /^[A-Z][A-Z0-9_]{1,39}$/;
++const ERROR_CATEGORY = /^[a-z][a-z_]{1,29}$/;
++
++// ---------- query parameters ----------
++
++function intParam(query: URLSearchParams, name: string, fallback: number, min: number, max: number): number {
++  const raw = query.get(name);
++  if (raw === null || raw === '') return fallback;
++  if (!/^\d{1,4}$/.test(raw)) throw new McpError(400);
++  const n = Number(raw);
++  if (n < min || n > max) throw new McpError(400);
++  return n;
++}
++function boolParam(query: URLSearchParams, name: string): boolean {
++  const raw = query.get(name);
++  if (raw === null || raw === '' || raw === 'false') return false;
++  if (raw === 'true') return true;
++  throw new McpError(400);
++}
++
++// ---------- GET /status ----------
++
++const CHECK_ORDER = ['deploy', 'offsiteBackup', 'disk', 'updateCheck', 'notifications', 'tunnel', 'tunnelUpdate', 'intuneReads', 'intuneSelfTest', 'scheduledUpdates', 'versionSync'] as const;
++type CheckState = 'ok' | 'warning' | 'failed' | 'unknown';
++
++export function serverStatusView(server: ServerStatus) {
++  if (!server.reported) {
++    return {
++      health: 'unknown' as const, statusFile: server.reason, version: null, generatedAt: isoTime(server.generatedAt),
++      lastUpdateCheckAt: null, lastBackupAt: null, lastOffsiteBackupAt: null, checks: [],
++    };
++  }
++  const run = (result: string | null | undefined): CheckState => (!result ? 'unknown' : result === 'success' ? 'ok' : 'failed');
++  const generated = isoTime(server.generatedAt);
++  const checks: Array<{ name: string; state: CheckState; checkedAt: string | null }> = [];
++  for (const name of CHECK_ORDER) {
++    let state: CheckState;
++    let at: unknown = server.generatedAt;
++    switch (name) {
++      case 'deploy':
++        state = !server.lastDeploy ? 'unknown' : server.problems.includes('deploy') ? 'failed' : 'ok';
++        at = server.lastDeploy?.time;
++        break;
++      case 'offsiteBackup':
++        if (server.offsiteBackup === undefined) continue; // not set up on this server
++        state = server.problems.includes('offsiteBackup') ? 'failed' : 'ok';
++        at = server.offsiteBackup?.at;
++        break;
++      case 'disk': state = server.diskWarning ? 'warning' : 'ok'; break;
++      case 'updateCheck': state = run(server.updateCheck?.result); at = server.updateCheck?.at; break;
++      case 'notifications': state = run(server.notifications?.result); at = server.notifications?.at; break;
++      case 'tunnel': state = server.tunnel?.running ? 'ok' : 'failed'; break;
++      case 'tunnelUpdate': state = run(server.tunnel?.lastUpdate?.result); at = server.tunnel?.lastUpdate?.at; break;
++      default: {
++        const check = server.checks?.[name];
++        state = !check ? 'unknown' : check.ok ? 'ok' : 'failed';
++        at = check?.at;
++      }
++    }
++    checks.push({ name, state, checkedAt: isoTime(at) });
++  }
++  return {
++    health: server.problems.length > 0 ? ('degraded' as const) : ('ok' as const),
++    version: safeVersion(server.version),
++    generatedAt: generated,
++    lastUpdateCheckAt: isoTime(server.updateCheck?.at),
++    lastBackupAt: isoTime(server.lastBackup?.at),
++    lastOffsiteBackupAt: isoTime(server.offsiteBackup?.at),
++    diskPercentUsed: Math.max(0, Math.min(100, Math.round(server.diskRatio * 100))),
++    checks,
++  };
++}
++
++// ---------- GET /attention and /install-failures ----------
++
++export function attentionView(data: Awaited<ReturnType<typeof readTenantAttention>>) {
++  const name = (value: string) => clean(value) ?? 'Unnamed app';
++  return {
++    counts: {
++      ...(data.attention ? { failedJobsLast7Days: data.attention.failedRecent, stuckJobs: data.attention.stuck } : {}),
++      appsWithInstallFailures: data.installFailures.length,
++      appsNotReached: data.unreached.length,
++      rollbackGaps: data.rollbackGaps.length,
++      oldCopiesKept: data.oldCopiesKept.length,
++    },
++    installFailures: data.installFailures.slice(0, 50).map((a) => ({ appName: name(a.displayName), intuneAppId: a.intuneAppId, failed: a.failed })),
++    unreached: data.unreached.slice(0, 50).map((a) => ({ appName: name(a.displayName), intuneAppId: a.intuneAppId, deployedAt: isoTime(a.deployedAt) })),
++    rollbackGaps: data.rollbackGaps.slice(0, 50).map((a) => ({ appName: name(a.displayName), intuneAppId: a.intuneAppId, previousVersion: clean(a.previousVersion, 60) })),
++    // The reason text is left out: it can hold Intune's own error text.
++    oldCopiesKept: data.oldCopiesKept.slice(0, 50).map((a) => ({ appName: name(a.displayName), intuneAppId: a.intuneAppId, version: clean(a.version, 60), newestAppId: a.newestAppId })),
++  };
++}
++
++export function installFailuresView(data: Awaited<ReturnType<typeof readTenantAttention>>, limit: number, now: Date) {
++  const failing = data.installs
++    .filter((a) => a.failed > 0 && !data.retiring.has(a.intune_app_id.toLowerCase()))
++    .sort((a, b) => b.failed - a.failed);
++  return {
++    apps: failing.slice(0, limit).map((a) => ({
++      appName: clean(a.display_name) ?? 'Unnamed app', intuneAppId: a.intune_app_id, failed: a.failed,
++      checkedAt: isoTime(a.checked_at), topErrors: errorView(a.topErrors ?? [], 5),
++    })),
++    total: failing.length,
++    generatedAt: now.toISOString(),
++  };
++}
++
++// ---------- GET /apps and /apps/{id} ----------
++
++function appSummary(app: Pick<IntuneWin32App, 'id' | 'displayName' | 'displayVersion' | 'publisher' | 'createdDateTime' | 'lastModifiedDateTime'>, wingetId: string | null) {
++  return {
++    intuneAppId: app.id,
++    displayName: clean(app.displayName) ?? 'Unnamed app',
++    version: clean(app.displayVersion, 60),
++    publisher: clean(app.publisher),
++    wingetId: clean(wingetId),
++    createdAt: isoTime(app.createdDateTime),
++    modifiedAt: isoTime(app.lastModifiedDateTime),
++  };
++}
++
++async function tenantHistory(tenantId: string): Promise<UploadHistoryRecord[]> {
++  return (await getDatabase().uploadHistory.listAll(2000)).filter((r) => r.intune_tenant_id === tenantId);
++}
++function wingetIds(history: UploadHistoryRecord[]): Map<string, string> {
++  const ids = new Map<string, string>();
++  for (const r of history) if (r.intune_app_id && !ids.has(r.intune_app_id.toLowerCase())) ids.set(r.intune_app_id.toLowerCase(), r.winget_id);
++  return ids;
++}
++
++async function token(ctx: McpContext): Promise<string> {
++  const value = await (ctx.graphToken ?? getServicePrincipalToken)(ctx.tenantId).catch(() => null);
++  if (!value) throw new McpError(503);
++  return value;
++}
++
++const MAX_PAGES = 20;
++const INVENTORY_CACHE_MS = 60_000;
++// The shared read has its own time limit: it never uses one request's signal, so one caller going
++// away can't fail the others waiting on the same read. Each request still keeps its own deadline.
++const INVENTORY_READ_MS = 6_000;
++let inventoryCache: { tenantId: string; at: number; apps: Promise<ReturnType<typeof appSummary>[]> } | undefined;
++
++/** Every Win32 app in the tenant (up to 2,000), cached for a minute. */
++async function readInventory(ctx: McpContext) {
++  if (inventoryCache && inventoryCache.tenantId === ctx.tenantId && ctx.now.getTime() - inventoryCache.at < INVENTORY_CACHE_MS) {
++    return inventoryCache.apps;
++  }
++  const apps = (async () => {
++    const graphToken = await token(ctx);
++    const fetchImpl = ctx.fetchImpl ?? fetch;
++    const signal = AbortSignal.timeout(INVENTORY_READ_MS);
++    const raw: IntuneWin32App[] = [];
++    let cursor: string | null = null;
++    for (let page = 0; page < MAX_PAGES; page++) {
++      const response = await fetchImpl(inventoryPageUrl(cursor), { headers: { Authorization: `Bearer ${graphToken}` }, cache: 'no-store', signal });
++      if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new McpError(503); }
++      const data = await response.json() as { value?: IntuneWin32App[]; '@odata.nextLink'?: string };
++      raw.push(...(data.value ?? []));
++      cursor = data['@odata.nextLink'] ? new URL(data['@odata.nextLink']).searchParams.get('$skiptoken') : null;
++      if (!cursor) break;
++    }
++    const ids = wingetIds(await tenantHistory(ctx.tenantId).catch(() => []));
++    return raw.filter((a) => typeof a?.id === 'string' && GUID.test(a.id)).map((a) => appSummary(a, ids.get(a.id.toLowerCase()) ?? null));
++  })();
++  inventoryCache = { tenantId: ctx.tenantId, at: ctx.now.getTime(), apps };
++  // A failed read is never cached.
++  apps.catch(() => { if (inventoryCache?.apps === apps) inventoryCache = undefined; });
++  return apps;
++}
++export function resetMcpInventoryCache() { inventoryCache = undefined; }
++
++export async function listApps(ctx: McpContext, query: URLSearchParams) {
++  const search = (query.get('search') ?? '').trim().toLowerCase();
++  if (search.length > 100) throw new McpError(400);
++  const limit = intParam(query, 'limit', 50, 1, 100);
++  const cursorText = query.get('cursor') ?? '';
++  if (cursorText && !/^\d{1,5}$/.test(cursorText)) throw new McpError(400);
++  const offset = cursorText ? Number(cursorText) : 0;
++  const apps = (await readInventory(ctx)).filter((a) => !search
++    || [a.displayName, a.publisher, a.wingetId].some((field) => field?.toLowerCase().includes(search)));
++  const page = apps.slice(offset, offset + limit);
++  return { apps: page, total: apps.length, nextCursor: offset + limit < apps.length ? String(offset + limit) : null };
++}
++
++const INTENTS = new Set(['required', 'available', 'uninstall']);
++function assignmentView(assignment: IntuneAppAssignment, names: Record<string, string>) {
++  const type = assignment.target?.['@odata.type'] ?? '';
++  const group = typeof assignment.target?.groupId === 'string' ? names[assignment.target.groupId.toLowerCase()] : undefined;
++  const label = type === '#microsoft.graph.allDevicesAssignmentTarget' ? 'All devices'
++    : type === '#microsoft.graph.allLicensedUsersAssignmentTarget' ? 'All users'
++      : clean(group) ?? 'Group name not available';
++  const intent = assignment.intent === 'availableWithoutEnrollment' ? 'available' : INTENTS.has(assignment.intent) ? assignment.intent : 'unknown';
++  // An exclusion is said in the label so no reader takes it for an included group.
++  return { groupLabel: type === '#microsoft.graph.exclusionGroupAssignmentTarget' ? `Excluded: ${label}` : label, intent };
++}
++
++export async function getApp(ctx: McpContext, id: string) {
++  if (!GUID.test(id)) throw new McpError(400);
++  const graphToken = await token(ctx);
++  const fetchImpl = ctx.fetchImpl ?? fetch;
++  const headers = { Authorization: `Bearer ${graphToken}` };
++  const [appResponse, assignmentsResponse] = await Promise.all([
++    fetchImpl(`${GRAPH}/${id}`, { headers, cache: 'no-store', signal: ctx.signal }),
++    fetchImpl(`${GRAPH}/${id}/assignments`, { headers, cache: 'no-store', signal: ctx.signal }),
++  ]);
++  if (!appResponse.ok) {
++    await appResponse.body?.cancel().catch(() => {});
++    await assignmentsResponse.body?.cancel().catch(() => {});
++    throw new McpError(appResponse.status === 404 ? 404 : 503);
++  }
++  const app = await appResponse.json() as IntuneWin32App & { '@odata.type'?: string };
++  if ((app['@odata.type'] && app['@odata.type'] !== '#microsoft.graph.win32LobApp') || typeof app.id !== 'string' || app.id.toLowerCase() !== id.toLowerCase()) {
++    await assignmentsResponse.body?.cancel().catch(() => {});
++    throw new McpError(404);
++  }
++  let assignments: IntuneAppAssignment[] = [];
++  if (assignmentsResponse.ok) assignments = ((await assignmentsResponse.json()) as { value?: IntuneAppAssignment[] }).value ?? [];
++  else await assignmentsResponse.body?.cancel().catch(() => {});
++  const groups = await resolveAssignmentGroupNames(assignments, graphToken, ctx.signal).catch(() => ({ names: {} as Record<string, string> }));
++
++  const history = await tenantHistory(ctx.tenantId).catch(() => []);
++  const key = id.toLowerCase();
++  const detail: Record<string, unknown> = {
++    ...appSummary(app, wingetIds(history).get(key) ?? null),
++    assignments: assignments.slice(0, 100).map((a) => assignmentView(a, groups.names)),
++  };
++  if (isSqliteMode()) {
++    const sqlite = await import('@/lib/db/sqlite');
++    const install = (await sqlite.sqliteInstallStatus.listForTenant(ctx.tenantId).catch(() => [] as InstallStatusRecord[]))
++      .find((r) => r.intune_app_id.toLowerCase() === key);
++    if (install) {
++      detail.installCounts = { installed: install.installed, failed: install.failed, pending: install.pending, notApplicable: install.notApplicable, checkedAt: isoTime(install.checked_at) };
++      detail.topErrors = errorView(install.topErrors ?? [], 10);
++    }
++    try {
++      const readiness = sqlite.sqliteRollbackReadiness.get(ctx.tenantId, id);
++      if (readiness) detail.rollbackAvailable = readiness.status === 'ready' && readiness.checksum_status !== 'mismatch';
++    } catch { /* optional */ }
++    try { detail.retirementPhase = sqlite.sqliteRetirements.active(ctx.tenantId, id)?.phase ?? null; } catch { /* optional */ }
++    try {
++      const pilot = sqlite.sqlitePilotRollouts.list(ctx.tenantId)
++        .find((p) => p.phase !== 'complete' && [p.previous_app_id, p.new_app_id].some((a) => a?.toLowerCase() === key));
++      detail.pilotPhase = pilot?.phase ?? null;
++    } catch { /* optional */ }
++  }
++  return detail;
++}
++
++// ---------- GET /updates ----------
++
++export async function listUpdates(ctx: McpContext, query: URLSearchParams) {
++  const includeDismissed = boolParam(query, 'includeDismissed');
++  const db = getDatabase();
++  const history = await tenantHistory(ctx.tenantId);
++  // Detected updates are stored per staff member; read every deployer's rows for this tenant, once each.
++  const users = [...new Set(history.map((r) => r.user_id))].slice(0, 50);
++  const rows = (await Promise.all(users.map((user) => db.updateCheckResults.list(user, { tenantId: ctx.tenantId, includeDismissed })))).flat();
++  const newest = new Map<string, UpdateCheckResult>();
++  for (const row of rows) {
++    if (row.tenant_id !== ctx.tenantId) continue;
++    const id = `${row.winget_id.toLowerCase()}|${row.intune_app_id.toLowerCase()}`;
++    const seen = newest.get(id);
++    if (!seen || row.updated_at > seen.updated_at) newest.set(id, row);
++  }
++  const latestDeployment = new Map<string, UploadHistoryRecord>();
++  for (const r of history) if (!latestDeployment.has(r.winget_id)) latestDeployment.set(r.winget_id, r);
++  const policies = new Map<string, string>();
++  for (const policy of await db.updatePolicies.listAll().catch(() => [])) {
++    if (policy.tenant_id === ctx.tenantId && !policies.has(policy.winget_id)) policies.set(policy.winget_id, policy.policy_type);
++  }
++  const updates = [...newest.values()].flatMap((row) => {
++    const current = effectiveCurrentVersion(row, latestDeployment.get(row.winget_id) ?? null);
++    if (current === 'Unknown' || compareVersions(current, row.latest_version) >= 0) return [];
++    return [{
++      appName: clean(row.display_name) ?? 'Unnamed app',
++      wingetId: clean(row.winget_id),
++      intuneAppId: GUID.test(row.intune_app_id) ? row.intune_app_id : null,
++      currentVersion: clean(current, 60),
++      latestVersion: clean(row.latest_version, 60),
++      policy: policies.get(row.winget_id) ?? null,
++      dismissed: Boolean(row.dismissed_at),
++      detectedAt: isoTime(row.detected_at),
++    }];
++  }).sort((a, b) => a.appName.localeCompare(b.appName)).slice(0, 200);
++  const server = await readServerStatus(ctx.now);
++  return { updates, lastCheckedAt: server.reported ? isoTime(server.updateCheck?.at) : null };
++}
++
++// ---------- GET /update-schedule ----------
++
++const hour = (h: number) => `${String(h).padStart(2, '0')}:00`;
++export async function updateScheduleView(ctx: McpContext) {
++  if (!isSqliteMode()) return { supported: false, paused: false };
++  const { sqliteUpdateSchedule: store } = await import('@/lib/db/sqlite');
++  const schedule = store.get(ctx.tenantId);
++  const blackouts = store.blackouts(ctx.tenantId, ctx.now);
++  const state = updateWindowState(schedule, blackouts, ctx.now);
++  return {
++    supported: true,
++    enabled: schedule.enabled,
++    paused: Boolean(schedule.paused),
++    open: state.open,
++    window: schedule.enabled
++      ? { days: schedule.days.filter((d) => d >= 0 && d <= 6).map((d) => DAY_NAMES[d]), start: hour(schedule.startHour), end: hour(schedule.endHour), timeZone: UPDATE_TIME_ZONE }
++      : { days: [...DAY_NAMES], start: '00:00', end: '24:00', timeZone: UPDATE_TIME_ZONE },
++    blackouts: blackouts.slice(0, 50).map((b) => ({ start: b.startsOn, end: b.endsOn, label: clean(b.label, 60) })),
++    nextRunAt: isoTime(state.nextOpen),
++  };
++}
++
++// ---------- GET /jobs ----------
++
++const JOB_CURSOR = /^(\d{1,15})~([0-9A-Za-z-]{1,64})$/;
++export async function listJobs(ctx: McpContext, query: URLSearchParams) {
++  const status = query.get('status') || null;
++  if (status && !JOB_STATUSES.has(status)) throw new McpError(400);
++  const sinceText = query.get('since') || null;
++  const since = sinceText ? Date.parse(sinceText) : null;
++  if (sinceText && (sinceText.length > 40 || !Number.isFinite(since))) throw new McpError(400);
++  const limit = intParam(query, 'limit', 25, 1, 100);
++  const cursorText = query.get('cursor') || null;
++  const cursor = cursorText ? JOB_CURSOR.exec(cursorText) : null;
++  if (cursorText && !cursor) throw new McpError(400);
++
++  const created = (job: PackagingJob) => { const at = Date.parse(job.created_at); return Number.isFinite(at) ? at : 0; };
++  const jobs = (await getDatabase().jobs.getByTenantId(ctx.tenantId, 500))
++    .filter((job) => job.tenant_id === ctx.tenantId)
++    .filter((job) => !status || job.status === status)
++    .filter((job) => since === null || created(job) >= since)
++    .sort((a, b) => created(b) - created(a) || b.id.localeCompare(a.id))
++    .filter((job) => !cursor || created(job) < Number(cursor[1]) || (created(job) === Number(cursor[1]) && job.id.localeCompare(cursor[2]) < 0));
++  const page = jobs.slice(0, limit);
++  const last = page.at(-1);
++  return {
++    jobs: page.map((job) => ({
++      jobId: job.id,
++      appName: clean(job.display_name) ?? 'Unnamed app',
++      wingetId: clean(job.winget_id),
++      version: clean(job.version, 60),
++      status: jobStatus(job.status),
++      // Codes only, and only on jobs that didn't deploy; error and status messages are never sent.
++      errorCode: job.status !== 'deployed' && typeof job.error_code === 'string' && ERROR_CODE.test(job.error_code) ? job.error_code : null,
++      errorCategory: job.status !== 'deployed' && typeof job.error_category === 'string' && ERROR_CATEGORY.test(job.error_category) ? job.error_category : null,
++      intuneAppId: typeof job.intune_app_id === 'string' && GUID.test(job.intune_app_id) ? job.intune_app_id : null,
++      automatic: Boolean(job.is_auto_update),
++      createdAt: isoTime(job.created_at),
++      completedAt: isoTime(job.completed_at ?? job.cancelled_at),
++    })),
++    nextCursor: jobs.length > limit && last ? `${created(last)}~${last.id}` : null,
++  };
++}
++
++// ---------- GET /pilots ----------
++
++export async function listPilots(ctx: McpContext) {
++  if (!isSqliteMode()) return { pilots: [] };
++  const { sqlitePilotRollouts } = await import('@/lib/db/sqlite');
++  return {
++    pilots: sqlitePilotRollouts.list(ctx.tenantId).slice(0, 100).map((p) => ({
++      pilotId: p.id,
++      appName: clean(p.display_name) ?? 'Unnamed app',
++      wingetId: clean(p.winget_id),
++      phase: p.phase,
++      fromVersion: clean(p.previous_version, 60),
++      toVersion: clean(p.new_version, 60),
++      pilotGroupLabel: clean(p.group_name),
++      previousAppId: p.previous_app_id,
++      newAppId: p.new_app_id ?? null,
++      jobStatus: p.job_status ? jobStatus(p.job_status) : null,
++      startedAt: isoTime(p.created_at),
++      updatedAt: null,
++    })),
++  };
++}
++
++// ---------- routing ----------
++
++/** The endpoint for a path under /api/hrm/mcp, as a fixed name safe to log. */
++export function mcpEndpoint(path: string[]): string | null {
++  const [first, second, ...rest] = path;
++  if (rest.length > 0) return null;
++  if (first === 'apps' && second !== undefined) return 'apps/{id}';
++  if (second !== undefined) return null;
++  return ['status', 'attention', 'apps', 'updates', 'update-schedule', 'jobs', 'install-failures', 'pilots'].includes(first) ? first : null;
++}
++
++export async function handleMcpRequest(path: string[], query: URLSearchParams, ctx: McpContext): Promise<unknown> {
++  switch (mcpEndpoint(path)) {
++    case 'status': return serverStatusView(await readServerStatus(ctx.now));
++    case 'attention': return attentionView(await readTenantAttention(ctx.tenantId));
++    case 'apps': return listApps(ctx, query);
++    case 'apps/{id}': return getApp(ctx, path[1]);
++    case 'updates': return listUpdates(ctx, query);
++    case 'update-schedule': return updateScheduleView(ctx);
++    case 'jobs': return listJobs(ctx, query);
++    case 'install-failures': {
++      const limit = intParam(query, 'limit', 25, 1, 100);
++      return installFailuresView(await readTenantAttention(ctx.tenantId), limit, ctx.now);
++    }
++    case 'pilots': return listPilots(ctx);
++    default: throw new McpError(404);
++  }
++}
+diff --git a/lib/hrm/mcp-auth.ts b/lib/hrm/mcp-auth.ts
+new file mode 100644
+index 000000000..f785b3321
+--- /dev/null
++++ b/lib/hrm/mcp-auth.ts
+@@ -0,0 +1,85 @@
++/**
++ * HRM patch 0055: who may call the MCP read API (GET /api/hrm/mcp/*).
++ *
++ * Both are required on every request:
++ *  1. Authorization: Bearer <MCP_API_KEY> (at least 32 characters, compared in constant time).
++ *  2. A Cloudflare Access JWT (Cf-Access-Jwt-Assertion) signed by the team's keys, for ACCESS_AUD,
++ *     whose common_name is the MCP Worker's service token client ID (MCP_ACCESS_CLIENT_ID).
++ * HRM_TENANT_ID names the one Intune tenant the API reads (patch 0056 shares it with sign-in;
++ * MCP_TENANT_ID is still read when it is unset). Missing settings turn the API off.
++ * Callers only ever learn "401"; the reason is never returned or logged.
++ */
++
++import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
++import { reportKeyMatches } from './status-report';
++
++export interface McpConfig {
++  apiKey: string;
++  teamDomain: string;
++  audience: string;
++  clientId: string;
++  tenantId: string;
++}
++
++const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++// Only a Cloudflare Access team domain is trusted for keys, so a bad setting can't point at other servers.
++const TEAM_DOMAIN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/;
++
++/** The API's settings, or null when any is missing or malformed (the API is then off). */
++export function mcpConfig(env: Record<string, string | undefined> = process.env): McpConfig | null {
++  const apiKey = env.MCP_API_KEY ?? '';
++  const teamDomain = (env.ACCESS_TEAM_DOMAIN ?? '').trim().toLowerCase().replace(/^https:\/\//, '').replace(/\/+$/, '');
++  const audience = (env.ACCESS_AUD ?? '').trim();
++  const clientId = (env.MCP_ACCESS_CLIENT_ID ?? '').trim();
++  const tenantId = (env.HRM_TENANT_ID || env.MCP_TENANT_ID || '').trim().toLowerCase();
++  if (apiKey.length < 32 || !TEAM_DOMAIN.test(teamDomain) || audience.length < 16 || clientId.length < 8 || !GUID.test(tenantId)) return null;
++  return { apiKey, teamDomain, audience, clientId, tenantId };
++}
++
++const keySets = new Map<string, JWTVerifyGetKey>();
++function teamKeys(teamDomain: string): JWTVerifyGetKey {
++  let keys = keySets.get(teamDomain);
++  if (!keys) {
++    keys = createRemoteJWKSet(new URL(`https://${teamDomain}/cdn-cgi/access/certs`), { timeoutDuration: 2_000, cooldownDuration: 30_000 });
++    keySets.set(teamDomain, keys);
++  }
++  return keys;
++}
++
++/** True only for a valid, unexpired Access JWT issued to the MCP Worker's service token. */
++export async function accessTokenMatches(token: string | null, config: McpConfig, keys: JWTVerifyGetKey = teamKeys(config.teamDomain)): Promise<boolean> {
++  if (!token || token.length > 8192) return false;
++  try {
++    const { payload } = await jwtVerify(token, keys, {
++      issuer: `https://${config.teamDomain}`,
++      audience: config.audience,
++      algorithms: ['RS256'],
++      clockTolerance: 30,
++      requiredClaims: ['exp', 'iat'],
++    });
++    return typeof payload.common_name === 'string' && payload.common_name === config.clientId;
++  } catch {
++    return false;
++  }
++}
++
++/** The configured tenant when both checks pass, otherwise null. */
++export async function authorizeMcpRequest(
++  headers: Headers,
++  env: Record<string, string | undefined> = process.env,
++  keys?: JWTVerifyGetKey,
++): Promise<McpConfig | null> {
++  const config = mcpConfig(env);
++  if (!config) return null;
++  // The key is checked first: it is cheap and never makes a network call.
++  if (!reportKeyMatches(headers.get('authorization'), config.apiKey)) return null;
++  if (!(await accessTokenMatches(headers.get('cf-access-jwt-assertion'), config, keys))) return null;
++  return config;
++}
++
++const EMAIL = /^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
++/** The requester header for the server log only: a plain email or "unknown", never other text. */
++export function requesterForLog(value: string | null): string {
++  const email = value?.trim() ?? '';
++  return email.length <= 254 && EMAIL.test(email) ? email.toLowerCase() : 'unknown';
++}
+diff --git a/lib/hrm/status-report-data.ts b/lib/hrm/status-report-data.ts
+new file mode 100644
+index 000000000..10bb8f8fc
+--- /dev/null
++++ b/lib/hrm/status-report-data.ts
+@@ -0,0 +1,122 @@
++/** Counts only, using an isolated read-only SQLite connection so a slow query cannot block HTTP. */
++import { Worker } from 'node:worker_threads';
++import path from 'node:path';
++import { getDatabase, isSqliteMode } from '@/lib/db';
++import type { ReportCounts } from './status-report';
++import { countsFromRecords } from './status-report';
++
++// The worker has its own 200 ms busy timeout; no setting on the app's connection is changed.
++// Its inputs contain only the database path and time. Its output contains counts and timestamps.
++const QUERY = `
++const { parentPort, workerData } = require('node:worker_threads');
++let db;
++try {
++  // Resolve inside the worker: webpack must not rewrite a parent require.resolve into a bundle ID.
++  const Database = require('node:module').createRequire(workerData.packagePath)('better-sqlite3');
++  db = new Database(workerData.databasePath, { readonly: true, fileMustExist: true, timeout: 200 });
++  db.pragma('query_only = ON');
++  const now = workerData.now;
++  const day = 86400000;
++  const start = new Date(Math.floor(now / day) * day - 13 * day).toISOString();
++  const end = new Date(now).toISOString();
++  const failedSince = new Date(now - 7 * day).toISOString();
++  const stuckBefore = new Date(now - 2 * 3600000).toISOString();
++  const eventsSince = new Date(now - 2 * day).toISOString();
++  const failedRecent = db.prepare(\`SELECT COUNT(*) AS n FROM packaging_jobs WHERE archived_at IS NULL
++    AND status = 'failed' AND julianday(created_at) BETWEEN julianday(?) AND julianday(?)\`).get(failedSince, end).n;
++  const stuck = db.prepare(\`SELECT COUNT(*) AS n FROM packaging_jobs WHERE archived_at IS NULL
++    AND status IN ('queued', 'packaging', 'uploading') AND julianday(created_at) < julianday(?)\`).get(stuckBefore).n;
++  const days = Array(14).fill(0);
++  for (const row of db.prepare(\`SELECT date(deployed_at) AS date, COUNT(*) AS n FROM upload_history
++    WHERE julianday(deployed_at) BETWEEN julianday(?) AND julianday(?) GROUP BY date(deployed_at)\`).all(start, end)) {
++    const offset = Math.round((Date.parse(row.date + 'T00:00:00Z') - Date.parse(start)) / day);
++    if (offset >= 0 && offset < 14) days[offset] = row.n;
++  }
++  const groups = (table, time, condition) => db.prepare(\`SELECT MAX(julianday(\${time})) AS at, COUNT(*) AS count
++    FROM \${table} WHERE \${condition} AND julianday(\${time}) BETWEEN julianday(?) AND julianday(?)
++    GROUP BY strftime('%Y-%m-%dT%H', \${time})\`).all(eventsSince, end)
++    .map(row => ({ at: new Date(Math.round((row.at - 2440587.5) * day)).toISOString(), count: row.count }));
++  const failed = groups('packaging_jobs', 'COALESCE(updated_at, created_at)', "status = 'failed' AND archived_at IS NULL");
++  const deployed = groups('upload_history', 'deployed_at', '1 = 1');
++  let startup;
++  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hrm_startup_reports'").get()) {
++    const snapshots = db.prepare(\`SELECT checked_at, error,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.summary.waiting') END AS waiting,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.summary.failed') END AS failed,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.summary.outdated') END AS outdated,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.unknownDevices') END AS unknown,
++      CASE WHEN json_valid(payload) THEN json_extract(payload, '$.omitted') END AS omitted
++      FROM hrm_startup_reports LIMIT 100\`).all();
++    if (snapshots.length) {
++      startup = { waiting: 0, failed: 0, outdated: 0, unknown: 0, omitted: 0 };
++      for (const row of snapshots) {
++        if (row.error || !Number.isFinite(Date.parse(row.checked_at)) || now - Date.parse(row.checked_at) > 6 * 3600000) { startup.outdated++; continue; }
++        for (const key of ['waiting','failed','outdated','unknown','omitted']) if (Number.isSafeInteger(row[key]) && row[key] >= 0 && row[key] <= 1000000) startup[key] += row[key];
++      }
++    }
++  }
++  parentPort.postMessage({ failedRecent, stuck, days, failed, deployed, ...(startup ? {startup} : {}) });
++} catch {
++  parentPort.postMessage(null);
++} finally {
++  if (db) db.close();
++}
++`;
++
++export function readSqliteReportCounts(signal: AbortSignal, now = new Date()): Promise<ReportCounts> {
++  return new Promise((resolve, reject) => {
++    signal.throwIfAborted();
++    const worker = new Worker(QUERY, {
++      eval: true,
++      workerData: {
++        packagePath: path.join(process.cwd(), 'package.json'),
++        databasePath: path.resolve(process.env.DATABASE_PATH || './data/intuneget.db'),
++        now: now.getTime(),
++      },
++    });
++    let finished = false;
++    const finish = (value?: ReportCounts) => {
++      if (finished) return;
++      finished = true;
++      signal.removeEventListener('abort', abort);
++      void worker.terminate();
++      if (value) resolve(value);
++      else reject(new Error('Report unavailable'));
++    };
++    const abort = () => finish();
++    signal.addEventListener('abort', abort, { once: true });
++    worker.once('message', (value: ReportCounts | null) => finish(value ?? undefined));
++    worker.once('error', () => finish());
++    worker.once('exit', () => finish());
++    // Covers cancellation between construction and listener registration.
++    if (signal.aborted) abort();
++  });
++}
++
++export async function readReportCounts(signal: AbortSignal, now = new Date()): Promise<ReportCounts> {
++  if (isSqliteMode()) return readSqliteReportCounts(signal, now);
++  // The shared adapter is asynchronous in Supabase mode. The route still enforces its deadline.
++  const db = getDatabase();
++  const [jobs, deploys] = await Promise.all([
++    Promise.all([
++      db.jobs.getByStatus('failed', 500, false),
++      ...['queued', 'packaging', 'uploading'].map(status => db.jobs.getByStatus(status, 200)),
++    ]).then(lists => lists.flat()),
++    db.uploadHistory.listAll(1000),
++  ]);
++  signal.throwIfAborted();
++  return countsFromRecords(jobs, deploys, now);
++}
++
++/** Bound file size before parsing; malformed or oversized status data becomes a sanitized degraded report. */
++export async function readReportServerStatus(signal: AbortSignal, now = new Date()) {
++  // HRM patch 0036: the 32 KB bounded read is shared with Home (readStatusFileText in ./home).
++  const { interpretServerStatus, readStatusFileText } = await import('./home');
++  const raw = await readStatusFileText(signal);
++  if (raw === null) return interpretServerStatus(null, now);
++  const value = JSON.parse(raw);
++  if (!value || typeof value.generatedAt !== 'string' || !Number.isFinite(Date.parse(value.generatedAt))
++    || !Number.isFinite(value.disk?.totalKb) || value.disk.totalKb < 0
++    || !Number.isFinite(value.disk?.usedKb) || value.disk.usedKb < 0) throw new Error('Report unavailable');
++  return interpretServerStatus(raw, now);
++}
+diff --git a/lib/hrm/status-report.ts b/lib/hrm/status-report.ts
+new file mode 100644
+index 000000000..6ed6d256a
+--- /dev/null
++++ b/lib/hrm/status-report.ts
+@@ -0,0 +1,274 @@
++/**
++ * HRM patch: the IT dashboard's status report (hrm-it-dashboard
++ * docs/status-report.md, version 1), served at GET /api/status-report.
++ *
++ * Built from the server status file (lib/hrm/home.ts) and job and deploy
++ * counts the database already has. Counts and states only: never app names,
++ * staff names or emails, tenant IDs or error text.
++ */
++
++import { createHash, timingSafeEqual } from 'node:crypto';
++import type { PackagingJob, UploadHistoryRecord } from '@/lib/db/types';
++import { attentionCounts, type ServerStatus } from '@/lib/hrm/home';
++
++type Health = 'ok' | 'warn' | 'down';
++type Tone = 'ok' | 'warn' | 'down' | 'iris';
++
++export interface StatusReport {
++  version: 1;
++  tool: 'intuneget';
++  generatedAt: string;
++  health: Health;
++  status: string;
++  metric: { value: number; label: string };
++  series: { label: string; values: number[] };
++  foot: string[];
++  todos: { id: string; title: string; detail?: string; link?: string }[];
++  events: { at: string; text: string; tone: Tone }[];
++}
++
++export interface StatusReportInput {
++  server: ServerStatus;
++  /** Failed and pending jobs, or null when the database couldn't be read. */
++  jobs: Pick<PackagingJob, 'status' | 'created_at' | 'updated_at'>[] | null;
++  deploys: Pick<UploadHistoryRecord, 'deployed_at'>[] | null;
++  /** The server's public address (serverHttpsOrigin in lib/hrm/site); links are left out unless it is https. */
++  origin: string | undefined;
++  now?: Date;
++  counts?: ReportCounts;
++  /** Patch 0056's sign-in limit (adminAccessState); left out, no to-do is added. */
++  appAccess?: 'limited' | 'not_limited';
++}
++
++const HOUR = 3_600_000;
++const DAY = 24 * HOUR;
++const SERIES_DAYS = 14;
++const EVENT_HOURS = 48;
++const MAX_ITEMS = 20;
++
++/** Patch 0058: the sign-in limit to-do. Names the setting only, never its value. */
++export const APP_ACCESS_TODO = {
++  title: 'Limit IntuneGet sign-in to IT-Admins',
++  detail: 'Set HRM_ADMIN_GROUP_IDS on the server (CLAUDE.md, Access to the app)',
++} as const;
++
++// Summarizes the Home page status states; the watchdog also checks timer lateness and app health.
++const PROBLEMS: Record<string, { status: string; title: string }> = {
++  deploy: { status: 'Deploy failed', title: 'The last deploy did not finish' },
++  offsiteBackup: { status: 'Backup failed', title: 'The nightly off-site backup failed or is late' },
++  disk: { status: 'Disk low', title: 'Disk space is running low' },
++  updateCheck: { status: 'Update check failed', title: 'The scheduled update check failed' },
++  notifications: { status: 'Alerts failed', title: 'The scheduled update alerts failed' },
++  tunnel: { status: 'Tunnel down', title: 'The Cloudflare tunnel is not running' },
++  tunnelUpdate: { status: 'Tunnel update failed', title: 'The nightly cloudflared update failed' },
++  // HRM patch 0032
++  intuneReads: { status: 'Intune reads failing', title: 'Install results or app activity could not be read from Intune' },
++  intuneSelfTest: { status: 'Intune self-test failed', title: 'The daily Intune self-test failed' },
++  scheduledUpdates: { status: 'Scheduled updates failing', title: 'The hourly scheduled update run failed or is late' },
++  // HRM patch 0057
++  versionSync: { status: 'Version sync failing', title: "App updates wasn't corrected after 2 or more recent deploys" },
++};
++const PROBLEM_ORDER = Object.keys(PROBLEMS);
++
++const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
++
++/** Compares the presented bearer key with STATUS_REPORT_KEY in constant time. */
++export function reportKeyMatches(authorization: string | null, expected: string | undefined): boolean {
++  const presented = authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined;
++  if (!presented || !expected || expected.length < 32) return false;
++  const digest = (value: string) => createHash('sha256').update(value).digest();
++  return timingSafeEqual(digest(presented), digest(expected));
++}
++
++/** Groups timestamps from the last 48 hours by hour, newest first: [{ at, count }]. */
++function byHour(times: string[], now: Date) {
++  const groups = new Map<number, { at: string; count: number }>();
++  for (const time of times) {
++    const at = Date.parse(time);
++    if (!Number.isFinite(at) || now.getTime() - at > EVENT_HOURS * HOUR || at > now.getTime()) continue;
++    const slot = Math.floor(at / HOUR);
++    const group = groups.get(slot);
++    if (!group) groups.set(slot, { at: new Date(at).toISOString(), count: 1 });
++    else {
++      group.count++;
++      if (at > Date.parse(group.at)) group.at = new Date(at).toISOString();
++    }
++  }
++  return [...groups.values()];
++}
++
++function recent(time: string | null | undefined, now: Date): string | null {
++  const at = Date.parse(time ?? '');
++  return Number.isFinite(at) && now.getTime() - at <= EVENT_HOURS * HOUR && at <= now.getTime()
++    ? new Date(at).toISOString()
++    : null;
++}
++
++export function buildStatusReport({ server, jobs, deploys, origin, counts, appAccess, now = new Date() }: StatusReportInput): StatusReport {
++  const base = httpsOrigin(origin);
++  const link = (path: string) => (base ? { link: `${base}${path}` } : {});
++  const todos: StatusReport['todos'] = [];
++  const events: StatusReport['events'] = [];
++  let health: Health = 'ok';
++  let status = 'Up';
++  const flag = (text: string, level: Health = 'warn') => {
++    if (health === 'ok' || (level === 'down' && health !== 'down')) {
++      health = level;
++      status = text;
++    }
++  };
++
++  if (!server.reported) {
++    flag(server.reason === 'stale' ? 'Status file stale' : 'No server status');
++    todos.push({ id: 'server-status', title: 'The server status file has stopped updating', detail: 'Check intuneget-status.timer on the VM' });
++  } else {
++    for (const key of PROBLEM_ORDER.filter((problem) => server.problems.includes(problem))) {
++      flag(key === 'disk' ? `Disk ${Math.round(server.diskRatio * 100)}% full` : PROBLEMS[key].status);
++      todos.push({ id: `server-${key}`, title: PROBLEMS[key].title, ...link('/dashboard') });
++    }
++  }
++  // Patch 0058: a to-do (not a pill change) until the IT admins group is set; it goes once it is.
++  if (appAccess === 'not_limited') {
++    todos.push({ id: 'app-access-not-limited', title: APP_ACCESS_TODO.title, detail: APP_ACCESS_TODO.detail, ...link('/dashboard') });
++  }
++
++  if (jobs === null || deploys === null) {
++    flag('Database error', 'down');
++  } else {
++    const { failedRecent, stuck } = counts ?? countsFromRecords(jobs, deploys, now);
++    if (failedRecent > 0) {
++      flag(`${failedRecent} failed`);
++      todos.push({ id: 'jobs-failed', title: `${plural(failedRecent, 'packaging job')} failed in the last 7 days`, ...link('/dashboard/uploads?status=failed') });
++    }
++    if (stuck > 0) {
++      flag(`${stuck} stuck`);
++      todos.push({ id: 'jobs-stuck', title: `${plural(stuck, 'packaging job')} waiting more than 2 hours`, ...link('/dashboard/uploads?status=pending') });
++    }
++    for (const group of (counts?.failed ?? byHour(jobs.filter((job) => job.status === 'failed').map((job) => job.updated_at ?? job.created_at), now))) {
++      events.push({ at: group.at, text: `${plural(group.count, 'packaging job')} failed`, tone: 'warn' });
++    }
++    for (const group of (counts?.deployed ?? byHour(deploys.map((deploy) => deploy.deployed_at), now))) {
++      events.push({ at: group.at, text: `${plural(group.count, 'app')} deployed to Intune`, tone: 'ok' });
++    }
++  }
++
++  // Startup Beta uses only cached aggregate counts; no app/device identifiers enter this report.
++  if (counts?.startup) {
++    const startup = counts.startup;
++    if (startup.waiting > 0) todos.push({ id: 'startup-waiting', title: `${plural(startup.waiting, 'startup installation')} waiting for restart`, detail: 'Beta: device reports, separate from deploying', ...link('/dashboard/updates#startup-installations') });
++    if (startup.failed > 0) { flag('Startup installs failed'); todos.push({ id: 'startup-failed', title: `${plural(startup.failed, 'startup installation')} failed`, detail: 'Beta: review the device reports', ...link('/dashboard/updates#startup-installations') }); }
++    if (startup.outdated > 0 || (startup.unknown ?? 0) > 0 || (startup.omitted ?? 0) > 0) { flag('Check startup reports'); todos.push({ id: 'startup-outdated', title: 'Startup installation reports need review', detail: 'Beta: outdated, unreadable or omitted results need a check', ...link('/dashboard/updates#startup-installations') }); }
++  }
++
++  const values = (counts ?? countsFromRecords(jobs ?? [], deploys ?? [], now)).days;
++
++  const foot: string[] = [];
++  if (server.reported) {
++    const deployAt = recent(server.lastDeploy?.time, now);
++    if (server.lastDeploy && deployAt && server.lastDeploy.result !== 'waiting') {
++      const version = safeVersion(server.lastDeploy.to);
++      if (server.lastDeploy.result === 'deployed') {
++        events.push({ at: deployAt, text: version ? `Server updated to ${version}` : 'Server updated', tone: 'ok' });
++      } else {
++        events.push({ at: deployAt, text: 'Server update did not finish', tone: 'down' });
++      }
++    }
++    const backupAt = recent(server.offsiteBackup?.at, now);
++    if (server.offsiteBackup && backupAt) {
++      events.push(server.offsiteBackup.result === 'success'
++        ? { at: backupAt, text: 'Off-site backup finished', tone: 'ok' }
++        : { at: backupAt, text: 'Off-site backup failed', tone: 'down' });
++    }
++    const version = safeVersion(server.version);
++    if (version) foot.push(`Running ${version}`);
++    foot.push(`Disk ${Math.round(server.diskRatio * 100)}% used`);
++  }
++
++  return constrainReport({
++    version: 1,
++    tool: 'intuneget',
++    generatedAt: now.toISOString(),
++    health,
++    status,
++    metric: { value: values.reduce((sum, n) => sum + n, 0), label: 'apps deployed in 14 days' },
++    series: { label: 'Apps deployed per UTC day, last 14 days', values },
++    foot,
++    todos: todos.slice(0, MAX_ITEMS),
++    events: events.sort((a, b) => b.at.localeCompare(a.at)).slice(0, MAX_ITEMS),
++  }, now);
++}
++
++
++export interface ReportCounts {
++  startup?: { waiting: number; failed: number; outdated: number; unknown?: number; omitted?: number };
++  failedRecent: number;
++  stuck: number;
++  days: number[];
++  failed: { at: string; count: number }[];
++  deployed: { at: string; count: number }[];
++}
++
++/** UTC calendar days, not moving 24-hour intervals; also used by the SQLite aggregate reader. */
++export function countsFromRecords(jobs: NonNullable<StatusReportInput['jobs']>, deploys: NonNullable<StatusReportInput['deploys']>, now: Date): ReportCounts {
++  const days = Array.from({ length: SERIES_DAYS }, () => 0);
++  const today = Math.floor(now.getTime() / DAY);
++  for (const deploy of deploys) {
++    const at = Date.parse(deploy.deployed_at);
++    const daysAgo = today - Math.floor(at / DAY);
++    if (at <= now.getTime() && daysAgo >= 0 && daysAgo < SERIES_DAYS) days[SERIES_DAYS - 1 - daysAgo]++;
++  }
++  return {
++    ...attentionCounts(jobs.filter(job => Date.parse(job.created_at) <= now.getTime()), now),
++    days,
++    failed: byHour(jobs.filter(job => job.status === 'failed').map(job => job.updated_at ?? job.created_at), now),
++    deployed: byHour(deploys.map(deploy => deploy.deployed_at), now),
++  };
++}
++
++/** Only release tags used by this build; no arbitrary status-file strings can become report text. Also used by the MCP read API (patch 0055). */
++export function safeVersion(value: unknown): string | null {
++  return typeof value === 'string' && /^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-hrm\.[0-9]{1,6})?$/.exec(value)?.[0] === value ? value : null;
++}
++
++function httpsOrigin(value: string | undefined): string | null {
++  try {
++    const url = new URL(value ?? '');
++    return url.protocol === 'https:' && !url.username && !url.password ? url.origin : null;
++  } catch { return null; }
++}
++
++export function degradedReport(now = new Date()): StatusReport {
++  return {
++    version: 1, tool: 'intuneget', generatedAt: now.toISOString(), health: 'down', status: 'Report unavailable',
++    metric: { value: 0, label: 'apps deployed in 14 days' },
++    series: { label: 'Apps deployed per UTC day, last 14 days', values: Array(14).fill(0) },
++    foot: [], todos: [], events: [],
++  };
++}
++
++/** One output boundary enforces the contract, including UTF-8 bytes rather than JS string size. */
++export function constrainReport(report: StatusReport, now = new Date()): StatusReport {
++  const text = (value: string, limit: number) => value.slice(0, limit);
++  const link = (value: string | undefined) => {
++    if (!value || value.length > 2048) return {};
++    try {
++      const url = new URL(value);
++      return url.protocol === 'https:' && !url.username && !url.password ? { link: url.href } : {};
++    } catch { return {}; }
++  };
++  const result: StatusReport = {
++    version: 1, tool: 'intuneget', generatedAt: report.generatedAt,
++    health: report.health, status: text(report.status, 24) || 'Report unavailable',
++    metric: { value: report.metric.value, label: text(report.metric.label, 40) },
++    series: { label: text(report.series.label, 60), values: report.series.values.slice(0, 30) },
++    foot: report.foot.slice(0, 2).map(line => text(line, 60)),
++    todos: report.todos.slice(0, MAX_ITEMS).map(todo => ({
++      id: text(todo.id, 80), title: text(todo.title, 100),
++      ...(todo.detail ? { detail: text(todo.detail, 100) } : {}), ...link(todo.link),
++    })),
++    events: report.events.filter(event => recent(event.at, now)).slice(0, MAX_ITEMS).map(event => ({
++      at: recent(event.at, now)!, text: text(event.text, 80), tone: event.tone,
++    })),
++  };
++  return Buffer.byteLength(JSON.stringify(result), 'utf8') < 65_536 ? result : degradedReport(now);
++}
+diff --git a/proxy.ts b/proxy.ts
+index 7f19c207b..6a6696d84 100644
+--- a/proxy.ts
++++ b/proxy.ts
+@@ -1,5 +1,9 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createNextMiddleware } from 'gt-next/middleware';
++import { HOME_PATH, ROBOTS_TXT, isCrawlerPath, isHiddenDashboardPath, isMarketingPath } from '@/lib/hrm/site';
++// HRM patch 0056: staff outside the IT admins group get a clear 403 from every user API route.
++import { accessRefusedResponse, adminAccessConfig, isMachineApiPath } from '@/lib/hrm/admin-access';
++import { verifyAccessToken } from '@/lib/auth-utils';
+ 
+ const PROTECTED_ROUTES = ['/dashboard'];
+ 
+@@ -11,9 +15,40 @@ const PROTECTED_ROUTES = ['/dashboard'];
+ // flip in client-rendered sections like Uploads (issue #136).
+ const gtMiddleware = createNextMiddleware({ localeRouting: false });
+ 
+-export function proxy(request: NextRequest) {
++function withSecurityHeaders<R extends Response>(response: R): R {
++  response.headers.set('X-Content-Type-Options', 'nosniff');
++  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
++  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
++  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
++  return response;
++}
++
++/**
++ * HRM patch 0056: a 403 (or 503 when the check failed) for a genuine staff token whose user
++ * isn't in the IT admins group. Anything else goes on to the route, which still refuses a
++ * missing or invalid token itself. Machine routes and unlimited access are never checked.
++ */
++async function refuseOutsideAdmins(request: NextRequest): Promise<Response | null> {
++  const auth = request.headers.get('authorization');
++  if (!auth?.startsWith('Bearer ') || auth.slice(7).split('.').length !== 3) return null;
++  const verified = await verifyAccessToken(auth);
++  if (!verified || verified.access === 'allowed') return null;
++  return withSecurityHeaders(accessRefusedResponse(verified.access));
++}
++
++export async function proxy(request: NextRequest) {
+   const { pathname } = request.nextUrl;
+ 
++  // HRM patch: no marketing site on this server.
++  if (isCrawlerPath(pathname)) {
++    if (pathname !== '/robots.txt') return new NextResponse(null, { status: 404 });
++    return new NextResponse(ROBOTS_TXT, { headers: { 'Content-Type': 'text/plain' } });
++  }
++  // HRM patch 0036: hidden upstream sections (SCCM, app requests, MSP, and Account from 0051) go Home too.
++  if (isMarketingPath(pathname) || isHiddenDashboardPath(pathname)) {
++    return NextResponse.redirect(new URL(HOME_PATH, request.url));
++  }
++
+   // Protect dashboard routes: redirect to sign-in if no auth hint cookie
+   const isProtected = PROTECTED_ROUTES.some((route) => pathname.startsWith(route));
+   if (isProtected) {
+@@ -25,18 +60,18 @@ export function proxy(request: NextRequest) {
+     }
+   }
+ 
++  if (pathname.startsWith('/api/') && !isMachineApiPath(pathname) && adminAccessConfig()) {
++    const refused = await refuseOutsideAdmins(request);
++    if (refused) return refused;
++  }
++
+   // Pin the UI locale on page requests. API requests are skipped: their locale
+   // is irrelevant and must not drive the shared cookie.
+   const response = pathname.startsWith('/api')
+     ? NextResponse.next()
+     : gtMiddleware(request);
+ 
+-  response.headers.set('X-Content-Type-Options', 'nosniff');
+-  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+-  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+-
+-  return response;
++  return withSecurityHeaders(response);
+ }
+ 
+ export const config = {

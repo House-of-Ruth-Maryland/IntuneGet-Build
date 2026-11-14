@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The 60 patches are regrouped into 13, one per feature, and no two patches change the same file.
+  Nothing the server runs changes: the patched app is byte-identical (same git tree). README's
+  Patch history table says which new patch holds each old patch number.
+
 - App updates shows the Major, Minor and Patch badges, and the Critical and Unmanaged badges,
   in sentence case instead of all capitals (patch 0060).
 
