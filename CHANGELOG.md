@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- App updates shows the Major, Minor and Patch badges, and the Critical and Unmanaged badges,
+  in sentence case instead of all capitals (patch 0060).
+
 - The sign-in page's button now says Sign in with your HRM account (patch 0059), and the
   "Use your HRM work account." line under the Sign in heading is gone.
 
