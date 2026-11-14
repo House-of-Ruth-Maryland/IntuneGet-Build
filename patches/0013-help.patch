@@ -647,7 +647,7 @@ index 000000000..864e9e8e7
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..d984ffec1
+index 000000000..e960667af
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
 @@ -0,0 +1,542 @@
@@ -1118,7 +1118,7 @@ index 000000000..d984ffec1
 +    points: [
 +      'Update alerts, deployment results, install failures and Auto-update turned off post to the IT Ops team, IT chat channel, through the HRM alert relay. The relay page keeps a 30-day list of every alert.',
 +      'Server status problems also post to IT Ops: once when seen on 2 checks in a row, once a day while they last, and once when they clear.',
-+      'To check the connection, open Settings, then Notifications (Teams alerts), and press Send test (the paper plane) on the alert relay webhook. An IntuneGet Webhook Test card should appear in IT Ops.',
++      'To check the connection, open Settings, then Notifications (Teams alerts), and press Send test (the paper plane) on the alert relay webhook. A card titled This webhook is connected should appear in IT Ops.',
 +    ],
 +    links: [{ label: 'HRM alert relay', href: ALERT_RELAY_URL }],
 +  },
@@ -1195,7 +1195,7 @@ index 000000000..d984ffec1
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..363b12b80
+index 000000000..4d7014adb
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,381 @@
@@ -1509,7 +1509,7 @@ index 000000000..363b12b80
 +    start: settings, before: ['Use the configured alert relay webhook.'],
 +    steps: [
 +      step('Find the alert connection', 'Open Settings, then Notifications under Teams alerts.', 'settings', 'Notifications', 'The configured webhook is available for testing.'),
-+      step('Send and confirm', 'Press Send test on the alert relay webhook, then check IT Ops for an IntuneGet Webhook Test card.', 'settings', 'Send test', 'A received card confirms that test message reached the channel.'),
++      step('Send and confirm', 'Press Send test on the alert relay webhook, then check IT Ops for a card titled This webhook is connected.', 'settings', 'Send test', 'A received card confirms that test message reached the channel.'),
 +      step('Review missing alerts', 'Use the HRM alert relay’s recent alert list to investigate delivery; report persistent problems to HRM Support.', 'support', 'HRM Support', 'The missing alert can be investigated without changing deployment settings.'),
 +    ],
 +    success: 'The test card appears in the intended IT Ops channel.',

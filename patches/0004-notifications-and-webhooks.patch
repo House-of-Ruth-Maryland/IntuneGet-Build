@@ -1214,10 +1214,10 @@ index 000000000..c0c03ac5c
 +}
 diff --git a/lib/webhooks/deployment-formatters.test.ts b/lib/webhooks/deployment-formatters.test.ts
 new file mode 100644
-index 000000000..e0e8d8f56
+index 000000000..7eb10a653
 --- /dev/null
 +++ b/lib/webhooks/deployment-formatters.test.ts
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,85 @@
 +import { describe, expect, it } from 'vitest';
 +import type { PackagingJob } from '@/lib/db/types';
 +import { buildDeploymentData, formatDeploymentPayload } from './deployment-formatters';
@@ -1259,18 +1259,25 @@ index 000000000..e0e8d8f56
 +    expect(event.data.error!.message).toHaveLength(301);
 +  });
 +
-+  it('formats a Teams Adaptive Card, green for deployed and red for failed', () => {
++  it('formats a Teams Adaptive Card in the shared layout, green for deployed and red for failed', () => {
 +    const ok = formatDeploymentPayload('teams', job()) as any;
 +    expect(ok.type).toBe('message');
 +    const card = ok.attachments[0].content;
 +    expect(ok.attachments[0].contentType).toBe('application/vnd.microsoft.card.adaptive');
-+    expect(card.body[0]).toMatchObject({ text: 'Deployed: Example App 1.2.3', color: 'Good' });
-+    expect(card.body[1].facts).toContainEqual({ title: 'Deployed by', value: 'attorney.one@example.test' });
++    expect(card.body[0]).toMatchObject({ type: 'Container', style: 'good', bleed: true });
++    expect(card.body[0].items.map((i: any) => i.text)).toEqual(['IntuneGet · Deployed', 'Example App', 'Version 1.2.3 · Oct 24, 2026, 4:43 PM EDT']);
++    expect(card.body[1].facts).toEqual([
++      { title: 'App', value: 'Example.App' },
++      { title: 'Architecture', value: 'x64' },
++      { title: 'Deployed by', value: 'attorney.one@example.test' },
++    ]);
 +    expect(card.actions.map((a: any) => a.title)).toEqual(['Open in Intune', 'View GitHub run']);
 +
 +    const bad = (formatDeploymentPayload('teams', failed('Graph upload timed out')) as any).attachments[0].content;
-+    expect(bad.body[0]).toMatchObject({ text: 'Failed: Example App 1.2.3', color: 'Attention' });
-+    expect(bad.body[2].text).toBe('Stage: upload · Category: intune_api\nGraph upload timed out');
++    expect(bad.body[0]).toMatchObject({ style: 'attention' });
++    expect(bad.body[0].items[0].text).toBe('IntuneGet · Deployment failed');
++    expect(bad.body[2]).toMatchObject({ type: 'Container', style: 'attention' });
++    expect(bad.body[2].items.map((i: any) => i.text)).toEqual(['What went wrong', 'Stage: upload · Category: intune_api\nGraph upload timed out']);
 +    expect(bad.actions.map((a: any) => a.title)).toEqual(['View GitHub run']);
 +  });
 +
@@ -1298,10 +1305,10 @@ index 000000000..e0e8d8f56
 +});
 diff --git a/lib/webhooks/deployment-formatters.ts b/lib/webhooks/deployment-formatters.ts
 new file mode 100644
-index 000000000..497bd6053
+index 000000000..555f0e1ac
 --- /dev/null
 +++ b/lib/webhooks/deployment-formatters.ts
-@@ -0,0 +1,208 @@
+@@ -0,0 +1,197 @@
 +/**
 + * Deployment Result Formatters (HRM patch)
 + * Format one finished packaging job (deployed or failed) for each webhook
@@ -1311,6 +1318,7 @@ index 000000000..497bd6053
 +
 +import type { PackagingJob } from '@/lib/db/types';
 +import { appUrl } from '@/lib/hrm/site';
++import { teamsCallout, teamsFacts, teamsMessage, teamsTime } from './teams-card';
 +import type { WebhookType } from '@/types/notifications';
 +
 +export type DeploymentEventType = 'deployment.completed' | 'deployment.failed';
@@ -1421,28 +1429,16 @@ index 000000000..497bd6053
 +export function formatTeamsDeployment(event: DeploymentWebhookData) {
 +  const failed = event.event_type === 'deployment.failed';
 +  const error = errorLine(event);
-+  const body: unknown[] = [
-+    { type: 'TextBlock', text: title(event), size: 'Large', weight: 'Bolder', color: failed ? 'Attention' : 'Good', wrap: true },
-+    { type: 'FactSet', facts: facts(event) },
-+  ];
-+  if (error) body.push({ type: 'TextBlock', text: error, wrap: true, color: 'Attention' });
-+
-+  return {
-+    type: 'message',
-+    data: event,
-+    attachments: [
-+      {
-+        contentType: 'application/vnd.microsoft.card.adaptive',
-+        content: {
-+          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-+          type: 'AdaptiveCard',
-+          version: '1.4',
-+          body,
-+          actions: links(event).map((link) => ({ type: 'Action.OpenUrl', title: link.label, url: link.url })),
-+        },
-+      },
-+    ],
-+  };
++  // HRM: the shared IntuneGet card layout. App name, version and time are in the header.
++  const details = [{ title: 'App', value: event.data.winget_id }, ...facts(event).filter((f) => !['App', 'Version', 'Time'].includes(f.title))];
++  return teamsMessage(event, {
++    tone: failed ? 'attention' : 'good',
++    label: failed ? 'Deployment failed' : 'Deployed',
++    title: event.data.display_name,
++    subtitle: `Version ${event.data.version} · ${teamsTime(event.timestamp)}`,
++    body: [teamsFacts(details), ...(error ? [teamsCallout('attention', 'What went wrong', error)] : [])],
++    actions: links(event).map((link) => ({ title: link.label, url: link.url })),
++  });
 +}
 +
 +/**
@@ -1511,18 +1507,19 @@ index 000000000..497bd6053
 +  }
 +}
 diff --git a/lib/webhooks/formatters.ts b/lib/webhooks/formatters.ts
-index 6da3117bd..a6b702b2b 100644
+index 6da3117bd..6288ae322 100644
 --- a/lib/webhooks/formatters.ts
 +++ b/lib/webhooks/formatters.ts
-@@ -3,6 +3,7 @@
+@@ -3,6 +3,8 @@
   * Format notification payloads for different webhook platforms
   */
  
 +import { appUrl } from '@/lib/hrm/site';
++import { teamsFacts, teamsMessage, teamsSection, teamsText, teamsTime } from './teams-card';
  import type {
    NotificationPayload,
    WebhookTestPayload,
-@@ -177,9 +178,7 @@ export function formatSlackMessage(payload: NotificationPayload): SlackPayload {
+@@ -177,9 +179,7 @@ export function formatSlackMessage(payload: NotificationPayload): SlackPayload {
              text: 'View in Dashboard',
              emoji: true,
            },
@@ -1533,18 +1530,175 @@ index 6da3117bd..a6b702b2b 100644
            style: 'primary',
          },
        ],
-@@ -295,9 +294,7 @@ export function formatTeamsMessage(payload: NotificationPayload): TeamsPayload {
-             {
-               type: 'Action.OpenUrl',
-               title: 'View in Dashboard',
+@@ -204,136 +204,61 @@ function formatSlackAppBlock(app: AppUpdate): any {
+ 
+ /**
+  * Format notification payload for Microsoft Teams Adaptive Card
++ * HRM: the shared IntuneGet card layout (teams-card.ts).
+  */
+ export function formatTeamsMessage(payload: NotificationPayload): TeamsPayload {
+   const { updates, summary, tenant_name } = payload;
+   const criticalUpdates = updates.filter((u) => u.is_critical);
+   const regularUpdates = updates.filter((u) => !u.is_critical);
++  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+ 
+-  const body: any[] = [
+-    // Header
+-    {
+-      type: 'TextBlock',
+-      text: summary.critical > 0
+-        ? `${summary.critical} Critical App Update${summary.critical > 1 ? 's' : ''} Available`
+-        : `${summary.total} App Update${summary.total > 1 ? 's' : ''} Available`,
+-      size: 'Large',
+-      weight: 'Bolder',
+-      wrap: true,
+-    },
+-    // Context
+-    {
+-      type: 'TextBlock',
+-      text: `IntuneGet | ${new Date(payload.timestamp).toLocaleString()}${tenant_name ? ` | Tenant: ${tenant_name}` : ''}`,
+-      size: 'Small',
+-      isSubtle: true,
+-      wrap: true,
+-    },
+-    // Summary facts
+-    {
+-      type: 'FactSet',
+-      facts: [
+-        { title: 'Total Updates', value: summary.total.toString() },
+-        { title: 'Critical Updates', value: summary.critical.toString() },
+-      ],
+-    },
++  const body: unknown[] = [
++    summary.critical > 0
++      ? teamsText(`${plural(summary.critical, 'major-version update')}. Check compatibility before deploying.`)
++      : teamsText('No major-version updates in this check.', { subtle: true }),
+   ];
+ 
+-  // Critical updates section
+   if (criticalUpdates.length > 0) {
+-    body.push({
+-      type: 'TextBlock',
+-      text: 'Critical Updates (Major Version)',
+-      weight: 'Bolder',
+-      spacing: 'Medium',
+-      wrap: true,
+-    });
+-
+-    criticalUpdates.forEach((app) => {
+-      body.push(formatTeamsAppCard(app));
+-    });
++    body.push(teamsSection('Major-version updates'));
++    criticalUpdates.forEach((app) => body.push(formatTeamsAppCard(app)));
+   }
+ 
+-  // Regular updates section
+   if (regularUpdates.length > 0) {
+-    body.push({
+-      type: 'TextBlock',
+-      text: 'Available Updates',
+-      weight: 'Bolder',
+-      spacing: 'Medium',
+-      wrap: true,
+-    });
+-
++    body.push(teamsSection(criticalUpdates.length > 0 ? 'Other updates' : 'Updates'));
+     // Limit to first 5
+-    const displayUpdates = regularUpdates.slice(0, 5);
+-    displayUpdates.forEach((app) => {
+-      body.push(formatTeamsAppCard(app));
+-    });
+-
++    regularUpdates.slice(0, 5).forEach((app) => body.push(formatTeamsAppCard(app)));
+     if (regularUpdates.length > 5) {
+-      body.push({
+-        type: 'TextBlock',
+-        text: `...and ${regularUpdates.length - 5} more updates`,
+-        isSubtle: true,
+-        wrap: true,
+-      });
++      body.push(teamsText(`And ${plural(regularUpdates.length - 5, 'more update')}.`, { subtle: true }));
+     }
+   }
+ 
+-  return {
+-    type: 'message',
+-    data: buildWebhookData(payload),
+-    attachments: [
+-      {
+-        contentType: 'application/vnd.microsoft.card.adaptive',
+-        content: {
+-          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+-          type: 'AdaptiveCard',
+-          version: '1.4',
+-          body,
+-          actions: [
+-            {
+-              type: 'Action.OpenUrl',
+-              title: 'View in Dashboard',
 -              url: process.env.NEXT_PUBLIC_APP_URL
 -                ? `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`
 -                : 'https://intuneget.com/dashboard',
-+              url: `${appUrl() ?? 'https://intuneget.com'}/dashboard`, // HRM patch 0036: same server address as every other HRM link
-             },
-           ],
-         },
-@@ -430,8 +427,9 @@ export function formatDiscordMessage(payload: NotificationPayload): DiscordPaylo
+-            },
+-          ],
+-        },
+-      },
+-    ],
+-  };
++  return teamsMessage(buildWebhookData(payload), {
++    tone: 'neutral',
++    label: 'Updates available',
++    title: `${plural(summary.total, 'app update')} ready to review`,
++    subtitle: [teamsTime(payload.timestamp), tenant_name].filter(Boolean).join(' · '),
++    body,
++    // HRM patch 0036: same server address as every other HRM link
++    actions: [{ title: 'Review updates', url: `${appUrl() ?? 'https://intuneget.com'}/dashboard` }],
++  });
+ }
+ 
+ /**
+- * Format a single app update for Teams
++ * Format a single app update for Teams: name, WinGet ID, then installed and available versions.
+  */
+ function formatTeamsAppCard(app: AppUpdate) {
++  const column = (label: string, value: string, highlight: boolean) => ({
++    type: 'Column', width: 'stretch', items: [
++      { type: 'TextBlock', text: label, size: 'Small', isSubtle: true, wrap: true },
++      { type: 'TextBlock', text: value, spacing: 'Small', wrap: true, ...(highlight ? { weight: 'Bolder', color: 'Accent' } : {}) },
++    ],
++  });
+   return {
+-    type: 'Container',
+-    items: [
+-      {
+-        type: 'TextBlock',
+-        text: app.app_name,
+-        weight: 'Bolder',
+-        wrap: true,
+-      },
+-      {
+-        type: 'TextBlock',
+-        text: app.winget_id,
+-        size: 'Small',
+-        isSubtle: true,
+-        wrap: true,
+-      },
+-      {
+-        type: 'TextBlock',
+-        text: `${app.current_version} -> ${app.latest_version}`,
+-        wrap: true,
+-      },
++    type: 'Container', style: 'emphasis', spacing: 'Small', items: [
++      { type: 'TextBlock', text: app.app_name, weight: 'Bolder', wrap: true },
++      { type: 'TextBlock', text: app.winget_id, size: 'Small', isSubtle: true, spacing: 'None', wrap: true },
++      { type: 'ColumnSet', spacing: 'Small', columns: [column('Installed', app.current_version, false), column('Available', app.latest_version, true)] },
+     ],
+-    spacing: 'Small',
+-    separator: true,
+   };
+ }
+ 
+@@ -430,8 +355,9 @@ export function formatDiscordMessage(payload: NotificationPayload): DiscordPaylo
   */
  export function formatCustomPayload(
    payload: NotificationPayload
@@ -1556,9 +1710,70 @@ index 6da3117bd..a6b702b2b 100644
  }
  
  /**
+@@ -477,50 +403,19 @@ export function formatSlackTestMessage(payload: WebhookTestPayload): SlackPayloa
+ }
+ 
+ /**
+- * Format test message for Teams
++ * Format test message for Teams (HRM: the shared IntuneGet card layout)
+  */
+ export function formatTeamsTestMessage(payload: WebhookTestPayload): TeamsPayload {
+-  return {
+-    type: 'message',
+-    data: payload,
+-    attachments: [
+-      {
+-        contentType: 'application/vnd.microsoft.card.adaptive',
+-        content: {
+-          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+-          type: 'AdaptiveCard',
+-          version: '1.4',
+-          body: [
+-            {
+-              type: 'TextBlock',
+-              text: 'IntuneGet Webhook Test',
+-              size: 'Large',
+-              weight: 'Bolder',
+-              wrap: true,
+-            },
+-            {
+-              type: 'TextBlock',
+-              text: payload.message,
+-              wrap: true,
+-            },
+-            {
+-              type: 'FactSet',
+-              facts: [
+-                { title: 'Webhook', value: payload.webhook_name },
+-                { title: 'Time', value: new Date(payload.timestamp).toLocaleString() },
+-              ],
+-            },
+-            {
+-              type: 'TextBlock',
+-              text: 'Configuration successful!',
+-              weight: 'Bolder',
+-              wrap: true,
+-            },
+-          ],
+-        },
+-      },
++  return teamsMessage(payload, {
++    tone: 'good',
++    label: 'Webhook test',
++    title: 'This webhook is connected',
++    subtitle: teamsTime(payload.timestamp),
++    body: [
++      teamsText(payload.message),
++      ...(payload.webhook_name ? [teamsFacts([{ title: 'Webhook', value: payload.webhook_name }])] : []),
+     ],
+-  };
++  });
+ }
+ 
+ /**
 diff --git a/lib/webhooks/install-failure-formatters.ts b/lib/webhooks/install-failure-formatters.ts
 new file mode 100644
-index 000000000..f51377295
+index 000000000..d89776d6f
 --- /dev/null
 +++ b/lib/webhooks/install-failure-formatters.ts
 @@ -0,0 +1,66 @@
@@ -1621,7 +1836,7 @@ index 000000000..f51377295
 +
 +export function formatInstallFailurePayload(webhookType: WebhookType, data: InstallFailureWebhookData): unknown {
 +  return formatSimpleAlert(webhookType, {
-+    data, title: title(data), lines: lines(data), timestamp: data.timestamp,
++    data, label: 'Install failures', title: title(data), lines: lines(data), timestamp: data.timestamp,
 +    // HRM patch 0032: a single app links straight to its details
 +    link: !data.app_url ? undefined : data.apps.length === 1
 +      ? { label: 'Open in Inventory', url: `${data.app_url}/dashboard/inventory?app=${encodeURIComponent(data.apps[0].intune_app_id)}` }
@@ -2094,18 +2309,21 @@ index 000000000..4ec1b9b3c
 +});
 diff --git a/lib/webhooks/simple-alert.ts b/lib/webhooks/simple-alert.ts
 new file mode 100644
-index 000000000..23b879669
+index 000000000..c045ad3a4
 --- /dev/null
 +++ b/lib/webhooks/simple-alert.ts
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,47 @@
 +/**
 + * HRM patch 0032: one alert layout for every webhook type: a title, a few lines and one link.
 + * Used by install-failure and paused auto-update alerts. Counts, app names and versions only.
 + */
 +import type { WebhookType } from '@/types/notifications';
++import { teamsMessage, teamsText, teamsTime } from './teams-card';
 +
 +export interface SimpleAlert<T> {
 +  data: T;
++  /** Short sentence-case kind for the Teams card's header label, e.g. "Install failures". */
++  label?: string;
 +  title: string;
 +  lines: string[];
 +  link?: { label: string; url: string };
@@ -2117,26 +2335,15 @@ index 000000000..23b879669
 +const escapeSlack = (text: string) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
 +
 +export function formatSimpleAlert<T>(webhookType: WebhookType, alert: SimpleAlert<T>): unknown {
-+  const { data, title, lines, link, timestamp, tone = 'warning' } = alert;
++  const { data, label = 'Alert', title, lines, link, timestamp, tone = 'warning' } = alert;
 +  switch (webhookType) {
 +    case 'teams':
-+      return {
-+        type: 'message',
-+        data,
-+        attachments: [{
-+          contentType: 'application/vnd.microsoft.card.adaptive',
-+          content: {
-+            $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-+            type: 'AdaptiveCard',
-+            version: '1.4',
-+            body: [
-+              { type: 'TextBlock', text: title, size: 'Large', weight: 'Bolder', color: tone === 'attention' ? 'Attention' : 'Warning', wrap: true },
-+              ...lines.map((text) => ({ type: 'TextBlock', text, wrap: true })),
-+            ],
-+            actions: link ? [{ type: 'Action.OpenUrl', title: link.label, url: link.url }] : [],
-+          },
-+        }],
-+      };
++      // HRM: the shared IntuneGet card layout (teams-card.ts).
++      return teamsMessage(data, {
++        tone, label, title, subtitle: teamsTime(timestamp),
++        body: lines.map((text) => teamsText(text)),
++        actions: link ? [{ title: link.label, url: link.url }] : [],
++      });
 +    case 'slack':
 +      return {
 +        data,
@@ -2152,6 +2359,184 @@ index 000000000..23b879669
 +    default:
 +      return data;
 +  }
++}
+diff --git a/lib/webhooks/teams-card.test.ts b/lib/webhooks/teams-card.test.ts
+new file mode 100644
+index 000000000..70d91a68a
+--- /dev/null
++++ b/lib/webhooks/teams-card.test.ts
+@@ -0,0 +1,80 @@
++import { describe, expect, it } from 'vitest';
++import { teamsCard, teamsTime } from './teams-card';
++import { formatTeamsMessage, formatTeamsTestMessage } from './formatters';
++import { formatSimpleAlert } from './simple-alert';
++import { formatInstallFailurePayload } from './install-failure-formatters';
++
++const header = (card: any) => card.body[0].items.map((i: any) => i.text);
++const content = (payload: any) => payload.attachments[0].content;
++const app = (name: string, from: string, to: string, critical = false) => ({ app_name: name, winget_id: `Example.${name.replace(/\W/g, '')}`, intune_app_id: name, current_version: from, latest_version: to, is_critical: critical });
++const updates = (list: ReturnType<typeof app>[], tenant_name?: string) => ({
++  event: 'app_updates_available' as const, timestamp: '2026-11-06T20:31:00Z', tenant_id: 't', tenant_name, updates: list,
++  summary: { total: list.length, critical: list.filter((u) => u.is_critical).length },
++});
++const texts = (card: any) => JSON.stringify(card).match(/"text":"[^"]*"/g)!.map((t) => t.slice(8, -1));
++
++describe('Teams time (HRM)', () => {
++  it('shows New York time with daylight saving and winter zones', () => {
++    expect(teamsTime('2026-11-06T20:31:00Z')).toBe('Nov 6, 2026, 3:31 PM EST');
++    expect(teamsTime('2026-07-06T20:31:00Z')).toBe('Jul 6, 2026, 4:31 PM EDT');
++  });
++  it('keeps an unparseable timestamp instead of throwing', () => {
++    expect(teamsTime('unknown')).toBe('unknown');
++  });
++});
++
++describe('shared Teams card layout (HRM)', () => {
++  it('maps each tone to a header band and label colour', () => {
++    for (const [tone, style, color] of [['neutral', 'emphasis', 'Accent'], ['good', 'good', 'Good'], ['warning', 'warning', 'Warning'], ['attention', 'attention', 'Attention']] as const) {
++      const card = teamsCard({ tone, label: 'Kind', title: 'Title' });
++      expect(card.body[0]).toMatchObject({ type: 'Container', style, bleed: true });
++      expect((card.body[0] as any).items[0]).toMatchObject({ text: 'IntuneGet · Kind', color });
++      expect((card.body[0] as any).items).toHaveLength(2);
++    }
++  });
++
++  it('gives the update list a header, version columns and a review button', () => {
++    const card = content(formatTeamsMessage(updates([app('App A', '1.2.0', '1.3.0'), app('Contoso Tool', '4.9.1', '5.0.0', true)], 'Example Tenant')));
++    expect(card.version).toBe('1.4');
++    expect(header(card)).toEqual(['IntuneGet · Updates available', '2 app updates ready to review', 'Nov 6, 2026, 3:31 PM EST · Example Tenant']);
++    expect(card.body[1].text).toBe('1 major-version update. Check compatibility before deploying.');
++    expect(card.body[2].text).toBe('Major-version updates');
++    expect(card.body[3].items[2].columns.map((c: any) => c.items.map((i: any) => i.text))).toEqual([['Installed', '4.9.1'], ['Available', '5.0.0']]);
++    expect(card.body[4].text).toBe('Other updates');
++    expect(card.actions.map((a: any) => a.title)).toEqual(['Review updates']);
++  });
++
++  it('says so when no update is a major version, and counts what is left out', () => {
++    const list = Array.from({ length: 7 }, (_, i) => app(`App ${i}`, '1.0', '1.1'));
++    const card = content(formatTeamsMessage(updates(list)));
++    expect(header(card)[2]).toBe('Nov 6, 2026, 3:31 PM EST');
++    expect(card.body[1].text).toBe('No major-version updates in this check.');
++    expect(card.body[2].text).toBe('Updates');
++    expect(card.body.at(-1).text).toBe('And 2 more updates.');
++  });
++
++  it('gives the webhook test and alerts the same header', () => {
++    const test = content(formatTeamsTestMessage({ event: 'test', timestamp: '2026-11-06T20:31:00Z', message: 'Test message.', webhook_name: 'IT Ops' } as any));
++    expect(header(test)).toEqual(['IntuneGet · Webhook test', 'This webhook is connected', 'Nov 6, 2026, 3:31 PM EST']);
++    expect(test.body[0].style).toBe('good');
++
++    const failures = content(formatInstallFailurePayload('teams', { event: 'install_failures', timestamp: '2026-11-06T20:31:00Z', apps: [
++      { display_name: 'App A', intune_app_id: 'a', failed: 3, previous_failed: 0, installed: 4, pending: 0, top_errors: [] },
++    ] }));
++    expect(header(failures)).toEqual(['IntuneGet · Install failures', 'App A: 3 devices failed to install', 'Nov 6, 2026, 3:31 PM EST']);
++    expect(failures.body[0].style).toBe('warning');
++
++    const generic = content(formatSimpleAlert('teams', { data: {}, title: 'T', lines: ['One.', 'Two.'], timestamp: '2026-11-06T20:31:00Z', tone: 'attention' }));
++    expect(generic.body[0].items[0].text).toBe('IntuneGet · Alert');
++    expect(generic.body.slice(1).map((b: any) => b.text)).toEqual(['One.', 'Two.']);
++    expect(generic.actions).toEqual([]);
++  });
++
++  it('keeps every card text in sentence case without exclamation marks', () => {
++    const cards = [
++      content(formatTeamsMessage(updates([app('App A', '1.2.0', '1.3.0'), app('App B', '1', '2', true)]))),
++      content(formatTeamsTestMessage({ event: 'test', timestamp: '2026-11-06T20:31:00Z', message: 'Test.', webhook_name: 'IT Ops' } as any)),
++    ];
++    for (const card of cards) for (const text of texts(card)) expect(text).not.toMatch(/!|Available Updates|Critical Updates|View in Dashboard/);
++  });
++});
+diff --git a/lib/webhooks/teams-card.ts b/lib/webhooks/teams-card.ts
+new file mode 100644
+index 000000000..6bb004350
+--- /dev/null
++++ b/lib/webhooks/teams-card.ts
+@@ -0,0 +1,86 @@
++/**
++ * HRM: one layout for every IntuneGet card in Teams. A tinted header band (a small "IntuneGet · <kind>"
++ * label, the title, then the time and context), the details, and buttons. Teams owns fonts and colours,
++ * so only semantic styles are used and the card follows Teams' light and dark themes.
++ * The VM watchdog (deploy/intuneget-watchdog.py) builds the same layout in Python; keep them matching.
++ */
++
++export type TeamsTone = 'neutral' | 'good' | 'warning' | 'attention';
++
++const CONTAINER_STYLE: Record<TeamsTone, string> = { neutral: 'emphasis', good: 'good', warning: 'warning', attention: 'attention' };
++const LABEL_COLOR: Record<TeamsTone, string> = { neutral: 'Accent', good: 'Good', warning: 'Warning', attention: 'Attention' };
++
++export interface TeamsCardOptions {
++  tone: TeamsTone;
++  /** Short sentence-case kind, e.g. "Deployed" or "Updates available". */
++  label: string;
++  title: string;
++  /** Usually teamsTime(...) plus context, joined with " · ". */
++  subtitle?: string;
++  body?: unknown[];
++  actions?: Array<{ title: string; url: string }>;
++}
++
++/** Explicit New York time with its zone, so a card never shows the server's UTC without saying so. */
++export function teamsTime(timestamp: string): string {
++  const date = new Date(timestamp);
++  if (Number.isNaN(date.getTime())) return timestamp;
++  return new Intl.DateTimeFormat('en-US', {
++    timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric',
++    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
++  }).format(date);
++}
++
++export function teamsHeader(tone: TeamsTone, label: string, title: string, subtitle?: string) {
++  return {
++    type: 'Container', style: CONTAINER_STYLE[tone], bleed: true, items: [
++      { type: 'TextBlock', text: `IntuneGet · ${label}`, size: 'Small', weight: 'Bolder', color: LABEL_COLOR[tone], wrap: true },
++      { type: 'TextBlock', text: title, size: 'Large', weight: 'Bolder', spacing: 'Small', wrap: true },
++      ...(subtitle ? [{ type: 'TextBlock', text: subtitle, size: 'Small', spacing: 'Small', wrap: true }] : []),
++    ],
++  };
++}
++
++/** A small bold heading between groups of the card's details. */
++export function teamsSection(text: string) {
++  return { type: 'TextBlock', text, weight: 'Bolder', spacing: 'Large', wrap: true };
++}
++
++/** Plain lines of text. */
++export function teamsText(text: string, options: { subtle?: boolean } = {}) {
++  return { type: 'TextBlock', text, wrap: true, spacing: 'Medium', ...(options.subtle ? { isSubtle: true, size: 'Small' } : {}) };
++}
++
++export function teamsFacts(facts: Array<{ title: string; value: string }>) {
++  return { type: 'FactSet', spacing: 'Medium', facts };
++}
++
++/** A tinted box for what went wrong or what to do next. */
++export function teamsCallout(tone: Exclude<TeamsTone, 'neutral'>, heading: string, text: string) {
++  return {
++    type: 'Container', style: CONTAINER_STYLE[tone], spacing: 'Medium', items: [
++      { type: 'TextBlock', text: heading, weight: 'Bolder', wrap: true },
++      { type: 'TextBlock', text, wrap: true, spacing: 'Small' },
++    ],
++  };
++}
++
++/** The Adaptive Card itself (the attachment's content). */
++export function teamsCard(options: TeamsCardOptions) {
++  return {
++    $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
++    type: 'AdaptiveCard',
++    version: '1.4',
++    body: [teamsHeader(options.tone, options.label, options.title, options.subtitle), ...(options.body ?? [])],
++    actions: (options.actions ?? []).map((a) => ({ type: 'Action.OpenUrl', title: a.title, url: a.url })),
++  };
++}
++
++/** The message Teams Workflows expects: the machine-readable data plus the card. */
++export function teamsMessage<T>(data: T, options: TeamsCardOptions) {
++  return {
++    type: 'message' as const,
++    data,
++    attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive' as const, content: teamsCard(options) }],
++  };
 +}
 diff --git a/lib/webhooks/transport.test.ts b/lib/webhooks/transport.test.ts
 new file mode 100644

@@ -4549,7 +4549,7 @@ index 000000000..beb376bbc
 +}
 diff --git a/lib/hrm/paused-auto-update.ts b/lib/hrm/paused-auto-update.ts
 new file mode 100644
-index 000000000..819640892
+index 000000000..10e7e7bde
 --- /dev/null
 +++ b/lib/hrm/paused-auto-update.ts
 @@ -0,0 +1,64 @@
@@ -4602,7 +4602,7 @@ index 000000000..819640892
 +  let sent = 0;
 +  for (const webhook of await webhooks.listAllEnabled()) {
 +    const result = await deliverFormattedWebhook(webhook, formatSimpleAlert(webhook.webhook_type, {
-+      data, timestamp: data.timestamp, tone: 'attention',
++      data, timestamp: data.timestamp, tone: 'attention', label: 'Auto-update',
 +      title: fresh.length === 1 ? `Auto-update turned off for ${names[0]}` : `Auto-update turned off for ${fresh.length} apps`,
 +      lines: [
 +        ...data.apps.map((a) => `${a.display_name}: ${a.failures} failed updates in a row`),

@@ -25,6 +25,12 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 
+try:
+    from zoneinfo import ZoneInfo
+    LOCAL_ZONE = ZoneInfo('America/New_York')
+except Exception:  # no time zone data: show UTC and say so
+    LOCAL_ZONE = None
+
 ENV_FILE = os.environ.get('ENV_FILE', '/opt/intuneget/.env.local')
 DATA_DIR = os.environ.get('DATA_DIR', '/var/lib/docker/volumes/intuneget_intuneget-data/_data')
 STATUS_FILE = os.environ.get('STATUS_FILE', os.path.join(DATA_DIR, 'hrm-status.json'))
@@ -130,14 +136,14 @@ def find_problems(at_now):
     if deploy and deploy.get('result') not in ('deployed', 'waiting'):
         problems['deploy'] = f"{deploy.get('result', '').replace('_', ' ')}: {deploy.get('from')} to {deploy.get('to')}."
     if late_or_failed(status.get('updateCheck'), at_now):
-        problems['updateCheck'] = f"Last run {status['updateCheck'].get('at')}, result {status['updateCheck'].get('result')}."
+        problems['updateCheck'] = f"Last run {local_time(status['updateCheck'].get('at'))}, result {status['updateCheck'].get('result')}."
     if late_or_failed(status.get('notifications'), at_now):
-        problems['notifications'] = f"Last run {status['notifications'].get('at')}, result {status['notifications'].get('result')}."
+        problems['notifications'] = f"Last run {local_time(status['notifications'].get('at'))}, result {status['notifications'].get('result')}."
     offsite = status.get('offsiteBackup')
     if offsite:  # only once backups are set up
         at = parse_time(offsite.get('at'))
         if offsite.get('result') != 'success' or at is None or (at_now - at).total_seconds() > OFFSITE_LATE_HOURS * 3600:
-            problems['offsiteBackup'] = f"Last result {offsite.get('result')} at {offsite.get('at')}."
+            problems['offsiteBackup'] = f"Last result {offsite.get('result')} at {local_time(offsite.get('at'))}."
     # Patches 0032 and 0057: the status script already decided these; a missing entry means not set up yet.
     for key, check in (status.get('checks') or {}).items():
         if key in LABELS and isinstance(check, dict) and check.get('ok') is False:
@@ -150,7 +156,22 @@ def find_problems(at_now):
     return problems
 
 
-def card(title, color, facts, app_url):
+TONES = {'good': ('good', 'Good'), 'attention': ('attention', 'Attention')}
+
+
+def local_time(value):
+    """New York time with its zone, as the app's Teams cards show it (lib/webhooks/teams-card.ts)."""
+    at = value if isinstance(value, datetime) else parse_time(value)
+    if at is None:
+        return str(value)
+    if LOCAL_ZONE is None:
+        return at.astimezone(timezone.utc).strftime('%b %-d, %Y, %-I:%M %p UTC')
+    return at.astimezone(LOCAL_ZONE).strftime('%b %-d, %Y, %-I:%M %p %Z')
+
+
+def card(tone, label, title, facts, app_url, at):
+    """The app's shared IntuneGet card layout: a tinted header band, the details, one button."""
+    style, color = TONES[tone]
     return {
         'type': 'message',
         'attachments': [{
@@ -160,8 +181,12 @@ def card(title, color, facts, app_url):
                 'type': 'AdaptiveCard',
                 'version': '1.4',
                 'body': [
-                    {'type': 'TextBlock', 'text': title, 'size': 'Large', 'weight': 'Bolder', 'color': color, 'wrap': True},
-                    {'type': 'FactSet', 'facts': [{'title': key, 'value': value} for key, value in facts]},
+                    {'type': 'Container', 'style': style, 'bleed': True, 'items': [
+                        {'type': 'TextBlock', 'text': f'IntuneGet · {label}', 'size': 'Small', 'weight': 'Bolder', 'color': color, 'wrap': True},
+                        {'type': 'TextBlock', 'text': title, 'size': 'Large', 'weight': 'Bolder', 'spacing': 'Small', 'wrap': True},
+                        {'type': 'TextBlock', 'text': local_time(at), 'size': 'Small', 'spacing': 'Small', 'wrap': True},
+                    ]},
+                    {'type': 'FactSet', 'spacing': 'Medium', 'facts': [{'title': key, 'value': value} for key, value in facts]},
                 ],
                 'actions': [{'type': 'Action.OpenUrl', 'title': 'Open IntuneGet', 'url': app_url}] if app_url else [],
             },
@@ -227,15 +252,15 @@ def run(at_now):
         alerted = parse_time(entry['alertedAt']) if entry['alertedAt'] else None
         due = entry['count'] >= CONFIRM_RUNS and (alerted is None or (at_now - alerted).total_seconds() >= REMIND_HOURS * 3600)
         if due:
-            title = ('Still a problem: ' if alerted else '') + LABELS[key]
-            post(card(title, 'Attention', server_facts([('Detail', detail), ('Since', entry['firstSeen'])]), app_url))
+            label = 'Still a problem' if alerted else 'Server alert'
+            post(card('attention', label, LABELS[key], server_facts([('Detail', detail), ('Since', local_time(entry['firstSeen']))]), app_url, at_now))
             entry['alertedAt'] = stamp
             print(f'intuneget-watchdog: alerted {key}')
 
     for key in [k for k in state if k not in problems]:
         entry = state.pop(key)
         if entry.get('alertedAt'):
-            post(card(f'Resolved: {LABELS.get(key, key)}', 'Good', server_facts([('Since', entry['firstSeen']), ('Cleared', stamp)]), app_url))
+            post(card('good', 'Resolved', LABELS.get(key, key), server_facts([('Since', local_time(entry['firstSeen']))]), app_url, at_now))
             print(f'intuneget-watchdog: resolved {key}')
 
     save_state(state)
@@ -250,7 +275,7 @@ def main():
     elif command == 'status':
         print(json.dumps(find_problems(at_now), indent=2))
     elif command == 'test':
-        post(card('Test: IntuneGet watchdog is connected', 'Good', server_facts([('Sent', at_now.strftime('%Y-%m-%d %H:%M UTC'))]), env_value('NEXT_PUBLIC_APP_URL')))
+        post(card('good', 'Watchdog test', 'The IntuneGet watchdog is connected', server_facts([]), env_value('NEXT_PUBLIC_APP_URL'), at_now))
         print('intuneget-watchdog: test message sent')
     else:
         sys.exit(__doc__)
