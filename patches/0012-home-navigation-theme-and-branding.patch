@@ -1096,7 +1096,7 @@ index fa4896636..9c79fbe37 100644
                      </div>
 diff --git a/app/api/hrm/home/route.test.ts b/app/api/hrm/home/route.test.ts
 new file mode 100644
-index 000000000..2ea9ae458
+index 000000000..a6e87a613
 --- /dev/null
 +++ b/app/api/hrm/home/route.test.ts
 @@ -0,0 +1,95 @@
@@ -1104,7 +1104,7 @@ index 000000000..2ea9ae458
 +import { beforeEach, describe, expect, it, vi } from 'vitest';
 +const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn(), status: vi.fn(), installs: vi.fn(), history: vi.fn(), kept: vi.fn(), retiring: vi.fn() }));
 +vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
-+vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getAnalyticsJobs: mocks.jobs }, uploadHistory: { listAll: mocks.history } }) }));
++vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getAttentionCounts: mocks.jobs }, uploadHistory: { currentDeployments: mocks.history } }) }));
 +vi.mock('@/lib/hrm/install-status-check', () => ({ listInstallStatus: mocks.installs }));
 +vi.mock('@/lib/hrm/home', async (original) => ({ ...(await original<typeof import('@/lib/hrm/home')>()), readServerStatus: mocks.status }));
 +// HRM patch 0042: only read when DATABASE_MODE is sqlite.
@@ -1120,7 +1120,7 @@ index 000000000..2ea9ae458
 +beforeEach(() => {
 +  vi.clearAllMocks();
 +  mocks.auth.mockResolvedValue({ userId: 'caller', tenantId: 'token-tenant' });
-+  mocks.jobs.mockResolvedValue([]);
++  mocks.jobs.mockResolvedValue({failedRecent:0,stuck:0});
 +  mocks.status.mockResolvedValue({ reported: false, reason: 'missing' });
 +  mocks.installs.mockResolvedValue([]);
 +  mocks.history.mockResolvedValue([]);
@@ -1136,7 +1136,8 @@ index 000000000..2ea9ae458
 +
 +  it('reads only the signed-in tenant and is never cached', async () => {
 +    const response = await GET(request());
-+    expect(mocks.jobs).toHaveBeenCalledWith({ tenantId: 'token-tenant' });
++    expect(mocks.jobs).toHaveBeenCalledWith('token-tenant');
++    expect(mocks.history).toHaveBeenCalledWith('token-tenant');
 +    expect(response.headers.get('cache-control')).toBe('private, no-store');
 +    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [], rollbackGaps: [], oldCopiesKept: [], appAccess: 'not_limited' });
 +    expect(mocks.installs).toHaveBeenCalledWith('token-tenant');
@@ -1171,7 +1172,6 @@ index 000000000..2ea9ae458
 +    const old = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
 +    mocks.installs.mockResolvedValue([{ intune_app_id: 'app-a', display_name: 'App A', installed: 0, pending: 0, failed: 0, checked_at: recent }]);
 +    mocks.history.mockResolvedValue([
-+      { intune_tenant_id: 'other-tenant', intune_app_id: 'app-a', deployed_at: recent },
 +      { intune_tenant_id: 'token-tenant', intune_app_id: 'app-a', deployed_at: old },
 +    ]);
 +    expect((await (await GET(request())).json()).unreached).toEqual([{ displayName: 'App A', intuneAppId: 'app-a', deployedAt: old }]);

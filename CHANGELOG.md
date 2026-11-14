@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Fixes from the November security, UX and performance review (`docs/security-review-2026-11.md`).
+  Retire app deletes without the extra confirmation only when Intune's report is complete and shows
+  the app gone; failed or unknown uninstalls now need Delete without confirmation from Intune (the
+  box was Delete even though computers still report it), and an incomplete report blocks deleting.
+  If Intune doesn't answer while retiring changes the groups, the app shows Retiring was interrupted
+  with Check retirement state instead of staying stuck, and a cancel whose answer was lost can be
+  repeated. Retire app and Go back to previous version say when they can't load. Install results
+  show Not installed and Unknown, read every app's newest copy (no 2,000-record limit), 3 at a time
+  within 2 minutes per check, and refuse incomplete Intune reports. Home counts failed and stuck
+  deployments in the database. Sign-in tokens must come from IntuneGet's own sign-in app, and the
+  managed identity serves only `HRM_TENANT_ID`. Webhooks connect to the address that was checked,
+  and installer downloads share that check. Inventory details and long reviews work better with a
+  keyboard and on small screens. Production dependency audits for the app and the packager report
+  0 (`@azure/identity` 4.14.1, packager `@azure/msal-node` 7). PR checks now fail on production
+  audit findings, and the image build confirms the merged PR's checks passed. Help matches.
+  Before deploying, check `AZURE_CLIENT_ID` and `HRM_TENANT_ID` on the VM (CLAUDE.md, "Access to
+  the app").
+
 - The 60 patches are regrouped into 13, one per feature, and no two patches change the same file.
   Nothing the server runs changes: the patched app is byte-identical (same git tree). README's
   Patch history table says which new patch holds each old patch number.

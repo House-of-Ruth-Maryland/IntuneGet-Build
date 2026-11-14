@@ -647,10 +647,10 @@ index 000000000..864e9e8e7
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..2198022c9
+index 000000000..d984ffec1
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,531 @@
+@@ -0,0 +1,542 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -950,7 +950,7 @@ index 000000000..2198022c9
 +  {
 +    id: 'rollback',
 +    title: 'Going back to a previous version',
-+    uiLabels: ['Inventory', 'Actions', 'Previous version', 'Go back to previous version', 'I checked the versions and groups', 'Allow again', 'Check installer now', 'Needs attention', 'Deployments'],
++    uiLabels: ['Inventory', 'Actions', 'Previous version', 'Go back to previous version', 'I checked the versions and groups', 'Allow again', 'Check installer now', 'Needs attention', 'Deployments', 'Try again'],
 +    flow: ['Open the app in Inventory', 'Press Go back to previous version', 'Check versions and groups', 'Press Go back'],
 +    points: [
 +      'If a new version causes problems, open the app in Inventory. Under Actions, find Previous version and press Go back to previous version.',
@@ -973,13 +973,14 @@ index 000000000..2198022c9
 +      'To let automatic updates deploy a skipped version again, press Allow again next to it under Previous version.',
 +      'Going back is refused while a pilot or another deployment for the app is running, or while the app is being retired.',
 +      'Going back doesn\'t need the old copy in Intune, so it still works after IntuneGet removes old copies (see How old copies are removed).',
++      'If Previous version can\'t load, it shows why instead of disappearing. Press Try again.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open Deployments', href: '/dashboard/uploads' }],
 +  },
 +  {
 +    id: 'retire',
 +    title: 'Retiring an app',
-+    uiLabels: ['Inventory', 'Actions', 'Retire app', 'I understand this uninstalls the app from these groups', 'Uninstall from these groups', 'Start retiring', 'Retiring this app', 'Removing this app', 'Discovered apps', 'Remove from computers', 'Delete from Intune', 'Keep it for now', 'Delete even though computers still report it', 'Cancel retiring', 'Ignore', 'Ignored apps'],
++    uiLabels: ['Inventory', 'Actions', 'Retire app', 'I understand this uninstalls the app from these groups', 'Uninstall from these groups', 'Start retiring', 'Retiring this app', 'Removing this app', 'Discovered apps', 'Remove from computers', 'Delete from Intune', 'Keep it for now', 'Delete without confirmation from Intune', 'Cancel retiring', 'Ignore', 'Ignored apps', 'Retiring was interrupted', 'Check retirement state', 'Try again'],
 +    flow: ['Open the app in Inventory', 'Press Retire app', 'Check the groups', 'Uninstall from these groups', 'Wait for computers', 'Delete from Intune'],
 +    points: [
 +      'When HRM stops using an app, open it in Inventory and press Retire app, the last item under Actions. The review reads the app and its groups from Intune.',
@@ -989,24 +990,32 @@ index 000000000..2198022c9
 +      'Select I understand this uninstalls the app from these groups, then press Uninstall from these groups. A copy with no groups shows Start retiring instead.',
 +      'Retire app is refused while a pilot or a deployment for the app is running.',
 +      'While a copy is being retired, Update, automatic updates, pilots, going back and deploying from the App catalog are held for every copy of the app. Save to Intune and duplicate cleanup are held for that copy.',
-+      'Retiring this app shows how many computers still report it installed or pending. Computers check in over the next hours, so check back later.',
++      'Retiring this app shows what Intune reports: still installed, pending, failed, not installed, not applicable and unknown. Computers check in over the next hours, so check back later.',
 +      'An app being removed from Discovered apps shows in Inventory as Removing this app, with the same counts and Delete from Intune. It has no Cancel retiring.',
-+      'Computers that failed to uninstall don\'t stop the delete. Check them under Install results first. Home leaves an app being retired out of its install failures, apps that reach no computers and apps that can\'t go back.',
-+      'When none are left, press Delete from Intune, then press Delete from Intune again to confirm. Keep it for now closes the question.',
-+      'If some computers never report, for example because they are offline for good, select Delete even though computers still report it before confirming.',
++      'Home leaves an app being retired out of its install failures, apps that reach no computers and apps that can\'t go back. Check computers that failed to uninstall under Install results.',
++      'The app is ready to delete when Intune\'s report is complete, at least 1 computer reports it not installed, and none report it installed, pending, failed or unknown. A copy with no groups needs no report.',
++      'When it is ready, press Delete from Intune, then press Delete from Intune again to confirm. Keep it for now closes the question.',
++      'Otherwise, select Delete without confirmation from Intune before confirming. Use it only when computers still listed will never report, for example because they are offline for good, and after checking any that failed.',
++      'If Intune\'s report can\'t be read or is incomplete, nothing is deleted, even with that box selected. Try again in a few minutes.',
++      'Deleting stops Intune uninstalling the app, including on computers that haven\'t checked in yet. Ready means every computer that reported has removed it, not that every computer has reported.',
 +      'Deleting first removes this app\'s links to apps it replaces or depends on. If another app replaces or depends on it, the delete stops and says which app. Deleting can\'t be undone.',
 +      'After deletion, every copy of the app is set to Ignore in App updates. To get updates for a copy that remains, use Ignored apps. To bring the app back, deploy it from the App catalog.',
 +      'Cancel retiring puts the saved groups back. Required groups then install the app again on computers that already uninstalled it.',
 +      'If the groups were changed in Intune since retiring started, Cancel retiring is refused. Put them back in Intune instead.',
++      'If Intune didn\'t confirm Cancel retiring, wait 1 minute and press Cancel retiring again. If the groups are already back, it finishes without changing them again.',
++      'If Intune didn\'t answer when retiring changed the groups, the panel shows Retiring was interrupted. Updates and deployments of the app stay held until you check.',
++      'Wait 1 minute, then press Check retirement state. It reads the app\'s groups in Intune and changes nothing there.',
++      'If the groups are the Uninstall groups, retiring continues. If they are the saved groups, the retirement is dropped and nothing changed. Otherwise, set one of them in Intune and check again.',
++      'While Retire app is loading, it says it is checking. If it can\'t load, it shows why instead of disappearing. Press Try again.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }],
 +  },
 +  {
 +    id: 'install-results',
 +    title: 'Install results',
-+    uiLabels: ['Install results', 'Check installs now', 'What to check', 'Needs attention', 'Open app', 'Open Inventory', 'Check groups', 'Inventory', 'Open in Intune', 'Update history', 'Try again'],
++    uiLabels: ['Install results', 'Check installs now', 'What to check', 'Needs attention', 'Open app', 'Open Inventory', 'Check groups', 'Inventory', 'Open in Intune', 'Update history', 'Try again', 'Installed', 'Failed', 'Pending', 'Not installed', 'Not applicable', 'Unknown'],
 +    points: [
-+      'At 3:30 AM and 3:30 PM (Maryland time), with the update check, IntuneGet asks Intune how each app it deployed is installing: installed, failed, pending and not applicable.',
++      'At 3:30 AM and 3:30 PM (Maryland time), with the update check, IntuneGet asks Intune how each app it deployed is installing. Install results shows Installed, Failed, Pending, Not installed, Not applicable and Unknown, so every counted computer appears.',
 +      'Open the app in Inventory to see the counts and the most common reasons for failures. Open in Intune opens the app there.',
 +      'Under a failure reason, open What to check for suggested next steps and Microsoft troubleshooting guidance. These are checks to try, not a diagnosis or an automatic repair.',
 +      'When computers fail to install an app, Home lists it under Needs attention. Press Open app for one app, or Open Inventory for several. A Teams alert posts to the IT Ops team when an update check finds more failures, at most once a day per app.',
@@ -1015,11 +1024,13 @@ index 000000000..2198022c9
 +      'Apps being retired, or removed from Discovered apps, are left out of this list and of install failures (see Retiring an app).',
 +      'A link from another tool, or from a Teams alert about one app, can open an app\'s details in Inventory directly. If it says it couldn\'t load this app from Intune, the app may have been removed from Intune or isn\'t a Win32 app, which Inventory doesn\'t list. Press Try again to check once more.',
 +      'Only counts are kept. To see which computers failed, open the app in Intune, then Device install status.',
-+      'Only the newest copy IntuneGet deployed of each app is checked. A new copy shows no install results until the next update check.',
++      'Only the newest copy IntuneGet deployed of each app is checked, however long ago it was deployed. A new copy shows no install results until the next update check.',
 +      'To see results sooner, press Check installs now under Install results. It reads that app\'s results from Intune and changes nothing there.',
 +      'Check installs now shows only on the newest copy of an app, in Inventory and in Update history. In Update history, expand a deployed version to see its install results.',
 +      'You can check each app once every 5 minutes. An update check or a failed attempt also starts the 5 minutes. The message says when to try again.',
 +      'Check installs now never sends a Teams alert. The next update check compares with the saved counts and alerts as usual.',
++      'Each update check reads 3 apps at a time and stops after 2 minutes. Apps it didn\'t reach are read first at the next update check. They aren\'t counted as failed reads.',
++      'If Intune asks IntuneGet to wait, it waits up to 10 seconds and tries again. An incomplete or unreadable report counts as a failed read, and the app keeps its last results.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Microsoft Intune', href: INTUNE_URL }],
 +  },
@@ -1075,7 +1086,7 @@ index 000000000..2198022c9
 +  {
 +    id: 'remove-discovered',
 +    title: 'Removing an app found on computers',
-+    uiLabels: ['Discovered apps', 'Remove', 'Remove from computers', 'How to remove', 'Matched', 'Partial match', 'No match', 'Link package', 'Microsoft Store app', 'What gets removed', 'Remove it from', 'All devices', 'Groups I choose in the Deployment list', 'I understand this uninstalls the app from every computer in the groups I choose', 'Add removal to Deployment list', 'To remove', 'Deployment list', 'Removal', 'This only removes the app', 'Who gets it', 'More settings', 'Choose groups', 'Adds it to Intune only to uninstall', 'Deploy to Intune', 'Ignore', 'Inventory', 'Removing this app', 'Delete from Intune', 'Cancel retiring'],
++    uiLabels: ['Discovered apps', 'Remove', 'Remove from computers', 'How to remove', 'Matched', 'Partial match', 'No match', 'Link package', 'Microsoft Store app', 'What gets removed', 'Remove it from', 'All devices', 'Groups I choose in the Deployment list', 'I understand this uninstalls the app from every computer in the groups I choose', 'Add removal to Deployment list', 'To remove', 'Deployment list', 'Removal', 'This only removes the app', 'Who gets it', 'More settings', 'Choose groups', 'Adds it to Intune only to uninstall', 'Deploy to Intune', 'Ignore', 'Inventory', 'Removing this app', 'Delete from Intune', 'Delete without confirmation from Intune', 'Cancel retiring'],
 +    flow: ['Press Remove from computers', 'Choose where to remove it', 'Add removal to Deployment list', 'Deploy to Intune', 'Wait for computers', 'Delete from Intune'],
 +    points: [
 +      'In Discovered apps, Matched rows that aren\'t in the Deployment list have Remove (list view) or Remove from computers (card view). Other rows have How to remove, which explains what to do instead.',
@@ -1093,10 +1104,10 @@ index 000000000..2198022c9
 +      'Every group is Uninstall. Install scope, update settings and More settings are hidden.',
 +      'Deploy to Intune stays off until the removal has at least one group and every group is Uninstall. Press Choose groups to fix it. The review says Adds it to Intune only to uninstall the app.',
 +      'Deploying adds the app to Intune with (uninstall only) after its name. It never installs anything, and its updates are set to Ignore. Computers that have the app remove it when they check in.',
-+      'Afterwards, open the copy in Inventory. Removing this app shows how many computers still report it installed, pending or failed. Computers check in over the next hours, so check back later.',
++      'Afterwards, open the copy in Inventory. Removing this app shows what Intune reports: still installed, pending, failed, not installed, not applicable and unknown. Computers check in over the next hours, so check back later.',
 +      'While it is removing, updates and deployments of the app are held, and the hold messages say it is being retired. Home leaves it out of install failures.',
-+      'When none are left, press Delete from Intune, then confirm.',
-+      'To stop removing sooner, delete the copy. Intune stops uninstalling, and computers that already removed it don\'t get it back. A removal has no Cancel retiring.',
++      'When it is ready to delete (see Retiring an app), press Delete from Intune, then confirm.',
++      'To stop removing sooner, delete the copy with Delete without confirmation from Intune selected. Intune stops uninstalling, and computers that already removed it don\'t get it back. A removal has no Cancel retiring.',
 +    ],
 +    links: [{ label: 'Open Discovered apps', href: '/dashboard/unmanaged' }, { label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open Intune for script results', href: INTUNE_URL }],
 +  },
@@ -1184,7 +1195,7 @@ index 000000000..2198022c9
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..f645e274d
+index 000000000..363b12b80
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,381 @@
@@ -1392,8 +1403,8 @@ index 000000000..f645e274d
 +    success: 'The earlier version is deployed again to the intended groups and computers report results.',
 +    caution: 'Going back uninstalls the current version before installing the earlier one. A matching checksum proves file identity, not compatibility or safety.',
 +    related: ['install-results', 'updating', 'support'],
-+    troubleshoot: [{ problem: 'Go back is hidden', action: 'Read the installer status. A missing, changed or unsupported installer prevents going back; use a newer fix instead.' }, { problem: 'Automatic updates skip the bad version', action: 'This is intentional, even if going back fails. Use Allow again only after reviewing the reason.' }],
-+    referenceGroups: [reference('Where going back is available', [0, 1, 2, 3]), reference('Installer download and checksum checks', [4, 5, 6, 7, 8, 9, 10]), reference('Review and replacement behavior', [11, 12, 13, 14]), reference('Skipped updates and deployment holds', [15, 16, 17, 18, 19])],
++    troubleshoot: [{ problem: 'Go back is hidden', action: 'Read the installer status. A missing, changed or unsupported installer prevents going back; use a newer fix instead.' }, { problem: 'Previous version shows an error', action: 'It couldn’t load. Press Try again; if it keeps failing, open HRM Support.' }, { problem: 'Automatic updates skip the bad version', action: 'This is intentional, even if going back fails. Use Allow again only after reviewing the reason.' }],
++    referenceGroups: [reference('Where going back is available', [0, 1, 2, 3, 20]), reference('Installer download and checksum checks', [4, 5, 6, 7, 8, 9, 10]), reference('Review and replacement behavior', [11, 12, 13, 14]), reference('Skipped updates and deployment holds', [15, 16, 17, 18, 19])],
 +  },
 +  {
 +    id: 'retire', category: 'troubleshoot', title: 'Retire a managed app',
@@ -1402,21 +1413,21 @@ index 000000000..f645e274d
 +    steps: [
 +      step('Review the app and groups', 'Open the app in Inventory and press Retire app, the last item under Actions. Read the groups that will change to Uninstall.', 'inventory', 'Retire app', 'The review shows this copy’s affected groups.'),
 +      step('Confirm uninstall', 'Select I understand this uninstalls the app from these groups, then press Uninstall from these groups.', 'inventory', 'Uninstall from these groups', 'The groups change to Uninstall; computers act as they check in.'),
-+      step('Wait and inspect failures', 'Read Retiring this app and Install results. Check failures and remaining installed or pending computers before deleting.', 'inventory', 'Retiring this app', 'You have uninstall results from computers.'),
-+      step('Delete the Intune copy', 'When ready, press Delete from Intune and confirm. If computers still report it, read Delete even though computers still report it carefully.', 'inventory', 'Delete from Intune', 'The Intune copy is deleted; the app’s updates are set to Ignore.'),
++      step('Wait and inspect failures', 'Read Retiring this app and Install results. Check computers still installed, pending, failed or unknown before deleting.', 'inventory', 'Retiring this app', 'You have uninstall results from computers.'),
++      step('Delete the Intune copy', 'When it is ready, press Delete from Intune and confirm. Otherwise, select Delete without confirmation from Intune only after checking the remaining computers.', 'inventory', 'Delete from Intune', 'The Intune copy is deleted, uninstalling stops and the app’s updates are set to Ignore.'),
 +    ],
 +    success: 'Uninstall results have been reviewed and the retired copy is removed from Intune.',
-+    caution: 'Deleting cannot be undone. Cancel retiring restores the saved groups, so Required groups can reinstall the app.',
++    caution: 'Deleting cannot be undone and stops uninstalling on computers that haven’t checked in. Cancel retiring restores the saved groups, so Required groups can reinstall the app.',
 +    related: ['remove-discovered', 'install-results', 'group-changes'],
-+    troubleshoot: [{ problem: 'There are no groups', action: 'The review offers Start retiring. There are no assigned groups to uninstall from.' }, { problem: 'Cancel retiring is refused', action: 'Groups changed since retirement started. Review and restore the intended assignments in Intune.' }, { problem: 'The app was installed another way', action: 'Use the discovered-app removal guidance.', guide: 'remove-discovered' }],
-+    referenceGroups: [reference('Scope and confirmation', [0, 1, 2, 3, 4]), reference('Holds and install results', [5, 6, 7, 8, 9]), reference('Delete and restore assignments', [10, 11, 12, 13, 14, 15])],
++    troubleshoot: [{ problem: 'There are no groups', action: 'The review offers Start retiring. There are no assigned groups to uninstall from.' }, { problem: 'Retiring was interrupted', action: 'Wait 1 minute, then press Check retirement state. It reads the groups in Intune and changes nothing.' }, { problem: 'Delete is refused even with the box selected', action: 'Intune’s report couldn’t be read completely. Nothing was deleted; try again in a few minutes.' }, { problem: 'Cancel retiring is refused', action: 'Groups changed since retirement started. Review and restore the intended assignments in Intune.' }, { problem: 'The app was installed another way', action: 'Use the discovered-app removal guidance.', guide: 'remove-discovered' }],
++    referenceGroups: [reference('Scope and confirmation', [0, 1, 2, 3, 4]), reference('Holds and install results', [5, 6, 7, 8, 9]), reference('When it can be deleted', [10, 11, 12, 13, 14]), reference('Delete and restore assignments', [15, 16, 17, 18, 19]), reference('Interrupted retiring and loading errors', [20, 21, 22, 23])],
 +  },
 +  {
 +    id: 'install-results', category: 'devices', title: 'Check whether computers installed an app',
-+    summary: 'Read install results and failure guidance without confusing a finished deployment with an install on computers.', keywords: ['installed', 'pending', 'failed', 'not applicable', 'devices', 'computers', 'no devices', 'no computers', 'check installs now', 'refresh', '403', 'forbidden', 'permissions'],
++    summary: 'Read install results and failure guidance without confusing a finished deployment with an install on computers.', keywords: ['installed', 'pending', 'failed', 'not installed', 'not applicable', 'unknown', 'devices', 'computers', 'no devices', 'no computers', 'check installs now', 'refresh', '403', 'forbidden', 'permissions'],
 +    start: inventory, before: ['Know which app copy or version you need to check.'],
 +    steps: [
-+      step('Open install results', 'Open the app in Inventory and read installed, failed, pending and not-applicable counts.', 'inventory', 'Inventory', 'You see the install results Intune has received for this app.'),
++      step('Open install results', 'Open the app in Inventory and read the Installed, Failed, Pending, Not installed, Not applicable and Unknown counts.', 'inventory', 'Inventory', 'You see the install results Intune has received for this app.'),
 +      step('Get fresh results', 'Under Install results, press Check installs now to read this app’s results from Intune. You can check each app once every 5 minutes.', 'inventory', 'Check installs now', 'The counts and checked time update. No Teams alert is sent.'),
 +      step('Read the failure reason', 'Expand What to check under a failure reason for suggested checks and Microsoft guidance.', 'inventory', 'What to check', 'You have suggested investigation steps, not an automatic repair.'),
 +      step('Inspect individual computers', 'Press Open in Intune and open Device install status there to identify the affected computers.', 'inventory', 'Open in Intune', 'Results for each computer are checked in Intune.'),
@@ -1425,8 +1436,8 @@ index 000000000..f645e274d
 +    success: 'You can state what Intune reports, when it was checked and which investigation should happen next.',
 +    caution: 'Deploying a package is not installation evidence. IntuneGet keeps counts, not a list of computers; offline computers and reporting delays can leave results pending.',
 +    related: ['group-changes', 'startup-beta', 'support'],
-+    troubleshoot: [{ problem: 'A new copy shows no results', action: 'Results arrive at the next 3:30 AM or 3:30 PM check. Press Check installs now to read them sooner.' }, { problem: 'Check installs now is missing', action: 'It shows only on the newest copy IntuneGet deployed of an app.' }, { problem: 'A direct app link can’t load the app', action: 'The copy may have been removed from Intune or may not be a Win32 app. Press Try again once.' }, { problem: 'All counts are zero', action: 'Check groups and membership. Zero counts do not prove a successful installation.' }, { problem: 'Intune denies access to results', action: 'A 401 or 403 means the result is unavailable. Check access in Intune; do not treat missing results as success or rerun a removal blindly.' }],
-+    referenceGroups: [reference('Read results and investigate failures', [0, 1, 2, 8]), reference('When results are checked', [9, 10, 11, 12, 13]), reference('Warnings and apps that reach no computers', [3, 4, 5, 6]), reference('Missing app links', [7])],
++    troubleshoot: [{ problem: 'A new copy shows no results', action: 'Results arrive at the next 3:30 AM or 3:30 PM check. Press Check installs now to read them sooner.' }, { problem: 'Check installs now is missing', action: 'It shows only on the newest copy IntuneGet deployed of an app.' }, { problem: 'A direct app link can’t load the app', action: 'The copy may have been removed from Intune or may not be a Win32 app. Press Try again once.' }, { problem: 'Results didn’t change after an update check', action: 'Intune may not have answered in time, or the report was incomplete. The last results stay; press Check installs now or wait for the next check.' }, { problem: 'All counts are zero', action: 'Check groups and membership. Zero counts do not prove a successful installation.' }, { problem: 'Intune denies access to results', action: 'A 401 or 403 means the result is unavailable. Check access in Intune; do not treat missing results as success or rerun a removal blindly.' }],
++    referenceGroups: [reference('Read results and investigate failures', [0, 1, 2, 8]), reference('When results are checked', [9, 10, 11, 12, 13, 14, 15]), reference('Warnings and apps that reach no computers', [3, 4, 5, 6]), reference('Missing app links', [7])],
 +  },
 +  {
 +    id: 'app-activity', category: 'devices', title: 'Trace what changed for an app',
