@@ -25,8 +25,8 @@ HRM IT notes.
 | `deploy/intuneget-backup.py` | Nightly at 1:30 AM New York (installed as `/usr/local/sbin/intuneget-backup`, run by `intuneget-backup.timer`): copies the SQLite database while the app runs, checks it, compresses it and uploads it to the Azure Storage container in `BACKUP_CONTAINER_URL` as the VM's managed identity. `intuneget-backup status` shows the last result. |
 | `deploy/tests/` | Python tests for the status script's `checks.versionSync` field and the watchdog's alerts (stub commands, temporary files). `scripts/check-app.sh full` runs them. |
 | `.github/workflows/upstream-check.yml` | Weekly: newer upstream release? Test the patches on it and open the "Build upstream" PR (or an issue). |
-| `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: check Help (below), build `<tag>-hrm.<n>` and open the "Deploy" PR. |
-| `.github/workflows/tests.yml` | For code PR revisions: apply pinned patches, cache npm downloads, check Help and both app/packager types, then run the full regression suite once. Deploy-only PRs and description edits do not run the suite. Manual dispatch covers bot-created upgrade PRs. |
+| `.github/workflows/build.yml` | On `main` changes to `upstream-ref`, patches or branding: confirm the merged PR's "Patched app checks passed" succeeded (security review S8; a run started by hand skips this), check Help (below), build `<tag>-hrm.<n>` and open the "Deploy" PR. |
+| `.github/workflows/tests.yml` | For code PR revisions: apply pinned patches, cache npm downloads, check Help and both app/packager types, audit production dependencies of app and packager (`npm audit --omit=dev`, moderate and above), then run the full regression suite once. Deploy-only PRs and description edits do not run the suite. Manual dispatch covers bot-created upgrade PRs. |
 | `scripts/check-app.sh` | Shared local/PR validation entry point for a patched tree with dependencies installed. `related` runs affected tests during iteration; `full` checks Help, both compiler configurations and all tests. |
 | `.github/workflows/help-check.yml` | On PRs that change patches, `upstream-ref` or `deploy/` (not `deploy/version`): run the Help check and require "Help and tooltips checked" ticked in the PR description. |
 | `docs/mcp-api.md` | The MCP read API contract (patch 0055): endpoints, parameters, response fields with fake examples, and where the server differs from the MCP Worker's first contract. |
@@ -58,7 +58,10 @@ HRM IT notes.
    in IntuneGet-Workflows to the vX version (from upstream's `.github/workflows-reference/`) in its
    own PR. Merge it right before the Deploy PR, not earlier, because the running server still
    expects the old one.
-3. Merge "Build upstream vX". The image builds and **"Deploy vX-hrm.N"** opens.
+3. Run Patched app checks on the bot's PR by hand (Actions, Patched app checks, Run workflow on its
+   branch); GitHub doesn't start them for a PR the Actions token opened, and the build refuses a
+   merge whose PR has no passed "Patched app checks passed". Then merge "Build upstream vX". The
+   image builds and **"Deploy vX-hrm.N"** opens.
 4. Merging the Deploy PR deploys to production. Only David approves this.
 5. Within about 5 minutes the VM backs up, upgrades and checks health. Confirm on the VM:
    `sudo intuneget-deploy status` and `journalctl -u intuneget-deploy -n 50`.
@@ -95,7 +98,7 @@ HRM IT notes.
 - When a patch calls something new from a module that upstream tests mock with `vi.mock`, add it to
   that mock in the same patch.
 - **Migration numbers:** every HRM SQLite migration is in `lib/db/sqlite-migrations.ts`, which is in
-  `0003-database.patch` (HRM uses 9 to 24 today; upstream v0.8.5 goes up to 8). A new migration takes
+  `0003-database.patch` (HRM uses 9 to 25 today; upstream v0.8.5 goes up to 8). A new migration takes
   the next number after the highest of both. Use `IF NOT EXISTS` so a table created by an earlier build is kept. If upstream reaches the
   same number, renumber the HRM migration above upstream's highest before building. The weekly check flags this.
 - **App mapping IDs:** `0002-self-hosted-fixes.patch` (was patch 0004) checks that every built-in app mapping resolves in WinGet. Run it on a
@@ -159,6 +162,23 @@ up to 5 minutes. A failed check refuses (`503`, Try again) and is not kept. Refu
 don't have access to IntuneGet. Ask HRM Support (https://support.hruthmd.org) to add you to the IT
 admins group." Cron, the status report, workflow callbacks, the packager, QA and the MCP read API
 never go through this check.
+
+Two more checks apply whether or not the group is set (security review S1, November 2026,
+`docs/security-review-2026-11.md`):
+
+- A sign-in token must be unexpired and issued to IntuneGet's own sign-in app: its `azp` (or `appid`)
+  claim must equal `AZURE_CLIENT_ID`, the same value `app/layout.tsx` hands the browser to sign in
+  with. A Graph token another app obtained is refused. While `AZURE_CLIENT_ID` and
+  `NEXT_PUBLIC_AZURE_AD_CLIENT_ID` are unset or not GUIDs, this check is off.
+- In managed-identity mode, the server's Graph token serves only `HRM_TENANT_ID` (or
+  `MCP_TENANT_ID`). A caller from another tenant gets `consent_not_granted`. Unset, any tenant is
+  served as before, so keep `HRM_TENANT_ID` set.
+
+The server can't see when someone leaves the group without a new Graph application permission, so
+their webhooks keep receiving messages. Webhooks belong to the person who added them, so before
+removing someone from the IT admins group, have them delete theirs under Settings, Notifications (or
+add the channel again under a current admin first). Afterwards only a change to the database on the
+VM removes them.
 
 Unset (or no well-formed group ID), nothing changes and Home's Server status shows "Not limited to
 a group" under Who can sign in. The status file records it as `checks.appAccess`; the watchdog doesn't

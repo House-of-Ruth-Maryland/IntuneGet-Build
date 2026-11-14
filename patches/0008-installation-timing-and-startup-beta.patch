@@ -1007,11 +1007,24 @@ index 000000000..be9004b00
 +    </div></details>
 +  </section>;
 +}
+diff --git a/components/ui/alert-dialog.tsx b/components/ui/alert-dialog.tsx
+index a0098adc5..7b42bdf90 100644
+--- a/components/ui/alert-dialog.tsx
++++ b/components/ui/alert-dialog.tsx
+@@ -34,7 +34,7 @@ const AlertDialogContent = React.forwardRef<
+     <DialogPrimitive.Content
+       ref={ref}
+       className={cn(
+-        'fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border border-overlay/10 bg-bg-elevated p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg',
++        'fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border border-overlay/10 bg-bg-elevated p-6 shadow-lg max-h-[calc(100dvh-2rem)] overflow-y-auto motion-reduce:animate-none motion-reduce:transition-none duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg',
+         className
+       )}
+       {...props}
 diff --git a/components/ui/dialog.tsx b/components/ui/dialog.tsx
-index 0bfadb0c2..022aa1827 100644
+index 0bfadb0c2..935d3eb56 100644
 --- a/components/ui/dialog.tsx
 +++ b/components/ui/dialog.tsx
-@@ -31,18 +31,20 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
+@@ -31,18 +31,21 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
  const DialogContent = React.forwardRef<
    React.ElementRef<typeof DialogPrimitive.Content>,
    React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
@@ -1031,7 +1044,8 @@ index 0bfadb0c2..022aa1827 100644
 -        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]',
 +        side === 'right'
 +          ? 'fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col bg-bg-surface border-l border-overlay/10 shadow-2xl overflow-hidden motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:slide-in-from-right motion-safe:data-[state=closed]:animate-out motion-safe:data-[state=closed]:slide-out-to-right duration-200'
-+          : 'fixed left-[50%] top-[50%] z-50 w-full max-w-lg translate-x-[-50%] translate-y-[-50%] bg-bg-surface rounded-2xl border border-overlay/10 shadow-2xl overflow-hidden duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
++          : // Security review U2 (November 2026): a long review scrolls inside the viewport, so its buttons stay reachable.
++            'fixed left-[50%] top-[50%] z-50 w-full max-w-lg translate-x-[-50%] translate-y-[-50%] bg-bg-surface rounded-2xl border border-overlay/10 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto motion-reduce:animate-none motion-reduce:transition-none duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
          className
        )}
        {...props}
