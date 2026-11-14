@@ -31,6 +31,7 @@ HRM IT notes.
 | `.github/workflows/help-check.yml` | On PRs that change patches, `upstream-ref` or `deploy/` (not `deploy/version`): run the Help check and require "Help and tooltips checked" ticked in the PR description. |
 | `docs/mcp-api.md` | The MCP read API contract (patch 0055): endpoints, parameters, response fields with fake examples, and where the server differs from the MCP Worker's first contract. |
 | `scripts/check-help.mjs` | The Help check: every on-screen label a Help section lists in `uiLabels` (patch 0034) still exists in the app, every time Help gives matches a timer in `deploy/systemd/`, and HRM's tooltips and hints keep the writing rules. Run by the build, the weekly upstream check and PRs. |
+| `scripts/migration-numbers.mjs` | Finds SQLite migration numbers the way `lib/db/sqlite-migrations.ts` defines them (`version: N,` on its own line or inline), in upstream's file and in the lines the patches add to that file only. The weekly upstream check uses it to flag HRM migrations that upstream has reached; `scripts/check-app.sh full` runs its tests. |
 
 ## Registry and sign-in
 
