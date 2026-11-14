@@ -1,0 +1,1958 @@
+diff --git a/app/api/cron/send-notifications/route.ts b/app/api/cron/send-notifications/route.ts
+index cb49b62f9..37d7f65d6 100644
+--- a/app/api/cron/send-notifications/route.ts
++++ b/app/api/cron/send-notifications/route.ts
+@@ -8,6 +8,8 @@ import { NextResponse } from 'next/server';
+ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+ import { isEmailConfigured } from '@/lib/email/service';
+ import { notifyUserOfPendingUpdates } from '@/lib/notifications/notify-user';
++import { notifySqliteWebhooks } from '@/lib/notifications/notify-sqlite';
++import { getDatabase, isSqliteMode } from '@/lib/db';
+ import type { UpdateCheckResult } from '@/types/notifications';
+ 
+ const BATCH_SIZE = 20;
+@@ -142,6 +144,32 @@ export async function GET(request: Request) {
+     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+   }
+ 
++  // Self-hosted deployments keep webhooks and detected updates in SQLite.
++  // Email needs Supabase-only preferences, so only webhooks are delivered.
++  if (isSqliteMode()) {
++    if (!process.env.CRON_SECRET) {
++      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
++    }
++    try {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const summary = await notifySqliteWebhooks(getDatabase(), sqliteWebhooks);
++      return NextResponse.json({
++        success: summary.errors.length === 0,
++        mode: 'sqlite',
++        emailsSent: 0,
++        webhooksSent: summary.webhooksSent,
++        updatesProcessed: summary.updatesProcessed,
++        channelUsers: summary.channelUsers,
++        errors: summary.errors.length > 0 ? summary.errors : undefined,
++      });
++    } catch (error) {
++      return NextResponse.json(
++        { error: error instanceof Error ? error.message : 'Notification run failed' },
++        { status: 500 }
++      );
++    }
++  }
++
+   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+ 
+diff --git a/app/api/webhooks/[id]/route.ts b/app/api/webhooks/[id]/route.ts
+index 91b19939c..3a7780629 100644
+--- a/app/api/webhooks/[id]/route.ts
++++ b/app/api/webhooks/[id]/route.ts
+@@ -8,8 +8,9 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { parseAccessToken } from '@/lib/auth-utils';
++import { isSqliteMode } from '@/lib/db';
+ import { WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE } from '@/types/notifications';
+-import { validateWebhookUrl } from '@/lib/webhooks/service';
++import { validateWebhookDestination } from '@/lib/webhooks/service';
+ import type {
+   WebhookConfiguration,
+   WebhookConfigurationUpdate,
+@@ -23,6 +24,10 @@ interface RouteParams {
+   params: Promise<{ id: string }>;
+ }
+ 
++function maskSecret(webhook: WebhookConfiguration): WebhookConfiguration {
++  return { ...webhook, secret: webhook.secret ? '********' : null };
++}
++
+ /**
+  * GET /api/webhooks/[id]
+  * Get a specific webhook configuration
+@@ -39,6 +44,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
+ 
+     const { id } = await params;
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const webhook = await sqliteWebhooks.get(id, user.userId);
++      if (!webhook) {
++        return NextResponse.json(
++          { error: 'Webhook not found' },
++          { status: 404 }
++        );
++      }
++      return NextResponse.json({ webhook: maskSecret(webhook) });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json({ error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE }, { status: 503 });
+     }
+@@ -100,7 +117,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
+ 
+     // Validate URL if provided
+     if (body.url) {
+-      const urlValidation = validateWebhookUrl(body.url);
++      const urlValidation = await validateWebhookDestination(body.url);
+       if (!urlValidation.valid) {
+         return NextResponse.json(
+           { error: urlValidation.error || 'Invalid webhook URL' },
+@@ -120,6 +137,25 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
+       );
+     }
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const changes: Parameters<typeof sqliteWebhooks.update>[2] = {};
++      if (body.name !== undefined) changes.name = body.name.trim();
++      if (body.url !== undefined) changes.url = body.url;
++      if (body.webhook_type !== undefined) changes.webhook_type = body.webhook_type;
++      if (body.headers !== undefined) changes.headers = body.headers;
++      if (body.is_enabled !== undefined) changes.is_enabled = body.is_enabled;
++      if ('secret' in body) changes.secret = body.secret ?? null;
++      const webhook = await sqliteWebhooks.update(id, user.userId, changes);
++      if (!webhook) {
++        return NextResponse.json(
++          { error: 'Webhook not found' },
++          { status: 404 }
++        );
++      }
++      return NextResponse.json({ webhook: maskSecret(webhook) });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json({ error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE }, { status: 503 });
+     }
+@@ -203,6 +239,12 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
+ 
+     const { id } = await params;
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      await sqliteWebhooks.delete(id, user.userId);
++      return NextResponse.json({ success: true });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json({ error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE }, { status: 503 });
+     }
+diff --git a/app/api/webhooks/[id]/test/route.ts b/app/api/webhooks/[id]/test/route.ts
+index 5c48ac26d..8ccb3b898 100644
+--- a/app/api/webhooks/[id]/test/route.ts
++++ b/app/api/webhooks/[id]/test/route.ts
+@@ -6,6 +6,7 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { parseAccessToken } from '@/lib/auth-utils';
++import { isSqliteMode } from '@/lib/db';
+ import { WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE } from '@/types/notifications';
+ import { sendTestWebhook } from '@/lib/webhooks/service';
+ import type { WebhookConfiguration } from '@/types/notifications';
+@@ -34,6 +35,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
+ 
+     const { id } = await params;
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const webhook = await sqliteWebhooks.get(id, user.userId);
++      if (!webhook) {
++        return NextResponse.json(
++          { error: 'Webhook not found' },
++          { status: 404 }
++        );
++      }
++      const result = await sendTestWebhook(webhook);
++      await sqliteWebhooks.recordResult(id, result.success);
++      return NextResponse.json({
++        success: result.success,
++        statusCode: result.statusCode,
++        error: result.error,
++      });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json({ error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE }, { status: 503 });
+     }
+diff --git a/app/api/webhooks/route.sqlite.test.ts b/app/api/webhooks/route.sqlite.test.ts
+new file mode 100644
+index 000000000..f864e8b2e
+--- /dev/null
++++ b/app/api/webhooks/route.sqlite.test.ts
+@@ -0,0 +1,132 @@
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++// Test addresses don't resolve in DNS; keep the no-network checks (HRM address guard).
++vi.mock('@/lib/webhooks/address-guard', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@/lib/webhooks/address-guard')>();
++  return { ...actual, checkWebhookDestination: async (url: string) => actual.checkWebhookUrlShape(url) };
++});
++
++const parseAccessTokenMock = vi.hoisted(() => vi.fn());
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: parseAccessTokenMock }));
++
++let tempDir: string;
++let list: typeof import('@/app/api/webhooks/route');
++let item: typeof import('@/app/api/webhooks/[id]/route');
++let test: typeof import('@/app/api/webhooks/[id]/test/route');
++let cron: typeof import('@/app/api/cron/send-notifications/route');
++
++beforeEach(async () => {
++  vi.resetModules();
++  tempDir = mkdtempSync(join(tmpdir(), 'intuneget-webhooks-'));
++  process.env.DATABASE_MODE = 'sqlite';
++  process.env.DATABASE_PATH = join(tempDir, 'app.db');
++  process.env.CRON_SECRET = 'cron-fixture';
++  parseAccessTokenMock.mockReset();
++  parseAccessTokenMock.mockResolvedValue({ userId: 'u1' });
++  vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
++  vi.doMock('@/lib/db', async () => {
++    const sqlite = await import('@/lib/db/sqlite');
++    return { getDatabase: () => sqlite.sqliteDb, isSqliteMode: () => true, resetDatabaseInstance: () => {} };
++  });
++  list = await import('@/app/api/webhooks/route');
++  item = await import('@/app/api/webhooks/[id]/route');
++  test = await import('@/app/api/webhooks/[id]/test/route');
++  cron = await import('@/app/api/cron/send-notifications/route');
++});
++
++afterEach(async () => {
++  const { closeSqliteDb } = await import('@/lib/db/sqlite');
++  closeSqliteDb();
++  rmSync(tempDir, { recursive: true, force: true });
++  delete process.env.DATABASE_MODE;
++  delete process.env.DATABASE_PATH;
++  delete process.env.CRON_SECRET;
++  vi.unstubAllGlobals();
++});
++
++const request = (url: string, method = 'GET', body?: unknown) => new NextRequest(`http://localhost${url}`, {
++  method, headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' },
++  body: body === undefined ? undefined : JSON.stringify(body),
++});
++const params = (id: string) => ({ params: Promise.resolve({ id }) });
++const valid = { name: ' Teams alerts ', url: 'https://example.test/hook', webhook_type: 'teams', secret: 'fixture-secret' };
++
++async function create(body: unknown = valid) {
++  return list.POST(request('/api/webhooks', 'POST', body));
++}
++
++describe('webhooks in SQLite mode', () => {
++  it('creates, lists, updates and deletes a webhook with the secret masked', async () => {
++    const created = await create();
++    expect(created.status).toBe(201);
++    const { webhook } = await created.json();
++    expect(webhook).toMatchObject({ name: 'Teams alerts', webhook_type: 'teams', secret: '********', headers: {}, is_enabled: true, failure_count: 0 });
++
++    expect((await (await list.GET(request('/api/webhooks'))).json()).webhooks).toHaveLength(1);
++
++    const updated = await item.PUT(request(`/api/webhooks/${webhook.id}`, 'PUT', { is_enabled: false, secret: null, headers: { 'X-Fixture': '1' } }), params(webhook.id));
++    expect(await updated.json()).toEqual({ webhook: expect.objectContaining({ is_enabled: false, secret: null, headers: { 'X-Fixture': '1' } }) });
++
++    expect((await item.DELETE(request(`/api/webhooks/${webhook.id}`, 'DELETE'), params(webhook.id))).status).toBe(200);
++    expect((await item.GET(request(`/api/webhooks/${webhook.id}`), params(webhook.id))).status).toBe(404);
++  });
++
++  it('keeps webhooks private to their owner', async () => {
++    const { webhook } = await (await create()).json();
++    parseAccessTokenMock.mockResolvedValue({ userId: 'u2' });
++    expect((await (await list.GET(request('/api/webhooks'))).json()).webhooks).toEqual([]);
++    expect((await item.GET(request(`/api/webhooks/${webhook.id}`), params(webhook.id))).status).toBe(404);
++    expect((await item.PUT(request(`/api/webhooks/${webhook.id}`, 'PUT', { name: 'x' }), params(webhook.id))).status).toBe(404);
++    expect((await test.POST(request(`/api/webhooks/${webhook.id}/test`, 'POST'), params(webhook.id))).status).toBe(404);
++    await item.DELETE(request(`/api/webhooks/${webhook.id}`, 'DELETE'), params(webhook.id));
++    parseAccessTokenMock.mockResolvedValue({ userId: 'u1' });
++    expect((await item.GET(request(`/api/webhooks/${webhook.id}`), params(webhook.id))).status).toBe(200);
++  });
++
++  it('enforces the ten webhook limit', async () => {
++    for (let i = 0; i < 10; i++) expect((await create()).status).toBe(201);
++    expect((await create()).status).toBe(400);
++  });
++
++  it('sends a test payload and records the result', async () => {
++    const { webhook } = await (await create()).json();
++    const response = await test.POST(request(`/api/webhooks/${webhook.id}/test`, 'POST'), params(webhook.id));
++    expect(await response.json()).toMatchObject({ success: true, statusCode: 200 });
++    expect(fetch).toHaveBeenCalledWith('https://example.test/hook', expect.anything());
++    const stored = (await (await item.GET(request(`/api/webhooks/${webhook.id}`), params(webhook.id))).json()).webhook;
++    expect(stored.last_success_at).toEqual(expect.any(String));
++  });
++
++  it('delivers pending updates once and again when a newer version appears', async () => {
++    await create();
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    const detected = { user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'i1', display_name: 'Vendor App', current_version: '1.0', latest_version: '2.0' };
++    await sqliteDb.updateCheckResults.upsert(detected);
++    const run = async () => (await cron.GET(new Request('http://localhost/api/cron/send-notifications', { headers: { authorization: 'Bearer cron-fixture' } }))).json();
++
++    expect(await run()).toMatchObject({ mode: 'sqlite', webhooksSent: 1, updatesProcessed: 1 });
++    expect(await run()).toMatchObject({ webhooksSent: 0, updatesProcessed: 0 });
++
++    await sqliteDb.updateCheckResults.upsert(detected);
++    expect(await run()).toMatchObject({ webhooksSent: 0 });
++    await sqliteDb.updateCheckResults.upsert({ ...detected, latest_version: '3.0' });
++    expect(await run()).toMatchObject({ webhooksSent: 1, updatesProcessed: 1 });
++  });
++
++  it('leaves ignored apps pending and rejects an unauthenticated run', async () => {
++    await create();
++    const { sqliteDb } = await import('@/lib/db/sqlite');
++    await sqliteDb.updateCheckResults.upsert({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', intune_app_id: 'i1', display_name: 'Vendor App', current_version: '1.0', latest_version: '2.0' });
++    await sqliteDb.updatePolicies.upsert({ user_id: 'u1', tenant_id: 't1', winget_id: 'Vendor.App', policy_type: 'ignore' });
++
++    const unauthorized = await cron.GET(new Request('http://localhost/api/cron/send-notifications'));
++    expect(unauthorized.status).toBe(401);
++    const response = await cron.GET(new Request('http://localhost/api/cron/send-notifications', { headers: { authorization: 'Bearer cron-fixture' } }));
++    expect(await response.json()).toMatchObject({ webhooksSent: 0, updatesProcessed: 0 });
++    expect(fetch).not.toHaveBeenCalled();
++  });
++});
+diff --git a/app/api/webhooks/route.test.ts b/app/api/webhooks/route.test.ts
+index 0793570ec..fe7bb0d7d 100644
+--- a/app/api/webhooks/route.test.ts
++++ b/app/api/webhooks/route.test.ts
+@@ -1,6 +1,12 @@
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { NextRequest } from 'next/server';
+ 
++// Test addresses don't resolve in DNS; keep the no-network checks (HRM address guard).
++vi.mock('@/lib/webhooks/address-guard', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@/lib/webhooks/address-guard')>();
++  return { ...actual, checkWebhookDestination: async (url: string) => actual.checkWebhookUrlShape(url) };
++});
++
+ const fixture = vi.hoisted(() => ({ allowed: true, client: null as unknown }));
+ const clientFactory = vi.hoisted(() => vi.fn());
+ vi.mock('@/lib/auth-utils', () => ({
+@@ -25,7 +31,7 @@ const unavailable = { error: 'Webhook notifications require Supabase to be confi
+ beforeEach(() => {
+   vi.resetModules(); vi.doUnmock('@/lib/supabase');
+   fixture.allowed = true; fixture.client = null; clientFactory.mockClear();
+-  vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '');
++  vi.stubEnv('DATABASE_MODE', 'supabase'); vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '');
+   vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', ''); vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', '');
+   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Network forbidden in route tests'); }));
+ });
+diff --git a/app/api/webhooks/route.ts b/app/api/webhooks/route.ts
+index afe64c65b..0d957293f 100644
+--- a/app/api/webhooks/route.ts
++++ b/app/api/webhooks/route.ts
+@@ -7,13 +7,18 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { parseAccessToken } from '@/lib/auth-utils';
+-import { validateWebhookUrl, detectWebhookType } from '@/lib/webhooks/service';
++import { isSqliteMode } from '@/lib/db';
++import { validateWebhookDestination, detectWebhookType } from '@/lib/webhooks/service';
+ import { WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE } from '@/types/notifications';
+ import type {
+   WebhookConfiguration,
+   WebhookConfigurationInput,
+ } from '@/types/notifications';
+ 
++function maskSecret(webhook: WebhookConfiguration): WebhookConfiguration {
++  return { ...webhook, secret: webhook.secret ? '********' : null };
++}
++
+ /**
+  * GET /api/webhooks
+  * List all webhook configurations for the user
+@@ -28,6 +33,12 @@ export async function GET(request: NextRequest) {
+       );
+     }
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      const webhooks = await sqliteWebhooks.list(user.userId);
++      return NextResponse.json({ webhooks: webhooks.map(maskSecret) });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json(
+         { error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE },
+@@ -99,7 +110,7 @@ export async function POST(request: NextRequest) {
+     }
+ 
+     // Validate URL
+-    const urlValidation = validateWebhookUrl(body.url);
++    const urlValidation = await validateWebhookDestination(body.url);
+     if (!urlValidation.valid) {
+       return NextResponse.json(
+         { error: urlValidation.error || 'Invalid webhook URL' },
+@@ -121,6 +132,25 @@ export async function POST(request: NextRequest) {
+       );
+     }
+ 
++    if (isSqliteMode()) {
++      const { sqliteWebhooks } = await import('@/lib/db/sqlite');
++      if ((await sqliteWebhooks.count(user.userId)) >= 10) {
++        return NextResponse.json(
++          { error: 'Maximum of 10 webhooks allowed per user' },
++          { status: 400 }
++        );
++      }
++      const webhook = await sqliteWebhooks.create(user.userId, {
++        name: body.name.trim(),
++        url: body.url,
++        webhook_type: webhookType,
++        secret: body.secret || null,
++        headers: body.headers || {},
++        is_enabled: body.is_enabled ?? true,
++      });
++      return NextResponse.json({ webhook: maskSecret(webhook) }, { status: 201 });
++    }
++
+     if (!isSupabaseServerConfigured()) {
+       return NextResponse.json(
+         { error: WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE },
+diff --git a/components/settings/NotificationSettings.tsx b/components/settings/NotificationSettings.tsx
+index e3745b86d..986bf44d7 100644
+--- a/components/settings/NotificationSettings.tsx
++++ b/components/settings/NotificationSettings.tsx
+@@ -160,7 +160,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
+           <Bell className="w-5 h-5 text-accent-cyan" />
+         </div>
+         <div>
+-          <h2 className="text-lg font-semibold text-text-primary">Email Notifications</h2>
++          <h2 className="text-lg font-semibold text-text-primary">Email notifications</h2>
+           <p className="text-sm text-text-secondary">Get notified when app updates are available</p>
+         </div>
+       </div>
+@@ -188,7 +188,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
+         {/* Enable toggle */}
+         <div className="flex items-center justify-between">
+           <div>
+-            <p className="text-text-primary font-medium">Enable Email Notifications</p>
++            <p className="text-text-primary font-medium">Enable email notifications</p>
+             <p className="text-sm text-text-secondary">Receive email alerts for app updates</p>
+           </div>
+           <label className="relative inline-flex items-center cursor-pointer">
+@@ -216,7 +216,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
+ 
+         {/* Frequency */}
+         <div className={cn(!preferences.email_enabled && 'opacity-50 pointer-events-none')}>
+-          <p className="text-text-primary font-medium mb-2">Notification Frequency</p>
++          <p className="text-text-primary font-medium mb-2">Notification frequency</p>
+           <div className="flex gap-2">
+             {(['immediate', 'daily', 'weekly'] as EmailFrequency[]).map((freq) => (
+               <button
+@@ -242,7 +242,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
+ 
+         {/* Override email */}
+         <div className={cn(!preferences.email_enabled && 'opacity-50 pointer-events-none')}>
+-          <p className="text-text-primary font-medium mb-2">Email Address</p>
++          <p className="text-text-primary font-medium mb-2">Email address</p>
+           <Input
+             type="email"
+             placeholder={user?.email || 'your@email.com'}
+@@ -266,7 +266,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
+           !preferences.email_enabled && 'opacity-50 pointer-events-none'
+         )}>
+           <div>
+-            <p className="text-text-primary font-medium">Critical Updates Only</p>
++            <p className="text-text-primary font-medium">Critical updates only</p>
+             <p className="text-sm text-text-secondary">Only notify for major version updates</p>
+           </div>
+           <label className="relative inline-flex items-center cursor-pointer">
+@@ -317,7 +317,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
+                 Saving...
+               </>
+             ) : (
+-              'Save Preferences'
++              'Save preferences'
+             )}
+           </Button>
+ 
+@@ -336,7 +336,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
+               ) : (
+                 <>
+                   <Send className="w-4 h-4 mr-2" />
+-                  Send Test Email
++                  Send test email
+                 </>
+               )}
+             </Button>
+diff --git a/components/settings/WebhookFormModal.tsx b/components/settings/WebhookFormModal.tsx
+index 4c1fcf4f1..1f977f084 100644
+--- a/components/settings/WebhookFormModal.tsx
++++ b/components/settings/WebhookFormModal.tsx
+@@ -162,7 +162,7 @@ export function WebhookFormModal({
+         {/* Header */}
+         <div className="flex items-center justify-between p-4 border-b border-overlay/5">
+           <h2 className="text-lg font-semibold text-text-primary">
+-            {initialData ? 'Edit Webhook' : 'Add Webhook'}
++            {initialData ? 'Edit webhook' : 'Add webhook'}
+           </h2>
+           <button
+             onClick={onClose}
+@@ -182,7 +182,7 @@ export function WebhookFormModal({
+             <Input
+               value={formData.name}
+               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+-              placeholder="My Slack Webhook"
++              placeholder="IT Ops Teams channel"
+               className="bg-bg-elevated border-overlay/10 text-text-primary"
+             />
+           </div>
+@@ -263,7 +263,7 @@ export function WebhookFormModal({
+             <div>
+               <div className="flex items-center justify-between mb-2">
+                 <label className="block text-sm font-medium text-text-primary">
+-                  Custom Headers
++                  Custom headers
+                 </label>
+                 <Button
+                   type="button"
+@@ -273,7 +273,7 @@ export function WebhookFormModal({
+                   className="border-overlay/10 text-xs"
+                 >
+                   <Plus className="w-3 h-3 mr-1" />
+-                  Add Header
++                  Add header
+                 </Button>
+               </div>
+ 
+@@ -337,9 +337,9 @@ export function WebhookFormModal({
+                   Saving...
+                 </>
+               ) : initialData ? (
+-                'Update Webhook'
++                'Save webhook'
+               ) : (
+-                'Add Webhook'
++                'Add webhook'
+               )}
+             </Button>
+           </div>
+diff --git a/components/settings/WebhookManager.tsx b/components/settings/WebhookManager.tsx
+index 5c95c6717..d1674eafc 100644
+--- a/components/settings/WebhookManager.tsx
++++ b/components/settings/WebhookManager.tsx
+@@ -270,7 +270,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+             <Webhook className="w-5 h-5 text-accent-violet" />
+           </div>
+           <div>
+-            <h2 className="text-lg font-semibold text-text-primary">Webhook Notifications</h2>
++            <h2 className="text-lg font-semibold text-text-primary">Webhook notifications</h2>
+             <p className="text-sm text-text-secondary">Send updates to Slack, Teams, or Discord</p>
+           </div>
+         </div>
+@@ -282,7 +282,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+           className="bg-accent-violet hover:bg-accent-violet/80 text-white"
+         >
+           <Plus className="w-4 h-4 mr-2" />
+-          Add Webhook
++          Add webhook
+         </Button>
+       </div>
+ 
+diff --git a/components/settings/notification-setup-guidance.test.ts b/components/settings/notification-setup-guidance.test.ts
+index 0b4cc7cbe..a9c94a887 100644
+--- a/components/settings/notification-setup-guidance.test.ts
++++ b/components/settings/notification-setup-guidance.test.ts
+@@ -56,14 +56,14 @@ describe('webhook notification setup guidance', () => {
+     expect(document.body.textContent).toContain(WEBHOOK_STORAGE_UNAVAILABLE_MESSAGE);
+     expect(document.body.textContent).not.toContain('No webhooks configured');
+     expect(guideLink()).not.toBeNull();
+-    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add Webhook'));
++    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add webhook'));
+     expect(add?.disabled).toBe(true);
+   });
+   it('keeps adding webhooks available when storage is configured', async () => {
+     await render(WebhookManager, Response.json({ webhooks: [] }));
+     expect(document.body.textContent).toContain('No webhooks configured');
+     expect(guideLink()).toBeNull();
+-    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add Webhook'));
++    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add webhook'));
+     expect(add?.disabled).toBe(false);
+   });
+ });
+diff --git a/docs/SELF_HOSTING.md b/docs/SELF_HOSTING.md
+index 728d2a802..290fc89de 100644
+--- a/docs/SELF_HOSTING.md
++++ b/docs/SELF_HOSTING.md
+@@ -187,18 +187,32 @@ Optional catalog snapshot overrides (sensible defaults, normally unset):
+ > Note: app update policies and their auto-update history are stored locally in
+ > SQLite. Manual package links and app claims also stay in SQLite and are
+ > reflected when refreshing unmanaged apps for the signed in tenant.
+-> Other Supabase-backed surfaces (dashboard history, notifications,
+-> automatic update triggering, and MSP features) still require Supabase; the
+-> catalog and update policies run Supabase-less.
++> Webhook notifications are also stored in SQLite (see Notification
++> Configuration). Other Supabase-backed surfaces (dashboard history, email
++> notifications, automatic update triggering, and MSP features) still require
++> Supabase; the catalog and update policies run Supabase-less.
+ 
+ ### Notification Configuration
+ 
+-Email preferences, webhook configurations, and notification history require
+-Supabase. A deployment using only SQLite cannot store these settings.
+-**Settings → Notifications** shows which configuration is missing and links to
+-this section.
++Webhook notifications (Slack, Teams, Discord, or custom endpoints) work with
++`DATABASE_MODE=sqlite`. Webhook configurations are stored in the local
++database. To deliver them, schedule the notification endpoint after the update
++check described in [Automatic updates](#automatic-updates-sqlite-mode):
+ 
+-To enable notifications, complete the [Supabase setup](DATABASE_SETUP.md),
++```cron
++45 3 * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://intune.example.com/api/cron/send-notifications
++```
++
++Each run sends every update that has not been notified yet to the owner's
++enabled webhooks, grouped by tenant, and an update is sent again only when a
++newer version is detected. Ignored and pinned apps are skipped, as in the
++hosted service. SQLite mode does not keep notification history.
++
++Email preferences and notification history require Supabase. A deployment using
++only SQLite cannot store these settings. **Settings → Notifications** shows
++which configuration is missing and links to this section.
++
++To enable email notifications, complete the [Supabase setup](DATABASE_SETUP.md),
+ including its migrations, and configure the server environment variables
+ `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
+ `SUPABASE_SERVICE_ROLE_KEY`. Keep the service role key on the server.
+@@ -406,7 +420,8 @@ twice a day, matching the catalog sync.
+ 
+ Differences from the hosted service: the self-hosted check uses the catalog
+ only (no live Intune query), and it does not run hosted QA, send
+-notifications, or require tenant consent. Rate limits and the failure circuit
++notifications (schedule `/api/cron/send-notifications` for webhooks), or
++require tenant consent. Rate limits and the failure circuit
+ breaker still apply, and jobs are created in `queued` state for the local
+ packager.
+ 
+diff --git a/lib/notifications/notify-deployment.test.ts b/lib/notifications/notify-deployment.test.ts
+new file mode 100644
+index 000000000..65bb12283
+--- /dev/null
++++ b/lib/notifications/notify-deployment.test.ts
+@@ -0,0 +1,54 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import type { PackagingJob } from '@/lib/db/types';
++import type { WebhookConfiguration } from '@/types/notifications';
++
++const mocks = vi.hoisted(() => ({ deliver: vi.fn(), sqliteMode: vi.fn() }));
++vi.mock('@/lib/webhooks/service', () => ({ deliverFormattedWebhook: mocks.deliver }));
++vi.mock('@/lib/db', () => ({ isSqliteMode: mocks.sqliteMode }));
++
++import { notifyDeploymentWebhooks } from './notify-deployment';
++
++const webhook = (id: string, user: string, type: WebhookConfiguration['webhook_type'] = 'teams') =>
++  ({ id, user_id: user, name: `Hook ${id}`, url: `https://hooks.example.test/${id}`, webhook_type: type, secret: null, headers: {}, is_enabled: true, failure_count: 0 }) as unknown as WebhookConfiguration;
++const job = (status: string) => ({ id: 'job-1', status, display_name: 'Example App', winget_id: 'Example.App', version: '1.0', user_email: 'attorney.one@example.test' }) as PackagingJob;
++const store = (hooks: WebhookConfiguration[]) => ({ listAllEnabled: vi.fn().mockResolvedValue(hooks), recordResult: vi.fn().mockResolvedValue(undefined) });
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.sqliteMode.mockReturnValue(true);
++  mocks.deliver.mockResolvedValue({ success: true });
++});
++
++describe('notifyDeploymentWebhooks', () => {
++  it('sends to every enabled webhook across users and records each result', async () => {
++    const hooks = [webhook('a', 'user-1'), webhook('b', 'user-2', 'slack')];
++    const s = store(hooks);
++    mocks.deliver.mockResolvedValueOnce({ success: true }).mockResolvedValueOnce({ success: false, error: 'HTTP 404' });
++    const summary = await notifyDeploymentWebhooks(job('deployed'), s);
++    expect(mocks.deliver).toHaveBeenCalledTimes(2);
++    expect(mocks.deliver.mock.calls[0][1]).toMatchObject({ type: 'message' });
++    expect(mocks.deliver.mock.calls[1][1]).toHaveProperty('blocks');
++    expect(s.recordResult).toHaveBeenNthCalledWith(1, 'a', true);
++    expect(s.recordResult).toHaveBeenNthCalledWith(2, 'b', false);
++    expect(summary).toEqual({ webhooksSent: 1, errors: ['Webhook Hook b failed: HTTP 404'] });
++  });
++
++  it('sends failed jobs too', async () => {
++    const s = store([webhook('a', 'user-1')]);
++    await notifyDeploymentWebhooks(job('failed'), s);
++    expect(mocks.deliver).toHaveBeenCalledTimes(1);
++  });
++
++  it('ignores other statuses', async () => {
++    const s = store([webhook('a', 'user-1')]);
++    for (const status of ['duplicate_skipped', 'cancelled', 'packaging']) await notifyDeploymentWebhooks(job(status), s);
++    expect(s.listAllEnabled).not.toHaveBeenCalled();
++    expect(mocks.deliver).not.toHaveBeenCalled();
++  });
++
++  it('does nothing in hosted (Supabase) mode', async () => {
++    mocks.sqliteMode.mockReturnValue(false);
++    expect(await notifyDeploymentWebhooks(job('deployed'))).toEqual({ webhooksSent: 0, errors: [] });
++    expect(mocks.deliver).not.toHaveBeenCalled();
++  });
++});
+diff --git a/lib/notifications/notify-deployment.ts b/lib/notifications/notify-deployment.ts
+new file mode 100644
+index 000000000..c89bb0d29
+--- /dev/null
++++ b/lib/notifications/notify-deployment.ts
+@@ -0,0 +1,53 @@
++/**
++ * Deployment result webhooks for self-hosted SQLite deployments (HRM patch).
++ *
++ * When a packaging job finishes as deployed or failed, post one message to
++ * every enabled webhook on this server, whoever owns it, so a shared channel
++ * sees every deployment. SQLite mode has no tenant table, so "every webhook"
++ * assumes the server serves one Intune tenant.
++ */
++
++import { isSqliteMode } from '@/lib/db';
++import type { PackagingJob } from '@/lib/db/types';
++import type { sqliteWebhooks as SqliteWebhooks } from '@/lib/db/sqlite';
++import { formatDeploymentPayload } from '@/lib/webhooks/deployment-formatters';
++import { deliverFormattedWebhook } from '@/lib/webhooks/service';
++
++export type DeploymentWebhookStore = Pick<typeof SqliteWebhooks, 'listAllEnabled' | 'recordResult'>;
++
++export interface DeploymentNotifySummary {
++  webhooksSent: number;
++  errors: string[];
++}
++
++/**
++ * Send a finished job to every enabled webhook. Hosted (Supabase) mode is
++ * left to upstream's MSP deployment events.
++ */
++export async function notifyDeploymentWebhooks(
++  job: PackagingJob,
++  store?: DeploymentWebhookStore
++): Promise<DeploymentNotifySummary> {
++  const summary: DeploymentNotifySummary = { webhooksSent: 0, errors: [] };
++  if (job.status !== 'deployed' && job.status !== 'failed') return summary;
++
++  if (!store) {
++    if (!isSqliteMode()) return summary;
++    store = (await import('@/lib/db/sqlite')).sqliteWebhooks;
++  }
++
++  for (const webhook of await store.listAllEnabled()) {
++    const result = await deliverFormattedWebhook(webhook, formatDeploymentPayload(webhook.webhook_type, job));
++    await store.recordResult(webhook.id, result.success);
++    if (result.success) {
++      summary.webhooksSent++;
++    } else {
++      summary.errors.push(`Webhook ${webhook.name} failed: ${result.error}`);
++    }
++  }
++
++  if (summary.errors.length > 0) {
++    console.warn(`[Deployment webhooks] ${summary.errors.length} delivery error(s) for job ${job.id}`, summary.errors);
++  }
++  return summary;
++}
+diff --git a/lib/notifications/notify-install-failures.ts b/lib/notifications/notify-install-failures.ts
+new file mode 100644
+index 000000000..5e04dfdd6
+--- /dev/null
++++ b/lib/notifications/notify-install-failures.ts
+@@ -0,0 +1,28 @@
++/**
++ * HRM patch 0019: tell every enabled webhook when apps' failed install counts go up.
++ * Like deployment results, this is server-wide (SQLite mode serves one tenant).
++ */
++
++import type { sqliteWebhooks as SqliteWebhooks } from '@/lib/db/sqlite';
++import type { InstallStatusRecord } from '@/lib/hrm/install-status';
++import { buildInstallFailureData, formatInstallFailurePayload } from '@/lib/webhooks/install-failure-formatters';
++import { deliverFormattedWebhook } from '@/lib/webhooks/service';
++
++export type InstallFailureWebhookStore = Pick<typeof SqliteWebhooks, 'listAllEnabled' | 'recordResult'>;
++
++export async function notifyInstallFailures(
++  records: InstallStatusRecord[],
++  store: InstallFailureWebhookStore,
++  now = new Date()
++): Promise<{ webhooksSent: number; errors: string[] }> {
++  const summary = { webhooksSent: 0, errors: [] as string[] };
++  if (records.length === 0) return summary;
++  const data = buildInstallFailureData(records, now);
++  for (const webhook of await store.listAllEnabled()) {
++    const result = await deliverFormattedWebhook(webhook, formatInstallFailurePayload(webhook.webhook_type, data));
++    await store.recordResult(webhook.id, result.success);
++    if (result.success) summary.webhooksSent++;
++    else summary.errors.push(`Webhook ${webhook.name} failed: ${result.error}`);
++  }
++  return summary;
++}
+diff --git a/lib/notifications/notify-sqlite.ts b/lib/notifications/notify-sqlite.ts
+new file mode 100644
+index 000000000..92af7aa61
+--- /dev/null
++++ b/lib/notifications/notify-sqlite.ts
+@@ -0,0 +1,103 @@
++/**
++ * Webhook notifications for self-hosted SQLite deployments.
++ *
++ * Mirrors the webhook half of notifyUserOfPendingUpdates against the local
++ * database. Email preferences, user profiles, and notification history live
++ * only in Supabase, so this path delivers webhooks and nothing else.
++ */
++
++import type { DatabaseAdapter } from '@/lib/db/types';
++import type { sqliteWebhooks as SqliteWebhooks } from '@/lib/db/sqlite';
++import { deliverWebhook } from '@/lib/webhooks/service';
++import type { AppUpdate, NotificationPayload, UpdateCheckResult } from '@/types/notifications';
++import { shouldSkipUpdate } from '@/types/update-policies';
++
++export interface SqliteNotifySummary {
++  webhooksSent: number;
++  updatesProcessed: number;
++  channelUsers: number;
++  errors: string[];
++}
++
++/**
++ * Deliver every pending update to its owner's enabled webhooks and mark the
++ * delivered updates notified. As in the hosted path, updates skipped by an
++ * ignore or pin policy stay pending, and updates no webhook accepted are
++ * retried on the next run.
++ */
++export async function notifySqliteWebhooks(
++  db: DatabaseAdapter,
++  webhooks: typeof SqliteWebhooks
++): Promise<SqliteNotifySummary> {
++  const summary: SqliteNotifySummary = { webhooksSent: 0, updatesProcessed: 0, channelUsers: 0, errors: [] };
++  const userIds = await webhooks.listUsersWithEnabled();
++  summary.channelUsers = userIds.length;
++
++  for (const userId of userIds) {
++    const pending = await webhooks.listPendingUpdates(userId);
++    if (pending.length === 0) continue;
++
++    const policies = await db.updatePolicies.list(userId);
++    const policyByApp = new Map(policies.map((policy) => [`${policy.tenant_id}:${policy.winget_id}`, policy]));
++    const updates = pending.filter(
++      (u) => !shouldSkipUpdate(policyByApp.get(`${u.tenant_id}:${u.winget_id}`), u.latest_version)
++    );
++    if (updates.length === 0) continue;
++
++    const tenantUpdates = new Map<string, UpdateCheckResult[]>();
++    updates.forEach((u) => {
++      if (!tenantUpdates.has(u.tenant_id)) {
++        tenantUpdates.set(u.tenant_id, []);
++      }
++      tenantUpdates.get(u.tenant_id)!.push(u);
++    });
++
++    const userWebhooks = await webhooks.listEnabled(userId);
++    const notifiedIds: string[] = [];
++
++    for (const [tenantId, tenantUpdateList] of tenantUpdates) {
++      const appUpdates: AppUpdate[] = tenantUpdateList.map((u) => ({
++        app_name: u.display_name,
++        winget_id: u.winget_id,
++        intune_app_id: u.intune_app_id,
++        current_version: u.current_version,
++        latest_version: u.latest_version,
++        is_critical: u.is_critical,
++      }));
++
++      const payload: NotificationPayload = {
++        event: 'app_updates_available',
++        timestamp: new Date().toISOString(),
++        tenant_id: tenantId,
++        updates: appUpdates,
++        summary: { total: appUpdates.length, critical: appUpdates.filter((u) => u.is_critical).length },
++      };
++
++      let delivered = false;
++      for (const webhook of userWebhooks) {
++        const result = await deliverWebhook(webhook, payload);
++        await webhooks.recordResult(webhook.id, result.success);
++        // Keep the in-memory count current so the circuit breaker sees
++        // failures from earlier tenants in this run.
++        webhook.failure_count = result.success ? 0 : webhook.failure_count + 1;
++        if (!result.success) webhook.last_failure_at = new Date().toISOString();
++
++        if (result.success) {
++          delivered = true;
++          summary.webhooksSent++;
++        } else {
++          summary.errors.push(`Webhook ${webhook.name} failed: ${result.error}`);
++        }
++      }
++
++      if (delivered) {
++        notifiedIds.push(...tenantUpdateList.map((u) => u.id));
++      }
++    }
++
++    await webhooks.markNotified(notifiedIds);
++    summary.updatesProcessed += notifiedIds.length;
++  }
++
++  return summary;
++}
+diff --git a/lib/webhooks/address-guard.test.ts b/lib/webhooks/address-guard.test.ts
+new file mode 100644
+index 000000000..71d571c10
+--- /dev/null
++++ b/lib/webhooks/address-guard.test.ts
+@@ -0,0 +1,81 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++
++const lookupMock = vi.fn();
++let lookupFails = false;
++vi.mock('dns/promises', () => ({
++  lookup: async (...args: unknown[]) => {
++    if (lookupFails) throw new Error('getaddrinfo ENOTFOUND');
++    return lookupMock(...args);
++  },
++}));
++
++import { checkWebhookDestination, checkWebhookUrlShape, isBlockedAddress } from './address-guard';
++
++beforeEach(() => {
++  lookupMock.mockReset();
++  lookupFails = false;
++});
++
++describe('isBlockedAddress', () => {
++  it.each([
++    '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1',
++    '0.0.0.0', '224.0.0.1', '255.255.255.255', '::1', '::', 'fd00::1', 'fe80::1', 'ff02::1',
++    '::ffff:127.0.0.1', '::ffff:7f00:1', '64:ff9b::10.0.0.1', '64:ff9b::a00:1', '::ffff:a9fe:a9fe', 'not-an-ip',
++  ])('blocks %s', (address) => expect(isBlockedAddress(address)).toBe(true));
++
++  it.each(['20.42.65.92', '172.32.0.1', '8.8.8.8', '2606:4700::1111', '::ffff:8.8.8.8', '::ffff:808:808'])('allows %s', (address) =>
++    expect(isBlockedAddress(address)).toBe(false)
++  );
++});
++
++describe('checkWebhookUrlShape', () => {
++  it.each([
++    ['http://hooks.example.test/x', 'https://'],
++    ['https://localhost/x', 'must be public'],
++    ['https://app.internal/x', 'must be public'],
++    ['https://intranet/x', 'must be public'],
++    ['https://169.254.169.254/metadata', 'must be public'],
++    ['https://[::1]/x', 'must be public'],
++    ['https://user:pass@hooks.example.test/x', 'header'],
++    ['not a url', 'https://'],
++  ])('refuses %s', (url, message) => {
++    const result = checkWebhookUrlShape(url);
++    expect(result.ok).toBe(false);
++    expect(result.error).toContain(message);
++  });
++
++  it('accepts a public https address', () => {
++    expect(checkWebhookUrlShape('https://alerts.example.test/in/abc')).toEqual({ ok: true });
++  });
++});
++
++describe('checkWebhookDestination', () => {
++  it('accepts a name that resolves only to public addresses', async () => {
++    lookupMock.mockResolvedValue([{ address: '104.16.1.1', family: 4 }, { address: '2606:4700::1', family: 6 }]);
++    expect(await checkWebhookDestination('https://alerts.example.test/in/abc')).toEqual({ ok: true });
++  });
++
++  it('refuses a public-looking name that resolves to a private address', async () => {
++    lookupMock.mockResolvedValue([{ address: '104.16.1.1', family: 4 }, { address: '10.0.0.4', family: 4 }]);
++    expect((await checkWebhookDestination('https://sneaky.example.test/x')).ok).toBe(false);
++  });
++
++  it('refuses a name that does not resolve', async () => {
++    lookupFails = true;
++    const result = await checkWebhookDestination('https://missing.example.test/x');
++    expect(result.ok).toBe(false);
++    expect(result.error).toContain("Couldn't find");
++  });
++
++  it('does not look up names it already refused', async () => {
++    expect((await checkWebhookDestination('https://localhost/x')).ok).toBe(false);
++    expect(lookupMock).not.toHaveBeenCalled();
++  });
++});
++
++// HRM patch 0024: URL parsing writes embedded IPv4 in hex
++describe('IPv6 literals in URLs', () => {
++  it('refuses a NAT64 private address however it is written', () => {
++    expect(checkWebhookUrlShape('https://[64:ff9b::10.0.0.1]/x').ok).toBe(false);
++  });
++});
+diff --git a/lib/webhooks/address-guard.ts b/lib/webhooks/address-guard.ts
+new file mode 100644
+index 000000000..3ed744b8f
+--- /dev/null
++++ b/lib/webhooks/address-guard.ts
+@@ -0,0 +1,105 @@
++/**
++ * HRM patch: webhook addresses must be public.
++ *
++ * A webhook URL is typed by a signed-in user, and the server then POSTs to it.
++ * Without this check it could be pointed at the server itself, the private
++ * network or the Azure metadata address. Checked when a webhook is saved and
++ * again before every delivery (DNS can change in between); redirects are not
++ * followed, so a public address can't bounce the request inward.
++ */
++
++import { lookup } from 'dns/promises';
++import { isIP } from 'net';
++
++export interface DestinationCheck {
++  ok: boolean;
++  error?: string;
++}
++
++const BLOCKED_NAMES = /(^|\.)(localhost|local|internal|home\.arpa)$/i;
++
++function ipv4Parts(address: string): number[] | null {
++  const parts = address.split('.').map(Number);
++  return parts.length === 4 && parts.every((p) => Number.isInteger(p) && p >= 0 && p <= 255) ? parts : null;
++}
++
++function blockedIpv4([a, b, c]: number[]): boolean {
++  return (
++    a === 0 || // "this network"
++    a === 10 ||
++    a === 127 ||
++    (a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT
++    (a === 169 && b === 254) || // link-local, including 169.254.169.254 (cloud metadata)
++    (a === 172 && b >= 16 && b <= 31) ||
++    (a === 192 && b === 168) ||
++    (a === 192 && b === 0 && c === 0) ||
++    (a === 198 && (b === 18 || b === 19)) || // benchmarking
++    a >= 224 // multicast and reserved
++  );
++}
++
++/** The IPv4 address inside an IPv4-mapped (::ffff:0:0/96) or NAT64 (64:ff9b::/96) IPv6 address. */
++function embeddedIpv4(lower: string): number[] | null {
++  const prefix = /^(?:::ffff:|0:0:0:0:0:ffff:|64:ff9b::|64:ff9b:0:0:0:0:)(.+)$/.exec(lower);
++  if (!prefix) return null;
++  const rest = prefix[1];
++  if (rest.includes('.')) return ipv4Parts(rest) ?? [0, 0, 0, 0];
++  const words = rest.split(':');
++  if (words.length !== 2 || !words.every((w) => /^[0-9a-f]{1,4}$/.test(w))) return [0, 0, 0, 0];
++  const [hi, lo] = words.map((w) => parseInt(w, 16));
++  return [hi >> 8, hi & 255, lo >> 8, lo & 255];
++}
++
++/** True for loopback, private, link-local, metadata and other non-public addresses. */
++export function isBlockedAddress(address: string): boolean {
++  const version = isIP(address);
++  if (version === 4) return blockedIpv4(ipv4Parts(address)!);
++  if (version !== 6) return true;
++
++  const lower = address.toLowerCase();
++  // IPv4 written inside IPv6 is judged as IPv4, whether dotted (::ffff:10.0.0.1) or in hex
++  // (::ffff:a00:1, 64:ff9b::a00:1), which is how URL parsing writes it. HRM patch 0024.
++  const embedded = embeddedIpv4(lower);
++  if (embedded) return blockedIpv4(embedded);
++  if (lower === '::' || lower === '::1') return true;
++  const first = parseInt(lower.split(':')[0] || '0', 16);
++  return (
++    (first & 0xfe00) === 0xfc00 || // unique local fc00::/7
++    (first & 0xffc0) === 0xfe80 || // link-local fe80::/10
++    (first & 0xff00) === 0xff00 // multicast
++  );
++}
++
++/** The checks that need no network: https, and no local names or private literal addresses. */
++export function checkWebhookUrlShape(url: string): DestinationCheck {
++  let parsed: URL;
++  try {
++    parsed = new URL(url);
++  } catch {
++    return { ok: false, error: 'Enter a full address starting with https://.' };
++  }
++  if (parsed.protocol !== 'https:') return { ok: false, error: 'Enter a full address starting with https://.' };
++  if (parsed.username || parsed.password) return { ok: false, error: 'Put credentials in a header, not in the address.' };
++  const host = parsed.hostname.replace(/^\[|\]$/g, '');
++  if (isIP(host) ? isBlockedAddress(host) : BLOCKED_NAMES.test(host) || !host.includes('.')) {
++    return { ok: false, error: 'Webhook addresses must be public, not this server or the private network.' };
++  }
++  return { ok: true };
++}
++
++/** Full check: the shape, then every address the name resolves to must be public. */
++export async function checkWebhookDestination(url: string): Promise<DestinationCheck> {
++  const shape = checkWebhookUrlShape(url);
++  if (!shape.ok) return shape;
++  const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
++  if (isIP(host)) return { ok: true };
++  try {
++    const addresses = await lookup(host, { all: true, verbatim: true });
++    if (addresses.length === 0 || addresses.some((a) => isBlockedAddress(a.address))) {
++      return { ok: false, error: 'Webhook addresses must be public, not this server or the private network.' };
++    }
++    return { ok: true };
++  } catch {
++    return { ok: false, error: `Couldn't find ${host}. Check the address.` };
++  }
++}
+diff --git a/lib/webhooks/deployment-formatters.test.ts b/lib/webhooks/deployment-formatters.test.ts
+new file mode 100644
+index 000000000..e0e8d8f56
+--- /dev/null
++++ b/lib/webhooks/deployment-formatters.test.ts
+@@ -0,0 +1,78 @@
++import { describe, expect, it } from 'vitest';
++import type { PackagingJob } from '@/lib/db/types';
++import { buildDeploymentData, formatDeploymentPayload } from './deployment-formatters';
++
++const job = (overrides: Partial<PackagingJob> = {}) => ({
++  id: 'job-1',
++  status: 'deployed',
++  display_name: 'Example App',
++  winget_id: 'Example.App',
++  version: '1.2.3',
++  architecture: 'x64',
++  publisher: 'Example Publisher',
++  user_email: 'attorney.one@example.test',
++  tenant_id: 'tenant-1',
++  intune_app_url: 'https://intune.example.test/app/1',
++  github_run_url: 'https://github.example.test/run/1',
++  error_message: null,
++  error_stage: null,
++  error_category: null,
++  completed_at: '2026-10-24T20:43:27.000Z',
++  ...overrides,
++}) as PackagingJob;
++
++const failed = (message: string) => job({ status: 'failed', error_message: message, error_stage: 'upload', error_category: 'intune_api' });
++
++describe('deployment webhook formatters', () => {
++  it('builds a completed event with the Intune link', () => {
++    const event = buildDeploymentData(job());
++    expect(event.event_type).toBe('deployment.completed');
++    expect(event.timestamp).toBe('2026-10-24T20:43:27.000Z');
++    expect(event.data).toMatchObject({ winget_id: 'Example.App', deployed_by: 'attorney.one@example.test', intune_app_url: 'https://intune.example.test/app/1', error: null });
++  });
++
++  it('builds a failed event with a truncated error and no Intune link', () => {
++    const event = buildDeploymentData(failed('x'.repeat(500)));
++    expect(event.event_type).toBe('deployment.failed');
++    expect(event.data.intune_app_url).toBeNull();
++    expect(event.data.error).toMatchObject({ stage: 'upload', category: 'intune_api' });
++    expect(event.data.error!.message).toHaveLength(301);
++  });
++
++  it('formats a Teams Adaptive Card, green for deployed and red for failed', () => {
++    const ok = formatDeploymentPayload('teams', job()) as any;
++    expect(ok.type).toBe('message');
++    const card = ok.attachments[0].content;
++    expect(ok.attachments[0].contentType).toBe('application/vnd.microsoft.card.adaptive');
++    expect(card.body[0]).toMatchObject({ text: 'Deployed: Example App 1.2.3', color: 'Good' });
++    expect(card.body[1].facts).toContainEqual({ title: 'Deployed by', value: 'attorney.one@example.test' });
++    expect(card.actions.map((a: any) => a.title)).toEqual(['Open in Intune', 'View GitHub run']);
++
++    const bad = (formatDeploymentPayload('teams', failed('Graph upload timed out')) as any).attachments[0].content;
++    expect(bad.body[0]).toMatchObject({ text: 'Failed: Example App 1.2.3', color: 'Attention' });
++    expect(bad.body[2].text).toBe('Stage: upload · Category: intune_api\nGraph upload timed out');
++    expect(bad.actions.map((a: any) => a.title)).toEqual(['View GitHub run']);
++  });
++
++  it('formats Slack blocks and escapes control characters', () => {
++    const payload = formatDeploymentPayload('slack', job({ winget_id: 'A<B>&C' })) as any;
++    expect(payload.blocks[0].text.text).toBe('Deployed: Example App 1.2.3');
++    expect(payload.blocks[1].fields[0].text).toBe('*App*\nA&lt;B&gt;&amp;C');
++    expect(payload.blocks.at(-1).elements[0].text).toContain('<https://intune.example.test/app/1|Open in Intune>');
++  });
++
++  it('formats a Discord embed coloured by result', () => {
++    const ok = (formatDeploymentPayload('discord', job()) as any).embeds[0];
++    const bad = (formatDeploymentPayload('discord', failed('boom')) as any).embeds[0];
++    expect(ok.url).toBe('https://intune.example.test/app/1');
++    expect(ok.color).not.toBe(bad.color);
++    expect(bad.fields.find((f: any) => f.name === 'Error').value).toContain('boom');
++  });
++
++  it('sends plain JSON to custom webhooks and omits missing links', () => {
++    const payload = formatDeploymentPayload('custom', job({ intune_app_url: null, github_run_url: null })) as any;
++    expect(payload.event_type).toBe('deployment.completed');
++    const card = (formatDeploymentPayload('teams', job({ intune_app_url: null, github_run_url: null })) as any).attachments[0].content;
++    expect(card.actions).toEqual([]);
++  });
++});
+diff --git a/lib/webhooks/deployment-formatters.ts b/lib/webhooks/deployment-formatters.ts
+new file mode 100644
+index 000000000..497bd6053
+--- /dev/null
++++ b/lib/webhooks/deployment-formatters.ts
+@@ -0,0 +1,208 @@
++/**
++ * Deployment Result Formatters (HRM patch)
++ * Format one finished packaging job (deployed or failed) for each webhook
++ * platform. Only app details, the deploying staff member, links and the
++ * error summary are sent.
++ */
++
++import type { PackagingJob } from '@/lib/db/types';
++import { appUrl } from '@/lib/hrm/site';
++import type { WebhookType } from '@/types/notifications';
++
++export type DeploymentEventType = 'deployment.completed' | 'deployment.failed';
++
++export interface DeploymentWebhookData {
++  event_type: DeploymentEventType;
++  timestamp: string;
++  data: {
++    job_id: string;
++    display_name: string;
++    winget_id: string;
++    version: string;
++    architecture: string | null;
++    publisher: string | null;
++    deployed_by: string | null;
++    tenant_id: string | null;
++    intune_app_url: string | null;
++    github_run_url: string | null;
++    error: { stage: string | null; category: string | null; message: string } | null;
++  };
++}
++
++const ERROR_TEXT_LIMIT = 300;
++const DISCORD_SUCCESS_COLOR = 0x22c55e;
++const DISCORD_FAILURE_COLOR = 0xdc2626;
++
++function truncate(text: string, limit: number): string {
++  return text.length > limit ? `${text.slice(0, limit)}…` : text;
++}
++
++function formatTime(iso: string): string {
++  return `${iso.replace('T', ' ').slice(0, 16)} UTC`;
++}
++
++// Slack mrkdwn treats &, < and > as control characters.
++function escapeSlack(text: string): string {
++  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
++}
++
++/**
++ * Build the machine-readable event for a finished job
++ */
++export function buildDeploymentData(job: PackagingJob): DeploymentWebhookData {
++  const failed = job.status === 'failed';
++  return {
++    event_type: failed ? 'deployment.failed' : 'deployment.completed',
++    timestamp: job.completed_at || new Date().toISOString(),
++    data: {
++      job_id: job.id,
++      display_name: job.display_name,
++      winget_id: job.winget_id,
++      version: job.version,
++      architecture: job.architecture,
++      publisher: job.publisher,
++      // HRM patch: scheduled updates have no person behind them.
++      deployed_by: job.user_email || (job.is_auto_update ? 'Auto-update' : null),
++      tenant_id: job.tenant_id,
++      intune_app_url: failed ? null : job.intune_app_url,
++      github_run_url: job.github_run_url,
++      error: failed
++        ? {
++            stage: job.error_stage,
++            category: job.error_category,
++            message: truncate(job.error_message || 'Unknown error', ERROR_TEXT_LIMIT),
++          }
++        : null,
++    },
++  };
++}
++
++function title(event: DeploymentWebhookData): string {
++  const { display_name, version } = event.data;
++  return `${event.event_type === 'deployment.failed' ? 'Failed' : 'Deployed'}: ${display_name} ${version}`;
++}
++
++function facts(event: DeploymentWebhookData): Array<{ title: string; value: string }> {
++  const { data } = event;
++  const list = [
++    { title: 'App', value: data.winget_id },
++    { title: 'Version', value: data.version },
++  ];
++  if (data.architecture) list.push({ title: 'Architecture', value: data.architecture });
++  list.push({ title: 'Deployed by', value: data.deployed_by || 'Unknown' });
++  list.push({ title: 'Time', value: formatTime(event.timestamp) });
++  return list;
++}
++
++function errorLine(event: DeploymentWebhookData): string | null {
++  const error = event.data.error;
++  if (!error) return null;
++  const where = [error.stage && `Stage: ${error.stage}`, error.category && `Category: ${error.category}`]
++    .filter(Boolean)
++    .join(' · ');
++  return where ? `${where}\n${error.message}` : error.message;
++}
++
++function links(event: DeploymentWebhookData): Array<{ label: string; url: string }> {
++  const list: Array<{ label: string; url: string }> = [];
++  if (event.data.intune_app_url) list.push({ label: 'Open in Intune', url: event.data.intune_app_url });
++  if (event.data.github_run_url) list.push({ label: 'View GitHub run', url: event.data.github_run_url });
++  return list;
++}
++
++/**
++ * Format a deployment result for Microsoft Teams (Adaptive Card, as Teams
++ * Workflows expects)
++ */
++export function formatTeamsDeployment(event: DeploymentWebhookData) {
++  const failed = event.event_type === 'deployment.failed';
++  const error = errorLine(event);
++  const body: unknown[] = [
++    { type: 'TextBlock', text: title(event), size: 'Large', weight: 'Bolder', color: failed ? 'Attention' : 'Good', wrap: true },
++    { type: 'FactSet', facts: facts(event) },
++  ];
++  if (error) body.push({ type: 'TextBlock', text: error, wrap: true, color: 'Attention' });
++
++  return {
++    type: 'message',
++    data: event,
++    attachments: [
++      {
++        contentType: 'application/vnd.microsoft.card.adaptive',
++        content: {
++          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
++          type: 'AdaptiveCard',
++          version: '1.4',
++          body,
++          actions: links(event).map((link) => ({ type: 'Action.OpenUrl', title: link.label, url: link.url })),
++        },
++      },
++    ],
++  };
++}
++
++/**
++ * Format a deployment result for Slack
++ */
++export function formatSlackDeployment(event: DeploymentWebhookData) {
++  const error = errorLine(event);
++  const blocks: unknown[] = [
++    { type: 'header', text: { type: 'plain_text', text: title(event), emoji: true } },
++    {
++      type: 'section',
++      fields: facts(event).map((fact) => ({ type: 'mrkdwn', text: `*${fact.title}*\n${escapeSlack(fact.value)}` })),
++    },
++  ];
++  if (error) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `:x: ${escapeSlack(error)}` } });
++  const linkList = links(event);
++  if (linkList.length > 0) {
++    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: linkList.map((link) => `<${link.url}|${link.label}>`).join(' | ') }] });
++  }
++  return { data: event, blocks };
++}
++
++/**
++ * Format a deployment result for Discord
++ */
++export function formatDiscordDeployment(event: DeploymentWebhookData) {
++  const failed = event.event_type === 'deployment.failed';
++  const error = errorLine(event);
++  const fields = facts(event).map((fact) => ({ name: fact.title, value: fact.value, inline: true }));
++  if (error) fields.push({ name: 'Error', value: error, inline: false });
++  const linkList = links(event);
++  if (linkList.length > 0) {
++    fields.push({ name: 'Links', value: linkList.map((link) => `[${link.label}](${link.url})`).join(' | '), inline: false });
++  }
++  return {
++    data: event,
++    embeds: [
++      {
++        title: title(event),
++        url: event.data.intune_app_url || undefined,
++        color: failed ? DISCORD_FAILURE_COLOR : DISCORD_SUCCESS_COLOR,
++        fields,
++        footer: { text: 'IntuneGet' },
++        timestamp: event.timestamp,
++      },
++    ],
++  };
++}
++
++/**
++ * Format a finished job for the given webhook type
++ */
++export function formatDeploymentPayload(webhookType: WebhookType, job: PackagingJob): unknown {
++  const event = buildDeploymentData(job);
++  switch (webhookType) {
++    case 'slack':
++      return formatSlackDeployment(event);
++    case 'teams':
++      return formatTeamsDeployment(event);
++    case 'discord':
++      return formatDiscordDeployment(event);
++    case 'custom':
++    default:
++      // HRM patch 0019: this server's address, so a receiver (the alert relay) can link back
++      return { ...event, app_url: appUrl() };
++  }
++}
+diff --git a/lib/webhooks/formatters.ts b/lib/webhooks/formatters.ts
+index 6da3117bd..a6b702b2b 100644
+--- a/lib/webhooks/formatters.ts
++++ b/lib/webhooks/formatters.ts
+@@ -3,6 +3,7 @@
+  * Format notification payloads for different webhook platforms
+  */
+ 
++import { appUrl } from '@/lib/hrm/site';
+ import type {
+   NotificationPayload,
+   WebhookTestPayload,
+@@ -177,9 +178,7 @@ export function formatSlackMessage(payload: NotificationPayload): SlackPayload {
+             text: 'View in Dashboard',
+             emoji: true,
+           },
+-          url: process.env.NEXT_PUBLIC_APP_URL
+-            ? `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`
+-            : 'https://intuneget.com/dashboard',
++          url: `${appUrl() ?? 'https://intuneget.com'}/dashboard`, // HRM patch 0036: same server address as every other HRM link
+           style: 'primary',
+         },
+       ],
+@@ -295,9 +294,7 @@ export function formatTeamsMessage(payload: NotificationPayload): TeamsPayload {
+             {
+               type: 'Action.OpenUrl',
+               title: 'View in Dashboard',
+-              url: process.env.NEXT_PUBLIC_APP_URL
+-                ? `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`
+-                : 'https://intuneget.com/dashboard',
++              url: `${appUrl() ?? 'https://intuneget.com'}/dashboard`, // HRM patch 0036: same server address as every other HRM link
+             },
+           ],
+         },
+@@ -430,8 +427,9 @@ export function formatDiscordMessage(payload: NotificationPayload): DiscordPaylo
+  */
+ export function formatCustomPayload(
+   payload: NotificationPayload
+-): NotificationPayload & { data: WebhookData } {
+-  return { ...payload, data: buildWebhookData(payload) };
++): NotificationPayload & { data: WebhookData; app_url?: string } {
++  // HRM patch 0019: this server's address, so a receiver (the alert relay) can link back
++  return { ...payload, data: buildWebhookData(payload), app_url: appUrl() };
+ }
+ 
+ /**
+diff --git a/lib/webhooks/install-failure-formatters.ts b/lib/webhooks/install-failure-formatters.ts
+new file mode 100644
+index 000000000..f51377295
+--- /dev/null
++++ b/lib/webhooks/install-failure-formatters.ts
+@@ -0,0 +1,66 @@
++/**
++ * HRM patch 0019: "devices failed to install" messages for each webhook type.
++ * Counts and Microsoft's error descriptions only; never device or user names.
++ */
++
++import { appUrl } from '@/lib/hrm/site';
++import type { InstallStatusRecord } from '@/lib/hrm/install-status';
++import type { WebhookType } from '@/types/notifications';
++import { formatSimpleAlert } from './simple-alert';
++
++export interface InstallFailureWebhookData {
++  event: 'install_failures';
++  timestamp: string;
++  app_url?: string;
++  apps: Array<{
++    display_name: string;
++    intune_app_id: string;
++    failed: number;
++    previous_failed: number;
++    installed: number;
++    pending: number;
++    top_errors: Array<{ code: string; description: string; count: number }>;
++  }>;
++}
++
++export function buildInstallFailureData(records: InstallStatusRecord[], now = new Date()): InstallFailureWebhookData {
++  return {
++    event: 'install_failures',
++    timestamp: now.toISOString(),
++    app_url: appUrl(),
++    apps: records.map((r) => ({
++      display_name: r.display_name,
++      intune_app_id: r.intune_app_id,
++      failed: r.failed,
++      previous_failed: r.previous_failed,
++      installed: r.installed,
++      pending: r.pending,
++      top_errors: r.topErrors,
++    })),
++  };
++}
++
++const devices = (n: number) => `${n} device${n === 1 ? '' : 's'}`;
++
++function title(data: InstallFailureWebhookData): string {
++  return data.apps.length === 1
++    ? `${data.apps[0].display_name}: ${devices(data.apps[0].failed)} failed to install`
++    : `${data.apps.length} apps have devices that failed to install`;
++}
++
++function lines(data: InstallFailureWebhookData): string[] {
++  return data.apps.map((app) => {
++    const reason = app.top_errors[0]?.description || app.top_errors[0]?.code;
++    return `${app.display_name}: ${app.failed} failed, ${app.installed} installed${reason ? `. ${reason}` : ''}`;
++  });
++}
++
++export function formatInstallFailurePayload(webhookType: WebhookType, data: InstallFailureWebhookData): unknown {
++  return formatSimpleAlert(webhookType, {
++    data, title: title(data), lines: lines(data), timestamp: data.timestamp,
++    // HRM patch 0032: a single app links straight to its details
++    link: !data.app_url ? undefined : data.apps.length === 1
++      ? { label: 'Open in Inventory', url: `${data.app_url}/dashboard/inventory?app=${encodeURIComponent(data.apps[0].intune_app_id)}` }
++      : { label: 'Open Inventory', url: `${data.app_url}/dashboard/inventory` },
++  });
++}
+diff --git a/lib/webhooks/managed-identity.test.ts b/lib/webhooks/managed-identity.test.ts
+new file mode 100644
+index 000000000..7eaf83929
+--- /dev/null
++++ b/lib/webhooks/managed-identity.test.ts
+@@ -0,0 +1,130 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import type { WebhookConfiguration } from '@/types/notifications';
++import { isSignedWebhookUrl, resetManagedIdentityTokenCache, webhookAuthHeaders } from './managed-identity';
++import { deliverFormattedWebhook, sendTestWebhook } from './service';
++
++// Test addresses don't resolve in DNS; keep the no-network checks (HRM address guard).
++vi.mock('@/lib/webhooks/address-guard', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@/lib/webhooks/address-guard')>();
++  return { ...actual, checkWebhookDestination: async (url: string) => actual.checkWebhookUrlShape(url) };
++});
++
++const FLOW_URL = 'https://default0000.00.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/abc/triggers/manual/paths/invoke?api-version=1';
++const OTHER_TENANT_FLOW = 'https://default9999.99.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/evil/triggers/manual/paths/invoke?api-version=1';
++const OTHER_LOGIC_APP = 'https://prod-01.westus.logic.azure.com/workflows/evil/triggers/manual/paths/invoke';
++const SLACK_URL = 'https://hooks.slack.com/services/T000/B000/fixture';
++const fetchMock = vi.fn();
++const nowSeconds = () => Math.floor(Date.now() / 1000);
++const imdsReply = (token: string, expiresOn = nowSeconds() + 86_400) =>
++  new Response(JSON.stringify({ access_token: token, expires_on: String(expiresOn) }), { status: 200 });
++const webhook = (url: string, type: WebhookConfiguration['webhook_type'] = 'teams') =>
++  ({ id: 'w1', user_id: 'u1', name: 'IT Ops', url, webhook_type: type, secret: null, headers: {}, is_enabled: true, failure_count: 0, last_failure_at: null }) as unknown as WebhookConfiguration;
++const sent = (call: number) => fetchMock.mock.calls[call][1] as RequestInit & { headers: Record<string, string> };
++
++beforeEach(() => {
++  resetManagedIdentityTokenCache();
++  fetchMock.mockReset();
++  vi.stubGlobal('fetch', fetchMock);
++  process.env.WEBHOOK_MANAGED_IDENTITY_URLS = FLOW_URL;
++});
++afterEach(() => {
++  vi.unstubAllGlobals();
++  delete process.env.WEBHOOK_MANAGED_IDENTITY_URLS;
++});
++
++describe('which webhook URLs are signed', () => {
++  it('signs only the exact allowed flow URL', () => {
++    expect(isSignedWebhookUrl(FLOW_URL)).toBe(true);
++    // Default port and a different api-version are the same endpoint.
++    expect(isSignedWebhookUrl(FLOW_URL.replace(':443', '').replace('api-version=1', 'api-version=2'))).toBe(true);
++  });
++
++  it("never signs another tenant's Power Automate flow or Logic App", () => {
++    expect(isSignedWebhookUrl(OTHER_TENANT_FLOW)).toBe(false);
++    expect(isSignedWebhookUrl(OTHER_LOGIC_APP)).toBe(false);
++  });
++
++  it('never signs a different path on the allowed host, plain HTTP or look-alike hosts', () => {
++    expect(isSignedWebhookUrl(FLOW_URL.replace('/abc/', '/other/'))).toBe(false);
++    expect(isSignedWebhookUrl(FLOW_URL.replace('https:', 'http:'))).toBe(false);
++    expect(isSignedWebhookUrl(FLOW_URL.replace('powerplatform.com', 'powerplatform.com.attacker.example.test'))).toBe(false);
++    expect(isSignedWebhookUrl(SLACK_URL)).toBe(false);
++    expect(isSignedWebhookUrl('not a url')).toBe(false);
++  });
++
++  it('signs nothing when no URLs are configured, and accepts several', () => {
++    delete process.env.WEBHOOK_MANAGED_IDENTITY_URLS;
++    expect(isSignedWebhookUrl(FLOW_URL)).toBe(false);
++    process.env.WEBHOOK_MANAGED_IDENTITY_URLS = `${OTHER_LOGIC_APP}, ${FLOW_URL}`;
++    expect(isSignedWebhookUrl(FLOW_URL)).toBe(true);
++  });
++});
++
++describe('managed identity token', () => {
++  it('asks the managed identity endpoint for a Power Automate token', async () => {
++    fetchMock.mockResolvedValueOnce(imdsReply('token-1'));
++    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({ Authorization: 'Bearer token-1' });
++    const [url, init] = fetchMock.mock.calls[0];
++    expect(url).toContain('169.254.169.254');
++    expect(url).toContain(encodeURIComponent('https://service.flow.microsoft.com/'));
++    expect(init.headers).toEqual({ Metadata: 'true' });
++  });
++
++  it('never requests a token for URLs that are not allowed', async () => {
++    expect(await webhookAuthHeaders(OTHER_TENANT_FLOW)).toEqual({});
++    expect(await webhookAuthHeaders(SLACK_URL)).toEqual({});
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++
++  it('reuses the token and renews it shortly before it expires', async () => {
++    fetchMock.mockResolvedValueOnce(imdsReply('token-1', nowSeconds() + 3600));
++    await webhookAuthHeaders(FLOW_URL);
++    await webhookAuthHeaders(FLOW_URL);
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++
++    resetManagedIdentityTokenCache();
++    fetchMock.mockResolvedValueOnce(imdsReply('token-2', nowSeconds() + 120));
++    fetchMock.mockResolvedValueOnce(imdsReply('token-3'));
++    await webhookAuthHeaders(FLOW_URL);
++    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({ Authorization: 'Bearer token-3' });
++  });
++
++  it('sends unsigned when the token request fails', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    fetchMock.mockResolvedValueOnce(new Response('no identity', { status: 400 }));
++    expect(await webhookAuthHeaders(FLOW_URL)).toEqual({});
++    expect(warn).toHaveBeenCalled();
++    warn.mockRestore();
++  });
++});
++
++describe('webhook senders', () => {
++  it('signs deliveries to the allowed flow and refuses redirects', async () => {
++    fetchMock.mockResolvedValueOnce(imdsReply('token-1')).mockResolvedValueOnce(new Response('', { status: 202 }));
++    expect((await deliverFormattedWebhook(webhook(FLOW_URL), { type: 'message' })).success).toBe(true);
++    expect(sent(1).headers.Authorization).toBe('Bearer token-1');
++    expect(sent(1).redirect).toBe('error');
++  });
++
++  it('signs the settings page test message and refuses redirects', async () => {
++    fetchMock.mockResolvedValueOnce(imdsReply('token-1')).mockResolvedValueOnce(new Response('', { status: 202 }));
++    expect((await sendTestWebhook(webhook(FLOW_URL))).success).toBe(true);
++    expect(sent(1).headers.Authorization).toBe('Bearer token-1');
++    expect(sent(1).redirect).toBe('error');
++  });
++
++  it("does not sign a test sent to another tenant's flow", async () => {
++    fetchMock.mockResolvedValueOnce(new Response('', { status: 202 }));
++    await sendTestWebhook(webhook(OTHER_TENANT_FLOW));
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++    expect(sent(0).headers.Authorization).toBeUndefined();
++    expect(sent(0).redirect).toBe('error');
++  });
++
++  it('does not sign Slack deliveries', async () => {
++    fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }));
++    await deliverFormattedWebhook(webhook(SLACK_URL, 'slack'), { blocks: [] });
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++    expect(sent(0).headers.Authorization).toBeUndefined();
++  });
++});
+diff --git a/lib/webhooks/managed-identity.ts b/lib/webhooks/managed-identity.ts
+new file mode 100644
+index 000000000..59fc438d5
+--- /dev/null
++++ b/lib/webhooks/managed-identity.ts
+@@ -0,0 +1,83 @@
++/**
++ * Managed identity sign-in for Power Automate webhooks (HRM patch).
++ *
++ * Teams Workflows' V2 webhook trigger refuses unsigned requests. Webhooks to
++ * the flow URLs listed in WEBHOOK_MANAGED_IDENTITY_URLS carry a bearer token
++ * for the server's Azure managed identity, so the flow can allow only that
++ * identity ("Specific users in my tenant"). Only exact URLs set by the server
++ * admin are signed: any tenant can own a Power Automate or Logic Apps URL, so a
++ * host suffix check would hand the token to whoever creates a webhook.
++ */
++
++const IMDS_URL = 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01';
++const FLOW_RESOURCE = 'https://service.flow.microsoft.com/';
++const RENEW_BEFORE_MS = 5 * 60 * 1000;
++
++let cached: { token: string; expiresAt: number } | null = null;
++
++function parseHttps(url: string): URL | null {
++  try {
++    const parsed = new URL(url.trim());
++    return parsed.protocol === 'https:' ? parsed : null;
++  } catch {
++    return null;
++  }
++}
++
++/** The flow URLs the server admin allows to receive a signed request. */
++function allowedUrls(): URL[] {
++  return (process.env.WEBHOOK_MANAGED_IDENTITY_URLS || '')
++    .split(/[\s,]+/)
++    .map(parseHttps)
++    .filter((url): url is URL => url !== null);
++}
++
++/**
++ * True when the URL is exactly one of the allowed flow URLs: same scheme, host,
++ * port and path. The query string (for example api-version) may differ.
++ */
++export function isSignedWebhookUrl(url: string): boolean {
++  const target = parseHttps(url);
++  if (!target) return false;
++  return allowedUrls().some((allowed) => allowed.origin === target.origin && allowed.pathname === target.pathname);
++}
++
++async function getFlowToken(): Promise<string> {
++  if (cached && Date.now() < cached.expiresAt - RENEW_BEFORE_MS) return cached.token;
++
++  const response = await fetch(`${IMDS_URL}&resource=${encodeURIComponent(FLOW_RESOURCE)}`, {
++    headers: { Metadata: 'true' },
++    signal: AbortSignal.timeout(5000),
++  });
++  if (!response.ok) throw new Error(`Managed identity token request failed: HTTP ${response.status}`);
++
++  const body = (await response.json()) as { access_token?: string; expires_on?: string | number };
++  if (!body.access_token) throw new Error('Managed identity returned no token');
++  const expiresOn = Number(body.expires_on);
++  cached = {
++    token: body.access_token,
++    expiresAt: Number.isFinite(expiresOn) && expiresOn > 0 ? expiresOn * 1000 : Date.now() + 60 * 60 * 1000,
++  };
++  return cached.token;
++}
++
++/**
++ * Authorization header for an allowed flow URL, or none. A failed token request
++ * is logged and the webhook is sent unsigned, so the flow's refusal shows up as
++ * an ordinary delivery failure. Callers must not follow redirects for signed
++ * requests (see isSignedWebhookUrl).
++ */
++export async function webhookAuthHeaders(url: string): Promise<Record<string, string>> {
++  if (!isSignedWebhookUrl(url)) return {};
++  try {
++    return { Authorization: `Bearer ${await getFlowToken()}` };
++  } catch (error) {
++    console.warn('[Webhooks] Could not get a managed identity token:', error instanceof Error ? error.message : error);
++    return {};
++  }
++}
++
++/** Test helper: forget the cached token. */
++export function resetManagedIdentityTokenCache(): void {
++  cached = null;
++}
+diff --git a/lib/webhooks/service.ts b/lib/webhooks/service.ts
+index c9e417f8e..332acdd69 100644
+--- a/lib/webhooks/service.ts
++++ b/lib/webhooks/service.ts
+@@ -19,6 +19,9 @@ import {
+   formatTeamsTestMessage,
+   formatDiscordTestMessage,
+ } from './formatters';
++import { appUrl } from '@/lib/hrm/site';
++import { checkWebhookDestination, checkWebhookUrlShape } from './address-guard';
++import { webhookAuthHeaders } from './managed-identity';
+ 
+ // Circuit breaker thresholds
+ const MAX_FAILURES = 5;
+@@ -113,7 +116,8 @@ export function formatTestPayload(
+       return formatDiscordTestMessage(testPayload);
+     case 'custom':
+     default:
+-      return { ...testPayload, data: testPayload };
++      // HRM patch 0019: this server's address, so a receiver (the alert relay) can link back
++      return { ...testPayload, data: testPayload, app_url: appUrl() };
+   }
+ }
+ 
+@@ -124,6 +128,18 @@ export async function deliverWebhook(
+   webhook: WebhookConfiguration,
+   payload: NotificationPayload,
+   options: WebhookDeliveryOptions = {}
++): Promise<WebhookDeliveryResult> {
++  return deliverFormattedWebhook(webhook, formatPayload(webhook.webhook_type, payload), options);
++}
++
++/**
++ * Deliver an already formatted body with the same retries, signature and
++ * circuit breaker as deliverWebhook (HRM patch: used for deployment results).
++ */
++export async function deliverFormattedWebhook(
++  webhook: WebhookConfiguration,
++  formattedPayload: unknown,
++  options: WebhookDeliveryOptions = {}
+ ): Promise<WebhookDeliveryResult> {
+   const opts = { ...DEFAULT_OPTIONS, ...options };
+ 
+@@ -136,8 +152,12 @@ export async function deliverWebhook(
+     };
+   }
+ 
+-  // Format payload for webhook type
+-  const formattedPayload = formatPayload(webhook.webhook_type, payload);
++  // HRM patch: only public addresses, checked again in case DNS changed since it was saved
++  const destination = await checkWebhookDestination(webhook.url);
++  if (!destination.ok) {
++    return { success: false, error: destination.error, retryable: false };
++  }
++
+   const payloadString = JSON.stringify(formattedPayload);
+ 
+   // Build headers
+@@ -145,6 +165,8 @@ export async function deliverWebhook(
+     'Content-Type': 'application/json',
+     'User-Agent': 'IntuneGet-Webhook/1.0',
+     ...webhook.headers,
++    // HRM patch: sign in to Power Automate webhooks as the server's managed identity
++    ...(await webhookAuthHeaders(webhook.url)),
+   };
+ 
+   // Add signature if secret is configured
+@@ -171,6 +193,8 @@ export async function deliverWebhook(
+         headers,
+         body: payloadString,
+         signal: controller.signal,
++        // HRM patch: never follow a redirect, so a public address can't send the request inward
++        redirect: 'error',
+       });
+ 
+       clearTimeout(timeoutId);
+@@ -223,6 +247,11 @@ export async function deliverWebhook(
+ export async function sendTestWebhook(
+   webhook: WebhookConfiguration
+ ): Promise<WebhookDeliveryResult> {
++  const destination = await checkWebhookDestination(webhook.url);
++  if (!destination.ok) {
++    return { success: false, error: destination.error };
++  }
++
+   const formattedPayload = formatTestPayload(webhook.webhook_type, webhook.name);
+   const payloadString = JSON.stringify(formattedPayload);
+ 
+@@ -230,6 +259,8 @@ export async function sendTestWebhook(
+     'Content-Type': 'application/json',
+     'User-Agent': 'IntuneGet-Webhook/1.0',
+     ...webhook.headers,
++    // HRM patch: sign in to Power Automate webhooks as the server's managed identity
++    ...(await webhookAuthHeaders(webhook.url)),
+   };
+ 
+   if (webhook.secret) {
+@@ -245,6 +276,8 @@ export async function sendTestWebhook(
+       headers,
+       body: payloadString,
+       signal: controller.signal,
++      // HRM patch: never follow a redirect, so a public address can't send the request inward
++      redirect: 'error',
+     });
+ 
+     clearTimeout(timeoutId);
+@@ -286,28 +319,17 @@ export async function sendTestWebhook(
+  * Validate webhook URL
+  */
+ export function validateWebhookUrl(url: string): { valid: boolean; error?: string } {
+-  try {
+-    const parsed = new URL(url);
+-
+-    // Must be HTTPS
+-    if (parsed.protocol !== 'https:') {
+-      return { valid: false, error: 'URL must use HTTPS' };
+-    }
+-
+-    // Basic validation for known webhook types
+-    if (
+-      url.includes('hooks.slack.com') ||
+-      url.includes('webhook.office.com') ||
+-      url.includes('discord.com/api/webhooks')
+-    ) {
+-      return { valid: true };
+-    }
++  // HRM patch: https only, and no local names or private literal addresses
++  const shape = checkWebhookUrlShape(url);
++  return shape.ok ? { valid: true } : { valid: false, error: shape.error };
++}
+ 
+-    // Allow any HTTPS URL for custom webhooks
+-    return { valid: true };
+-  } catch {
+-    return { valid: false, error: 'Invalid URL format' };
+-  }
++/**
++ * HRM patch: validate a URL being saved, including where its name resolves
++ */
++export async function validateWebhookDestination(url: string): Promise<{ valid: boolean; error?: string }> {
++  const destination = await checkWebhookDestination(url);
++  return destination.ok ? { valid: true } : { valid: false, error: destination.error };
+ }
+ 
+ /**
+diff --git a/lib/webhooks/simple-alert.test.ts b/lib/webhooks/simple-alert.test.ts
+new file mode 100644
+index 000000000..4ec1b9b3c
+--- /dev/null
++++ b/lib/webhooks/simple-alert.test.ts
+@@ -0,0 +1,16 @@
++import { describe, expect, it } from 'vitest';
++import { formatInstallFailurePayload, type InstallFailureWebhookData } from './install-failure-formatters';
++const app = (id: string) => ({ display_name: 'Example', intune_app_id: id, failed: 1, previous_failed: 0, installed: 2, pending: 0, top_errors: [] });
++const data = (apps: InstallFailureWebhookData['apps']): InstallFailureWebhookData => ({ event: 'install_failures', timestamp: '2026-11-05T12:00:00Z', app_url: 'https://intuneget.example.test', apps });
++const teamsLink = (payload: unknown) => (payload as { attachments: Array<{ content: { actions: Array<{ title: string; url: string }> } }> }).attachments[0].content.actions[0];
++describe('alert links (HRM patch 0032)', () => {
++  it('links one app straight to its Inventory details', () => {
++    expect(teamsLink(formatInstallFailurePayload('teams', data([app('11111111-1111-4111-8111-111111111111')])))).toEqual({ type: 'Action.OpenUrl', title: 'Open in Inventory', url: 'https://intuneget.example.test/dashboard/inventory?app=11111111-1111-4111-8111-111111111111' });
++  });
++  it('links several apps to Inventory, and every webhook type keeps the same data', () => {
++    const many = data([app('a'), app('b')]);
++    expect(teamsLink(formatInstallFailurePayload('teams', many)).url).toBe('https://intuneget.example.test/dashboard/inventory');
++    for (const type of ['slack', 'discord'] as const) expect((formatInstallFailurePayload(type, many) as { data: unknown }).data).toEqual(many);
++    expect(formatInstallFailurePayload('custom', many)).toEqual(many);
++  });
++});
+diff --git a/lib/webhooks/simple-alert.ts b/lib/webhooks/simple-alert.ts
+new file mode 100644
+index 000000000..23b879669
+--- /dev/null
++++ b/lib/webhooks/simple-alert.ts
+@@ -0,0 +1,55 @@
++/**
++ * HRM patch 0032: one alert layout for every webhook type: a title, a few lines and one link.
++ * Used by install-failure and paused auto-update alerts. Counts, app names and versions only.
++ */
++import type { WebhookType } from '@/types/notifications';
++
++export interface SimpleAlert<T> {
++  data: T;
++  title: string;
++  lines: string[];
++  link?: { label: string; url: string };
++  timestamp: string;
++  tone?: 'warning' | 'attention';
++}
++
++const DISCORD_COLOR = { warning: 0xf59e0b, attention: 0xef4444 };
++const escapeSlack = (text: string) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
++
++export function formatSimpleAlert<T>(webhookType: WebhookType, alert: SimpleAlert<T>): unknown {
++  const { data, title, lines, link, timestamp, tone = 'warning' } = alert;
++  switch (webhookType) {
++    case 'teams':
++      return {
++        type: 'message',
++        data,
++        attachments: [{
++          contentType: 'application/vnd.microsoft.card.adaptive',
++          content: {
++            $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
++            type: 'AdaptiveCard',
++            version: '1.4',
++            body: [
++              { type: 'TextBlock', text: title, size: 'Large', weight: 'Bolder', color: tone === 'attention' ? 'Attention' : 'Warning', wrap: true },
++              ...lines.map((text) => ({ type: 'TextBlock', text, wrap: true })),
++            ],
++            actions: link ? [{ type: 'Action.OpenUrl', title: link.label, url: link.url }] : [],
++          },
++        }],
++      };
++    case 'slack':
++      return {
++        data,
++        blocks: [
++          { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },
++          { type: 'section', text: { type: 'mrkdwn', text: escapeSlack(lines.join('\n')) } },
++          ...(link ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: `<${link.url}|${link.label}>` }] }] : []),
++        ],
++      };
++    case 'discord':
++      return { data, embeds: [{ title, url: link?.url, description: lines.join('\n'), color: DISCORD_COLOR[tone], footer: { text: 'IntuneGet' }, timestamp }] };
++    case 'custom':
++    default:
++      return data;
++  }
++}

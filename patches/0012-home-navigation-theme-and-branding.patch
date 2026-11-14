@@ -1,0 +1,3574 @@
+diff --git a/app/(app)/dashboard/apps/error.tsx b/app/(app)/dashboard/apps/error.tsx
+index 13c7c31f8..34e7b2627 100644
+--- a/app/(app)/dashboard/apps/error.tsx
++++ b/app/(app)/dashboard/apps/error.tsx
+@@ -15,10 +15,10 @@ export default function AppsError({
+     <DashboardRouteError
+       error={error}
+       reset={reset}
+-      title={<T>App Catalog</T>}
++      title={<T>App catalog</T>}
+       description={<T>Browse and deploy applications to Intune</T>}
+       icon={Package}
+-      logLabel="App Catalog"
++      logLabel="App catalog"
+     />
+   );
+ }
+diff --git a/app/(app)/dashboard/apps/page.tsx b/app/(app)/dashboard/apps/page.tsx
+index f818738c1..19b49e19f 100644
+--- a/app/(app)/dashboard/apps/page.tsx
++++ b/app/(app)/dashboard/apps/page.tsx
+@@ -3,6 +3,7 @@
+ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+ import { T, Var } from "gt-next";
+ import { useSearchParams } from 'next/navigation';
++import { useNewVersionPrefill } from '@/hooks/useNewVersionPrefill';
+ import Link from 'next/link';
+ import {
+   Package,
+@@ -107,6 +108,14 @@ export default function AppCatalogPage() {
+ 
+   // Custom app modal state
+   const [isCustomAppModalOpen, setIsCustomAppModalOpen] = useState(false);
++  // HRM patch 0015: /dashboard/apps?newVersionOf=<job> opens the custom app form for its next version.
++  const [newVersionOf] = useState(() => searchParams.get('newVersionOf'));
++  // HRM patch 0020: ?newVersionOfApp=<Intune app> comes from App updates with a new GitHub release filled in.
++  const [newVersionOfApp] = useState(() => searchParams.get('newVersionOfApp'));
++  const { data: newVersionPrefill } = useNewVersionPrefill(newVersionOf, newVersionOfApp);
++  useEffect(() => {
++    if (newVersionPrefill) setIsCustomAppModalOpen(true);
++  }, [newVersionPrefill]);
+ 
+   // Bulk selection state
+   const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
+@@ -403,7 +412,7 @@ export default function AppCatalogPage() {
+       .filter((p) => selectedPackageIds.has(p.id))
+       .filter((p) => !cartIds.has(`${p.id}@${p.version}`));
+     if (selected.length === 0) {
+-      toast.info('All selected apps are already in the cart');
++      toast.info('All selected apps are already in the Deployment list');
+       return;
+     }
+ 
+@@ -418,7 +427,7 @@ export default function AppCatalogPage() {
+     setBulkProgress(null);
+ 
+     if (result.failed.length === 0) {
+-      toast.success(`Added ${result.succeeded.length} app${result.succeeded.length !== 1 ? 's' : ''} to selection`);
++      toast.success(`Added ${result.succeeded.length} app${result.succeeded.length !== 1 ? 's' : ''} to the Deployment list`);
+     } else {
+       toast.warning(
+         `Added ${result.succeeded.length} of ${selected.length} apps`,
+@@ -638,14 +647,14 @@ export default function AppCatalogPage() {
+           <div className="absolute right-0 top-0 h-28 w-28 md:h-40 md:w-40 bg-gradient-to-bl from-accent-violet/10 via-accent-cyan/5 to-transparent blur-2xl" />
+ 
+           <div className="relative">
+-            <h1 className="text-display-sm text-text-primary"><T>App Catalog</T></h1>
++            <h1 className="text-display-sm text-text-primary"><T>App catalog</T></h1>
+             <p className="text-text-secondary mt-2 max-w-2xl">
+-              <T>Browse Winget applications or choose reviewed releases from the IntuneGet Curated Catalog.</T>
++              <T>Browse WinGet apps, or choose curated apps (releases reviewed by IntuneGet).</T>
+             </p>
+ 
+             <div className="mt-5 flex flex-wrap items-center gap-2">
+               <Link href="/dashboard/apps/curated" className="inline-flex items-center gap-2 rounded-full border border-accent-cyan/30 bg-accent-cyan/10 px-3 py-1.5 text-sm font-medium text-accent-cyan hover:bg-accent-cyan/20">
+-                <Sparkles className="h-4 w-4" /><T>Curated Catalog</T>
++                <Sparkles className="h-4 w-4" /><T>Curated apps</T>
+               </Link>
+               <span className="inline-flex items-center gap-2 rounded-full border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
+                 <Package className="w-4 h-4 text-accent-cyan" />
+@@ -835,13 +844,13 @@ export default function AppCatalogPage() {
+                 onClick={() => setSearchQuery('')}
+                 className="px-4 py-2 text-sm font-medium text-text-primary bg-bg-elevated hover:bg-overlay/5 rounded-lg border border-overlay/10 transition-colors"
+               >
+-                <T>Clear Search</T>
++                <T>Clear search</T>
+               </button>
+               <button
+                 onClick={() => { setSearchQuery(''); setSelectedCategory(null); }}
+                 className="px-4 py-2 text-sm font-medium text-white bg-accent-cyan hover:bg-accent-cyan-dim rounded-lg border-0 transition-colors"
+               >
+-                <T>Browse All</T>
++                <T>Browse all apps</T>
+               </button>
+             </div>
+           </div>
+@@ -862,7 +871,7 @@ export default function AppCatalogPage() {
+                       onClick={() => setSelectedCategory(null)}
+                       className="text-text-secondary hover:text-accent-cyan transition-colors"
+                     >
+-                      <T>App Catalog</T>
++                      <T>App catalog</T>
+                     </button>
+                     <ChevronRight className="w-3.5 h-3.5 text-text-muted" />
+                     <span className="text-text-primary font-medium">{activeCategoryLabel}</span>
+@@ -881,10 +890,10 @@ export default function AppCatalogPage() {
+ 
+                     <h2 className="text-xl font-bold tracking-tight text-text-primary">
+                       {showSearchResults
+-                        ? <T>Search Results</T>
++                        ? <T>Search results</T>
+                         : showCategoryResults
+                         ? activeCategoryLabel
+-                        : <T>All Apps</T>}
++                        : <T>All apps</T>}
+                     </h2>
+                   </div>
+                   {!showSearchResults && (
+@@ -993,7 +1002,7 @@ export default function AppCatalogPage() {
+       )}
+ 
+       {isCustomAppModalOpen && (
+-        <CustomAppModal onClose={() => setIsCustomAppModalOpen(false)} />
++        <CustomAppModal onClose={() => setIsCustomAppModalOpen(false)} prefill={newVersionPrefill ?? undefined} />
+       )}
+ 
+       {deploymentIntentId &&
+@@ -1089,7 +1098,7 @@ export default function AppCatalogPage() {
+             onClick={handleSelectAllVisible}
+             className="text-sm text-text-secondary hover:text-accent-cyan transition-colors whitespace-nowrap"
+           >
+-            <T>Select All</T>
++            <T>Select all</T>
+           </button>
+           <button
+             onClick={handleClearBulkSelection}
+@@ -1111,7 +1120,7 @@ export default function AppCatalogPage() {
+             ) : (
+               <>
+                 <Check className="w-4 h-4" />
+-                <T>Quick Add All</T>
++                <T>Add selected to Deployment list</T>
+               </>
+             )}
+           </button>
+diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
+index bade6e949..7f377c333 100644
+--- a/app/(app)/dashboard/layout.tsx
++++ b/app/(app)/dashboard/layout.tsx
+@@ -12,28 +12,32 @@ import {
+ import { T } from 'gt-next';
+ import { Button } from '@/components/ui/button';
+ import { Toaster } from 'sonner';
++import { useTheme } from '@/components/providers/theme-context';
+ import { useCartStore } from '@/stores/cart-store';
+ import { useSidebarStore } from '@/stores/sidebar-store';
+ import { useProfileStore } from '@/stores/profile-store';
+ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+ import { useOnboardingStatus } from '@/hooks/useOnboardingStatus';
+-import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
++import { useKeyboardShortcuts, useModifierKeyLabel } from '@/hooks/useKeyboardShortcuts';
+ import { TenantSwitcher } from '@/components/msp';
+ import dynamic from 'next/dynamic';
+ const UploadCart = dynamic(() => import('@/components/UploadCart').then(m => m.UploadCart));
+ import { NotificationBell } from '@/components/notifications';
+-import { ChangelogBell } from '@/components/changelog/ChangelogBell';
+ import { Sidebar, DeploymentStatusIndicator } from '@/components/dashboard';
+ const CommandPalette = dynamic(() => import('@/components/dashboard/CommandPalette').then(m => m.CommandPalette));
+ import { springPresets } from '@/lib/animations/variants';
+ import { getClientFeatureFlags } from '@/lib/features';
++// HRM patch 0056: staff outside the IT admins group see a "no access" page instead of the dashboard.
++import { useAppAccess } from '@/hooks/useAppAccess';
++import { AccessDenied } from '@/components/hrm/AccessDenied';
+ 
+ export default function DashboardLayout({
+   children,
+ }: {
+   children: React.ReactNode;
+ }) {
+-  const { isAuthenticated, isInitializing, isSigningOut, user, signOut, getAccessToken } = useMicrosoftAuth();
++  const { isAuthenticated, isInitializing, isSigningOut, user, signOut, signInWithAnotherAccount, getAccessToken } = useMicrosoftAuth();
++  const { theme } = useTheme();
+   const {
+     isOnboardingComplete,
+     isChecking: isCheckingOnboarding,
+@@ -60,6 +64,8 @@ export default function DashboardLayout({
+     setCommandPaletteOpen(true);
+   }, []);
+ 
++  const modifierKey = useModifierKeyLabel();
++
+   useKeyboardShortcuts({
+     onCommandPalette: handleOpenCommandPalette,
+     onToggleCart: toggleCart,
+@@ -69,6 +75,8 @@ export default function DashboardLayout({
+     setIsLoading(false);
+   }, []);
+ 
++  const { state: appAccess, retry: retryAccess } = useAppAccess(isAuthenticated && !isLoading);
++
+   useEffect(() => {
+     if (!isLoading && !isInitializing && !isAuthenticated && !isSigningOut) {
+       router.push('/auth/signin?callbackUrl=/dashboard');
+@@ -77,6 +85,8 @@ export default function DashboardLayout({
+ 
+   useEffect(() => {
+     if (isLoading || !isAuthenticated || isCheckingOnboarding) return;
++    // HRM patch 0056: a refused user's consent check fails too; never send them to onboarding.
++    if (appAccess !== 'allowed') return;
+ 
+     if (isOnboardingComplete) {
+       setShowRetryBanner(false);
+@@ -102,7 +112,7 @@ export default function DashboardLayout({
+ 
+     // consent_not_granted or insufficient_intune_permissions: real consent gap.
+     router.push('/onboarding');
+-  }, [isLoading, isAuthenticated, isCheckingOnboarding, isOnboardingComplete, errorType, router]);
++  }, [isLoading, isAuthenticated, isCheckingOnboarding, isOnboardingComplete, errorType, router, appAccess]);
+ 
+   useEffect(() => {
+     if (isAuthenticated && !isLoading) {
+@@ -124,7 +134,11 @@ export default function DashboardLayout({
+     await signOut();
+   };
+ 
+-  if (isLoading || isCheckingOnboarding) {
++  if (isAuthenticated && (appAccess === 'denied' || appAccess === 'unavailable')) {
++    return <AccessDenied unavailable={appAccess === 'unavailable'} account={user?.email} onRetry={retryAccess} onSwitchAccount={() => void signInWithAnotherAccount()} onSignOut={handleSignOut} />;
++  }
++
++  if (isLoading || isCheckingOnboarding || (isAuthenticated && appAccess === 'checking')) {
+     return (
+       <div className="min-h-screen flex items-center justify-center bg-bg-deepest">
+         <div className="relative">
+@@ -162,14 +176,15 @@ export default function DashboardLayout({
+         {/* Top bar */}
+         <header className="sticky top-0 z-30 h-16 glass-light">
+           <div className="flex items-center justify-between h-full pl-14 pr-3 sm:pr-4 lg:px-6">
+-            {/* Command palette trigger */}
++            {/* Command palette trigger. HRM patch 0036: called "Search" everywhere, with Ctrl or Cmd
++                for the computer in use. */}
+             <button
+               onClick={handleOpenCommandPalette}
+               className="hidden lg:flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted hover:text-text-secondary bg-overlay/[0.03] hover:bg-overlay/5 rounded-lg border border-overlay/5 transition-colors"
+             >
+-              <span><T>Search...</T></span>
++              <span><T>Search…</T></span>
+               <kbd className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5">
+-                <span className="text-xs"><T>Cmd</T></span><T>K</T>
++                <span className="text-xs">{modifierKey}</span>K
+               </kbd>
+             </button>
+             <div className="flex-1 lg:hidden" />
+@@ -177,7 +192,7 @@ export default function DashboardLayout({
+             <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+               <TenantSwitcher />
+               <DeploymentStatusIndicator />
+-              <ChangelogBell />
++              {/* HRM patch: no "What's new" bell; it loaded changelog.ugurlabs.com from every signed-in page */}
+               {hostedServices && <NotificationBell />}
+               <Button
+                 variant="ghost"
+@@ -239,12 +254,13 @@ export default function DashboardLayout({
+               <div className="flex items-start sm:items-center gap-3 min-w-0">
+                 <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5 sm:mt-0" />
+                 <div className="min-w-0">
+-                  <p className="text-sm font-medium text-amber-200">
++                  {/* HRM patch: readable on the light theme, and HRM Support instead of "your administrator". */}
++                  <p className="text-sm font-medium text-amber-800">
+                     <T>Unable to verify organization setup</T>
+                   </p>
+-                  <p className="text-xs text-amber-200/70">
++                  <p className="text-xs text-amber-700">
+                     {errorType === 'missing_credentials'
+-                      ? <T>Server configuration issue. Contact your administrator.</T>
++                      ? 'The server is missing its Intune settings. Contact HRM Support.'
+                       : <T>Please check your connection and try again.</T>}
+                   </p>
+                 </div>
+@@ -285,7 +301,7 @@ export default function DashboardLayout({
+ 
+       {/* Toast notifications */}
+       <Toaster
+-        theme="dark"
++        theme={theme}
+         position="bottom-right"
+         toastOptions={{
+           className: 'bg-bg-surface border border-overlay/10 text-text-primary',
+diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
+index 24e1de8db..9cbc04a29 100644
+--- a/app/(app)/dashboard/page.tsx
++++ b/app/(app)/dashboard/page.tsx
+@@ -10,11 +10,9 @@ import {
+   AlertCircle,
+   CheckCircle2,
+   Loader2,
+-  Zap,
+-  X,
+   KeyRound,
+-  Rocket,
+-  RotateCcw,
++  ArrowUpCircle,
++  Hourglass,
+ } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+@@ -24,8 +22,10 @@ import { useDashboardStats } from '@/hooks/useAnalytics';
+ import { useMspOptional } from '@/hooks/useMspOptional';
+ import { useOnboardingStatus } from '@/hooks/useOnboardingStatus';
+ import { RecentActivityList, PageHeader } from '@/components/dashboard';
+-import { useUserSettings } from '@/components/providers/UserSettingsProvider';
+ import { T, Var } from 'gt-next';
++import { useAvailableUpdates } from '@/hooks/use-updates';
++import { useHrmHome } from '@/hooks/useHrmHome';
++import { ServerStatusCard } from '@/components/hrm/ServerStatusCard';
+ 
+ function getTimeBasedGreeting(): React.ReactNode {
+   const hour = new Date().getHours();
+@@ -40,7 +40,10 @@ export default function DashboardPage() {
+   const { isMspUser } = useMspOptional();
+   const { data: stats, isLoading: statsLoading, isError: statsError } = useDashboardStats(statisticsScope);
+   const { errorType } = useOnboardingStatus();
+-  const { settings, setQuickStartDismissed } = useUserSettings();
++  // HRM patch: tenant-wide activity, updates waiting and server status for the Home page.
++  const { data: tenantStats, isLoading: tenantLoading } = useDashboardStats('tenant');
++  const { data: updates } = useAvailableUpdates();
++  const { data: home, isLoading: homeLoading } = useHrmHome();
+   const [mounted, setMounted] = useState(false);
+   const [greeting, setGreeting] = useState<React.ReactNode>(<T>Welcome back</T>);
+ 
+@@ -49,10 +52,6 @@ export default function DashboardPage() {
+     setGreeting(getTimeBasedGreeting());
+   }, []);
+ 
+-  const handleDismissQuickStart = async () => {
+-    await setQuickStartDismissed(true);
+-  };
+-
+   // Build attention items
+   const attentionItems = useMemo(() => {
+     const items: Array<{
+@@ -65,19 +64,106 @@ export default function DashboardPage() {
+       color: 'error' | 'warning' | 'cyan';
+     }> = [];
+ 
+-    if (statisticsScope === 'mine' && stats && stats.failed > 0) {
++    const updateCount = updates?.count ?? 0;
++    if (updateCount > 0) {
++      items.push({
++        id: 'updates-waiting',
++        icon: ArrowUpCircle,
++        title: updateCount !== 1 ? `${updateCount} app updates waiting` : '1 app update waiting',
++        description: 'New versions of apps deployed in Intune',
++        href: '/dashboard/updates',
++        actionLabel: 'Review',
++        color: 'cyan',
++      });
++    }
++    const failedRecent = home?.attention?.failedRecent ?? 0;
++    if (failedRecent > 0) {
+       items.push({
+         id: 'failed-deployments',
+         icon: AlertCircle,
+-        title: stats.failed !== 1
+-          ? <T><Var>{stats.failed}</Var> failed deployments</T>
+-          : <T><Var>{stats.failed}</Var> failed deployment</T>,
+-        description: <T>Review failed deployments and take action</T>,
++        title: failedRecent !== 1 ? `${failedRecent} failed deployments this week` : '1 failed deployment this week',
++        description: 'Across HRM, in the last 7 days',
+         href: '/dashboard/uploads?status=failed',
+-        actionLabel: <T>View Details</T>,
++        actionLabel: 'Open Deployments',
+         color: 'error',
+       });
+     }
++    // HRM patch 0019: apps with devices that failed to install
++    const installFailures = home?.installFailures ?? [];
++    if (installFailures.length > 0) {
++      const first = installFailures[0];
++      items.push({
++        id: 'install-failures',
++        icon: AlertCircle,
++        title: installFailures.length === 1
++          ? `${first.displayName}: ${first.failed === 1 ? '1 computer' : `${first.failed} computers`} failed to install`
++          : `${installFailures.length} apps have computers that failed to install`,
++        description: 'From Intune, checked twice a day',
++        // HRM patch 0032: one app opens its details directly
++        href: installFailures.length === 1 ? `/dashboard/inventory?app=${first.intuneAppId}` : '/dashboard/inventory',
++        actionLabel: installFailures.length === 1 ? 'Open app' : 'Open Inventory',
++        color: 'warning',
++      });
++    }
++    // HRM patch 0032: deployed apps that no device has, installs or is trying to install
++    const unreached = home?.unreached ?? [];
++    if (unreached.length > 0) {
++      items.push({
++        id: 'unreached-apps',
++        icon: AlertCircle,
++        title: unreached.length === 1
++          ? `${unreached[0].displayName} reaches no computers`
++          : `${unreached.length} apps reach no computers`,
++        description: 'Deployed over 3 days ago, but Intune reports nothing installed or pending. Check the groups in Inventory.',
++        href: unreached.length === 1 ? `/dashboard/inventory?app=${unreached[0].intuneAppId}` : '/dashboard/inventory',
++        actionLabel: 'Check groups',
++        color: 'warning',
++      });
++    }
++    // HRM patch 0039: apps that can't go back, because the previous installer is gone or has changed
++    const gaps = home?.rollbackGaps ?? [];
++    if (gaps.length > 0) {
++      items.push({
++        id: 'rollback-gaps',
++        icon: AlertCircle,
++        title: gaps.length === 1
++          ? `${gaps[0].displayName} can't go back to v${gaps[0].previousVersion}`
++          : `${gaps.length} apps can't go back to their previous version`,
++        description: "The earlier installer can't be downloaded or has changed. Fix a bad update with a newer version instead.",
++        href: gaps.length === 1 ? `/dashboard/inventory?app=${gaps[0].intuneAppId}` : '/dashboard/inventory',
++        actionLabel: gaps.length === 1 ? 'Open app' : 'Open Inventory',
++        color: 'warning',
++      });
++    }
++    // HRM patch 0042: old copies IntuneGet couldn't remove on its own after an update
++    const kept = home?.oldCopiesKept ?? [];
++    if (kept.length > 0) {
++      items.push({
++        id: 'old-copies-kept',
++        icon: AlertCircle,
++        title: kept.length === 1
++          ? `Old copy of ${kept[0].displayName} (v${kept[0].version}) needs a look`
++          : `${kept.length} old app copies need a look`,
++        description: kept.length === 1
++          ? kept[0].reason
++          : `IntuneGet is keeping these for review: ${kept.slice(0, 3).map((c) => `${c.displayName} v${c.version}`).join(', ')}${kept.length > 3 ? ` and ${kept.length - 3} more` : ''}. Open each newest copy in Inventory to see why.`,
++        href: kept.length === 1 ? `/dashboard/inventory?app=${kept[0].newestAppId}` : '/dashboard/inventory',
++        actionLabel: kept.length === 1 ? 'Open app' : 'Open Inventory',
++        color: 'warning',
++      });
++    }
++    const stuck = home?.attention?.stuck ?? 0;
++    if (stuck > 0) {
++      items.push({
++        id: 'stuck-jobs',
++        icon: Hourglass,
++        title: stuck !== 1 ? `${stuck} deployments stuck` : '1 deployment stuck',
++        description: 'Queued or packaging for more than 2 hours',
++        href: '/dashboard/uploads?status=pending',
++        actionLabel: 'Open Deployments',
++        color: 'warning',
++      });
++    }
+ 
+     if (errorType === 'network_error' || errorType === 'missing_credentials') {
+       items.push({
+@@ -85,7 +171,7 @@ export default function DashboardPage() {
+         icon: KeyRound,
+         title: <T>Connection issue detected</T>,
+         description: errorType === 'missing_credentials'
+-          ? <T>Server configuration issue. Contact your administrator.</T>
++          ? 'The server is missing its Intune settings. Contact HRM Support.'
+           : <T>Unable to verify organization setup. Check your connection.</T>,
+         href: '/dashboard/settings',
+         actionLabel: <T>Settings</T>,
+@@ -94,14 +180,14 @@ export default function DashboardPage() {
+     }
+ 
+     return items;
+-  }, [stats, errorType, statisticsScope]);
++  }, [updates, home, errorType]);
+ 
+   return (
+     <div className="space-y-8">
+       {/* Welcome header using PageHeader */}
+       <PageHeader
+         title={<T><Var>{greeting}</Var>, <Var>{user?.name?.split(' ')[0] || 'User'}</Var></T>}
+-        description={<T>Deploy Windows applications to Intune with precision and ease</T>}
++        description="House of Ruth Maryland's app deployments"
+         gradient
+         gradientColors="cyan"
+       />
+@@ -112,10 +198,13 @@ export default function DashboardPage() {
+       {/* Non-blocking nudge to re-consent for the assignment-filters permission */}
+       <FilterPermissionNudge />
+ 
+-      {/* Needs Attention section */}
+-      {attentionItems.length > 0 && (
+-        <div className={mounted ? 'animate-fade-up stagger-1' : 'opacity-0'}>
+-          <div className="space-y-3">
++      {/* HRM patch: layout B. Work on the left, Deploy an app and server status on the right. */}
++      <div className="grid gap-6 lg:grid-cols-3">
++        <div className="space-y-6 lg:col-span-2 min-w-0">
++          <section aria-labelledby="attention-title" className={mounted ? 'animate-fade-up stagger-1' : 'opacity-0'}>
++            <h2 id="attention-title" className="text-lg font-semibold text-text-primary mb-3">Needs attention</h2>
++            {attentionItems.length > 0 ? (
++              <div className="space-y-3">
+             {attentionItems.map((item) => {
+               const colorMap = {
+                 error: {
+@@ -142,35 +231,67 @@ export default function DashboardPage() {
+                 >
+                   <div className="flex items-center justify-between gap-4">
+                     <div className="flex items-center gap-3 min-w-0">
+-                      <item.icon className={`w-5 h-5 ${colors.iconColor} flex-shrink-0`} />
++                      <item.icon className={`w-5 h-5 ${colors.iconColor} flex-shrink-0`} aria-hidden="true" />
+                       <div className="min-w-0">
+                         <p className="text-sm font-medium text-text-primary">{item.title}</p>
+                         <p className="text-xs text-text-muted">{item.description}</p>
+                       </div>
+                     </div>
+-                    <Link href={item.href}>
+-                      <Button size="sm" variant="ghost" className="text-text-secondary hover:text-text-primary flex-shrink-0">
++                    {/* HRM patch 0058: one control, one focus stop (no button inside a link). */}
++                    <Button asChild size="sm" variant="ghost" className="text-text-secondary hover:text-text-primary flex-shrink-0">
++                      <Link href={item.href}>
+                         {item.actionLabel}
+-                        <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+-                      </Button>
+-                    </Link>
++                        <ArrowRight className="w-3.5 h-3.5 ml-1.5" aria-hidden="true" />
++                      </Link>
++                    </Button>
+                   </div>
+                 </div>
+               );
+             })}
+-          </div>
++              </div>
++            ) : (
++              <div className="glass-light rounded-xl p-4 flex items-center gap-3">
++                <CheckCircle2 className="w-5 h-5 text-status-success flex-shrink-0" aria-hidden="true" />
++                <p className="text-sm text-text-secondary">Nothing needs attention right now.</p>
++              </div>
++            )}
++          </section>
++
++          <section aria-labelledby="recent-title" className={`glass-light rounded-xl p-6 ${mounted ? 'animate-fade-up stagger-2' : 'opacity-0'}`}>
++            <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
++              <div className="flex items-center gap-2">
++                <Clock className="w-5 h-5 text-accent-violet" aria-hidden="true" />
++                <h2 id="recent-title" className="text-lg font-semibold text-text-primary">Recent deployments</h2>
++              </div>
++              <div className="flex items-center gap-4 text-sm">
++                <Link href="/dashboard/uploads?status=failed" className="text-accent-cyan hover:underline">Failed only</Link>
++                <Link href="/dashboard/uploads" className="text-accent-cyan hover:underline">View all</Link>
++              </div>
++            </div>
++            <RecentActivityList activities={tenantStats?.recentActivity} loading={tenantLoading} />
++          </section>
+         </div>
+-      )}
++
++        <div className="space-y-6 min-w-0">
++          {/* HRM patch 0053: one primary action instead of a Shortcuts card that repeated the sidebar. */}
++          <Button asChild className="w-full justify-center bg-accent-cyan hover:bg-accent-cyan-dim text-white border-0">
++            <Link href="/dashboard/apps">
++              <Package className="w-4 h-4 mr-2" aria-hidden="true" />Deploy an app
++            </Link>
++          </Button>
++          <ServerStatusCard status={home?.server} loading={homeLoading} appAccess={home?.appAccess} />
++        </div>
++      </div>
+ 
+       {/* Stat cards */}
+       <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Deployment statistics scope">
+         <Button variant={statisticsScope === 'mine' ? 'default' : 'outline'} aria-pressed={statisticsScope === 'mine'} onClick={() => setStatisticsScope('mine')}><T>My deployments</T></Button>
+         <Button variant={statisticsScope === 'tenant' ? 'default' : 'outline'} aria-pressed={statisticsScope === 'tenant'} onClick={() => setStatisticsScope('tenant')}><T>All in tenant</T></Button>
+-        <p className="text-sm text-text-muted">{statisticsScope === 'tenant' ? <T>Activity for the selected tenant</T> : isMspUser ? <T>Across all your tenants</T> : <T>Your deployment activity</T>}</p>
++        <p className="text-sm text-text-muted">{statisticsScope === 'tenant' ? <T>Activity for everyone in your tenant</T> : isMspUser ? <T>Across all your tenants</T> : <T>Your deployment activity</T>}</p>
+       </div>
+       {statsError ? <div role="alert" className="text-status-error"><T>Unable to load deployment statistics. Please try again.</T></div> : <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+         <StatCard
+-          title={<T>Total Deployed</T>}
++          title={<T>Total deployed</T>}
+           value={stats?.totalDeployed ?? 0}
+           icon={Package}
+           color="cyan"
+@@ -179,7 +300,7 @@ export default function DashboardPage() {
+           delay={1}
+         />
+         <StatCard
+-          title={<T>This Month</T>}
++          title={<T>This month</T>}
+           value={stats?.thisMonth ?? 0}
+           icon={Upload}
+           color="success"
+@@ -219,156 +340,6 @@ export default function DashboardPage() {
+           {stats.perUser.length === 0 && <p className="text-text-muted"><T>No deployment activity in this tenant.</T></p>}
+         </section>
+       )}
+-
+-      {/* Main content grid */}
+-      <div className="grid gap-6 lg:grid-cols-2">
+-        {/* Quick start - dismissible */}
+-        {!settings.quickStartDismissed && (
+-          <div className={`glass-light rounded-xl p-6 ${mounted ? 'animate-fade-up stagger-5' : 'opacity-0'}`}>
+-            <div className="flex items-center justify-between mb-6">
+-              <div className="flex items-center gap-2">
+-                <Zap className="w-5 h-5 text-accent-cyan" />
+-                <h2 className="text-lg font-semibold text-text-primary"><T>Quick Start</T></h2>
+-              </div>
+-              <button
+-                onClick={handleDismissQuickStart}
+-                className="text-text-muted hover:text-text-primary transition-colors p-1 rounded-lg hover:bg-overlay/5"
+-                aria-label="Dismiss Quick Start"
+-              >
+-                <X className="w-4 h-4" />
+-              </button>
+-            </div>
+-
+-            <div className="relative">
+-              <div className="absolute left-4 top-8 bottom-8 w-px bg-gradient-to-b from-accent-cyan via-accent-violet to-accent-cyan/20" />
+-
+-              <div className="space-y-4">
+-                <QuickStartStep
+-                  number={1}
+-                  title={<T>Browse the App Catalog</T>}
+-                  description={<T>Search from 13,000+ Winget packages</T>}
+-                  href="/dashboard/apps"
+-                />
+-                <QuickStartStep
+-                  number={2}
+-                  title={<T>Configure & Add to Cart</T>}
+-                  description={<T>Select architecture, scope, and detection rules</T>}
+-                />
+-                <QuickStartStep
+-                  number={3}
+-                  title={<T>Deploy to Intune</T>}
+-                  description={<T>One-click deployment to your tenant</T>}
+-                />
+-              </div>
+-            </div>
+-
+-            <Link href="/dashboard/apps">
+-              <Button className="w-full mt-6 bg-gradient-to-r from-accent-cyan to-accent-violet hover:opacity-90 text-bg-elevated border-0 shadow-glow-cyan">
+-                <Package className="w-4 h-4 mr-2" />
+-                <T>Browse App Catalog</T>
+-                <ArrowRight className="w-4 h-4 ml-2" />
+-              </Button>
+-            </Link>
+-          </div>
+-        )}
+-
+-        {/* Frequently deployed - shown when Quick Start is dismissed */}
+-        {settings.quickStartDismissed && stats?.frequentlyDeployed && stats.frequentlyDeployed.length > 0 && (
+-          <div className={`glass-light rounded-xl p-6 ${mounted ? 'animate-fade-up stagger-5' : 'opacity-0'}`}>
+-            <div className="flex items-center gap-2 mb-6">
+-              <Rocket className="w-5 h-5 text-accent-cyan" />
+-              <h2 className="text-lg font-semibold text-text-primary"><T>Frequently Deployed</T></h2>
+-            </div>
+-
+-            <div className="space-y-3">
+-              {stats.frequentlyDeployed.slice(0, 5).map((app) => (
+-                <Link
+-                  key={app.winget_id}
+-                  href={`/dashboard/apps?search=${encodeURIComponent(app.winget_id)}`}
+-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-overlay/5 transition-all group"
+-                >
+-                  <div className="flex items-center gap-3 min-w-0">
+-                    <div className="w-8 h-8 rounded-lg bg-accent-cyan/10 flex items-center justify-center flex-shrink-0">
+-                      <Package className="w-4 h-4 text-accent-cyan" />
+-                    </div>
+-                    <div className="min-w-0">
+-                      <p className="text-sm font-medium text-text-primary truncate group-hover:text-accent-cyan-bright transition-colors">
+-                        {app.display_name}
+-                      </p>
+-                      <p className="text-xs text-text-muted"><T><Var>{app.deploy_count}</Var> deployments</T></p>
+-                    </div>
+-                  </div>
+-                  <Button size="sm" variant="ghost" className="text-text-muted hover:text-accent-cyan flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+-                    <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+-                    <T>Redeploy</T>
+-                  </Button>
+-                </Link>
+-              ))}
+-            </div>
+-
+-            <Link href="/dashboard/apps">
+-              <Button variant="ghost" className="w-full mt-4 text-text-secondary hover:text-text-primary">
+-                <T>Browse All Apps</T>
+-                <ArrowRight className="w-4 h-4 ml-2" />
+-              </Button>
+-            </Link>
+-          </div>
+-        )}
+-
+-        {/* If Quick Start dismissed but no frequent apps, show browse CTA */}
+-        {settings.quickStartDismissed && (!stats?.frequentlyDeployed || stats.frequentlyDeployed.length === 0) && (
+-          <div className={`glass-light rounded-xl p-6 flex flex-col items-center justify-center text-center ${mounted ? 'animate-fade-up stagger-5' : 'opacity-0'}`}>
+-            <Package className="w-10 h-10 text-accent-cyan/40 mb-3" />
+-            <h3 className="text-text-primary font-medium mb-1"><T>Start deploying</T></h3>
+-            <p className="text-text-muted text-sm mb-4"><T>Browse the App Catalog to deploy your first packages</T></p>
+-            <Link href="/dashboard/apps">
+-              <Button className="bg-gradient-to-r from-accent-cyan to-accent-violet hover:opacity-90 text-bg-elevated border-0">
+-                <Package className="w-4 h-4 mr-2" />
+-                <T>Browse App Catalog</T>
+-              </Button>
+-            </Link>
+-          </div>
+-        )}
+-
+-        {/* Recent activity */}
+-        <div className={`glass-light rounded-xl p-6 ${mounted ? 'animate-fade-up stagger-6' : 'opacity-0'}`}>
+-          <div className="flex items-center justify-between mb-6">
+-            <div className="flex items-center gap-2">
+-              <Clock className="w-5 h-5 text-accent-violet" />
+-              <h2 className="text-lg font-semibold text-text-primary"><T>Recent Activity</T></h2>
+-            </div>
+-            <Link
+-              href="/dashboard/uploads"
+-              className="text-sm text-accent-cyan hover:text-accent-cyan-bright transition-colors"
+-            >
+-              <T>View all</T>
+-            </Link>
+-          </div>
+-
+-          <RecentActivityList
+-            activities={stats?.recentActivity}
+-            loading={statsLoading}
+-          />
+-        </div>
+-      </div>
+-
+-      {/* Intune connection status - compact, only show when connected */}
+-      <div className={`glass-light rounded-xl p-4 ${mounted ? 'animate-fade-up animation-delay-300' : 'opacity-0'}`}>
+-        <div className="flex items-center gap-3">
+-          <CheckCircle2 className="w-5 h-5 text-status-success flex-shrink-0" />
+-          <div className="flex-1 min-w-0">
+-            <span className="text-text-primary text-sm font-medium"><T>Connected to Microsoft Intune</T></span>
+-            <span className="text-text-muted text-sm ml-2">
+-              {user?.email}
+-            </span>
+-          </div>
+-          <Link href="/dashboard/settings">
+-            <Button variant="ghost" size="sm" className="text-text-muted hover:text-text-primary text-xs">
+-              <T>Settings</T>
+-            </Button>
+-          </Link>
+-        </div>
+-      </div>
+     </div>
+   );
+ }
+@@ -448,32 +419,3 @@ function StatCard({
+   return content;
+ }
+ 
+-function QuickStartStep({
+-  number,
+-  title,
+-  description,
+-  href,
+-}: {
+-  number: number;
+-  title: React.ReactNode;
+-  description: React.ReactNode;
+-  href?: string;
+-}) {
+-  const content = (
+-    <div className="group relative flex items-start gap-4 p-3 rounded-lg hover:bg-overlay/5 transition-all cursor-pointer">
+-      <div className="relative z-10 w-8 h-8 rounded-full bg-gradient-to-br from-accent-cyan to-accent-violet text-bg-elevated flex items-center justify-center font-medium text-sm flex-shrink-0 shadow-glow-cyan">
+-        {number}
+-      </div>
+-      <div className="pt-0.5">
+-        <p className="text-text-primary font-medium group-hover:text-accent-cyan-bright transition-colors">{title}</p>
+-        <p className="text-text-muted text-sm">{description}</p>
+-      </div>
+-    </div>
+-  );
+-
+-  if (href) {
+-    return <Link href={href}>{content}</Link>;
+-  }
+-
+-  return content;
+-}
+diff --git a/app/(app)/dashboard/reports/page.tsx b/app/(app)/dashboard/reports/page.tsx
+index 648e311ff..a5489fbdb 100644
+--- a/app/(app)/dashboard/reports/page.tsx
++++ b/app/(app)/dashboard/reports/page.tsx
+@@ -56,12 +56,15 @@ export default function ReportsPage() {
+     }
+   };
+ 
++  // HRM patch 0036: /api/analytics counts only the signed-in user's jobs (jobs.getByUserId),
++  // so the page says so instead of reading like a server-wide report. HRM patch 0053: the title
++  // says so too ("My deployment reports"); the sidebar keeps the short name Reports.
+   if (isLoading) {
+     return (
+       <div className="space-y-6">
+         <PageHeader
+-          title={<T>Reports & Analytics</T>}
+-          description={<T>Track your deployment performance and trends</T>}
++          title={<T>My deployment reports</T>}
++          description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
+         />
+         <SkeletonGrid count={4} columns={4} variant="stat" />
+         <div className="grid gap-6 lg:grid-cols-2">
+@@ -76,8 +79,8 @@ export default function ReportsPage() {
+     return (
+       <div className="space-y-6">
+         <PageHeader
+-          title={<T>Reports & Analytics</T>}
+-          description={<T>Track your deployment performance and trends</T>}
++          title={<T>My deployment reports</T>}
++          description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
+         />
+         <AnimatedEmptyState
+           icon={AlertTriangle}
+@@ -100,8 +103,8 @@ export default function ReportsPage() {
+     <div className="space-y-6">
+       {/* Header */}
+       <PageHeader
+-        title={<T>Reports & Analytics</T>}
+-        description={<T>Track your deployment performance and trends</T>}
++        title={<T>My deployment reports</T>}
++        description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
+         gradient
+         gradientColors="mixed"
+         actions={
+@@ -153,7 +156,7 @@ export default function ReportsPage() {
+       {/* Summary Stats */}
+       <StatCardGrid columns={4}>
+         <AnimatedStatCard
+-          title={<T>Total Deployments</T>}
++          title={<T>Total deployments</T>}
+           value={summary?.totalJobs || 0}
+           icon={Package}
+           color="cyan"
+@@ -194,7 +197,7 @@ export default function ReportsPage() {
+           variants={itemVariants}
+           className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
+         >
+-          <h2 className="text-lg font-semibold text-text-primary mb-4"><T>Success Rate</T></h2>
++          <h2 className="text-lg font-semibold text-text-primary mb-4"><T>Success rate</T></h2>
+           <SuccessRateChart
+             completed={summary?.completedJobs || 0}
+             failed={summary?.failedJobs || 0}
+@@ -208,7 +211,7 @@ export default function ReportsPage() {
+           className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
+         >
+           <h2 className="text-lg font-semibold text-text-primary mb-4">
+-            <T>Deployments Over Time</T>
++            <T>Deployments over time</T>
+           </h2>
+           <DeploymentsLineChart data={data?.dailyDeployments || []} />
+         </motion.div>
+@@ -222,7 +225,7 @@ export default function ReportsPage() {
+         className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
+       >
+         <h2 className="text-lg font-semibold text-text-primary mb-4">
+-          <T>Most Deployed Applications</T>
++          <T>Most deployed apps</T>
+         </h2>
+         <TopAppsChart data={data?.topApps || []} />
+       </motion.div>
+@@ -234,7 +237,7 @@ export default function ReportsPage() {
+         animate="visible"
+         className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
+       >
+-        <h2 className="text-lg font-semibold text-text-primary mb-4"><T>Recent Failures</T></h2>
++        <h2 className="text-lg font-semibold text-text-primary mb-4"><T>Recent failures</T></h2>
+         <RecentFailuresTable data={data?.recentFailures || []} />
+       </motion.div>
+     </div>
+diff --git a/app/(app)/dashboard/settings/page.tsx b/app/(app)/dashboard/settings/page.tsx
+index fa4896636..9c79fbe37 100644
+--- a/app/(app)/dashboard/settings/page.tsx
++++ b/app/(app)/dashboard/settings/page.tsx
+@@ -28,6 +28,8 @@ import { useUserSettings } from '@/components/providers/UserSettingsProvider';
+ import { cn } from '@/lib/utils';
+ import { useCartStore } from '@/stores/cart-store';
+ import { clearConsentPending, isConsentPending } from '@/components/AdminConsentBanner';
++import { useDatabaseMode } from '@/hooks/use-database-mode';
++import { UpdateBehaviorSettings } from '@/components/hrm/UpdateBehaviorSettings';
+ 
+ type SettingsTab = 'general' | 'permissions' | 'notifications' | 'exports' | 'data';
+ type PreferenceKey = 'cart' | 'assignments' | 'supersedence';
+@@ -64,13 +66,19 @@ const SETTINGS_TABS: Array<{
+   { id: 'general', label: <T>General</T>, icon: User, description: <T>Account and connection</T> },
+   { id: 'permissions', label: <T>Permissions</T>, icon: Shield, description: <T>API access control</T> },
+   { id: 'notifications', label: <T>Notifications</T>, icon: Bell, description: <T>Email and webhooks</T> },
+-  { id: 'exports', label: <T>Export</T>, icon: FileDown, description: <T>Export preferences</T> },
+-  { id: 'data', label: <T>Data</T>, icon: Database, description: <T>Data management</T> },
++  // HRM patch 0036: the Export and Data tabs are hidden. Their buttons only waited on a timer
++  // ("Simulate"), the export preferences were never used, and the "stored in your browser" note
++  // was wrong (data is on the server). The panels below stay in the code but nothing opens them.
++  // { id: 'exports', label: <T>Export</T>, icon: FileDown, description: <T>Export preferences</T> },
++  // { id: 'data', label: <T>Data</T>, icon: Database, description: <T>Data management</T> },
+ ];
+ 
+ export default function SettingsPage() {
+   const { user, getAccessToken, requestAdminConsent } = useMicrosoftAuth();
+   const prefersReducedMotion = useReducedMotion();
++  // HRM patch 0036: email notifications need Supabase, so on SQLite the Email card is not shown
++  // and the Notifications tab describes what it does there (webhooks posting to Teams).
++  const databaseMode = useDatabaseMode();
+   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+   const [isChecking, setIsChecking] = useState(false);
+   const [permissionStatus, setPermissionStatus] = useState<PermissionStatusState | null>(null);
+@@ -305,7 +313,9 @@ export default function SettingsPage() {
+                         {tab.label}
+                       </p>
+                       <p className="text-xs text-text-muted hidden lg:block truncate">
+-                        {tab.description}
++                        {tab.id === 'notifications' && databaseMode === 'sqlite'
++                          ? <T>Teams alerts</T>
++                          : tab.description}
+                       </p>
+                     </div>
+                   </button>
+@@ -351,7 +361,7 @@ export default function SettingsPage() {
+                       <SettingRow label={<T>Name</T>} value={user?.name || 'Not provided'} />
+                       <SettingRow label={<T>Email</T>} value={user?.email || 'Not provided'} />
+                       <SettingRow
+-                        label={<T>Authentication Provider</T>}
++                        label={<T>Authentication provider</T>}
+                         value="Microsoft Entra ID"
+                         noBorder
+                       />
+@@ -368,7 +378,7 @@ export default function SettingsPage() {
+                         <Building2 className="w-5 h-5 text-accent-violet" />
+                       </div>
+                       <div>
+-                        <h2 className="text-lg font-semibold text-text-primary"><T>Intune Connection</T></h2>
++                        <h2 className="text-lg font-semibold text-text-primary"><T>Intune connection</T></h2>
+                         <p className="text-sm text-text-muted"><T>Tenant configuration and status</T></p>
+                       </div>
+                     </div>
+@@ -395,7 +405,7 @@ export default function SettingsPage() {
+                           <button
+                             onClick={() => copyToClipboard(user.tenantId!, 'tenantId')}
+                             className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-overlay/5 transition-colors"
+-                            title="Copy Tenant ID"
++                            title="Copy tenant ID"
+                           >
+                             {copiedField === 'tenantId' ? (
+                               <Check className="w-4 h-4 text-status-success" />
+@@ -408,14 +418,14 @@ export default function SettingsPage() {
+ 
+                       <div className="flex items-center justify-between py-3">
+                         <div>
+-                          <p className="text-text-secondary text-sm"><T>Intune Portal</T></p>
++                          <p className="text-text-secondary text-sm"><T>Intune portal</T></p>
+                           <a
+                             href="https://intune.microsoft.com"
+                             target="_blank"
+                             rel="noopener noreferrer"
+                             className="flex items-center gap-2 text-accent-cyan hover:text-accent-cyan-bright transition-colors mt-1 text-sm"
+                           >
+-                            <T>Open Intune Portal</T>
++                            <T>Open Intune portal</T>
+                             <ExternalLink className="w-3.5 h-3.5" />
+                           </a>
+                         </div>
+@@ -423,16 +433,16 @@ export default function SettingsPage() {
+                     </div>
+                   </motion.section>
+ 
+-                  {/* Cart behavior card */}
++                  {/* Deployment list card (HRM patch 0051: was upstream's "Cart behavior") */}
+                   <motion.section
+                     variants={itemVariants}
+                     className="glass-light rounded-xl p-6 border border-overlay/5 hover:border-accent-cyan/20 transition-colors"
+                   >
+                     <div className="flex items-center justify-between">
+                       <div>
+-                        <p className="text-text-primary font-medium"><T>Cart behavior</T></p>
++                        <p className="text-text-primary font-medium"><T>Deployment list</T></p>
+                         <p className="text-sm text-text-muted">
+-                          <T>Control whether the cart opens automatically when adding apps</T>
++                          <T>Open the Deployment list when you add an app</T>
+                         </p>
+                       </div>
+                       <div className="flex min-w-28 flex-col items-end gap-1">
+@@ -451,6 +461,8 @@ export default function SettingsPage() {
+                     </div>
+                   </motion.section>
+ 
++                  {/* HRM patch 0051: these two switches only take effect in Supabase mode. */}
++                  <UpdateBehaviorSettings>
+                   {/* Carry over assignments card */}
+                   <motion.section
+                     variants={itemVariants}
+@@ -458,7 +470,7 @@ export default function SettingsPage() {
+                   >
+                     <div className="flex items-center justify-between">
+                       <div>
+-                        <p className="text-text-primary font-medium"><T>Carry over assignments on app updates</T></p>
++                        <p className="text-text-primary font-medium"><T>Carry over assignments</T></p>
+                         <p className="text-sm text-text-muted">
+                           <T>When enabled, assignments from the previous app version are copied to the new version and removed from the old app. When disabled, new app versions are created without assignments.</T>
+                         </p>
+@@ -506,6 +518,7 @@ export default function SettingsPage() {
+                       </div>
+                     </div>
+                   </motion.section>
++                  </UpdateBehaviorSettings>
+                 </motion.div>
+               </motion.div>
+             )}
+@@ -534,7 +547,7 @@ export default function SettingsPage() {
+                           <Shield className="w-5 h-5 text-accent-cyan" />
+                         </div>
+                         <div>
+-                          <h2 className="text-lg font-semibold text-text-primary"><T>API Permissions</T></h2>
++                          <h2 className="text-lg font-semibold text-text-primary"><T>API permissions</T></h2>
+                           <p className="text-sm text-text-muted"><T>Required Microsoft Graph permissions</T></p>
+                         </div>
+                       </div>
+@@ -550,7 +563,7 @@ export default function SettingsPage() {
+                         ) : (
+                           <Shield className="w-4 h-4 mr-2" />
+                         )}
+-                        {isChecking ? <T>Checking...</T> : <T>Check Permissions</T>}
++                        {isChecking ? <T>Checking...</T> : <T>Check permissions</T>}
+                       </Button>
+                     </div>
+ 
+@@ -607,7 +620,7 @@ export default function SettingsPage() {
+                       <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
+                         <Loader2 className="w-4 h-4 text-blue-400 animate-spin mt-0.5 flex-shrink-0" />
+                         <p className="text-sm text-blue-400">
+-                          <T>Admin consent was granted. Microsoft is still propagating the new permissions to tokens — this typically takes 5 to 15 minutes. Click &quot;Check Permissions&quot; again shortly.</T>
++                          <T>Admin consent was granted. Microsoft is still propagating the new permissions to tokens. This usually takes 5 to 15 minutes. Select &quot;Check permissions&quot; again shortly.</T>
+                         </p>
+                       </div>
+                     )}
+@@ -623,7 +636,7 @@ export default function SettingsPage() {
+                           size="sm"
+                           className="bg-status-warning hover:bg-status-warning/90 text-white"
+                         >
+-                          <T>Re-grant Admin Consent</T>
++                          <T>Re-grant admin consent</T>
+                         </Button>
+                       </div>
+                     )}
+@@ -632,14 +645,14 @@ export default function SettingsPage() {
+                       permissionStatus?.permissions.deviceManagementManagedDevices === false && (
+                       <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
+                         <p className="text-sm text-status-warning mb-2">
+-                          <T>Discovered Apps permission is missing. The Discovered Apps feature requires this permission. A Global Administrator needs to re-grant consent.</T>
++                          <T>Discovered apps permission is missing. The Discovered apps feature requires this permission. A Global Administrator needs to re-grant consent.</T>
+                         </p>
+                         <Button
+                           onClick={handleGrantConsent}
+                           size="sm"
+                           className="bg-status-warning hover:bg-status-warning/90 text-white"
+                         >
+-                          <T>Re-grant Admin Consent</T>
++                          <T>Re-grant admin consent</T>
+                         </Button>
+                       </div>
+                     )}
+@@ -655,7 +668,7 @@ export default function SettingsPage() {
+                           size="sm"
+                           className="bg-status-warning hover:bg-status-warning/90 text-white"
+                         >
+-                          <T>Re-grant Admin Consent</T>
++                          <T>Re-grant admin consent</T>
+                         </Button>
+                       </div>
+                     )}
+@@ -689,9 +702,12 @@ export default function SettingsPage() {
+                   animate="visible"
+                   className="space-y-6"
+                 >
+-                  <motion.div variants={itemVariants}>
+-                    <NotificationSettings />
+-                  </motion.div>
++                  {/* HRM patch 0036: shown only once the server reports Supabase mode. */}
++                  {databaseMode === 'supabase' && (
++                    <motion.div variants={itemVariants}>
++                      <NotificationSettings />
++                    </motion.div>
++                  )}
+                   <motion.div variants={itemVariants}>
+                     <WebhookManager />
+                   </motion.div>
+@@ -722,7 +738,7 @@ export default function SettingsPage() {
+                         <FileDown className="w-5 h-5 text-accent-cyan" />
+                       </div>
+                       <div>
+-                        <h2 className="text-lg font-semibold text-text-primary"><T>Export Preferences</T></h2>
++                        <h2 className="text-lg font-semibold text-text-primary"><T>Export preferences</T></h2>
+                         <p className="text-sm text-text-muted"><T>Configure default export settings</T></p>
+                       </div>
+                     </div>
+@@ -756,7 +772,7 @@ export default function SettingsPage() {
+                         <Database className="w-5 h-5 text-accent-violet" />
+                       </div>
+                       <div>
+-                        <h2 className="text-lg font-semibold text-text-primary"><T>Data Management</T></h2>
++                        <h2 className="text-lg font-semibold text-text-primary"><T>Data management</T></h2>
+                         <p className="text-sm text-text-muted"><T>Cache, sync, and storage settings</T></p>
+                       </div>
+                     </div>
+diff --git a/app/api/hrm/home/route.test.ts b/app/api/hrm/home/route.test.ts
+new file mode 100644
+index 000000000..2ea9ae458
+--- /dev/null
++++ b/app/api/hrm/home/route.test.ts
+@@ -0,0 +1,95 @@
++import { NextRequest } from 'next/server';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), jobs: vi.fn(), status: vi.fn(), installs: vi.fn(), history: vi.fn(), kept: vi.fn(), retiring: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/db', () => ({ getDatabase: () => ({ jobs: { getAnalyticsJobs: mocks.jobs }, uploadHistory: { listAll: mocks.history } }) }));
++vi.mock('@/lib/hrm/install-status-check', () => ({ listInstallStatus: mocks.installs }));
++vi.mock('@/lib/hrm/home', async (original) => ({ ...(await original<typeof import('@/lib/hrm/home')>()), readServerStatus: mocks.status }));
++// HRM patch 0042: only read when DATABASE_MODE is sqlite.
++vi.mock('@/lib/db/sqlite', () => ({
++  sqliteRetirements: { activeAppIds: mocks.retiring },
++  sqliteRollbackReadiness: { gaps: () => [] },
++  sqliteAppInsights: { tracked: () => [] },
++  sqliteOldCopies: { kept: mocks.kept },
++}));
++import { GET } from './route';
++
++const request = () => new NextRequest('http://localhost/api/hrm/home');
++beforeEach(() => {
++  vi.clearAllMocks();
++  mocks.auth.mockResolvedValue({ userId: 'caller', tenantId: 'token-tenant' });
++  mocks.jobs.mockResolvedValue([]);
++  mocks.status.mockResolvedValue({ reported: false, reason: 'missing' });
++  mocks.installs.mockResolvedValue([]);
++  mocks.history.mockResolvedValue([]);
++});
++
++describe('HRM home route', () => {
++  it('requires sign-in before reading anything', async () => {
++    mocks.auth.mockResolvedValue(null);
++    expect((await GET(request())).status).toBe(401);
++    expect(mocks.jobs).not.toHaveBeenCalled();
++    expect(mocks.status).not.toHaveBeenCalled();
++  });
++
++  it('reads only the signed-in tenant and is never cached', async () => {
++    const response = await GET(request());
++    expect(mocks.jobs).toHaveBeenCalledWith({ tenantId: 'token-tenant' });
++    expect(response.headers.get('cache-control')).toBe('private, no-store');
++    expect(await response.json()).toEqual({ attention: { failedRecent: 0, stuck: 0 }, server: { reported: false, reason: 'missing' }, installFailures: [], unreached: [], rollbackGaps: [], oldCopiesKept: [], appAccess: 'not_limited' });
++    expect(mocks.installs).toHaveBeenCalledWith('token-tenant');
++  });
++
++  // HRM patch 0056
++  it('says whether sign-in is limited to the IT admins group', async () => {
++    vi.stubEnv('HRM_ADMIN_GROUP_IDS', '00000000-0000-4000-8000-0000000000a1');
++    try {
++      expect(await (await GET(request())).json()).toMatchObject({ appAccess: 'limited' });
++    } finally {
++      vi.unstubAllEnvs();
++    }
++  });
++
++  it('still returns server status when the job query fails', async () => {
++    mocks.jobs.mockRejectedValue(new Error('db busy'));
++    expect(await (await GET(request())).json()).toMatchObject({ attention: null, server: { reported: false } });
++  });
++
++  it('lists only apps with failed installs, by name and count', async () => {
++    mocks.installs.mockResolvedValue([
++      { display_name: 'Example Reader', intune_app_id: '00000000-0000-0000-0000-000000000001', failed: 3, installed: 40 },
++      { display_name: 'Example Zip', intune_app_id: '00000000-0000-0000-0000-000000000002', failed: 0, installed: 43 },
++    ]);
++    expect((await (await GET(request())).json()).installFailures).toEqual([
++      { displayName: 'Example Reader', intuneAppId: '00000000-0000-0000-0000-000000000001', failed: 3 },
++    ]);
++  });
++  it('lists apps that reach no devices, only from the signed-in tenant (HRM patch 0032)', async () => {
++    const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString();
++    const old = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
++    mocks.installs.mockResolvedValue([{ intune_app_id: 'app-a', display_name: 'App A', installed: 0, pending: 0, failed: 0, checked_at: recent }]);
++    mocks.history.mockResolvedValue([
++      { intune_tenant_id: 'other-tenant', intune_app_id: 'app-a', deployed_at: recent },
++      { intune_tenant_id: 'token-tenant', intune_app_id: 'app-a', deployed_at: old },
++    ]);
++    expect((await (await GET(request())).json()).unreached).toEqual([{ displayName: 'App A', intuneAppId: 'app-a', deployedAt: old }]);
++  });
++
++  it('lists old copies IntuneGet could not remove, for the signed-in tenant only, leaving out copies being retired', async () => {
++    const before = process.env.DATABASE_MODE;
++    process.env.DATABASE_MODE = 'sqlite';
++    try {
++      const A = '00000000-0000-0000-0000-00000000000a', B = '00000000-0000-0000-0000-00000000000b', N = '00000000-0000-0000-0000-00000000000c';
++      mocks.retiring.mockReturnValue([B]);
++      mocks.kept.mockReturnValue([
++        { app_id: A, display_name: 'Example Reader', version: '1.0', newest_app_id: N, reason: 'This copy has a group the newest copy doesn\'t.' },
++        { app_id: B, display_name: 'Example Zip', version: '2.0', newest_app_id: N, reason: 'x' },
++      ]);
++      const body = await (await GET(request())).json();
++      expect(mocks.kept).toHaveBeenCalledWith('token-tenant');
++      expect(body.oldCopiesKept).toEqual([{ displayName: 'Example Reader', intuneAppId: A, version: '1.0', newestAppId: N, reason: 'This copy has a group the newest copy doesn\'t.' }]);
++    } finally {
++      if (before === undefined) delete process.env.DATABASE_MODE; else process.env.DATABASE_MODE = before;
++    }
++  });
++});
+diff --git a/app/api/hrm/home/route.ts b/app/api/hrm/home/route.ts
+new file mode 100644
+index 000000000..8f6ca2d26
+--- /dev/null
++++ b/app/api/hrm/home/route.ts
+@@ -0,0 +1,23 @@
++// HRM patch: Home page data (needs attention counts and server status).
++
++import { NextRequest, NextResponse } from 'next/server';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { readServerStatus } from '@/lib/hrm/home';
++// HRM patch 0055: the attention lists are shared with the MCP read API.
++import { readTenantAttention } from '@/lib/hrm/attention';
++// HRM patch 0056: Server status says when sign-in isn't limited to the IT admins group.
++import { adminAccessState } from '@/lib/hrm/admin-access';
++
++export async function GET(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
++
++  const [server, { attention, installFailures, unreached, rollbackGaps, oldCopiesKept }] = await Promise.all([
++    readServerStatus(),
++    readTenantAttention(user.tenantId),
++  ]);
++  return NextResponse.json(
++    { attention, server, installFailures, unreached, rollbackGaps, oldCopiesKept, appAccess: adminAccessState() },
++    { headers: { 'Cache-Control': 'private, no-store' } },
++  );
++}
+diff --git a/app/api/user/settings/route.ts b/app/api/user/settings/route.ts
+index 8b7cfe81a..18839a80a 100644
+--- a/app/api/user/settings/route.ts
++++ b/app/api/user/settings/route.ts
+@@ -9,7 +9,7 @@ function isBoolean(value: unknown): value is boolean {
+ }
+ 
+ function isThemeMode(value: unknown): value is UserSettings['theme'] {
+-  return value === 'light' || value === 'dark';
++  return value === 'light' || value === 'dark' || value === 'system';
+ }
+ 
+ function isStoredSettings(value: unknown): value is Record<string, unknown> {
+diff --git a/app/globals.css b/app/globals.css
+index d1fdf2c7d..c1545fc5e 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -100,11 +100,11 @@ pre {
+   --bg-elevated: 255 255 255;
+ 
+   /* Accent colors - Electric Cyan (adjusted for light) */
+-  --accent-cyan: #0891b2;
+-  --accent-cyan-bright: #06b6d4;
+-  --accent-cyan-dim: #0e7490;
+-  --accent-violet: #7c3aed;
+-  --accent-violet-bright: #8b5cf6;
++  --accent-cyan: #673090;
++  --accent-cyan-bright: #855aa6;
++  --accent-cyan-dim: #412160;
++  --accent-violet: #5a838c;
++  --accent-violet-bright: #5dc19d;
+ 
+   /* Text hierarchy (light theme) - RGB channels */
+   --text-primary: 15 23 42;
+@@ -123,18 +123,25 @@ pre {
+   --status-error: #ef4444;
+ 
+   --selection-text: #0f172a;
+-  --selection-bg: rgba(8, 145, 178, 0.2);
++  --selection-bg: rgba(103, 48, 144, 0.2);
+   --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+   --glass-bg: rgba(255, 255, 255, 0.9);
+   --glass-border: rgba(15, 23, 42, 0.08);
+   --grid-line: rgba(0, 0, 0, 0.04);
+-  --focus-ring: rgba(8, 145, 178, 0.5);
++  --focus-ring: rgba(103, 48, 144, 0.5);
+ }
+ 
+ .dark {
+   color-scheme: dark;
+ 
++  /* HRM patch: HRM purple and teal, lightened to read on dark surfaces (AA). */
++  --accent-cyan: #a77fd0;
++  --accent-cyan-bright: #c4a3e3;
++  --accent-cyan-dim: #6f3d9b;
++  --accent-violet: #7fb3bd;
++  --accent-violet-bright: #6fd3ae;
++
+   --bg-deepest: 8 15 29;
+   --bg-surface: 15 26 46;
+   --bg-elevated: 21 35 58;
+@@ -150,7 +157,7 @@ pre {
+   --surface-inverse: 230 237 249;
+ 
+   --selection-text: #e5e7eb;
+-  --selection-bg: rgba(8, 145, 178, 0.3);
++  --selection-bg: rgba(103, 48, 144, 0.3);
+   --scrollbar-thumb: rgba(148, 163, 184, 0.32);
+   --scrollbar-thumb-hover: rgba(148, 163, 184, 0.42);
+   --glass-bg: rgba(10, 18, 33, 0.84);
+@@ -167,21 +174,21 @@ pre {
+     --card-foreground: 24 10% 10%;
+     --popover: 0 0% 100%;
+     --popover-foreground: 24 10% 10%;
+-    --primary: 191 91% 37%;
++    --primary: 275 50% 38%;
+     --primary-foreground: 0 0% 100%;
+     --secondary: 24 6% 96%;
+     --secondary-foreground: 24 10% 10%;
+     --muted: 24 6% 96%;
+     --muted-foreground: 24 6% 45%;
+-    --accent: 262 83% 58%;
++    --accent: 191 22% 45%;
+     --accent-foreground: 0 0% 100%;
+     --destructive: 0 84% 60%;
+     --destructive-foreground: 0 0% 100%;
+     --border: 24 6% 90%;
+     --input: 24 6% 90%;
+-    --ring: 191 91% 37%;
+-    --chart-1: 191 91% 37%;
+-    --chart-2: 262 83% 58%;
++    --ring: 275 50% 38%;
++    --chart-1: 275 50% 38%;
++    --chart-2: 191 22% 45%;
+     --chart-3: 142 76% 36%;
+     --chart-4: 38 92% 50%;
+     --chart-5: 0 84% 60%;
+@@ -196,20 +203,20 @@ pre {
+   --card-foreground: 210 20% 95%;
+   --popover: 222 47% 16%;
+   --popover-foreground: 210 20% 95%;
+-  --primary: 191 91% 61%;
++  --primary: 275 30% 63%;
+   --primary-foreground: 222 47% 11%;
+   --secondary: 216 17% 24%;
+   --secondary-foreground: 210 20% 95%;
+   --muted: 216 17% 24%;
+   --muted-foreground: 218 11% 75%;
+-  --accent: 262 83% 58%;
++  --accent: 191 22% 45%;
+   --accent-foreground: 0 0% 100%;
+   --destructive: 0 72% 58%;
+   --destructive-foreground: 0 0% 100%;
+   --border: 216 17% 30%;
+   --input: 216 17% 30%;
+-  --ring: 191 91% 61%;
+-  --chart-1: 191 91% 61%;
++  --ring: 275 30% 63%;
++  --chart-1: 275 30% 63%;
+   --chart-2: 262 83% 68%;
+   --chart-3: 142 76% 45%;
+   --chart-4: 38 92% 58%;
+@@ -232,21 +239,21 @@ pre {
+ 
+   /* ===== GRADIENT TEXT UTILITIES ===== */
+   .gradient-text-cyan {
+-    background: linear-gradient(135deg, #0891b2, #06b6d4, #22d3ee);
++    background: linear-gradient(135deg, #673090, #855aa6, #a483bc);
+     -webkit-background-clip: text;
+     -webkit-text-fill-color: transparent;
+     background-clip: text;
+   }
+ 
+   .gradient-text-violet {
+-    background: linear-gradient(135deg, #7c3aed, #8b5cf6, #a78bfa);
++    background: linear-gradient(135deg, #5a838c, #5dc19d, #8fd4ba);
+     -webkit-background-clip: text;
+     -webkit-text-fill-color: transparent;
+     background-clip: text;
+   }
+ 
+   .gradient-text-mixed {
+-    background: linear-gradient(135deg, #0891b2, #7c3aed, #06b6d4);
++    background: linear-gradient(135deg, #673090, #5a838c, #855aa6);
+     -webkit-background-clip: text;
+     -webkit-text-fill-color: transparent;
+     background-clip: text;
+@@ -266,28 +273,28 @@ pre {
+   }
+ 
+   .glow-cyan {
+-    box-shadow: 0 0 20px rgba(8, 145, 178, 0.15);
++    box-shadow: 0 0 20px rgba(103, 48, 144, 0.15);
+   }
+ 
+   .glow-cyan-lg {
+-    box-shadow: 0 0 40px rgba(8, 145, 178, 0.2);
++    box-shadow: 0 0 40px rgba(103, 48, 144, 0.2);
+   }
+ 
+   .glow-violet {
+-    box-shadow: 0 0 20px rgba(124, 58, 237, 0.15);
++    box-shadow: 0 0 20px rgba(90, 131, 140, 0.15);
+   }
+ 
+   .glow-violet-lg {
+-    box-shadow: 0 0 40px rgba(124, 58, 237, 0.2);
++    box-shadow: 0 0 40px rgba(90, 131, 140, 0.2);
+   }
+ 
+   /* Border accent */
+   .border-accent-cyan {
+-    box-shadow: 0 0 0 1px rgba(8, 145, 178, 0.2);
++    box-shadow: 0 0 0 1px rgba(103, 48, 144, 0.2);
+   }
+ 
+   .border-accent-violet {
+-    box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.2);
++    box-shadow: 0 0 0 1px rgba(90, 131, 140, 0.2);
+   }
+ 
+   /* ===== GLASS MORPHISM EFFECTS (Light) ===== */
+@@ -301,7 +308,7 @@ pre {
+ 
+   .glass-light-hover:hover {
+     background: var(--glass-bg);
+-    border-color: rgba(8, 145, 178, 0.28);
++    border-color: rgba(103, 48, 144, 0.28);
+   }
+ 
+   /* ===== BACKGROUND PATTERNS (Light Theme) ===== */
+@@ -310,7 +317,7 @@ pre {
+   }
+ 
+   .bg-dots-light {
+-    background-image: radial-gradient(circle, rgba(8, 145, 178, 0.08) 1px, transparent 1px);
++    background-image: radial-gradient(circle, rgba(103, 48, 144, 0.08) 1px, transparent 1px);
+     background-size: 24px 24px;
+   }
+ 
+@@ -337,33 +344,33 @@ pre {
+   }
+ 
+   .bg-gradient-radial-cyan {
+-    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(8, 145, 178, 0.06), transparent);
++    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(103, 48, 144, 0.06), transparent);
+   }
+ 
+   .bg-gradient-radial-violet {
+-    background: radial-gradient(ellipse 60% 40% at 80% 100%, rgba(124, 58, 237, 0.04), transparent);
++    background: radial-gradient(ellipse 60% 40% at 80% 100%, rgba(90, 131, 140, 0.04), transparent);
+   }
+ 
+   /* Dark mode gradient overrides */
+   .dark .bg-gradient-radial-cyan {
+-    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(8, 145, 178, 0.12), transparent);
++    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(103, 48, 144, 0.12), transparent);
+   }
+   .dark .bg-gradient-radial-violet {
+-    background: radial-gradient(ellipse 60% 40% at 80% 100%, rgba(124, 58, 237, 0.08), transparent);
++    background: radial-gradient(ellipse 60% 40% at 80% 100%, rgba(90, 131, 140, 0.08), transparent);
+   }
+ 
+   /* ===== DEPLOYMENT FEED PROCESSING GRADIENTS ===== */
+   .processing-gradient {
+-    background: linear-gradient(125deg, rgba(8, 145, 178, 0.06), rgba(255, 255, 255, 0.96) 52%, rgba(124, 58, 237, 0.04));
++    background: linear-gradient(125deg, rgba(103, 48, 144, 0.06), rgba(255, 255, 255, 0.96) 52%, rgba(90, 131, 140, 0.04));
+   }
+   .processing-gradient-calm {
+-    background: linear-gradient(125deg, rgba(8, 145, 178, 0.04), rgba(255, 255, 255, 0.97) 54%, rgba(124, 58, 237, 0.03));
++    background: linear-gradient(125deg, rgba(103, 48, 144, 0.04), rgba(255, 255, 255, 0.97) 54%, rgba(90, 131, 140, 0.03));
+   }
+   .dark .processing-gradient {
+-    background: linear-gradient(125deg, rgba(8, 145, 178, 0.12), rgba(21, 35, 58, 0.96) 52%, rgba(124, 58, 237, 0.08));
++    background: linear-gradient(125deg, rgba(103, 48, 144, 0.12), rgba(21, 35, 58, 0.96) 52%, rgba(90, 131, 140, 0.08));
+   }
+   .dark .processing-gradient-calm {
+-    background: linear-gradient(125deg, rgba(8, 145, 178, 0.08), rgba(21, 35, 58, 0.97) 54%, rgba(124, 58, 237, 0.06));
++    background: linear-gradient(125deg, rgba(103, 48, 144, 0.08), rgba(21, 35, 58, 0.97) 54%, rgba(90, 131, 140, 0.06));
+   }
+ 
+   /* ===== MASK UTILITIES ===== */
+@@ -444,7 +451,7 @@ pre {
+     background: linear-gradient(
+       90deg,
+       transparent 0%,
+-      rgba(8, 145, 178, 0.08) 50%,
++      rgba(103, 48, 144, 0.08) 50%,
+       transparent 100%
+     );
+     background-size: 200% 100%;
+@@ -591,10 +598,10 @@ pre {
+ 
+ @keyframes ring-pulse {
+   0%, 100% {
+-    box-shadow: 0 0 0 0px rgba(8, 145, 178, 0.3);
++    box-shadow: 0 0 0 0px rgba(103, 48, 144, 0.3);
+   }
+   50% {
+-    box-shadow: 0 0 0 6px rgba(8, 145, 178, 0);
++    box-shadow: 0 0 0 6px rgba(103, 48, 144, 0);
+   }
+ }
+ 
+@@ -652,3 +659,33 @@ pre {
+   outline: 2px solid var(--focus-ring);
+   outline-offset: 2px;
+ }
++
++/* HRM patch: solid purple buttons keep white text readable in dark mode. The
++   lighter accent above is for text and borders; a filled button uses a deeper
++   purple, and one shade darker on hover. Unlayered, so it wins over utilities. */
++.dark .bg-accent-cyan {
++  background-color: #7d4aa8;
++}
++.dark .bg-accent-cyan:is(:hover, :focus-visible)[class*="hover:bg-"] {
++  background-color: #6f3d9b;
++}
++.dark .bg-accent-violet {
++  background-color: #4f7880;
++}
++
++/* HRM patch: upstream screens use deep text shades (600 to 900) picked for the
++   light theme; on dark surfaces they fall below AA. Lighten them in dark mode. */
++.dark :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-amber-900) { color: #fcd34d; }
++.dark :is(.text-blue-600, .text-blue-700) { color: #93c5fd; }
++.dark :is(.text-purple-600, .text-violet-600) { color: #d8b4fe; }
++.dark :is(.text-emerald-600, .text-emerald-700, .text-green-600, .text-green-700) { color: #6ee7b7; }
++.dark :is(.text-red-600, .text-red-700) { color: #fca5a5; }
++.dark .text-cyan-700 { color: #67e8f9; }
++.dark :is(.text-slate-600, .text-zinc-600) { color: #cbd5e1; }
++
++/* HRM patch: the command palette's search box has the cursor whenever the
++   palette is open, so the page-wide focus outline (clipped at the box's edge)
++   isn't needed there. */
++[cmdk-input]:focus-visible {
++  outline: none;
++}
+diff --git a/app/layout.tsx b/app/layout.tsx
+index 517010b3f..dd5d02974 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -19,9 +19,9 @@ const PLAUSIBLE_DOMAIN = process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN;
+ 
+ export const metadata: Metadata = {
+   metadataBase: new URL("https://www.intuneget.com"),
+-  title: "IntuneGet | Free Intune App Deployment Tool - Deploy Winget Apps in Minutes",
+-  description:
+-    "Deploy any Winget app to Microsoft Intune in about 5 minutes. Free, open-source tool. No scripting, no IntuneWin packaging, no per-device licensing.",
++  // HRM patch: internal tool name in the browser tab.
++  title: "IntuneGet · HRM",
++  description: "House of Ruth Maryland's IntuneGet server for deploying apps to Intune.",
+   keywords: [
+     "Intune app deployment",
+     "Winget Intune",
+@@ -206,7 +206,8 @@ export default async function RootLayout({
+           type="font/woff2"
+           crossOrigin="anonymous"
+         />
+-        <link rel="preconnect" href="https://plausible.io" />
++        {/* HRM patch: only open a connection to plausible.io when analytics are configured */}
++        {PLAUSIBLE_DOMAIN && <link rel="preconnect" href="https://plausible.io" />}
+         <script
+           dangerouslySetInnerHTML={{
+             __html: `window.__RUNTIME_CONFIG__=${JSON.stringify({
+@@ -219,15 +220,11 @@ export default async function RootLayout({
+           dangerouslySetInnerHTML={{
+             __html: `(() => {
+   try {
+-    const storedTheme = localStorage.getItem("intuneget-theme");
+-    if (storedTheme === "light" || storedTheme === "dark") {
+-      document.documentElement.classList.toggle("dark", storedTheme === "dark");
+-      return;
+-    }
+-
+-    // First-time visitors always start in light mode. Explicit local or
+-    // account preferences still take precedence on later visits.
+-    document.documentElement.classList.remove("dark");
++    // HRM patch: light, dark, or (the default) the computer's setting.
++    const storedTheme = localStorage.getItem("intuneget-theme-mode");
++    const dark = storedTheme === "dark" ||
++      (storedTheme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
++    document.documentElement.classList.toggle("dark", dark);
+   } catch (error) {
+     if (typeof console !== "undefined" && console.warn) {
+       console.warn("Failed to initialize theme preference:", error);
+diff --git a/app/manifest.ts b/app/manifest.ts
+index bc4484fdd..952d1c557 100644
+--- a/app/manifest.ts
++++ b/app/manifest.ts
+@@ -2,14 +2,14 @@ import { MetadataRoute } from "next";
+ 
+ export default function manifest(): MetadataRoute.Manifest {
+   return {
+-    name: "IntuneGet - Deploy Winget Apps to Intune",
++    name: "IntuneGet · House of Ruth Maryland",
+     short_name: "IntuneGet",
+     description:
+       "Streamline your Microsoft Intune app deployment process with Winget integration. Package and upload applications effortlessly.",
+     start_url: "/",
+     display: "standalone",
+     background_color: "#0a0a0f",
+-    theme_color: "#06b6d4",
++    theme_color: "#673090",
+     icons: [
+       {
+         src: "/logo-192.png",
+diff --git a/components/auth/verification-scene/PackageBox.tsx b/components/auth/verification-scene/PackageBox.tsx
+index 56ba90b62..fe36ffb43 100644
+--- a/components/auth/verification-scene/PackageBox.tsx
++++ b/components/auth/verification-scene/PackageBox.tsx
+@@ -54,10 +54,10 @@ export function PackageBox() {
+         <RoundedBox args={[1.2, 1.2, 1.2]} radius={0.12} smoothness={4}>
+           <meshStandardMaterial
+             ref={materialRef}
+-            color="#0891b2"
++            color="#673090"
+             metalness={0.3}
+             roughness={0.4}
+-            emissive="#06b6d4"
++            emissive="#855aa6"
+             emissiveIntensity={0}
+           />
+         </RoundedBox>
+@@ -67,7 +67,7 @@ export function PackageBox() {
+           <meshBasicMaterial
+             ref={edgeMaterialRef}
+             wireframe
+-            color="#22d3ee"
++            color="#a483bc"
+             transparent
+             opacity={0.2}
+           />
+diff --git a/components/auth/verification-scene/SceneLights.tsx b/components/auth/verification-scene/SceneLights.tsx
+index 27c710577..776a9b69c 100644
+--- a/components/auth/verification-scene/SceneLights.tsx
++++ b/components/auth/verification-scene/SceneLights.tsx
+@@ -17,7 +17,7 @@ export function SceneLights() {
+       <pointLight
+         position={[-3, 1, 2]}
+         intensity={0.6}
+-        color="#0891b2"
++        color="#673090"
+         distance={10}
+       />
+ 
+@@ -25,7 +25,7 @@ export function SceneLights() {
+       <pointLight
+         position={[2, -2, 1]}
+         intensity={0.4}
+-        color="#7c3aed"
++        color="#5a838c"
+         distance={8}
+       />
+ 
+@@ -33,7 +33,7 @@ export function SceneLights() {
+       <pointLight
+         position={[0, 1, -3]}
+         intensity={0.3}
+-        color="#06b6d4"
++        color="#855aa6"
+         distance={8}
+       />
+     </>
+diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
+index 33d0890cc..d4f1c62ba 100644
+--- a/components/dashboard/CommandPalette.tsx
++++ b/components/dashboard/CommandPalette.tsx
+@@ -4,6 +4,7 @@ import { T } from 'gt-next';
+ import { useState, useEffect, useCallback } from 'react';
+ import { useRouter } from 'next/navigation';
+ import { Command } from 'cmdk';
++import { Title as DialogTitle } from '@radix-ui/react-dialog';
+ import {
+   LayoutDashboard,
+   Package,
+@@ -13,24 +14,24 @@ import {
+   ArrowUpCircle,
+   BarChart3,
+   Settings,
+-  FolderSync,
+-  Lightbulb,
++  LifeBuoy,
+   Search,
+   Keyboard,
+ } from 'lucide-react';
+-import { SHORTCUT_HINTS } from '@/hooks/useKeyboardShortcuts';
++import { SHORTCUT_HINTS, useModifierKeyLabel } from '@/hooks/useKeyboardShortcuts';
+ 
++// HRM patch: the same pages as HRM's sidebar (Home, no SCCM or app requests, Help).
++// HRM patch 0053: in the sidebar's order (Apps, Updates, Activity, then Settings and Help).
+ const NAVIGATION_ITEMS = [
+-  { name: 'Overview', href: '/dashboard', icon: LayoutDashboard, keywords: 'home dashboard overview' },
+-  { name: 'App Catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget' },
+-  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'uploads deploy jobs status' },
+-  { name: 'Discovered Apps', href: '/dashboard/unmanaged', icon: Radar, keywords: 'unmanaged discovered scan' },
++  { name: 'Home', href: '/dashboard', icon: LayoutDashboard, keywords: 'home dashboard overview' },
++  { name: 'App catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget deploy' },
+   { name: 'Inventory', href: '/dashboard/inventory', icon: Server, keywords: 'deployed inventory intune' },
+-  { name: 'App Updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions' },
+-  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts' },
+-  { name: 'SCCM Migration', href: '/dashboard/sccm', icon: FolderSync, keywords: 'sccm migration configmgr' },
+-  { name: 'App Requests', href: '/dashboard/app-requests', icon: Lightbulb, keywords: 'suggestions requests vote' },
++  { name: 'Discovered apps', href: '/dashboard/unmanaged', icon: Radar, keywords: 'unmanaged discovered scan devices' },
++  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions automatic schedule' },
++  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'uploads deploy jobs status history' },
++  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts my deployments' },
+   { name: 'Settings', href: '/dashboard/settings', icon: Settings, keywords: 'settings preferences permissions' },
++  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy, keywords: 'help support how' },
+ ];
+ 
+ interface CommandPaletteProps {
+@@ -41,22 +42,11 @@ interface CommandPaletteProps {
+ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+   const router = useRouter();
+   const [search, setSearch] = useState('');
++  const modifierKey = useModifierKeyLabel();
+ 
+   useEffect(() => {
+-    if (!open) {
+-      setSearch('');
+-      return;
+-    }
+-
+-    const handleEscape = (e: KeyboardEvent) => {
+-      if (e.key === 'Escape') {
+-        e.preventDefault();
+-        onOpenChange(false);
+-      }
+-    };
+-    document.addEventListener('keydown', handleEscape);
+-    return () => document.removeEventListener('keydown', handleEscape);
+-  }, [open, onOpenChange]);
++    if (!open) setSearch('');
++  }, [open]);
+ 
+   const handleSelect = useCallback(
+     (href: string) => {
+@@ -66,26 +56,27 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+     [onOpenChange, router]
+   );
+ 
+-  if (!open) return null;
+-
++  // HRM patch: a real dialog (cmdk's Radix Dialog), so the search box has the
++  // cursor when it opens, the arrow keys and Enter work straight away, focus
++  // stays in the palette (typing no longer triggers page shortcuts such as C
++  // for the cart), Escape and clicking outside close it, and focus goes back
++  // to where it was.
+   return (
+-    <div className="fixed inset-0 z-[60]">
+-      {/* Backdrop */}
+-      <div
+-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+-        onClick={() => onOpenChange(false)}
+-      />
+-
+-      {/* Command dialog */}
+-      <div className="absolute inset-0 flex items-start justify-center pt-[20vh] px-4">
+-        <Command
+-          className="w-full max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden"
+-          loop
+-        >
++    <Command.Dialog
++      open={open}
++      onOpenChange={onOpenChange}
++      label="Search"
++      loop
++      overlayClassName="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
++      contentClassName="fixed inset-x-4 top-[20vh] z-[60] mx-auto max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden focus:outline-none"
++      aria-describedby={undefined}
++    >
++      <DialogTitle className="sr-only">Search</DialogTitle>
+           {/* Search input */}
+           <div className="flex items-center gap-3 px-4 border-b border-overlay/5">
+             <Search className="w-4 h-4 text-text-muted flex-shrink-0" />
+             <Command.Input
++              autoFocus
+               value={search}
+               onValueChange={setSearch}
+               placeholder="Type a command or search..."
+@@ -122,7 +113,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+             {/* Keyboard shortcuts group */}
+             {!search && (
+               <Command.Group
+-                heading={<T>Keyboard Shortcuts</T>}
++                heading={<T>Keyboard shortcuts</T>}
+                 className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:mt-2"
+               >
+                 {SHORTCUT_HINTS.map((hint) => (
+@@ -142,7 +133,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+                           key={key}
+                           className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5"
+                         >
+-                          {key}
++                          {key === 'Mod' ? modifierKey : key}
+                         </kbd>
+                       ))}
+                     </div>
+@@ -151,8 +142,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+               </Command.Group>
+             )}
+           </Command.List>
+-        </Command>
+-      </div>
+-    </div>
++    </Command.Dialog>
+   );
+ }
+diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
+index e941306a7..92c974146 100644
+--- a/components/dashboard/Sidebar.tsx
++++ b/components/dashboard/Sidebar.tsx
+@@ -21,6 +21,7 @@ import {
+   Layers,
+   Webhook,
+   Lightbulb,
++  LifeBuoy,
+   PanelLeftClose,
+   PanelLeftOpen,
+ } from 'lucide-react';
+@@ -35,6 +36,7 @@ import { UpdateBadge } from '@/components/inventory';
+ import { TooltipProvider } from '@/components/ui/tooltip';
+ import { SidebarNavItem } from './SidebarNavItem';
+ import { SidebarUserSection } from './SidebarUserSection';
++import { hrmNavGroups } from '@/lib/hrm/navigation';
+ import type { LucideIcon } from 'lucide-react';
+ 
+ type NavItem = {
+@@ -50,23 +52,30 @@ type NavGroup = {
+ };
+ 
+ const coreNav: NavItem[] = [
+-  { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
+-  { name: 'App Catalog', href: '/dashboard/apps', icon: Package },
++  { name: 'Home', href: '/dashboard', icon: LayoutDashboard },
++  { name: 'App catalog', href: '/dashboard/apps', icon: Package },
+   { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket },
+-  { name: 'Discovered Apps', href: '/dashboard/unmanaged', icon: Radar },
++  { name: 'Discovered apps', href: '/dashboard/unmanaged', icon: Radar },
+ ];
+ 
+ const managementNav: NavItem[] = [
+-  { name: 'SCCM Migration', href: '/dashboard/sccm', icon: FolderSync },
++  { name: 'SCCM migration', href: '/dashboard/sccm', icon: FolderSync },
+   { name: 'Inventory', href: '/dashboard/inventory', icon: Server },
+-  { name: 'App Updates', href: '/dashboard/updates', icon: ArrowUpCircle, badge: <UpdateBadge /> },
++  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, badge: <UpdateBadge /> },
+ ];
+ 
+ const analyticsNav: NavItem[] = [
+   { name: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
+-  { name: 'App Requests', href: '/dashboard/app-requests', icon: Lightbulb },
++  { name: 'App requests', href: '/dashboard/app-requests', icon: Lightbulb },
+ ];
+ 
++// HRM patch: help for HRM IT, and no SCCM, MSP or public app-request items
++// (SCCM doesn't work on a SQLite server; HRM is one organization).
++const helpNav: NavItem[] = [
++  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy },
++];
++const HRM_HIDDEN_HREFS = new Set(['/dashboard/sccm', '/dashboard/app-requests']);
++
+ const mspNav: NavItem[] = [
+   { name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 },
+   { name: 'Batch Deploy', href: '/dashboard/msp/batch', icon: Layers },
+@@ -110,13 +119,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+   const managementItems = sccmEnabled
+     ? managementNav
+     : managementNav.filter((item) => item.href !== '/dashboard/sccm');
+-  const visibleManagementItems = hostedServices
+-    ? managementItems
+-    : managementItems.filter((item) => item.href !== '/dashboard/updates');
+ 
+-  const navGroups: NavGroup[] = [
++  const upstreamGroups: NavGroup[] = [
+     { items: coreNav },
+-    { label: 'Management', items: visibleManagementItems },
++    // HRM patch 0012: App updates works on SQLite, so it is shown here too.
++    { label: 'Management', items: managementItems },
+     {
+       label: 'Analytics',
+       items: hostedServices
+@@ -127,6 +134,16 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+       ? [{ label: 'MSP', items: mspNav }]
+       : [{ label: 'MSP', items: [{ name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 }] }]),
+   ];
++  // HRM patch 0053: HRM's groups by job (patch 0058: Apps and Activity, Help on its own) instead of upstream's
++  // Management and Analytics. Same items and routes; upstreamGroups stays so upstream's feature
++  // flags still decide which items exist.
++  const navGroups: NavGroup[] = hrmNavGroups(
++    upstreamGroups
++      .filter((group) => group.label !== 'MSP')
++      .flatMap((group) => group.items)
++      .filter((item) => !HRM_HIDDEN_HREFS.has(item.href)),
++    helpNav
++  );
+ 
+   const sidebarContent = (
+     <div className="flex flex-col h-full">
+@@ -153,9 +170,10 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+                 animate={{ opacity: 1, width: 'auto' }}
+                 exit={{ opacity: 0, width: 0 }}
+                 transition={{ duration: 0.15 }}
+-                className="text-xl font-bold text-text-primary tracking-tight whitespace-nowrap overflow-hidden"
++                className="flex flex-col whitespace-nowrap overflow-hidden"
+               >
+-                <T>IntuneGet</T>
++                <span className="text-xl font-bold text-text-primary tracking-tight leading-tight"><T>IntuneGet</T></span>
++                <span className="text-xs text-text-muted leading-tight">House of Ruth Maryland</span>
+               </motion.span>
+             )}
+           </AnimatePresence>
+@@ -180,7 +198,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+           className="space-y-1"
+         >
+           {navGroups.map((group, groupIndex) => (
+-            <div key={group.label || 'core'}>
++            <div key={group.label || `group-${groupIndex}`}>
++              {/* HRM patch 0058: an unlabelled group after the first (Help) gets a plain divider. */}
++              {!group.label && groupIndex > 0 && (
++                <div className={cn('pt-4 pb-2', isCollapsed ? 'px-0' : 'px-3')} aria-hidden="true">
++                  <div className={cn('border-t border-overlay/5', isCollapsed && 'mx-2')} />
++                </div>
++              )}
+               {/* Section divider/label */}
+               {group.label && (
+                 <div className={cn('pt-4 pb-2', isCollapsed ? 'px-0' : 'px-3')}>
+@@ -194,7 +218,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+                         animate={{ opacity: 1 }}
+                         exit={{ opacity: 0 }}
+                         transition={{ duration: 0.15 }}
+-                        className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-muted"
++                        className="text-xs font-semibold text-text-muted"
+                       >
+                         <T>{group.label}</T>
+                       </motion.span>
+@@ -252,10 +276,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+ 
+   return (
+     <TooltipProvider delayDuration={0}>
+-      {/* Mobile hamburger */}
++      {/* Mobile hamburger. HRM patch 0058: z-40 keeps it above the sticky z-30 page header; the
++          backdrop (z-40, later) and the open menu (z-50) still cover it. */}
+       <button
+         onClick={() => setMobileOpen(true)}
+-        className="fixed top-4 left-4 z-30 lg:hidden text-text-secondary hover:text-text-primary transition-colors"
++        className="fixed top-4 left-4 z-40 lg:hidden text-text-secondary hover:text-text-primary transition-colors"
+         aria-label="Open sidebar"
+       >
+         <Menu className="w-6 h-6" />
+diff --git a/components/dashboard/SidebarUserSection.tsx b/components/dashboard/SidebarUserSection.tsx
+index d834efe1b..6a84253d2 100644
+--- a/components/dashboard/SidebarUserSection.tsx
++++ b/components/dashboard/SidebarUserSection.tsx
+@@ -2,7 +2,7 @@
+ 
+ import { T } from 'gt-next';
+ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+-import { Settings, LogOut, User, ChevronRight } from 'lucide-react';
++import { Settings, LogOut, ChevronRight } from 'lucide-react';
+ import Link from 'next/link';
+ import { usePathname } from 'next/navigation';
+ import { cn } from '@/lib/utils';
+@@ -20,6 +20,7 @@ import {
+   TooltipTrigger,
+   TooltipContent,
+ } from '@/components/ui/tooltip';
++import { ThemeMenuItems } from '@/components/hrm/ThemeMenuItems';
+ 
+ interface SidebarUserSectionProps {
+   user: { id?: string; name?: string | null; email?: string | null } | null;
+@@ -88,12 +89,7 @@ export function SidebarUserSection({
+               </div>
+             </DropdownMenuLabel>
+             <DropdownMenuSeparator />
+-            <DropdownMenuItem asChild>
+-              <Link href="/dashboard/account" onClick={onNavigate}>
+-                <User className="w-4 h-4 mr-2" />
+-                <T>Account</T>
+-              </Link>
+-            </DropdownMenuItem>
++            {/* HRM patch 0036: no Account link. That page repeats Settings > General and the Home counts. */}
+             <DropdownMenuItem asChild>
+               <Link href="/dashboard/settings" onClick={onNavigate}>
+                 <Settings className="w-4 h-4 mr-2" />
+@@ -101,6 +97,8 @@ export function SidebarUserSection({
+               </Link>
+             </DropdownMenuItem>
+             <DropdownMenuSeparator />
++            <ThemeMenuItems />
++            <DropdownMenuSeparator />
+             <DropdownMenuItem onClick={onSignOut}>
+               <LogOut className="w-4 h-4 mr-2" />
+               <T>Sign out</T>
+@@ -158,18 +156,7 @@ export function SidebarUserSection({
+             </div>
+           </DropdownMenuLabel>
+           <DropdownMenuSeparator />
+-          <DropdownMenuItem asChild>
+-            <Link
+-              href="/dashboard/account"
+-              onClick={onNavigate}
+-              className={cn(
+-                pathname === '/dashboard/account' && 'text-accent-cyan'
+-              )}
+-            >
+-              <User className="w-4 h-4 mr-2" />
+-              <T>Account</T>
+-            </Link>
+-          </DropdownMenuItem>
++          {/* HRM patch 0036: no Account link. That page repeats Settings > General and the Home counts. */}
+           <DropdownMenuItem asChild>
+             <Link
+               href="/dashboard/settings"
+@@ -183,6 +170,8 @@ export function SidebarUserSection({
+             </Link>
+           </DropdownMenuItem>
+           <DropdownMenuSeparator />
++          <ThemeMenuItems />
++          <DropdownMenuSeparator />
+           <DropdownMenuItem onClick={onSignOut}>
+             <LogOut className="w-4 h-4 mr-2" />
+             <T>Sign out</T>
+diff --git a/components/dashboard/__tests__/CommandPalette.test.ts b/components/dashboard/__tests__/CommandPalette.test.ts
+new file mode 100644
+index 000000000..680dffc33
+--- /dev/null
++++ b/components/dashboard/__tests__/CommandPalette.test.ts
+@@ -0,0 +1,73 @@
++// @vitest-environment happy-dom
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++
++const push = vi.fn();
++vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
++vi.mock('gt-next', () => ({ T: ({ children }: { children: unknown }) => children }));
++
++import { CommandPalette } from '../CommandPalette';
++
++// HRM patch: the palette must take the keyboard as soon as it opens.
++describe('CommandPalette keyboard', () => {
++  let container: HTMLDivElement;
++  let root: Root;
++  const onOpenChange = vi.fn();
++
++  beforeEach(async () => {
++    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++    Element.prototype.scrollIntoView = vi.fn();
++    push.mockReset();
++    onOpenChange.mockReset();
++    container = document.createElement('div');
++    document.body.appendChild(container);
++    root = createRoot(container);
++    await act(async () => {
++      root.render(createElement(CommandPalette, { open: true, onOpenChange }));
++    });
++  });
++
++  afterEach(async () => {
++    await act(async () => root.unmount());
++    container.remove();
++  });
++
++  const input = () => document.querySelector<HTMLInputElement>('[cmdk-input]')!;
++  const selected = () => document.querySelector('[cmdk-item][data-selected="true"]')?.textContent;
++  const key = async (k: string) => {
++    await act(async () => {
++      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
++    });
++  };
++
++  it('opens as a labelled dialog with the cursor in the search box', () => {
++    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
++    expect(document.activeElement).toBe(input());
++  });
++
++  it('moves through the commands with the arrow keys and opens one with Enter', async () => {
++    expect(selected()).toBe('Home');
++    await key('ArrowDown');
++    expect(selected()).toBe('App catalog');
++    await key('ArrowUp');
++    expect(selected()).toBe('Home');
++    await key('ArrowDown');
++    await key('Enter');
++    expect(push).toHaveBeenCalledWith('/dashboard/apps');
++    expect(onOpenChange).toHaveBeenCalledWith(false);
++  });
++
++  // HRM patch 0053: pages in the sidebar's order, and the new G shortcuts listed.
++  it('lists pages in sidebar order and shows the new G shortcuts', () => {
++    const pages = [...document.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])')].map((el) => el.textContent);
++    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Settings', 'Help']);
++    const text = document.querySelector('[role="dialog"]')!.textContent;
++    for (const hint of ['Go to App updates', 'Go to Discovered apps', 'Go to Help']) expect(text).toContain(hint);
++  });
++
++  it('closes with Escape', async () => {
++    await key('Escape');
++    expect(onOpenChange).toHaveBeenCalledWith(false);
++  });
++});
+diff --git a/components/dashboard/__tests__/mobile-menu-layering.test.ts b/components/dashboard/__tests__/mobile-menu-layering.test.ts
+new file mode 100644
+index 000000000..bec4f6545
+--- /dev/null
++++ b/components/dashboard/__tests__/mobile-menu-layering.test.ts
+@@ -0,0 +1,24 @@
++// HRM patch 0058: at phone width the menu button must sit above the sticky page header,
++// and the open menu's backdrop and panel must still cover it.
++import { readFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++
++const root = join(__dirname, '..', '..', '..');
++const sidebar = readFileSync(join(root, 'components/dashboard/Sidebar.tsx'), 'utf8');
++const layout = readFileSync(join(root, 'app/(app)/dashboard/layout.tsx'), 'utf8');
++const z = (classes: string) => Number(/\bz-(\d+)\b/.exec(classes)?.[1]);
++const classesOf = (source: string, pattern: RegExp) => pattern.exec(source)?.[1] ?? '';
++
++describe('phone menu layering', () => {
++  it('keeps the menu button above the header and below the open menu', () => {
++    const button = z(classesOf(sidebar, /className="([^"]*)"\s*aria-label="Open sidebar"/));
++    const header = z(classesOf(layout, /<header className="([^"]*sticky[^"]*)"/));
++    const backdrop = z(classesOf(sidebar, /className="(fixed inset-0[^"]*)"/));
++    const panel = z(classesOf(sidebar, /'(fixed top-0 left-0[^']*lg:hidden)'/));
++    expect(header).toBeGreaterThan(0);
++    expect(button).toBeGreaterThan(header);
++    expect(backdrop).toBeGreaterThanOrEqual(button);
++    expect(panel).toBeGreaterThan(backdrop);
++  });
++});
+diff --git a/components/hrm/ServerStatusCard.test.ts b/components/hrm/ServerStatusCard.test.ts
+new file mode 100644
+index 000000000..94b3f252f
+--- /dev/null
++++ b/components/hrm/ServerStatusCard.test.ts
+@@ -0,0 +1,60 @@
++// @vitest-environment happy-dom
++// HRM patch 0057: Server status shows Version sync after deploy like the other checks.
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, expect, it } from 'vitest';
++import { interpretServerStatus } from '@/lib/hrm/home';
++import { deployResultLabel, ServerStatusCard } from './ServerStatusCard';
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++const status = (checks: Record<string, unknown>) => interpretServerStatus(JSON.stringify({
++  generatedAt: new Date().toISOString(), version: 'v0.8.5-hrm.1', startedAt: null, lastDeploy: null, lastBackup: null,
++  disk: { totalKb: 100, usedKb: 10 }, updateCheck: { result: null, at: null }, notifications: { result: null, at: null },
++  tunnel: { version: null, running: true, lastUpdate: { result: null, at: null } }, checks,
++}));
++
++let root: Root;
++beforeEach(() => { const node = document.createElement('div'); document.body.append(node); root = createRoot(node); });
++afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
++const row = (label: string) => [...document.querySelectorAll('dt')].find((dt) => dt.textContent === label)?.parentElement?.textContent ?? null;
++
++it('shows Working, or Failing with the reason', async () => {
++  await act(async () => root.render(createElement(ServerStatusCard, { status: status({ versionSync: { ok: true, at: null, detail: null } }) })));
++  expect(row('Version sync after deploy')).toContain('Working');
++  expect(document.body.textContent).toContain('Healthy');
++  await act(async () => root.render(createElement(ServerStatusCard, { status: status({ versionSync: { ok: false, at: null, detail: 'Fixture reason.' } }) })));
++  expect(row('Version sync after deploy')).toContain('Failing');
++  expect(row('Version sync after deploy')).toContain('Fixture reason.');
++  expect(document.body.textContent).toContain('1 needs a look');
++});
++
++// HRM patch 0058 (choice 3B): failing checks first, Version in view, healthy rows in a collapsed group.
++it('lists checks that need a look first and folds the healthy ones away', async () => {
++  await act(async () => root.render(createElement(ServerStatusCard, {
++    status: status({ versionSync: { ok: false, at: null, detail: 'Fixture reason.' }, intuneReads: { ok: true, at: null, detail: null } }),
++    appAccess: 'not_limited',
++  })));
++  const labels = [...document.querySelectorAll('dt')].map((dt) => dt.textContent);
++  expect(labels.slice(0, 3)).toEqual(['Version sync after deploy', 'Who can sign in', 'Version']);
++  expect(document.body.textContent).toContain('2 need a look');
++  expect(row('Who can sign in')).toContain('Not limited to a group');
++  const all = document.querySelector('[data-testid="server-status-all-checks"]') as HTMLDetailsElement;
++  expect(all.open).toBe(false);
++  expect(all.querySelector('summary')?.textContent).toMatch(/^All checks \(\d+ working\)/);
++  expect(all.textContent).toContain('Intune reads');
++  expect(all.textContent).not.toContain('Version sync after deploy');
++});
++
++it('words deploy results and a late status report plainly', async () => {
++  expect(deployResultLabel('rolled_back')).toBe('Rolled back');
++  expect(deployResultLabel('rollback_failed')).toBe('Rollback failed');
++  expect(deployResultLabel('backup_failed')).toBe('Backup failed');
++  expect(deployResultLabel('something_new')).toBe('Failed');
++  await act(async () => root.render(createElement(ServerStatusCard, { status: { reported: false, reason: 'stale', generatedAt: new Date(Date.now() - 3 * 3600_000).toISOString() } })));
++  expect(document.body.textContent).toContain('Last status report 3 h ago.');
++});
++
++it('hides the row until the server reports it', async () => {
++  await act(async () => root.render(createElement(ServerStatusCard, { status: status({}) })));
++  expect(row('Version sync after deploy')).toBeNull();
++});
+diff --git a/components/hrm/ServerStatusCard.tsx b/components/hrm/ServerStatusCard.tsx
+new file mode 100644
+index 000000000..680c66078
+--- /dev/null
++++ b/components/hrm/ServerStatusCard.tsx
+@@ -0,0 +1,182 @@
++'use client';
++
++// HRM patch: the Home page's server status card.
++
++import { Server, Loader2 } from 'lucide-react';
++import type { ServerStatus } from '@/lib/hrm/home';
++
++function relative(iso: string | null | undefined, now = Date.now()): string {
++  const at = iso ? Date.parse(iso) : NaN;
++  if (!Number.isFinite(at)) return 'Never';
++  const minutes = Math.max(0, Math.round((now - at) / 60000));
++  if (minutes < 60) return minutes <= 1 ? 'Just now' : `${minutes} min ago`;
++  const hours = Math.round(minutes / 60);
++  if (hours < 48) return `${hours} h ago`;
++  return `${Math.round(hours / 24)} days ago`;
++}
++
++function size(kb: number): string {
++  return kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.round(kb / 1024)} MB`;
++}
++
++function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'bad'; children: React.ReactNode }) {
++  const tones = {
++    ok: 'bg-status-success/10 text-status-success',
++    warn: 'bg-status-warning/10 text-status-warning',
++    bad: 'bg-status-error/10 text-status-error',
++  };
++  return <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tones[tone]}`}>{children}</span>;
++}
++
++function Row({ label, children }: { label: string; children: React.ReactNode }) {
++  return (
++    <div className="flex items-center justify-between gap-3 py-2 border-t border-overlay/5 first:border-t-0">
++      <dt className="text-sm text-text-muted">{label}</dt>
++      <dd className="text-sm text-text-primary text-right">{children}</dd>
++    </div>
++  );
++}
++
++/** HRM patch 0058: the deploy script's result codes, as words. */
++export function deployResultLabel(result: string): string {
++  const labels: Record<string, string> = {
++    rolled_back: 'Rolled back',
++    rollback_failed: 'Rollback failed',
++    backup_failed: 'Backup failed',
++    refused: 'Refused',
++  };
++  return labels[result] ?? 'Failed';
++}
++
++type Access = 'limited' | 'not_limited';
++interface StatusRow { key: string; label: string; problem: boolean; content: React.ReactNode }
++
++// HRM patch 0056: whether sign-in is limited to the IT admins group (HRM_ADMIN_GROUP_IDS on the VM).
++function accessRow(appAccess?: Access): StatusRow | null {
++  if (!appAccess) return null;
++  return {
++    key: 'appAccess',
++    label: 'Who can sign in',
++    problem: appAccess !== 'limited',
++    content: appAccess === 'limited' ? <Pill tone="ok">IT admins group</Pill> : <Pill tone="warn">Not limited to a group</Pill>,
++  };
++}
++
++function rowsFor(status: Extract<ServerStatus, { reported: true }>, appAccess?: Access): StatusRow[] {
++  const has = (key: string) => status.problems.includes(key);
++  const rows: Array<StatusRow | null> = [
++    {
++      key: 'deploy',
++      label: 'Last deploy',
++      problem: has('deploy'),
++      content: status.lastDeploy ? (
++        <span className="inline-flex items-center gap-2">
++          {relative(status.lastDeploy.time)}
++          {has('deploy') && <Pill tone="bad">{deployResultLabel(status.lastDeploy.result)}</Pill>}
++        </span>
++      ) : 'Never',
++    },
++    // HRM patch 0021: the nightly off-site copy, next to the copy taken before each deploy
++    status.offsiteBackup !== undefined ? {
++      key: 'offsiteBackup',
++      label: 'Off-site backup',
++      problem: has('offsiteBackup'),
++      content: has('offsiteBackup') ? (
++        <Pill tone="bad">{status.offsiteBackup?.result === 'failed' ? 'Failed' : status.offsiteBackup ? `Last ran ${relative(status.offsiteBackup.at)}` : 'None yet'}</Pill>
++      ) : relative(status.offsiteBackup?.at ?? null),
++    } : null,
++    { key: 'backup', label: 'Backup before deploy', problem: false, content: status.lastBackup ? `${relative(status.lastBackup.at)}, ${size(status.lastBackup.sizeKb)}` : 'None yet' },
++    { key: 'updateCheck', label: 'Update check', problem: has('updateCheck'), content: has('updateCheck') ? <Pill tone="bad">Failed</Pill> : relative(status.updateCheck.at) },
++    { key: 'notifications', label: 'Update alerts', problem: has('notifications'), content: has('notifications') ? <Pill tone="bad">Failed</Pill> : relative(status.notifications.at) },
++    // HRM patch 0032: whether the server can still read what it needs from Intune; patch 0057 adds Version sync after deploy
++    ...([['intuneReads', 'Intune reads'], ['intuneSelfTest', 'Intune self-test'], ['scheduledUpdates', 'Scheduled updates'], ['versionSync', 'Version sync after deploy']] as const).map(([key, label]): StatusRow | null => {
++      const check = status.checks?.[key];
++      if (!check) return null;
++      return {
++        key,
++        label,
++        problem: !check.ok,
++        content: check.ok ? <Pill tone="ok">Working</Pill> : (
++          <span className="inline-flex flex-col items-end gap-1 text-right">
++            <Pill tone="bad">Failing</Pill>
++            {check.detail && <span className="text-xs text-text-muted max-w-xs break-words">{check.detail}</span>}
++          </span>
++        ),
++      };
++    }),
++    {
++      key: 'disk',
++      label: 'Disk',
++      problem: status.diskWarning,
++      content: status.diskWarning ? <Pill tone="warn">{Math.round(status.diskRatio * 100)}% used</Pill> : `${Math.round(status.diskRatio * 100)}% used`,
++    },
++    {
++      key: 'tunnel',
++      label: 'Tunnel',
++      problem: has('tunnel') || has('tunnelUpdate'),
++      content: has('tunnel') ? <Pill tone="bad">Not running</Pill> : has('tunnelUpdate') ? <Pill tone="warn">Update failed</Pill> : (
++        <span className="inline-flex items-center gap-2">
++          {status.tunnel.version ?? ''}
++          <Pill tone="ok">Running</Pill>
++        </span>
++      ),
++    },
++    accessRow(appAccess),
++  ];
++  return rows.filter((row): row is StatusRow => row !== null);
++}
++
++const needLabel = (count: number) => (count === 1 ? '1 needs a look' : `${count} need a look`);
++
++/**
++ * HRM patch 0058 (David's choice 3B): checks that need a look come first, with their reason, and
++ * Version stays in view. Healthy checks sit in a collapsed All checks group.
++ */
++export function ServerStatusCard({ status, loading, appAccess }: { status?: ServerStatus; loading?: boolean; appAccess?: Access }) {
++  const rows = status?.reported ? rowsFor(status, appAccess) : [];
++  const problems = rows.filter((row) => row.problem);
++  const healthy = rows.filter((row) => !row.problem);
++  const access = accessRow(appAccess);
++  return (
++    <section aria-labelledby="server-status-title" className="glass-light rounded-xl p-5 border-t-4 border-t-accent-violet-bright">
++      <div className="flex items-center gap-2 mb-3">
++        <Server className="w-5 h-5 text-accent-cyan" aria-hidden="true" />
++        <h2 id="server-status-title" className="text-lg font-semibold text-text-primary">Server status</h2>
++        {status?.reported && (
++          <span className="ml-auto">{problems.length === 0 ? <Pill tone="ok">Healthy</Pill> : <Pill tone="warn">{needLabel(problems.length)}</Pill>}</span>
++        )}
++      </div>
++
++      {loading && !status ? (
++        <Loader2 className="w-5 h-5 text-text-secondary animate-spin" aria-label="Loading server status" />
++      ) : !status?.reported ? (
++        <>
++          <p className="text-sm text-text-muted">
++            {status?.reason === 'stale'
++              ? `Last status report ${relative(status.generatedAt)}. The server's status timer may have stopped.`
++              : 'Status not reported. The status timer on the server may not be installed yet.'}
++          </p>
++          {access && <dl className="mt-2"><Row label={access.label}>{access.content}</Row></dl>}
++        </>
++      ) : (
++        <>
++          <dl>
++            {problems.map((row) => <Row key={row.key} label={row.label}>{row.content}</Row>)}
++            <Row label="Version">{status.version ?? 'Unknown'}</Row>
++          </dl>
++          {healthy.length > 0 && (
++            <details className="mt-2 group" data-testid="server-status-all-checks">
++              <summary className="cursor-pointer rounded text-sm text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">
++                All checks ({healthy.length} working)
++                <span className="block text-xs text-text-muted">{healthy.slice(0, 4).map((row) => row.label).join(', ')}{healthy.length > 4 ? '…' : ''}</span>
++              </summary>
++              <dl className="mt-2">
++                {healthy.map((row) => <Row key={row.key} label={row.label}>{row.content}</Row>)}
++              </dl>
++            </details>
++          )}
++        </>
++      )}
++    </section>
++  );
++}
+diff --git a/components/hrm/StatusStripRow.tsx b/components/hrm/StatusStripRow.tsx
+new file mode 100644
+index 000000000..11d049d17
+--- /dev/null
++++ b/components/hrm/StatusStripRow.tsx
+@@ -0,0 +1,35 @@
++'use client';
++
++// HRM patch 0058 (David's choice 4B): one row of App updates' status strip. The row shows the setting's
++// state and the next action; the details and editing live in the row's dialog.
++
++import type { ReactNode } from 'react';
++
++export function StripPill({ tone, children }: { tone: 'ok' | 'warn' | 'muted'; children: ReactNode }) {
++  const tones = {
++    ok: 'bg-status-success/10 text-status-success',
++    warn: 'bg-status-warning/10 text-status-warning',
++    muted: 'bg-overlay/5 text-text-muted',
++  };
++  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>;
++}
++
++export function StatusStripRow({ label, summary, status, action, children }: {
++  label: string;
++  summary: ReactNode;
++  status?: ReactNode;
++  action?: ReactNode;
++  children?: ReactNode;
++}) {
++  return (
++    <section aria-label={label} className="space-y-2 p-4">
++      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
++        <h3 className="w-full shrink-0 text-sm font-semibold text-text-primary sm:w-44">{label}</h3>
++        <div className="min-w-0 flex-1 text-sm text-text-secondary">{summary}</div>
++        {status}
++        {action}
++      </div>
++      {children}
++    </section>
++  );
++}
+diff --git a/components/hrm/ThemeMenuItems.tsx b/components/hrm/ThemeMenuItems.tsx
+new file mode 100644
+index 000000000..16fabb803
+--- /dev/null
++++ b/components/hrm/ThemeMenuItems.tsx
+@@ -0,0 +1,40 @@
++'use client';
++
++// HRM patch: Light, Dark or System (follow the computer) in the account menu.
++
++import { Monitor, Moon, Sun } from 'lucide-react';
++import {
++  DropdownMenuLabel,
++  DropdownMenuRadioGroup,
++  DropdownMenuRadioItem,
++} from '@/components/ui/dropdown-menu';
++import { isThemeMode, useTheme } from '@/components/providers/theme-context';
++
++const OPTIONS = [
++  { value: 'light', label: 'Light', icon: Sun },
++  { value: 'dark', label: 'Dark', icon: Moon },
++  { value: 'system', label: 'Same as computer', icon: Monitor },
++] as const;
++
++export function ThemeMenuItems() {
++  const { theme, setTheme } = useTheme();
++
++  return (
++    <>
++      <DropdownMenuLabel className="text-xs font-normal text-text-muted">Theme</DropdownMenuLabel>
++      <DropdownMenuRadioGroup
++        value={theme}
++        onValueChange={(value) => {
++          if (isThemeMode(value)) void setTheme(value);
++        }}
++      >
++        {OPTIONS.map(({ value, label, icon: Icon }) => (
++          <DropdownMenuRadioItem key={value} value={value} onSelect={(event) => event.preventDefault()}>
++            <Icon className="w-4 h-4 mr-2" aria-hidden="true" />
++            {label}
++          </DropdownMenuRadioItem>
++        ))}
++      </DropdownMenuRadioGroup>
++    </>
++  );
++}
+diff --git a/components/providers/ThemeProvider.tsx b/components/providers/ThemeProvider.tsx
+index e874e16b5..2fe9ed245 100644
+--- a/components/providers/ThemeProvider.tsx
++++ b/components/providers/ThemeProvider.tsx
+@@ -5,6 +5,7 @@ import { useUserSettings } from "@/components/providers/UserSettingsProvider";
+ import {
+   ThemeContext,
+   applyThemeClass,
++  useFollowSystemTheme,
+ } from "@/components/providers/theme-context";
+ import type { ThemeMode } from "@/types/user-settings";
+ 
+@@ -24,6 +25,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
+     applyThemeClass(settings.theme);
+   }, [settings.theme]);
+ 
++  // HRM patch: follow the computer when it switches between light and dark.
++  useFollowSystemTheme(theme);
++
+   const setTheme = async (nextTheme: ThemeMode) => {
+     setThemeState(nextTheme);
+     applyThemeClass(nextTheme);
+diff --git a/components/providers/UserSettingsProvider.tsx b/components/providers/UserSettingsProvider.tsx
+index 05667de09..2afb407a5 100644
+--- a/components/providers/UserSettingsProvider.tsx
++++ b/components/providers/UserSettingsProvider.tsx
+@@ -40,7 +40,9 @@ type UserSettingsContextValue = {
+ 
+ const UserSettingsContext = createContext<UserSettingsContextValue | null>(null);
+ 
+-const THEME_KEY = "intuneget-theme";
++// HRM patch: a new key, so the "light" that every page load used to save (no
++// one chose it) doesn't stop new users following the computer's setting.
++const THEME_KEY = "intuneget-theme-mode";
+ const SIDEBAR_COLLAPSE_KEY = "intuneget-sidebar-collapsed";
+ const CART_KEY = "intuneget-cart";
+ const SELECTED_TENANT_KEY = "msp_selected_tenant_id";
+@@ -51,7 +53,7 @@ const CARRY_OVER_ASSIGNMENTS_KEY = "intuneget-carry-over-assignments";
+ const SUPERSEDE_PREVIOUS_APP_KEY = "intuneget-supersede-previous-app";
+ 
+ function isThemeMode(value: unknown): value is ThemeMode {
+-  return value === "light" || value === "dark";
++  return value === "light" || value === "dark" || value === "system";
+ }
+ 
+ function readBooleanStorageValue(key: string): boolean | null {
+@@ -351,7 +353,11 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
+       const legacy = readLegacyUserSettings();
+       const response = await getUserSettings(token);
+ 
+-      applySettings(response.settings);
++      // HRM patch: a server with nothing stored (always, on SQLite) answers with
++      // the defaults; applying them overwrote this browser's settings on every load.
++      if (response.hasStoredSettings) {
++        applySettings(response.settings);
++      }
+       setHasStoredSettings(Boolean(response.hasStoredSettings));
+ 
+       if (!response.hasStoredSettings && hasAnyLegacySetting(legacy)) {
+diff --git a/components/providers/__tests__/theme-context.test.ts b/components/providers/__tests__/theme-context.test.ts
+new file mode 100644
+index 000000000..ceca2c164
+--- /dev/null
++++ b/components/providers/__tests__/theme-context.test.ts
+@@ -0,0 +1,53 @@
++// @vitest-environment happy-dom
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { applyThemeClass, isThemeMode, resolveTheme } from '../theme-context';
++
++function mockSystem(dark: boolean) {
++  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
++    matches: dark,
++    addEventListener: vi.fn(),
++    removeEventListener: vi.fn(),
++  }));
++}
++
++describe('theme (HRM patch: dark mode)', () => {
++  afterEach(() => {
++    vi.unstubAllGlobals();
++    document.documentElement.classList.remove('dark');
++  });
++
++  it('accepts light, dark and system only', () => {
++    expect(['light', 'dark', 'system'].every(isThemeMode)).toBe(true);
++    expect(isThemeMode('blue')).toBe(false);
++    expect(isThemeMode(undefined)).toBe(false);
++  });
++
++  it('follows the computer when the theme is system', () => {
++    mockSystem(true);
++    expect(resolveTheme('system')).toBe('dark');
++    mockSystem(false);
++    expect(resolveTheme('system')).toBe('light');
++  });
++
++  it('keeps an explicit choice whatever the computer says', () => {
++    mockSystem(true);
++    expect(resolveTheme('light')).toBe('light');
++    mockSystem(false);
++    expect(resolveTheme('dark')).toBe('dark');
++  });
++
++  it('sets the dark class on the page and tells the other provider', () => {
++    mockSystem(false);
++    const heard: unknown[] = [];
++    const listener = (event: Event) => heard.push((event as CustomEvent).detail);
++    window.addEventListener('intuneget:theme-change', listener);
++
++    applyThemeClass('dark');
++    expect(document.documentElement.classList.contains('dark')).toBe(true);
++    applyThemeClass('system');
++    expect(document.documentElement.classList.contains('dark')).toBe(false);
++
++    window.removeEventListener('intuneget:theme-change', listener);
++    expect(heard).toEqual(['dark', 'system']);
++  });
++});
+diff --git a/components/providers/theme-context.tsx b/components/providers/theme-context.tsx
+index 9bba5755c..c87c46397 100644
+--- a/components/providers/theme-context.tsx
++++ b/components/providers/theme-context.tsx
+@@ -20,6 +20,7 @@ export const ThemeContext = createContext<ThemeContextValue | undefined>(
+ );
+ 
+ const THEME_CLASS = "dark";
++const DARK_QUERY = "(prefers-color-scheme: dark)";
+ 
+ // Fired whenever a provider applies a theme, so the other provider instance
+ // stays in sync. PublicThemeProvider lives in the persistent root layout
+@@ -28,16 +29,46 @@ const THEME_CLASS = "dark";
+ // theme change in the app and its toggle stops working until a full reload.
+ const THEME_CHANGE_EVENT = "intuneget:theme-change";
+ 
+-export function applyThemeClass(_theme: ThemeMode) {
++// HRM patch: dark mode is back. "system" follows the computer's setting.
++export function isThemeMode(value: unknown): value is ThemeMode {
++  return value === "light" || value === "dark" || value === "system";
++}
++
++export function resolveTheme(theme: ThemeMode): "light" | "dark" {
++  if (theme !== "system") return theme;
++  if (typeof window === "undefined" || !window.matchMedia) return "light";
++  return window.matchMedia(DARK_QUERY).matches ? "dark" : "light";
++}
++
++export function applyThemeClass(theme: ThemeMode) {
+   if (typeof document === "undefined") return;
+ 
+-  // The site is light-only: the dark class is never applied, regardless of
+-  // any stored preference from when a theme toggle existed.
+-  document.documentElement.classList.remove(THEME_CLASS);
+-  window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
++  document.documentElement.classList.toggle(THEME_CLASS, resolveTheme(theme) === "dark");
++  window.dispatchEvent(new CustomEvent<ThemeMode>(THEME_CHANGE_EVENT, { detail: theme }));
++}
++
++/** While the theme is "system", re-apply it when the computer switches. */
++export function useFollowSystemTheme(theme: ThemeMode) {
++  useEffect(() => {
++    if (theme !== "system" || typeof window === "undefined" || !window.matchMedia) return;
++    const query = window.matchMedia(DARK_QUERY);
++    const onChange = () => applyThemeClass("system");
++    query.addEventListener("change", onChange);
++    return () => query.removeEventListener("change", onChange);
++  }, [theme]);
+ }
+ 
+-const PUBLIC_THEME_KEY = "intuneget-theme";
++// Same key as UserSettingsProvider and the boot script in app/layout.tsx.
++const PUBLIC_THEME_KEY = "intuneget-theme-mode";
++
++function readStoredTheme(): ThemeMode {
++  try {
++    const stored = window.localStorage.getItem(PUBLIC_THEME_KEY);
++    return isThemeMode(stored) ? stored : "system";
++  } catch {
++    return "system";
++  }
++}
+ 
+ /**
+  * Theme provider for pages rendered without UserSettingsProvider (marketing,
+@@ -48,24 +79,23 @@ const PUBLIC_THEME_KEY = "intuneget-theme";
+  * the nearest (synced) context.
+  */
+ export function PublicThemeProvider({ children }: { children: ReactNode }) {
+-  const [theme, setThemeState] = useState<ThemeMode>("light");
++  const [theme, setThemeState] = useState<ThemeMode>("system");
+ 
+   useEffect(() => {
+-    const syncFromDocument = () => {
+-      setThemeState(
+-        document.documentElement.classList.contains(THEME_CLASS)
+-          ? "dark"
+-          : "light",
+-      );
+-    };
++    setThemeState(readStoredTheme());
+ 
+     // Track theme changes made by the settings-synced ThemeProvider while
+     // the visitor was inside the app surface.
+-    window.addEventListener(THEME_CHANGE_EVENT, syncFromDocument);
+-    return () =>
+-      window.removeEventListener(THEME_CHANGE_EVENT, syncFromDocument);
++    const onThemeChange = (event: Event) => {
++      const next = (event as CustomEvent<ThemeMode>).detail;
++      if (isThemeMode(next)) setThemeState(next);
++    };
++    window.addEventListener(THEME_CHANGE_EVENT, onThemeChange);
++    return () => window.removeEventListener(THEME_CHANGE_EVENT, onThemeChange);
+   }, []);
+ 
++  useFollowSystemTheme(theme);
++
+   const setTheme = async (nextTheme: ThemeMode) => {
+     setThemeState(nextTheme);
+     applyThemeClass(nextTheme);
+diff --git a/components/qa/QaDialog.module.css b/components/qa/QaDialog.module.css
+index 7750457a1..5a5621c77 100644
+--- a/components/qa/QaDialog.module.css
++++ b/components/qa/QaDialog.module.css
+@@ -18,7 +18,7 @@
+   --bg-surface: 255 255 255;
+   --bg-elevated: 248 250 252;
+   --text-muted: 71 85 105;
+-  --accent-cyan: #0e7490;
++  --accent-cyan: #412160;
+   --status-warning: #92400e;
+   --status-error: #b91c1c;
+   --status-success: #047857;
+diff --git a/components/ui/status-badge.tsx b/components/ui/status-badge.tsx
+index bc17915cb..16688775d 100644
+--- a/components/ui/status-badge.tsx
++++ b/components/ui/status-badge.tsx
+@@ -46,7 +46,7 @@ export function StatusBadge({ tone = 'neutral', icon: Icon, iconClassName, child
+   return (
+     <span
+       className={cn(
+-        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border',
++        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap flex-shrink-0',
+         toneClasses[tone],
+         className
+       )}
+diff --git a/hooks/use-database-mode.ts b/hooks/use-database-mode.ts
+new file mode 100644
+index 000000000..11c2d2f6c
+--- /dev/null
++++ b/hooks/use-database-mode.ts
+@@ -0,0 +1,23 @@
++'use client';
++
++import { useEffect, useState } from 'react';
++
++// HRM patch 0035: which database the server runs, read once from /api/health.
++// null until known. Used to hide options that only take effect in Supabase mode.
++let cached: Promise<'sqlite' | 'supabase' | null> | null = null;
++
++export function useDatabaseMode(): 'sqlite' | 'supabase' | null {
++  const [mode, setMode] = useState<'sqlite' | 'supabase' | null>(null);
++  useEffect(() => {
++    let active = true;
++    cached ??= fetch('/api/health', { cache: 'no-store' })
++      .then((res) => (res.ok || res.status === 503 ? res.json() : null))
++      .then((body: { databaseMode?: unknown } | null) =>
++        body?.databaseMode === 'sqlite' || body?.databaseMode === 'supabase' ? body.databaseMode : null)
++      .catch(() => null)
++      .then((value) => { if (value === null) cached = null; return value; });
++    cached.then((value) => { if (active) setMode(value); });
++    return () => { active = false; };
++  }, []);
++  return mode;
++}
+diff --git a/hooks/useHrmHome.ts b/hooks/useHrmHome.ts
+new file mode 100644
+index 000000000..573a2a93f
+--- /dev/null
++++ b/hooks/useHrmHome.ts
+@@ -0,0 +1,38 @@
++'use client';
++
++// HRM patch: Home page data from /api/hrm/home.
++
++import { useQuery } from '@tanstack/react-query';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++import type { ServerStatus } from '@/lib/hrm/home';
++
++export interface HrmHomeData {
++  attention: { failedRecent: number; stuck: number } | null;
++  server: ServerStatus;
++  // HRM patch 0019
++  installFailures?: Array<{ displayName: string; intuneAppId: string; failed: number }>;
++  // HRM patch 0032
++  unreached?: Array<{ displayName: string; intuneAppId: string; deployedAt: string }>;
++  // HRM patch 0039: newest copies whose previous installer is gone or has changed
++  rollbackGaps?: Array<{ displayName: string; intuneAppId: string; previousVersion: string }>;
++  // HRM patch 0042: old copies IntuneGet couldn't remove after an update
++  oldCopiesKept?: Array<{ displayName: string; intuneAppId: string; version: string; newestAppId: string; reason: string }>;
++  // HRM patch 0056: whether sign-in is limited to the IT admins group
++  appAccess?: 'limited' | 'not_limited';
++}
++
++export function useHrmHome() {
++  const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
++  return useQuery<HrmHomeData>({
++    queryKey: ['hrm', 'home'],
++    queryFn: async () => {
++      const token = await getAccessToken();
++      if (!token) throw new Error('Not authenticated');
++      const response = await fetch('/api/hrm/home', { headers: { Authorization: `Bearer ${token}` } });
++      if (!response.ok) throw new Error('Failed to load the Home page');
++      return response.json();
++    },
++    enabled: isAuthenticated,
++    refetchInterval: 60 * 1000,
++  });
++}
+diff --git a/hooks/useKeyboardShortcuts.ts b/hooks/useKeyboardShortcuts.ts
+index e2cbffe3d..96849cbb7 100644
+--- a/hooks/useKeyboardShortcuts.ts
++++ b/hooks/useKeyboardShortcuts.ts
+@@ -1,7 +1,8 @@
+ 'use client';
+ 
+-import { useEffect, useRef, useCallback } from 'react';
++import { useEffect, useRef, useCallback, useState } from 'react';
+ import { useRouter } from 'next/navigation';
++import { GO_TO_SHORTCUTS, goToShortcutHref } from '@/lib/hrm/navigation';
+ 
+ interface ShortcutAction {
+   key: string;
+@@ -75,31 +76,11 @@ export function useKeyboardShortcuts({
+         pendingKey.current = null;
+         if (pendingTimer.current) clearTimeout(pendingTimer.current);
+ 
+-        switch (e.key) {
+-          case 'd':
+-            e.preventDefault();
+-            router.push('/dashboard');
+-            break;
+-          case 'a':
+-            e.preventDefault();
+-            router.push('/dashboard/apps');
+-            break;
+-          case 'u':
+-            e.preventDefault();
+-            router.push('/dashboard/uploads');
+-            break;
+-          case 'i':
+-            e.preventDefault();
+-            router.push('/dashboard/inventory');
+-            break;
+-          case 's':
+-            e.preventDefault();
+-            router.push('/dashboard/settings');
+-            break;
+-          case 'r':
+-            e.preventDefault();
+-            router.push('/dashboard/reports');
+-            break;
++        // HRM patch 0053: one shared list (lib/hrm/navigation.ts), adds P, V and H.
++        const href = goToShortcutHref(e.key);
++        if (href) {
++          e.preventDefault();
++          router.push(href);
+         }
+       }
+     },
+@@ -115,14 +96,29 @@ export function useKeyboardShortcuts({
+   }, [handleKeyDown]);
+ }
+ 
+-export const SHORTCUT_HINTS = [
+-  { keys: ['Cmd', 'K'], description: 'Command palette' },
++// HRM patch 0036: the modifier key for Search, named for the computer in use. Starts as "Ctrl"
++// (most HRM computers run Windows) and switches to "Cmd" after mount on a Mac, so the server
++// render and the first client render match.
++export function isMacPlatform(nav: { platform?: string; userAgent?: string } | undefined): boolean {
++  if (!nav) return false;
++  return /Mac|iPhone|iPad|iPod/i.test(nav.platform || nav.userAgent || '');
++}
++
++export function useModifierKeyLabel(): 'Cmd' | 'Ctrl' {
++  const [label, setLabel] = useState<'Cmd' | 'Ctrl'>('Ctrl');
++  useEffect(() => {
++    if (isMacPlatform(typeof navigator === 'undefined' ? undefined : navigator)) setLabel('Cmd');
++  }, []);
++  return label;
++}
++
++// HRM patch 0036: the palette is called "Search" everywhere (header button, dialog name, this
++// list). 'Mod' is shown as Cmd or Ctrl by useModifierKeyLabel.
++// HRM patch 0053: the G shortcuts come from GO_TO_SHORTCUTS, in sidebar order, and C names the
++// deployment list.
++export const SHORTCUT_HINTS: readonly { keys: readonly string[]; description: string }[] = [
++  { keys: ['Mod', 'K'], description: 'Search' },
+   { keys: ['/'], description: 'Focus search' },
+-  { keys: ['C'], description: 'Toggle cart' },
+-  { keys: ['G', 'D'], description: 'Go to Dashboard' },
+-  { keys: ['G', 'A'], description: 'Go to App Catalog' },
+-  { keys: ['G', 'U'], description: 'Go to Deployments' },
+-  { keys: ['G', 'I'], description: 'Go to Inventory' },
+-  { keys: ['G', 'S'], description: 'Go to Settings' },
+-  { keys: ['G', 'R'], description: 'Go to Reports' },
+-] as const;
++  { keys: ['C'], description: 'Show or hide the Deployment list' },
++  ...GO_TO_SHORTCUTS.map((shortcut) => ({ keys: ['G', shortcut.key.toUpperCase()], description: `Go to ${shortcut.name}` })),
++];
+diff --git a/lib/hrm/__tests__/home.test.ts b/lib/hrm/__tests__/home.test.ts
+new file mode 100644
+index 000000000..0c2f46c2f
+--- /dev/null
++++ b/lib/hrm/__tests__/home.test.ts
+@@ -0,0 +1,113 @@
++import { afterEach, describe, expect, it } from 'vitest';
++import { mkdtemp, rm, writeFile } from 'fs/promises';
++import os from 'os';
++import path from 'path';
++import type { AnalyticsJob } from '@/lib/db/types';
++import { attentionCounts, interpretServerStatus, readServerStatus } from '../home';
++
++const NOW = new Date('2026-10-27T12:00:00Z');
++const file = (over: Record<string, unknown> = {}) => JSON.stringify({
++  generatedAt: '2026-10-27T11:58:00Z',
++  version: 'v0.8.2-hrm.9',
++  startedAt: '2026-10-27T10:00:00Z',
++  lastDeploy: { time: '2026-10-27T10:00:00Z', result: 'deployed', from: 'v0.8.2-hrm.8', to: 'v0.8.2-hrm.9' },
++  lastBackup: { at: '2026-10-27T09:59:00Z', sizeKb: 90000 },
++  disk: { totalKb: 1000, usedKb: 600 },
++  updateCheck: { result: 'success', at: '2026-10-27T07:30:00Z' },
++  notifications: { result: 'success', at: '2026-10-27T08:00:00Z' },
++  tunnel: { version: '2026.10.4', running: true, lastUpdate: { result: 'success', at: '2026-10-27T00:00:00Z' } },
++  ...over,
++});
++
++describe('server status file', () => {
++  it('reports a healthy server', () => {
++    const status = interpretServerStatus(file(), NOW);
++    expect(status).toMatchObject({ reported: true, version: 'v0.8.2-hrm.9', diskWarning: false, problems: [] });
++  });
++
++  // HRM patch 0057
++  it('reports a failing version sync after deploy as a problem', () => {
++    const failing = { ok: false, at: '2026-10-27T11:00:00Z', detail: 'Fixture detail.' };
++    expect(interpretServerStatus(file({ checks: { versionSync: failing } }), NOW)).toMatchObject({ problems: ['versionSync'] });
++    expect(interpretServerStatus(file({ checks: { versionSync: { ...failing, ok: true } } }), NOW)).toMatchObject({ problems: [] });
++    expect(interpretServerStatus(file({ checks: { versionSync: null } }), NOW)).toMatchObject({ problems: [] });
++  });
++
++  it('never guesses when the file is missing, unreadable or old', () => {
++    expect(interpretServerStatus(null, NOW)).toEqual({ reported: false, reason: 'missing' });
++    expect(interpretServerStatus('{not json', NOW)).toEqual({ reported: false, reason: 'unreadable' });
++    expect(interpretServerStatus('{}', NOW)).toEqual({ reported: false, reason: 'unreadable' });
++    expect(interpretServerStatus(file({ generatedAt: '2026-10-27T11:40:00Z' }), NOW)).toMatchObject({ reported: false, reason: 'stale' });
++  });
++
++  it('flags disk, deploy, timers and the tunnel', () => {
++    const status = interpretServerStatus(file({
++      disk: { totalKb: 100, usedKb: 90 },
++      lastDeploy: { time: '2026-10-27T10:00:00Z', result: 'rolled_back', from: 'a', to: 'b' },
++      updateCheck: { result: 'exit-code', at: '2026-10-27T07:30:00Z' },
++      notifications: { result: 'timeout', at: null },
++      tunnel: { version: '2026.10.4', running: false, lastUpdate: { result: 'success', at: null } },
++    }), NOW);
++    expect(status.reported && status.problems).toEqual(['disk', 'deploy', 'updateCheck', 'notifications', 'tunnel']);
++  });
++
++  it('treats a waiting deploy as normal and a failed tunnel update as a warning', () => {
++    const status = interpretServerStatus(file({
++      lastDeploy: { time: '2026-10-27T10:00:00Z', result: 'waiting', from: 'a', to: 'b' },
++      tunnel: { version: '2026.10.4', running: true, lastUpdate: { result: 'exit-code', at: null } },
++    }), NOW);
++    expect(status.reported && status.problems).toEqual(['tunnelUpdate']);
++  });
++});
++
++describe('needs attention counts', () => {
++  const job = (status: string, created: string) => ({ id: created, user_id: 'u', user_email: null, status, completed_at: null, created_at: created, winget_id: 'Example.App', display_name: 'Example', intune_app_url: null }) as unknown as AnalyticsJob;
++
++  it('counts failures from the last 7 days and jobs pending for over 2 hours', () => {
++    const counts = attentionCounts([
++      job('failed', '2026-10-26T12:00:00Z'),
++      job('failed', '2026-10-10T12:00:00Z'),
++      job('packaging', '2026-10-27T09:00:00Z'),
++      job('queued', '2026-10-27T11:30:00Z'),
++      job('uploading', '2026-10-27T08:00:00Z'),
++      job('deployed', '2026-10-27T01:00:00Z'),
++      job('failed', 'not a date'),
++    ], NOW);
++    expect(counts).toEqual({ failedRecent: 1, stuck: 2 });
++  });
++});
++
++// HRM patch 0021
++describe('off-site backup status', () => {
++  it('is fine after a recent success and a problem when failed, missing or old', () => {
++    const ok = interpretServerStatus(file({ offsiteBackup: { result: 'success', at: '2026-10-27T05:30:00Z' } }), NOW);
++    expect(ok).toMatchObject({ problems: [] });
++    expect(interpretServerStatus(file({ offsiteBackup: { result: 'failed', at: '2026-10-27T05:30:00Z' } }), NOW)).toMatchObject({ problems: ['offsiteBackup'] });
++    expect(interpretServerStatus(file({ offsiteBackup: null }), NOW)).toMatchObject({ problems: ['offsiteBackup'] });
++    expect(interpretServerStatus(file({ offsiteBackup: { result: 'success', at: '2026-10-25T05:30:00Z' } }), NOW)).toMatchObject({ problems: ['offsiteBackup'] });
++  });
++
++  it('says nothing when the server does not report it yet', () => {
++    expect(interpretServerStatus(file(), NOW)).toMatchObject({ problems: [] });
++  });
++});
++
++// HRM patch 0036: Home reads the status file with the same 32 KB bound as the status report.
++describe('readServerStatus', () => {
++  const originalPath = process.env.DATABASE_PATH;
++  let dir: string | undefined;
++  afterEach(async () => {
++    if (originalPath === undefined) delete process.env.DATABASE_PATH;
++    else process.env.DATABASE_PATH = originalPath;
++    if (dir) await rm(dir, { recursive: true, force: true });
++    dir = undefined;
++  });
++
++  it('reports a missing file as missing and an oversized one as unreadable', async () => {
++    dir = await mkdtemp(path.join(os.tmpdir(), 'hrm-home-'));
++    process.env.DATABASE_PATH = path.join(dir, 'intuneget.db');
++    expect(await readServerStatus()).toEqual({ reported: false, reason: 'missing' });
++    await writeFile(path.join(dir, 'hrm-status.json'), ' '.repeat(32_769));
++    expect(await readServerStatus()).toEqual({ reported: false, reason: 'unreadable' });
++  });
++});
+diff --git a/lib/hrm/__tests__/navigation.test.ts b/lib/hrm/__tests__/navigation.test.ts
+new file mode 100644
+index 000000000..1f1d6c8b3
+--- /dev/null
++++ b/lib/hrm/__tests__/navigation.test.ts
+@@ -0,0 +1,85 @@
++// @vitest-environment happy-dom
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { GO_TO_SHORTCUTS, goToShortcutHref, hrmNavGroups, HRM_NAV_LAYOUT } from '../navigation';
++
++const push = vi.hoisted(() => vi.fn());
++vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
++
++import { SHORTCUT_HINTS, useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
++
++// HRM patch 0053: sidebar groups by job, and G shortcuts for the pages HRM uses most.
++const item = (href: string) => ({ href, name: href });
++const SIDEBAR_ITEMS = ['/dashboard', '/dashboard/apps', '/dashboard/uploads', '/dashboard/unmanaged', '/dashboard/inventory', '/dashboard/updates', '/dashboard/reports'].map(item);
++
++describe('sidebar groups', () => {
++  it('groups the same pages as Apps and Activity, with Help unlabelled at the bottom (patch 0058)', () => {
++    const groups = hrmNavGroups(SIDEBAR_ITEMS, [item('/dashboard/help')]);
++    expect(groups.map((g) => [g.label ?? null, g.items.map((i) => i.href)])).toEqual([
++      [null, ['/dashboard']],
++      ['Apps', ['/dashboard/apps', '/dashboard/inventory', '/dashboard/unmanaged', '/dashboard/updates']],
++      ['Activity', ['/dashboard/uploads', '/dashboard/reports']],
++      [null, ['/dashboard/help']],
++    ]);
++    // Every label groups more than one page.
++    for (const group of HRM_NAV_LAYOUT) if (group.label) expect(group.hrefs.length).toBeGreaterThan(1);
++  });
++
++  it('keeps every page exactly once and drops empty groups', () => {
++    const hrefs = HRM_NAV_LAYOUT.flatMap((g) => g.hrefs);
++    expect(new Set(hrefs).size).toBe(hrefs.length);
++    expect(hrmNavGroups([item('/dashboard')], []).map((g) => g.label ?? null)).toEqual([null]);
++  });
++
++  it('never shows hidden pages it was not given', () => {
++    const groups = hrmNavGroups(SIDEBAR_ITEMS.filter((i) => i.href !== '/dashboard/reports'), []);
++    expect(groups.find((g) => g.label === 'Activity')?.items.map((i) => i.href)).toEqual(['/dashboard/uploads']);
++  });
++});
++
++describe('G shortcuts', () => {
++  it('keeps upstream keys and adds App updates, Discovered apps and Help', () => {
++    expect(goToShortcutHref('d')).toBe('/dashboard');
++    expect(goToShortcutHref('u')).toBe('/dashboard/uploads');
++    expect(goToShortcutHref('p')).toBe('/dashboard/updates');
++    expect(goToShortcutHref('v')).toBe('/dashboard/unmanaged');
++    expect(goToShortcutHref('h')).toBe('/dashboard/help');
++    expect(goToShortcutHref('x')).toBeNull();
++    expect(new Set(GO_TO_SHORTCUTS.map((s) => s.key)).size).toBe(GO_TO_SHORTCUTS.length);
++  });
++
++  it('lists every G shortcut in the Keyboard shortcuts hints, without cart wording', () => {
++    const descriptions = SHORTCUT_HINTS.map((h) => h.description);
++    expect(descriptions).toEqual(expect.arrayContaining(['Go to App updates', 'Go to Discovered apps', 'Go to Help']));
++    expect(SHORTCUT_HINTS.find((h) => h.description === 'Go to App updates')?.keys).toEqual(['G', 'P']);
++    expect(descriptions.join(' ')).not.toMatch(/cart/i);
++  });
++
++  describe('in the page', () => {
++    let root: Root | undefined;
++    afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; push.mockReset(); });
++
++    async function mount() {
++      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++      function Probe() { useKeyboardShortcuts({ onCommandPalette: vi.fn(), onToggleCart: vi.fn() }); return null; }
++      const container = document.createElement('div'); document.body.append(container);
++      root = createRoot(container);
++      await act(async () => root!.render(createElement(Probe)));
++    }
++    const press = (key: string) => document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
++
++    it.each([['p', '/dashboard/updates'], ['v', '/dashboard/unmanaged'], ['h', '/dashboard/help'], ['i', '/dashboard/inventory']])('G then %s opens %s', async (key, href) => {
++      await mount();
++      press('g'); press(key);
++      expect(push).toHaveBeenCalledWith(href);
++    });
++
++    it('ignores the keys while typing in a field', async () => {
++      await mount();
++      const input = document.createElement('input'); document.body.append(input); input.focus();
++      press('g'); press('p');
++      expect(push).not.toHaveBeenCalled();
++    });
++  });
++});
+diff --git a/lib/hrm/__tests__/site.test.ts b/lib/hrm/__tests__/site.test.ts
+new file mode 100644
+index 000000000..cf39a21f0
+--- /dev/null
++++ b/lib/hrm/__tests__/site.test.ts
+@@ -0,0 +1,77 @@
++import { describe, expect, it } from 'vitest';
++import { NextRequest } from 'next/server';
++import { isCrawlerPath, isHiddenDashboardPath, isMarketingPath, serverHttpsOrigin } from '../site';
++import { proxy } from '@/proxy';
++
++const get = (path: string) => proxy(new NextRequest(`https://intune.example.test${path}`));
++
++describe('no marketing site on the HRM server', () => {
++  it('treats the landing page and every marketing section as marketing', () => {
++    for (const path of ['/', '/about', '/apps', '/apps/Google.Chrome', '/blog/post', '/docs/docker', '/pricing', '/privacy', '/qa', '/roadmap', '/security', '/terms']) {
++      expect(isMarketingPath(path), path).toBe(true);
++    }
++  });
++
++  it('leaves the app, sign-in and API alone', () => {
++    for (const path of ['/dashboard', '/dashboard/apps', '/dashboard/help', '/auth/signin', '/api/health', '/api/apps', '/onboarding', '/redirect', '/applications', '/docsx']) {
++      expect(isMarketingPath(path), path).toBe(false);
++    }
++  });
++
++  it('redirects marketing pages to the dashboard', async () => {
++    for (const path of ['/', '/pricing', '/docs/getting-started']) {
++      const response = await get(path);
++      expect(response.status, path).toBe(307);
++      expect(new URL(response.headers.get('location')!).pathname).toBe('/dashboard');
++    }
++  });
++
++  it('tells crawlers to skip everything and serves no sitemap', async () => {
++    const robots = await get('/robots.txt');
++    expect(await robots.text()).toBe('User-agent: *\nDisallow: /\n');
++    expect((await get('/sitemap.xml')).status).toBe(404);
++    expect((await get('/sitemap/1.xml')).status).toBe(404);
++    expect(isCrawlerPath('/sitemapping')).toBe(false);
++  });
++
++  it('still sends signed-out visitors of the dashboard to sign-in', async () => {
++    const response = await get('/dashboard');
++    expect(new URL(response.headers.get('location')!).pathname).toBe('/auth/signin');
++  });
++});
++
++// HRM patch 0036: one address for webhook links and the status report.
++describe('serverHttpsOrigin', () => {
++  it('prefers NEXT_PUBLIC_URL and falls back to NEXT_PUBLIC_APP_URL', () => {
++    expect(serverHttpsOrigin({ NEXT_PUBLIC_URL: 'https://a.example.test', NEXT_PUBLIC_APP_URL: 'https://b.example.test' })).toBe('https://a.example.test');
++    expect(serverHttpsOrigin({ NEXT_PUBLIC_APP_URL: 'https://b.example.test/' })).toBe('https://b.example.test');
++  });
++
++  it('skips an http or credential-bearing NEXT_PUBLIC_URL', () => {
++    expect(serverHttpsOrigin({ NEXT_PUBLIC_URL: 'http://localhost:3000', NEXT_PUBLIC_APP_URL: 'https://b.example.test' })).toBe('https://b.example.test');
++    expect(serverHttpsOrigin({ NEXT_PUBLIC_URL: 'https://u:p@a.example.test' })).toBeUndefined();
++  });
++
++  it('keeps only the origin and rejects junk', () => {
++    expect(serverHttpsOrigin({ NEXT_PUBLIC_URL: 'https://a.example.test/x?y=1#z' })).toBe('https://a.example.test');
++    expect(serverHttpsOrigin({ NEXT_PUBLIC_URL: 'not a url' })).toBeUndefined();
++    expect(serverHttpsOrigin({})).toBeUndefined();
++  });
++});
++
++// HRM patch 0036: hidden upstream sections don't open by address either.
++describe('hidden dashboard sections', () => {
++  it('redirects SCCM, app requests, MSP and Account pages to Home', async () => {
++    for (const path of ['/dashboard/sccm', '/dashboard/sccm/new', '/dashboard/app-requests', '/dashboard/msp', '/dashboard/msp/team', '/dashboard/account']) {
++      const response = await get(path);
++      expect(response.status, path).toBe(307);
++      expect(new URL(response.headers.get('location')!).pathname, path).toBe('/dashboard');
++    }
++  });
++
++  it('leaves similar-looking and visible pages alone', () => {
++    for (const path of ['/dashboard', '/dashboard/settings', '/dashboard/mspx', '/dashboard/sccm-help', '/api/msp/tenants', '/dashboard/accounts-report', '/api/account']) {
++      expect(isHiddenDashboardPath(path), path).toBe(false);
++    }
++  });
++});
+diff --git a/lib/hrm/home.ts b/lib/hrm/home.ts
+new file mode 100644
+index 000000000..c9fc01031
+--- /dev/null
++++ b/lib/hrm/home.ts
+@@ -0,0 +1,164 @@
++/**
++ * HRM patch: data for the Home page's "Needs attention" and "Server status".
++ *
++ * The VM writes hrm-status.json next to the database every 5 minutes
++ * (IntuneGet-Build deploy/intuneget-status.sh). The app only reads it.
++ */
++
++import { open } from 'fs/promises';
++import path from 'path';
++import type { AnalyticsJob, UploadHistoryRecord } from '@/lib/db/types';
++import type { InstallStatusRecord } from './install-status';
++
++export const STATUS_STALE_AFTER_MS = 15 * 60 * 1000;
++export const STUCK_AFTER_MS = 2 * 60 * 60 * 1000;
++export const RECENT_FAILURE_MS = 7 * 24 * 60 * 60 * 1000;
++export const DISK_WARNING_RATIO = 0.85;
++// HRM patch 0021: the off-site backup runs nightly; no success for 36 hours is a problem.
++export const OFFSITE_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
++
++interface UnitRun { result: string | null; at: string | null }
++/** HRM patch 0032: a verdict the VM status script already worked out; null when not set up. */
++export interface StatusCheck { ok: boolean; at: string | null; detail: string | null }
++// HRM patch 0057 adds versionSync: App updates not corrected after 2 or more deploys in 24 hours.
++export const STATUS_CHECKS = ['intuneReads', 'intuneSelfTest', 'scheduledUpdates', 'versionSync'] as const;
++export type StatusCheckKey = (typeof STATUS_CHECKS)[number];
++
++export interface ServerStatusFile {
++  generatedAt: string;
++  version: string | null;
++  startedAt: string | null;
++  lastDeploy: { time: string; result: string; from: string; to: string } | null;
++  lastBackup: { at: string | null; sizeKb: number } | null;
++  // HRM patch 0021: the nightly copy to Azure Storage (deploy/intuneget-backup.py)
++  offsiteBackup?: { result: string | null; at: string | null; compressedBytes?: number } | null;
++  disk: { totalKb: number; usedKb: number };
++  updateCheck: UnitRun;
++  notifications: UnitRun;
++  tunnel: { version: string | null; running: boolean; lastUpdate: UnitRun };
++  checks?: Partial<Record<StatusCheckKey, StatusCheck | null>>;
++}
++
++export type ServerStatus =
++  | { reported: false; reason: 'missing' | 'stale' | 'unreadable'; generatedAt?: string }
++  | ({ reported: true; diskRatio: number; diskWarning: boolean; problems: string[] } & ServerStatusFile);
++
++export function statusFilePath(): string {
++  const dbPath = process.env.DATABASE_PATH || './data/intuneget.db';
++  return path.join(path.dirname(dbPath), 'hrm-status.json');
++}
++
++/** Interprets the status file. Anything old or malformed is "not reported", never guessed. */
++export function interpretServerStatus(raw: string | null, now = new Date()): ServerStatus {
++  if (raw === null) return { reported: false, reason: 'missing' };
++  let file: ServerStatusFile;
++  try {
++    file = JSON.parse(raw);
++    if (!file || typeof file.generatedAt !== 'string' || !file.disk) throw new Error('shape');
++  } catch {
++    return { reported: false, reason: 'unreadable' };
++  }
++  const generated = Date.parse(file.generatedAt);
++  if (!Number.isFinite(generated) || now.getTime() - generated > STATUS_STALE_AFTER_MS) {
++    return { reported: false, reason: 'stale', generatedAt: file.generatedAt };
++  }
++  const diskRatio = file.disk.totalKb > 0 ? file.disk.usedKb / file.disk.totalKb : 0;
++  const problems: string[] = [];
++  if (diskRatio >= DISK_WARNING_RATIO) problems.push('disk');
++  if (file.lastDeploy && !['deployed', 'waiting'].includes(file.lastDeploy.result)) problems.push('deploy');
++  if (file.updateCheck?.result && file.updateCheck.result !== 'success') problems.push('updateCheck');
++  if (file.notifications?.result && file.notifications.result !== 'success') problems.push('notifications');
++  if (file.offsiteBackup !== undefined) {
++    const at = Date.parse(file.offsiteBackup?.at ?? '');
++    if (file.offsiteBackup?.result !== 'success' || !Number.isFinite(at) || now.getTime() - at > OFFSITE_STALE_AFTER_MS) {
++      problems.push('offsiteBackup');
++    }
++  }
++  for (const key of STATUS_CHECKS) if (file.checks?.[key]?.ok === false) problems.push(key);
++  if (!file.tunnel?.running) problems.push('tunnel');
++  else if (file.tunnel.lastUpdate?.result && file.tunnel.lastUpdate.result !== 'success') problems.push('tunnelUpdate');
++  return { ...file, reported: true, diskRatio, diskWarning: diskRatio >= DISK_WARNING_RATIO, problems };
++}
++
++// HRM patch 0036: Home and the IT dashboard status report read the status file through one
++// bounded reader, so neither parses more than 32 KB.
++export const STATUS_FILE_MAX_BYTES = 32_768;
++export class StatusFileTooLargeError extends Error {
++  constructor() { super('Report unavailable'); }
++}
++
++/** The status file's text, or null when it doesn't exist. Throws if it is over 32 KB or unreadable. */
++export async function readStatusFileText(signal?: AbortSignal): Promise<string | null> {
++  let file;
++  try {
++    file = await open(statusFilePath(), 'r');
++  } catch (error) {
++    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
++    throw error;
++  }
++  try {
++    signal?.throwIfAborted();
++    if ((await file.stat()).size > STATUS_FILE_MAX_BYTES) throw new StatusFileTooLargeError();
++    const buffer = Buffer.alloc(STATUS_FILE_MAX_BYTES + 1);
++    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
++    signal?.throwIfAborted();
++    if (bytesRead > STATUS_FILE_MAX_BYTES) throw new StatusFileTooLargeError();
++    return buffer.toString('utf8', 0, bytesRead);
++  } finally {
++    await file.close();
++  }
++}
++
++export async function readServerStatus(now = new Date()): Promise<ServerStatus> {
++  let raw: string | null = null;
++  try {
++    raw = await readStatusFileText();
++  } catch (error) {
++    if (error instanceof StatusFileTooLargeError) return { reported: false, reason: 'unreadable' };
++    raw = null;
++  }
++  return interpretServerStatus(raw, now);
++}
++
++const PENDING = new Set(['queued', 'packaging', 'uploading']);
++
++/** Tenant-wide failures in the last 7 days and jobs pending for more than 2 hours. */
++export function attentionCounts(jobs: Pick<AnalyticsJob, 'status' | 'created_at'>[], now = new Date()) {
++  let failedRecent = 0;
++  let stuck = 0;
++  for (const job of jobs) {
++    const created = Date.parse(job.created_at ?? '');
++    if (!Number.isFinite(created)) continue;
++    const age = now.getTime() - created;
++    if (job.status === 'failed' && age <= RECENT_FAILURE_MS) failedRecent++;
++    else if (PENDING.has(job.status) && age > STUCK_AFTER_MS) stuck++;
++  }
++  return { failedRecent, stuck };
++}
++
++// HRM patch 0032: an app deployed this long ago that no device has, installs or is trying to install.
++export const UNREACHED_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
++const FRESH_COUNTS_MS = 2 * 24 * 60 * 60 * 1000;
++
++/**
++ * Deployed apps that reach no devices: Intune reports nothing installed, pending or failed. Usually an
++ * empty group, a group with no devices or a wrong assignment. Only recent counts and the newest copy
++ * of each app count, so an old copy or a stale check never raises it.
++ */
++export function unreachedApps(
++  installs: Pick<InstallStatusRecord, 'intune_app_id' | 'display_name' | 'installed' | 'pending' | 'failed' | 'checked_at'>[],
++  deployments: Pick<UploadHistoryRecord, 'intune_app_id' | 'deployed_at'>[],
++  now = new Date(),
++): Array<{ displayName: string; intuneAppId: string; deployedAt: string }> {
++  const deployedAt = new Map<string, string>();
++  for (const d of deployments) if (d.intune_app_id && d.deployed_at && !deployedAt.has(d.intune_app_id.toLowerCase())) deployedAt.set(d.intune_app_id.toLowerCase(), d.deployed_at);
++  return installs.flatMap((app) => {
++    const at = deployedAt.get(app.intune_app_id.toLowerCase());
++    const deployed = Date.parse(at ?? '');
++    const checked = Date.parse(app.checked_at);
++    if (!at || !Number.isFinite(deployed) || now.getTime() - deployed < UNREACHED_AFTER_MS) return [];
++    if (!Number.isFinite(checked) || now.getTime() - checked > FRESH_COUNTS_MS) return [];
++    if (app.installed + app.pending + app.failed > 0) return [];
++    return [{ displayName: app.display_name, intuneAppId: app.intune_app_id, deployedAt: at }];
++  });
++}
+diff --git a/lib/hrm/navigation.ts b/lib/hrm/navigation.ts
+new file mode 100644
+index 000000000..d87a54f98
+--- /dev/null
++++ b/lib/hrm/navigation.ts
+@@ -0,0 +1,36 @@
++// HRM patch 0053: the sidebar's groups. Routes are unchanged; only the grouping and order are HRM's.
++// Home on its own, then the pages grouped by job. Items not listed here (none
++// today) are dropped rather than shown in a random place.
++// HRM patch 0058 (David's choice 2B): every label groups more than one page. App updates sits with
++// the apps it updates, and Help is unlabelled at the bottom, next to Settings.
++export const HRM_NAV_LAYOUT: { label?: string; hrefs: string[] }[] = [
++  { hrefs: ['/dashboard'] },
++  { label: 'Apps', hrefs: ['/dashboard/apps', '/dashboard/inventory', '/dashboard/unmanaged', '/dashboard/updates'] },
++  { label: 'Activity', hrefs: ['/dashboard/uploads', '/dashboard/reports'] },
++  { hrefs: ['/dashboard/help'] },
++];
++
++export function hrmNavGroups<T extends { href: string }>(items: T[], support: T[]): { label?: string; items: T[] }[] {
++  const byHref = new Map([...items, ...support].map((item) => [item.href, item]));
++  return HRM_NAV_LAYOUT
++    .map((group) => ({ label: group.label, items: group.hrefs.flatMap((href) => byHref.get(href) ?? []) }))
++    .filter((group) => group.items.length > 0);
++}
++
++// Press G, then the key, to open a page. Listed in sidebar order; upstream's D, A, U, I, R and S
++// keep their meaning, and P (App updates; U was taken), V (Discovered apps) and H (Help) are added.
++export const GO_TO_SHORTCUTS: { key: string; href: string; name: string }[] = [
++  { key: 'd', href: '/dashboard', name: 'Home' },
++  { key: 'a', href: '/dashboard/apps', name: 'App catalog' },
++  { key: 'i', href: '/dashboard/inventory', name: 'Inventory' },
++  { key: 'v', href: '/dashboard/unmanaged', name: 'Discovered apps' },
++  { key: 'p', href: '/dashboard/updates', name: 'App updates' },
++  { key: 'u', href: '/dashboard/uploads', name: 'Deployments' },
++  { key: 'r', href: '/dashboard/reports', name: 'Reports' },
++  { key: 's', href: '/dashboard/settings', name: 'Settings' },
++  { key: 'h', href: '/dashboard/help', name: 'Help' },
++];
++
++export function goToShortcutHref(key: string): string | null {
++  return GO_TO_SHORTCUTS.find((shortcut) => shortcut.key === key.toLowerCase())?.href ?? null;
++}
+diff --git a/lib/hrm/settings-summary.ts b/lib/hrm/settings-summary.ts
+new file mode 100644
+index 000000000..9917ea899
+--- /dev/null
++++ b/lib/hrm/settings-summary.ts
+@@ -0,0 +1,36 @@
++/**
++ * HRM patch 0036: the current setting of each row under More settings and What staff see during
++ * install, in a few words. Shared by the deploy panel (PackageConfig) and the cart editor
++ * (CartItemConfig) so the two always describe the same settings the same way.
++ */
++import type { PSADTConfig } from '@/types/psadt';
++
++const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
++
++export interface SettingsSummaryInput {
++  config: PSADTConfig;
++  espProfiles: unknown[];
++  relationships: unknown[];
++  categories: Array<{ displayName: string }>;
++  /** Description, install or uninstall command differ from what the app started with. */
++  descriptionOrCommandsChanged: boolean;
++  customDetectionActive?: boolean;
++}
++
++export function settingsSummaries({ config, espProfiles, relationships, categories, descriptionOrCommandsChanged, customDetectionActive = false }: SettingsSummaryInput) {
++  return {
++    detection: customDetectionActive ? 'Your own rules' : 'Automatic',
++    esp: espProfiles.length ? `Required on ${plural(espProfiles.length, 'setup profile', 'setup profiles')}` : 'Not required',
++    dependencies: relationships.length ? plural(relationships.length, 'linked app', 'linked apps') : 'None',
++    category: categories.map((c) => c.displayName).join(', ') || 'None',
++    behavior: config.installAfterRestartBeta ? 'After next restart · Beta' : `${{ Silent: 'Silent', NonInteractive: 'Progress only', Auto: 'Installer decides' }[config.deployMode || 'Silent'] ?? 'Silent'}, ${
++      { Suppress: 'no restart', Prompt: 'asks to restart', Force: 'restarts' }[config.restartBehavior] ?? 'no restart'}`,
++    advanced: descriptionOrCommandsChanged || config.postInstallCommands?.length || config.postUninstallCommands?.length ? 'Changed' : 'Default',
++    deferral: config.allowDefer ? `Up to ${plural(config.deferTimes, 'time', 'times')}` : 'Off',
++    progress: config.progressDialog?.enabled || config.balloonTips?.length ? 'On' : 'Off',
++    prompts: config.customPrompts?.length ? plural(config.customPrompts.length, 'message', 'messages') : 'None',
++    restart: config.restartPrompt?.enabled ? 'On' : 'Off',
++    diskspace: config.checkDiskSpace ? (config.requiredDiskSpace ? `${config.requiredDiskSpace} MB` : 'On') : 'Off',
++    branding: config.brandingCompanyName || config.brandingWelcomeTitle || config.brandingLogoPath ? 'Custom' : 'Default',
++  };
++}
+diff --git a/lib/hrm/site.ts b/lib/hrm/site.ts
+new file mode 100644
+index 000000000..4173edc02
+--- /dev/null
++++ b/lib/hrm/site.ts
+@@ -0,0 +1,59 @@
++/**
++ * HRM patch: this server is HRM's internal tool behind Cloudflare Access, so
++ * the public marketing site (home page, pricing, blog, docs...) has no
++ * audience. Its pages stay in the code, unchanged, and the request proxy
++ * sends them to the dashboard instead.
++ */
++
++// Top-level routes of app/(marketing). '/' is the landing page.
++const MARKETING_PREFIXES = [
++  '/about', '/apps', '/blog', '/docs', '/pricing', '/privacy', '/qa', '/roadmap', '/security', '/terms',
++];
++
++export const HOME_PATH = '/dashboard';
++
++export function isMarketingPath(pathname: string): boolean {
++  if (pathname === '/') return true;
++  return MARKETING_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
++}
++
++// HRM patch 0036: upstream sections hidden from the sidebar (SCCM migration, public app requests,
++// MSP) still opened by typing the address. Their pages stay in the code; the proxy sends them Home.
++// HRM patch 0051: upstream's Account page too. No menu links to it, and Settings > General already
++// shows the signed-in account and the Intune connection.
++const HIDDEN_DASHBOARD_PREFIXES = ['/dashboard/sccm', '/dashboard/app-requests', '/dashboard/msp', '/dashboard/account'];
++
++export function isHiddenDashboardPath(pathname: string): boolean {
++  return HIDDEN_DASHBOARD_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
++}
++
++// Search engines are told to skip everything; the sitemap is never served.
++export function isCrawlerPath(pathname: string): boolean {
++  return pathname === '/robots.txt' || pathname === '/sitemap.xml' || pathname.startsWith('/sitemap/');
++}
++
++export const ROBOTS_TXT = 'User-agent: *\nDisallow: /\n';
++
++/**
++ * HRM patch 0036: this server's own https address (origin only), shared by webhook links and the
++ * IT dashboard status report. Reads NEXT_PUBLIC_URL first (the variable upstream's compose file
++ * sets) and falls back to NEXT_PUBLIC_APP_URL, taking the first one that is a plain https address.
++ * Paths, query strings and fragments are dropped; addresses with credentials or http are ignored,
++ * so compose's default http://localhost:3000 doesn't hide a valid NEXT_PUBLIC_APP_URL.
++ */
++export function serverHttpsOrigin(env: Record<string, string | undefined> = process.env): string | undefined {
++  for (const name of ['NEXT_PUBLIC_URL', 'NEXT_PUBLIC_APP_URL']) {
++    const value = (env[name] ?? '').trim();
++    if (!value) continue;
++    try {
++      const url = new URL(value);
++      if (url.protocol === 'https:' && !url.username && !url.password) return url.origin;
++    } catch { /* not a URL: try the next variable */ }
++  }
++  return undefined;
++}
++
++/** HRM patch 0019: this server's own https address, for links in Custom webhook messages. */
++export function appUrl(): string | undefined {
++  return serverHttpsOrigin();
++}
+diff --git a/tailwind.config.ts b/tailwind.config.ts
+index 62322b318..0d8eefae6 100644
+--- a/tailwind.config.ts
++++ b/tailwind.config.ts
+@@ -91,19 +91,19 @@ const config: Config = {
+           "50%": { backgroundPosition: "100% 50%" },
+         },
+         "ring-pulse": {
+-          "0%, 100%": { boxShadow: "0 0 0 0px rgba(8, 145, 178, 0.3)" },
+-          "50%": { boxShadow: "0 0 0 6px rgba(8, 145, 178, 0)" },
++          "0%, 100%": { boxShadow: "0 0 0 0px rgba(103, 48, 144, 0.3)" },
++          "50%": { boxShadow: "0 0 0 6px rgba(103, 48, 144, 0)" },
+         },
+       },
+       backgroundImage: {
+         "grid-light":
+           "url(\"data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(0 0 0 / 0.04)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e\")",
+         "dots-light":
+-          "radial-gradient(circle, rgba(8, 145, 178, 0.08) 1px, transparent 1px)",
++          "radial-gradient(circle, rgba(103, 48, 144, 0.08) 1px, transparent 1px)",
+         "gradient-radial-cyan":
+-          "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(8, 145, 178, 0.08), transparent)",
++          "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(103, 48, 144, 0.08), transparent)",
+         "gradient-radial-violet":
+-          "radial-gradient(ellipse 60% 40% at 80% 100%, rgba(124, 58, 237, 0.06), transparent)",
++          "radial-gradient(ellipse 60% 40% at 80% 100%, rgba(90, 131, 140, 0.06), transparent)",
+       },
+       colors: {
+         background: "hsl(var(--background))",
+@@ -154,12 +154,13 @@ const config: Config = {
+         "overlay": "rgb(var(--overlay) / <alpha-value>)",
+         // Inverse surface for Badge dark variant
+         "surface-inverse": "rgb(var(--surface-inverse) / <alpha-value>)",
+-        // Electric Cyan accent system (static - same in both themes)
+-        "accent-cyan": "#0891b2",
+-        "accent-cyan-bright": "#06b6d4",
+-        "accent-cyan-dim": "#0e7490",
+-        "accent-violet": "#7c3aed",
+-        "accent-violet-bright": "#8b5cf6",
++        // HRM patch: accents follow the theme (lighter purple and teal in dark
++        // mode, so text and borders stay readable); values in app/globals.css.
++        "accent-cyan": "var(--accent-cyan)",
++        "accent-cyan-bright": "var(--accent-cyan-bright)",
++        "accent-cyan-dim": "var(--accent-cyan-dim)",
++        "accent-violet": "var(--accent-violet)",
++        "accent-violet-bright": "var(--accent-violet-bright)",
+         // Text colors wired to CSS variables (switch light/dark)
+         "text-primary": "rgb(var(--text-primary) / <alpha-value>)",
+         "text-secondary": "rgb(var(--text-secondary) / <alpha-value>)",
+@@ -169,7 +170,7 @@ const config: Config = {
+           success: "#10b981",
+           warning: "#f59e0b",
+           error: "#ef4444",
+-          info: "#0891b2",
++          info: "#673090",
+         },
+       },
+       borderRadius: {
+@@ -186,10 +187,10 @@ const config: Config = {
+         "soft-xl": "0 12px 48px rgba(0, 0, 0, 0.1)",
+         "card": "0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.04)",
+         "card-hover": "0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04)",
+-        "glow-cyan": "0 0 20px rgba(8, 145, 178, 0.15)",
+-        "glow-cyan-lg": "0 0 40px rgba(8, 145, 178, 0.2)",
+-        "glow-violet": "0 0 20px rgba(124, 58, 237, 0.15)",
+-        "glow-violet-lg": "0 0 40px rgba(124, 58, 237, 0.2)",
++        "glow-cyan": "0 0 20px rgba(103, 48, 144, 0.15)",
++        "glow-cyan-lg": "0 0 40px rgba(103, 48, 144, 0.2)",
++        "glow-violet": "0 0 20px rgba(90, 131, 140, 0.15)",
++        "glow-violet-lg": "0 0 40px rgba(90, 131, 140, 0.2)",
+         "glow-success": "0 0 20px rgba(16, 185, 129, 0.15)",
+         "glow-warning": "0 0 20px rgba(245, 158, 11, 0.15)",
+         "glow-error": "0 0 20px rgba(239, 68, 68, 0.15)",
+diff --git a/types/user-settings.ts b/types/user-settings.ts
+index a566983e7..9234b5592 100644
+--- a/types/user-settings.ts
++++ b/types/user-settings.ts
+@@ -1,4 +1,5 @@
+-export type ThemeMode = "light" | "dark";
++// HRM patch: "system" follows the computer's light or dark setting.
++export type ThemeMode = "light" | "dark" | "system";
+ export type ViewMode = "grid" | "list";
+ 
+ export interface UserSettings {
+@@ -16,7 +17,7 @@ export interface UserSettings {
+ export type UserSettingsUpdate = Partial<UserSettings>;
+ 
+ export const DEFAULT_USER_SETTINGS: UserSettings = {
+-  theme: "light",
++  theme: "system",
+   sidebarCollapsed: false,
+   selectedTenantId: null,
+   cartAutoOpenOnAdd: true,

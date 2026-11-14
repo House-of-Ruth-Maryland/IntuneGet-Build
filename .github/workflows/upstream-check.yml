@@ -182,7 +182,7 @@ jobs:
           fi
 
       - name: Check app mapping IDs against WinGet
-        # Patch 0004's live check: every built-in app mapping must resolve in
+        # 0002-self-hosted-fixes.patch's live check (was patch 0004): every built-in app mapping must resolve in
         # winget-pkgs the way Claim looks it up.
         id: mappings
         if: steps.patches.outputs.result == 'ok'
@@ -273,7 +273,7 @@ jobs:
           - [ ] Read the upstream release notes.
           - [ ] If the packaging workflow changed, update IntuneGet-Workflows to the $LATEST version (merge that before the Deploy PR).
           - [ ] If migration numbers clash, rework the patch first.
-          - [ ] If app mapping IDs fail, fix them in patch 0004 (or list products that aren't in WinGet there).
+          - [ ] If app mapping IDs fail, fix them in 0002-self-hosted-fixes.patch (or list products that aren't in WinGet there).
           - [ ] Help and tooltips checked: run the help-writer agent against the upstream changes, fold its edits into a patch, and note here what changed (or why nothing did).
 
           Run: $RUN_URL
