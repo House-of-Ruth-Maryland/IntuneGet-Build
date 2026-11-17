@@ -1428,10 +1428,10 @@ index 000000000..37f25026e
 +}
 diff --git a/components/hrm/InstallStatusBar.test.ts b/components/hrm/InstallStatusBar.test.ts
 new file mode 100644
-index 000000000..e02a9e073
+index 000000000..b13cc0191
 --- /dev/null
 +++ b/components/hrm/InstallStatusBar.test.ts
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,76 @@
 +// @vitest-environment happy-dom
 +// HRM patch 0054: Check installs now in Inventory's Install results.
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1495,24 +1495,37 @@ index 000000000..e02a9e073
 +    await render();
 +    expect(button()).toBeUndefined();
 +  });
++
++  it('leads with the installed count and gives each failure reason its own card', async () => {
++    fetchMock.mockResolvedValueOnce(Response.json({ status: { installed: 49, failed: 2, pending: 3, notApplicable: 0, other: 0, notInstalled: 0, checkedAt: '2026-11-11T20:00:00.000Z', topErrors: [{ code: '0x80070644', description: '', count: 1 }, { code: '0x8007EA61', description: '', count: 1 }] }, canCheck: true }));
++    await render();
++    expect(text()).toContain('49 of 54computers installed (91%)');
++    expect(text()).toContain('Failed2');
++    expect(text()).toContain('0 not installed, 0 not applicable, 0 unknown.');
++    expect(text()).toContain('Why installs failed');
++    expect([...document.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['0x80070644', '0x8007EA61']);
++    expect(text()).toContain('Intune gave no description.');
++    expect(text()).not.toContain('No description from Intune');
++  });
 +});
 diff --git a/components/hrm/InstallStatusBar.tsx b/components/hrm/InstallStatusBar.tsx
 new file mode 100644
-index 000000000..6a5c6bea2
+index 000000000..558ef6e72
 --- /dev/null
 +++ b/components/hrm/InstallStatusBar.tsx
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,140 @@
 +'use client';
 +
 +// HRM patch 0019: install results for an IntuneGet-deployed app. Counts only, never device or user names.
 +// HRM patch 0054: Check installs now refreshes this one app's results from Intune (newest copy, SQLite mode).
++// November 2026 readability pass: a headline count, tiles for the main states, one card per failure reason.
 +
 +import { installErrorGuidance } from '@/lib/hrm/install-error-guidance';
 +import { ExternalLink } from 'lucide-react';
 +import { useCheckInstallsNow, useInstallStatus } from '@/hooks/useInstallStatus';
 +import { intuneAppUrl, OPEN_IN_INTUNE } from '@/lib/hrm/intune-link';
 +
-+// Security review U4 (November 2026): Not installed and Unknown are shown, so every counted device is in the legend.
++// Security review U4 (November 2026): Not installed and Unknown are shown, so every counted device is accounted for.
 +const SEGMENTS = [
 +  { key: 'installed', label: 'Installed', bar: 'bg-emerald-500', dot: 'bg-emerald-500' },
 +  { key: 'failed', label: 'Failed', bar: 'bg-red-500', dot: 'bg-red-500' },
@@ -1521,89 +1534,124 @@ index 000000000..6a5c6bea2
 +  { key: 'notApplicable', label: 'Not applicable', bar: 'bg-overlay/20', dot: 'bg-overlay/30' },
 +  { key: 'other', label: 'Unknown', bar: 'bg-purple-400', dot: 'bg-purple-400' },
 +] as const;
++const MAIN = new Set(['installed', 'failed', 'pending']);
++
++const heading = 'text-base font-semibold text-text-primary';
++const secondaryButton = 'inline-flex items-center gap-1.5 rounded-lg border border-overlay/15 px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan disabled:opacity-60';
++const computers = (n: number) => (n === 1 ? '1 computer' : `${n} computers`);
 +
 +// The check's state lives in InstallStatusBar, so its result stays shown when the first results arrive.
 +function CheckNow({ canCheck, check }: ReturnType<typeof useCheckInstallsNow>) {
 +  if (!canCheck) return null;
 +  return (
-+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-+      <button
-+        type="button"
-+        onClick={() => check.mutate()}
-+        disabled={check.isPending}
-+        className="rounded-md border border-overlay/10 px-2 py-1 text-accent-cyan hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan disabled:opacity-60"
-+      >
++    <>
++      <button type="button" onClick={() => check.mutate()} disabled={check.isPending} className={secondaryButton}>
 +        {check.isPending ? 'Checking…' : 'Check installs now'}
 +      </button>
-+      {check.isSuccess && <span role="status" className="text-text-secondary">Install results updated.</span>}
-+      {check.error && <span role="alert" className="text-status-error">{check.error.message}</span>}
-+    </div>
++      {check.isSuccess && <span role="status" className="text-sm text-status-success">Install results updated.</span>}
++      {check.error && <span role="alert" className="text-sm text-status-error">{check.error.message}</span>}
++    </>
 +  );
 +}
 +
 +export function InstallStatusBar({ appId }: { appId: string }) {
 +  const { data: status, isLoading, error } = useInstallStatus(appId);
 +  const checkNow = useCheckInstallsNow(appId);
-+  if (!status) return <div><h4 className="text-sm font-semibold text-text-secondary mb-2">Install results</h4><p className="text-sm text-text-muted" role={error ? 'alert' : undefined}>{isLoading ? 'Loading install results…' : error ? "Couldn't load install results. Close this panel and open it again." : 'No install results for this version yet.'}</p>{!isLoading && !error && <CheckNow {...checkNow} />}</div>;
-+  const total = status.installed + status.failed + status.pending + status.notApplicable + status.other + (status.notInstalled ?? 0);
++  if (!status) {
++    return (
++      <section aria-label="Install results">
++        <h4 className={`${heading} mb-2`}>Install results</h4>
++        <p className="text-sm text-text-secondary" role={error ? 'alert' : undefined}>
++          {isLoading ? 'Loading install results…' : error ? "Couldn't load install results. Close this panel and open it again." : 'No install results for this version yet.'}
++        </p>
++        {!isLoading && !error && <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2"><CheckNow {...checkNow} /></div>}
++      </section>
++    );
++  }
++  const count = (key: (typeof SEGMENTS)[number]['key']) => status[key] ?? 0;
++  const total = SEGMENTS.reduce((sum, s) => sum + count(s.key), 0);
++  const applicable = total - count('notApplicable');
++  const tiles = SEGMENTS.filter((s) => MAIN.has(s.key) || count(s.key) > 0);
++  const zeros = SEGMENTS.filter((s) => !MAIN.has(s.key) && count(s.key) === 0);
 +  const checked = new Date(status.checkedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 +  // HRM patch 0036: shared helper; the ID is now URL-encoded like the other Intune links.
 +  const intuneUrl = intuneAppUrl(appId);
 +
 +  return (
-+    <div>
-+      <h4 className="text-sm font-semibold text-text-secondary mb-2">Install results</h4>
-+      {total === 0 ? (
-+        <p className="text-sm text-text-muted">No computers have reported yet.</p>
-+      ) : (
-+        <>
-+          <div className="flex h-2 w-full overflow-hidden rounded-full bg-overlay/5" aria-hidden="true">
-+            {SEGMENTS.map((s) =>
-+              (status[s.key] ?? 0) > 0 ? <div key={s.key} className={s.bar} style={{ width: `${((status[s.key] ?? 0) / total) * 100}%` }} /> : null
++    <section aria-label="Install results" className="space-y-5">
++      <div>
++        <h4 className={`${heading} mb-2`}>Install results</h4>
++        {total === 0 ? (
++          <p className="text-sm text-text-secondary">No computers have reported yet.</p>
++        ) : (
++          <>
++            {applicable > 0 && (
++              <p className="text-2xl font-bold tracking-tight text-text-primary">
++                {status.installed} of {applicable}
++                <span className="ml-2 text-sm font-medium text-text-secondary">computers installed ({Math.round((status.installed / applicable) * 100)}%)</span>
++              </p>
 +            )}
-+          </div>
-+          <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-+            {SEGMENTS.map((s) => (
-+              <li key={s.key} className="flex items-center gap-2">
-+                <span className={`h-2 w-2 rounded-full ${s.dot}`} aria-hidden="true" />
-+                <span className="text-text-secondary">{s.label}</span>
-+                <span className={`ml-auto font-medium ${s.key === 'failed' && status.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-text-primary'}`}>
-+                  {status[s.key] ?? 0}
-+                </span>
-+              </li>
-+            ))}
-+          </ul>
-+        </>
-+      )}
++            <div className="mt-2 flex h-3 w-full gap-0.5 overflow-hidden rounded-full bg-overlay/5" aria-hidden="true">
++              {SEGMENTS.map((s) => (count(s.key) > 0 ? <div key={s.key} className={s.bar} style={{ width: `${(count(s.key) / total) * 100}%` }} /> : null))}
++            </div>
++            <ul className="mt-3 grid grid-cols-3 gap-2">
++              {tiles.map((s) => {
++                const alert = s.key === 'failed' && status.failed > 0;
++                return (
++                  <li key={s.key} className={`rounded-lg border px-3 py-2 ${alert ? 'border-status-error/40 bg-status-error/10' : 'border-overlay/10 bg-bg-elevated'}`}>
++                    <span className="flex items-center gap-1.5 text-sm text-text-secondary">
++                      <span className={`h-2 w-2 shrink-0 rounded-full ${s.dot}`} aria-hidden="true" />{s.label}
++                    </span>
++                    <span className={`block text-xl font-bold ${alert ? 'text-red-600 dark:text-red-400' : 'text-text-primary'}`}>{count(s.key)}</span>
++                  </li>
++                );
++              })}
++            </ul>
++            {zeros.length > 0 && <p className="mt-2 text-sm text-text-muted">{zeros.map((s) => `0 ${s.label.toLowerCase()}`).join(', ')}.</p>}
++          </>
++        )}
++      </div>
++
 +      {status.topErrors.length > 0 && (
-+        <div className="mt-3">
-+          <p className="text-xs font-medium text-text-secondary mb-1">Most common reasons</p>
-+          <ul className="space-y-1 text-sm text-text-secondary">
-+            {status.topErrors.map((e) => (
-+              <li key={e.code || e.description}>
-+                {e.description || 'No description from Intune'}
-+                {e.code && <span className="text-text-muted"> ({e.code})</span>}
-+                <span className="text-text-muted">: {e.count === 1 ? '1 computer' : `${e.count} computers`}</span>
-+                <details className="mt-1 mb-3 rounded-lg border border-overlay/10 bg-bg-elevated p-2">
-+                  <summary className="cursor-pointer text-accent-cyan">What to check</summary>
-+                  <p className="mt-2 font-medium">{installErrorGuidance(e.code).title}</p>
-+                  <ol className="mt-1 list-decimal pl-5 space-y-1">{installErrorGuidance(e.code).steps.map((step) => <li key={step}>{step}</li>)}</ol>
-+                  <a className="mt-2 inline-block text-xs text-accent-cyan hover:underline" href={installErrorGuidance(e.code).source} target="_blank" rel="noopener noreferrer">Microsoft troubleshooting guidance</a>
-+                </details>
-+              </li>
-+            ))}
++        <div>
++          <h4 className={`${heading} mb-2`}>Why installs failed</h4>
++          <ul className="space-y-2">
++            {status.topErrors.map((e) => {
++              const guide = installErrorGuidance(e.code);
++              return (
++                <li key={e.code || e.description} className="rounded-lg border border-overlay/10 bg-bg-elevated p-3">
++                  <div className="flex flex-wrap items-center justify-between gap-2">
++                    {e.code
++                      ? <code className="rounded-md border border-overlay/10 bg-overlay/5 px-2 py-0.5 font-mono text-sm text-text-primary">{e.code}</code>
++                      : <span className="text-sm font-medium text-text-primary">No error code</span>}
++                    <span className="text-sm text-text-secondary">{computers(e.count)}</span>
++                  </div>
++                  <p className="mt-1.5 text-sm text-text-secondary">{e.description || 'Intune gave no description.'}</p>
++                  <details className="group mt-2 text-sm">
++                    <summary className="cursor-pointer rounded font-medium text-accent-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">What to check</summary>
++                    <p className="mt-2 font-medium text-text-primary">{guide.title}</p>
++                    <ol className="mt-1 list-decimal space-y-1 pl-5 leading-relaxed text-text-secondary">{guide.steps.map((step) => <li key={step}>{step}</li>)}</ol>
++                    <a className="mt-2 inline-block text-accent-cyan hover:underline" href={guide.source} target="_blank" rel="noopener noreferrer">Microsoft troubleshooting guidance</a>
++                  </details>
++                </li>
++              );
++            })}
 +          </ul>
 +        </div>
 +      )}
-+      <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
-+        <span>Checked {checked}. Updated at 3:30 AM and 3:30 PM, Maryland time.</span>
-+        <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-accent-cyan hover:underline">
-+          {OPEN_IN_INTUNE} <ExternalLink className="w-3 h-3" aria-hidden="true" />
-+          <span className="sr-only"> (opens in a new tab)</span>
-+        </a>
-+      </p>
-+      <CheckNow {...checkNow} />
-+    </div>
++
++      <div className="border-t border-overlay/10 pt-4">
++        <p className="text-sm text-text-primary">Last checked {checked}</p>
++        <p className="mt-0.5 text-sm text-text-muted">Checked automatically at 3:30 AM and 3:30 PM, Maryland time.</p>
++        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
++          <CheckNow {...checkNow} />
++          <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className={secondaryButton}>
++            {OPEN_IN_INTUNE} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
++            <span className="sr-only"> (opens in a new tab)</span>
++          </a>
++        </div>
++      </div>
++    </section>
 +  );
 +}
 diff --git a/components/inventory/CopyableCommand.tsx b/components/inventory/CopyableCommand.tsx
@@ -1641,7 +1689,7 @@ index 267d2600e..096e82ec4 100644
  
            {/* Metadata */}
 diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
-index 5e9631f0e..80d3de409 100644
+index 5e9631f0e..e36d664a1 100644
 --- a/components/inventory/InventoryAppDetails.tsx
 +++ b/components/inventory/InventoryAppDetails.tsx
 @@ -1,7 +1,16 @@
@@ -1773,7 +1821,7 @@ index 5e9631f0e..80d3de409 100644
 +          {/* HRM patch 0054: a copy IntuneGet has replaced says so first, with what cleanup will do */}
 +          {appId && <><PreviousCopyNote appId={appId} /><InstallStatusBar appId={appId} /><AppDriftWarning appId={appId} changesOnly /></>}
 +          {/* HRM patch 0053: one Actions section in a fixed order, routine first and Retire app
-+              (destructive) last: Availability and deadline (0041), Deploy new version (0015) or
++              (destructive) last: Install dates (0041), Deploy new version (0015) or
 +              Find in App catalog (0014), Go back to previous version (0037), Retire app (0038). */}
 +          {appId && (
 +            <section aria-labelledby="inventory-app-actions" className="space-y-3" data-testid="inventory-app-actions">
@@ -1908,7 +1956,7 @@ index b19c39912..ad36b4c35 100644
    it('shows a resolved assignment name',async()=>{expect(await render(false,'Fixture Group')).toContain('Group: Fixture Group');expect(fetch).not.toHaveBeenCalled();});
 diff --git a/components/inventory/inventory-app-actions.test.ts b/components/inventory/inventory-app-actions.test.ts
 new file mode 100644
-index 000000000..52150effa
+index 000000000..d1581a5f1
 --- /dev/null
 +++ b/components/inventory/inventory-app-actions.test.ts
 @@ -0,0 +1,66 @@
@@ -1929,7 +1977,7 @@ index 000000000..52150effa
 +vi.mock('@/components/hrm/InstallStatusBar', () => ({ InstallStatusBar: () => null }));
 +vi.mock('@/components/hrm/PreviousCopy', () => ({ PreviousCopyNote: () => null }));
 +vi.mock('@/components/hrm/AppInsights', () => ({ AppActivityTimeline: () => null, AppDriftWarning: () => null }));
-+vi.mock('@/components/hrm/AppTimingPanel', () => ({ AppTimingPanel: () => createElement('p', null, 'Availability and deadline') }));
++vi.mock('@/components/hrm/AppTimingPanel', () => ({ AppTimingPanel: () => createElement('p', null, 'Install dates') }));
 +vi.mock('@/components/hrm/RollbackPanel', () => ({ RollbackPanel: () => createElement('p', null, 'Go back to previous version') }));
 +vi.mock('@/components/hrm/RetirePanel', () => ({ RetirePanel: () => createElement('p', null, 'Retire app') }));
 +vi.mock('@/components/dashboard/animations/SlidePanel', () => ({
@@ -1953,11 +2001,11 @@ index 000000000..52150effa
 +const actionTexts = (c: HTMLElement) => [...c.querySelectorAll('[data-testid="inventory-app-actions"] [data-action]')].map((el) => el.textContent?.trim());
 +
 +describe('Inventory app details actions', () => {
-+  it('lists Availability and deadline, Find in App catalog, Go back to previous version, then Retire app', async () => {
++  it('lists Install dates, Find in App catalog, Go back to previous version, then Retire app', async () => {
 +    const c = await render(vi.fn());
 +    const section = c.querySelector('[data-testid="inventory-app-actions"]')!;
 +    expect(section.querySelector('h4')?.textContent).toBe('Actions');
-+    expect(actionTexts(c)).toEqual(['Availability and deadline', 'Find in App catalog', 'Go back to previous version', 'Retire app']);
++    expect(actionTexts(c)).toEqual(['Install dates', 'Find in App catalog', 'Go back to previous version', 'Retire app']);
 +    expect(c.querySelector('footer')).toBeNull();
 +  });
 +
@@ -1975,7 +2023,7 @@ index 000000000..52150effa
 +    expect(button).not.toBeNull();
 +    await act(async () => button!.click());
 +    expect(state.refetch).toHaveBeenCalled();
-+    expect(actionTexts(c)).toEqual(['Availability and deadline', 'Go back to previous version', 'Retire app']);
++    expect(actionTexts(c)).toEqual(['Install dates', 'Go back to previous version', 'Retire app']);
 +  });
 +});
 diff --git a/components/inventory/inventory-app-link.test.ts b/components/inventory/inventory-app-link.test.ts

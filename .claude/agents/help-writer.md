@@ -95,7 +95,9 @@ Use these exactly; sentence case, as the screen shows them.
 | Deploy, deployed (sending an app or a new version to Intune) | Publish, published, Send to Intune, Upload |
 | Automatic updates (the App updates setup section and the process) | Automatic publishing, Automatic update setup |
 | Installation timing (deploy panel section and App updates card: prompts, postponement and startup install built into the package) | Device installation, Install behaviour, Installation behavior |
-| Availability and deadline (panel opened from Inventory app details and App updates cards: Intune assignment dates and restart grace for a copy already in Intune) | Installation timing (for that panel), timing |
+| Install dates (panel opened from Inventory app details and App updates cards: one group's dates and restart grace for a copy already in Intune) | Availability and deadline, Installation timing (for that panel), timing |
+| Group (in Install dates) | assignment |
+| Each computer's own clock | Device local time |
 | Update history (App updates tab) | Publishing history |
 | App updates | Updates page, App Updates |
 | Deployments | Uploads, jobs |
