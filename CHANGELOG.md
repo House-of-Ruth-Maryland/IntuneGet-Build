@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Next.js and eslint-config-next 16.4.3 to 16.4.6 (patch 0001), for the moderate advisory
+  GHSA-mfr8-8qww-v76h (information disclosure across root params when a `use cache` function is
+  called through `unstable_cache()`, 16.3.0 to 16.4.4). Only the Next.js packages change in the
+  lockfile; `npm audit --omit=dev` reports none.
+
 - Every Teams card IntuneGet sends now has the same layout (patch 0004, new
   `lib/webhooks/teams-card.ts`): a tinted header band with an "IntuneGet · kind" label, the title
   and the time, then the details and buttons. Neutral for updates, green for deployed, resolved and
