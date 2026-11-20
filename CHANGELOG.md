@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Install dates (was Availability and deadline) is easier to read (patches 0008, 0009 and 0013).
+  The panel reads the current dates from Intune when it opens and shows them in a table: Group,
+  Available from, Must install by, Time zone and Restart grace period. Edit dates opens the form;
+  Save to Intune reads the dates back afterwards, so Refresh dates (was Reload dates) is only needed
+  after an error. Text is larger and brighter, each section has a heading, and What changing dates
+  does is a short list. Install results lead with "49 of 54 computers installed", show Installed,
+  Failed and Pending as tiles (Failed in red when above 0), put the empty categories on one line,
+  and give each failure reason its own card with the error code first; "No description from
+  Intune" is now "Intune gave no description" under the code. Last checked and the automatic check
+  times are on separate lines, and Check installs now and Open in Intune are matching buttons. The
+  Install after next restart · Beta choice in the deploy panels explains itself in one sentence and
+  a short list, with the pilot warning in its own box. Form fields' screen-reader names match
+  their visible labels. Help uses the new names and the new order (choose the group, then Edit
+  dates).
+
+- Next.js and eslint-config-next 16.4.3 to 16.4.6 (patch 0001), for the moderate advisory
+  GHSA-mfr8-8qww-v76h (information disclosure across root params when a `use cache` function is
+  called through `unstable_cache()`, 16.3.0 to 16.4.4). Only the Next.js packages change in the
+  lockfile; `npm audit --omit=dev` reports none.
+
 - Every Teams card IntuneGet sends now has the same layout (patch 0004, new
   `lib/webhooks/teams-card.ts`): a tinted header band with an "IntuneGet · kind" label, the title
   and the time, then the details and buttons. Neutral for updates, green for deployed, resolved and

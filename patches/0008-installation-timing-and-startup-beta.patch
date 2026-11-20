@@ -232,7 +232,7 @@ index 000000000..325adf718
 +});
 diff --git a/app/api/hrm/app-timing/route.ts b/app/api/hrm/app-timing/route.ts
 new file mode 100644
-index 000000000..5be1da897
+index 000000000..f1a20ba1c
 --- /dev/null
 +++ b/app/api/hrm/app-timing/route.ts
 @@ -0,0 +1,82 @@
@@ -274,7 +274,7 @@ index 000000000..5be1da897
 +    await checkHold();
 +    const token = await getServicePrincipalToken(tenantId);
 +    if (!token) throw new PilotError('Could not reach Intune. Try again.', 424);
-+    const graph = pilotGraph(token, fetch, "Couldn't read all of this app's groups from Intune. Press Reload dates, then try again.");
++    const graph = pilotGraph(token, fetch, "Couldn't read all of this app's groups from Intune. Press Refresh dates, then try again.");
 +    const [app, rows] = await Promise.all([graph.app(appId), graph.assignments(appId)]);
 +    const restartBehavior = record(record(app).installExperience).deviceRestartBehavior;
 +    const restartSupported = restartBehavior === 'basedOnReturnCode' || restartBehavior === 'force';
@@ -291,8 +291,8 @@ index 000000000..5be1da897
 +      return reply({ rows: editable });
 +    }
 +    const row = rows.find(r => r.id === body?.assignmentId);
-+    if (!row || !timingEditable(row)) throw new PilotError("This group's dates can't be changed here any more. Press Reload dates.");
-+    if (body.token !== fingerprint(tenantId, identity, row)) throw new PilotError('The app or group changed after you opened it. Press Reload dates and check it again.');
++    if (!row || !timingEditable(row)) throw new PilotError("This group's dates can't be changed here any more. Press Refresh dates.");
++    if (body.token !== fingerprint(tenantId, identity, row)) throw new PilotError('The app or group changed after you opened it. Press Refresh dates and check it again.');
 +    const problem = timingProblem(body.edit, row.intent, restartSupported, record(row.settings).restartSettings ?? null);
 +    if (problem) return reply({ error: problem }, 400);
 +    await checkHold();
@@ -302,18 +302,18 @@ index 000000000..5be1da897
 +      body: JSON.stringify({ '@odata.type': '#microsoft.graph.mobileAppAssignment', settings }),
 +      signal: AbortSignal.timeout(30000), cache: 'no-store',
 +    });
-+    if (!response.ok) throw new PilotError("Intune didn't confirm the change. Press Reload dates before trying again.", 424);
++    if (!response.ok) throw new PilotError("Intune didn't confirm the change. Press Refresh dates before trying again.", 424);
 +    if (isSqliteMode()) {
 +      try {
 +        const { sqliteAppInsights: insights } = await import('@/lib/db/sqlite');
 +        const family = insights.family(tenantId, appId);
 +        if (family) insights.observe(tenantId, { appId, wingetId: family, displayName: app.displayName, version: app.displayVersion ?? '', exists: true,
-+          assignments: summarizeAssignments(rows.map(r => r.id === row.id ? { ...r, settings } : r)), checkedAt: new Date().toISOString() }, `Availability and deadline saved by ${user.userEmail || 'a staff member'}`, true);
++          assignments: summarizeAssignments(rows.map(r => r.id === row.id ? { ...r, settings } : r)), checkedAt: new Date().toISOString() }, `Install dates saved by ${user.userEmail || 'a staff member'}`, true);
 +      } catch { /* Optional activity must not hide a confirmed save. */ }
 +    }
 +    return reply({ success: true });
 +  } catch (error) {
-+    return reply({ error: error instanceof PilotError ? error.message : "Couldn't finish the change. Press Reload dates before trying again." }, error instanceof PilotError ? error.status : 424);
++    return reply({ error: error instanceof PilotError ? error.message : "Couldn't finish the change. Press Refresh dates before trying again." }, error instanceof PilotError ? error.status : 424);
 +  }
 +}
 +export const GET = (request: NextRequest) => handle(request, false);
@@ -566,10 +566,10 @@ index 65d4eb237..e3ef18808 100644
    assignToGroups: vi.fn(), syncAppCategories: vi.fn(), setAppRules: vi.fn(),
 diff --git a/components/hrm/AppTimingPanel.test.ts b/components/hrm/AppTimingPanel.test.ts
 new file mode 100644
-index 000000000..a86c1a5ec
+index 000000000..21ba82497
 --- /dev/null
 +++ b/components/hrm/AppTimingPanel.test.ts
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,89 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -585,23 +585,28 @@ index 000000000..a86c1a5ec
 +  const request = vi.fn(async (body?: Record<string, unknown>) => { if (body && fail) throw new Error('The assignment changed. Reload from Intune.'); return body ? { success: true } : { rows: [row] }; });
 +  const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
 +  await act(async () => root.render(createElement(TimingEditor, { appId: 'app', groupNames: {}, request })));
-+  await act(async () => button('Reload dates').click());
++  await act(async () => {});
++  await act(async () => button('Edit dates').click());
 +  return request;
 +}
 +it('loads live dates without browser timezone shifts and saves a changed grace period', async () => {
 +  const request = await render();
-+  expect(document.querySelector<HTMLInputElement>('[aria-label="App availability"]')!.value).toBe('2026-12-01T18:00');
-+  expect(document.querySelector<HTMLInputElement>('[aria-label="Installation deadline"]')!.value).toBe('2026-12-01T20:00');
++  expect(document.querySelector<HTMLInputElement>('[aria-label="Available from"]')!.value).toBe('2026-12-01T18:00');
++  expect(document.querySelector<HTMLInputElement>('[aria-label="Must install by"]')!.value).toBe('2026-12-01T20:00');
 +  expect((button('Save to Intune') as HTMLButtonElement).disabled).toBe(true);
 +  await act(async () => document.querySelector<HTMLInputElement>('[aria-label="Restart grace period"]')!.click());
 +  await act(async () => button('Save to Intune').click());
-+  expect(request).toHaveBeenLastCalledWith({ assignmentId: 'one', token: 'review', edit: { installTimeSettings: initial.installTimeSettings, restartSettings: { gracePeriodInMinutes: 1440, countdownDisplayBeforeRestartInMinutes: 15, restartNotificationSnoozeDurationInMinutes: 240 } } });
-+  expect(document.body.textContent).toContain('Saved to Intune. Press Reload dates');
-+  expect((button('Save to Intune') as HTMLButtonElement).disabled || button('Save to Intune').closest('fieldset')?.disabled).toBe(true);
++  expect(request).toHaveBeenNthCalledWith(2, { assignmentId: 'one', token: 'review', edit: { installTimeSettings: initial.installTimeSettings, restartSettings: { gracePeriodInMinutes: 1440, countdownDisplayBeforeRestartInMinutes: 15, restartNotificationSnoozeDurationInMinutes: 240 } } });
++  // Every save is followed by a fresh read, and the panel goes back to showing the dates.
++  expect(request).toHaveBeenCalledTimes(3);
++  expect(request).toHaveBeenLastCalledWith();
++  expect(document.body.textContent).toContain('Saved to Intune. The dates above are what Intune has now.');
++  expect(button('Save to Intune')).toBeUndefined();
++  expect(button('Edit dates')).toBeDefined();
 +});
 +it('does not offer deadlines for Available groups and disables unsupported grace periods', async () => {
 +  await render({ ...initial, intent: 'available', label: 'All users · Available', restartSupported: false, installTimeSettings: null });
-+  expect(document.querySelector('[aria-label="Installation deadline"]')).toBeNull();
++  expect(document.querySelector('[aria-label="Must install by"]')).toBeNull();
 +  expect(document.querySelector<HTMLInputElement>('[aria-label="Restart grace period"]')!.disabled).toBe(true);
 +  expect(document.body.textContent).toContain('does not support a grace period');
 +});
@@ -610,16 +615,16 @@ index 000000000..a86c1a5ec
 +  await act(async () => document.querySelector<HTMLInputElement>('[aria-label="Restart grace period"]')!.click());
 +  await act(async () => button('Save to Intune').click());
 +  expect(document.body.textContent).toContain('The assignment changed');
-+  expect(document.body.textContent).not.toContain('Saved to Intune. Press Reload dates');
++  expect(document.body.textContent).not.toContain('Saved to Intune.');
 +  expect(button('Save to Intune').closest('fieldset')!.disabled).toBe(true);
-+  expect((button('Reload dates') as HTMLButtonElement).disabled).toBe(false);
++  expect((button('Refresh dates') as HTMLButtonElement).disabled).toBe(false);
 +});
 +it('keeps clock times when changing timezone and blocks a deadline before availability', async () => {
 +  const request = await render();
-+  const select = document.querySelector<HTMLSelectElement>('[aria-label="Timing time zone"]')!;
++  const select = document.querySelector<HTMLSelectElement>('[aria-label="Time zone"]')!;
 +  await act(async () => { select.value = 'utc'; select.dispatchEvent(new Event('change', { bubbles: true })); });
-+  expect(document.querySelector<HTMLInputElement>('[aria-label="App availability"]')!.value).toBe('2026-12-01T18:00');
-+  const deadline = document.querySelector<HTMLInputElement>('[aria-label="Installation deadline"]')!;
++  expect(document.querySelector<HTMLInputElement>('[aria-label="Available from"]')!.value).toBe('2026-12-01T18:00');
++  const deadline = document.querySelector<HTMLInputElement>('[aria-label="Must install by"]')!;
 +  await act(async () => {
 +    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(deadline, '2026-12-01T17:00');
 +    deadline.dispatchEvent(new Event('input', { bubbles: true }));
@@ -628,26 +633,54 @@ index 000000000..a86c1a5ec
 +  expect((button('Save to Intune') as HTMLButtonElement).disabled).toBe(true);
 +  expect(request).toHaveBeenCalledTimes(1);
 +});
++it('reads the dates when it opens and shows them without browser timezone shifts', async () => {
++  const request = vi.fn(async () => ({ rows: [{ ...initial, restartSettings: { gracePeriodInMinutes: 1440, countdownDisplayBeforeRestartInMinutes: 15, restartNotificationSnoozeDurationInMinutes: 0 } }] }));
++  const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
++  await act(async () => root.render(createElement(TimingEditor, { appId: 'app', groupNames: {}, request })));
++  await act(async () => {});
++  expect(request).toHaveBeenCalledTimes(1);
++  expect(request).toHaveBeenCalledWith();
++  const text = document.body.textContent;
++  expect(text).toContain('Available fromDec 1, 2026, 6:00 PM');
++  expect(text).toContain('Must install byDec 1, 2026, 8:00 PM');
++  expect(text).toContain("Time zoneEach computer's own clock");
++  expect(text).toContain('Restart grace period1 day, 15-minute countdown, no snooze');
++  expect(document.querySelector('[aria-label="Available from"]')).toBeNull();
++});
++it('says when a save worked but the dates could not be read back', async () => {
++  let calls = 0;
++  const request = vi.fn(async (body?: Record<string, unknown>) => { calls++; if (body) return { success: true }; if (calls > 1) throw new Error('timeout'); return { rows: [initial] }; });
++  const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
++  await act(async () => root.render(createElement(TimingEditor, { appId: 'app', groupNames: {}, request })));
++  await act(async () => {});
++  await act(async () => button('Edit dates').click());
++  await act(async () => document.querySelector<HTMLInputElement>('[aria-label="Restart grace period"]')!.click());
++  await act(async () => button('Save to Intune').click());
++  expect(document.body.textContent).toContain('Saved to Intune, but the new dates could not be read back. Press Refresh dates.');
++  expect(document.body.textContent).not.toContain('The dates above are what Intune has now.');
++});
 diff --git a/components/hrm/AppTimingPanel.tsx b/components/hrm/AppTimingPanel.tsx
 new file mode 100644
-index 000000000..38090d42f
+index 000000000..cecfae0bf
 --- /dev/null
 +++ b/components/hrm/AppTimingPanel.tsx
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,208 @@
 +'use client';
-+import { useState } from 'react';
++import { useEffect, useRef, useState } from 'react';
 +import { useQueryClient } from '@tanstack/react-query';
 +import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
 +import { useMspOptional } from '@/hooks/useMspOptional';
 +import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 +import { InstallStatusBar } from './InstallStatusBar';
 +import { Button } from '@/components/ui/button';
-+import { timingInput, timingTimestamp, timingProblem, type TimingRow, type TimingEdit } from '@/lib/hrm/app-timing';
++import { timingInput, timingTimestamp, timingProblem, type TimingRow, type TimingEdit, type RestartTiming } from '@/lib/hrm/app-timing';
++
++export const INSTALL_DATES = 'Install dates';
 +
 +export function AppTimingPanel({ appId, groupNames = {} }: { appId: string; groupNames?: Record<string, string> }) {
-+  return <Dialog><DialogTrigger asChild><Button size="sm" variant="outline">Availability and deadline</Button></DialogTrigger>
-+    <DialogContent side="right"><DialogHeader className="pr-12"><DialogTitle>Availability and deadline</DialogTitle><DialogDescription>Dates and restart grace for this copy already in Intune. Installation timing in App updates sets future automatic updates.</DialogDescription></DialogHeader>
-+    <div className="flex-1 min-h-0 overflow-y-auto p-6"><AppTimingContent appId={appId} groupNames={groupNames} /><div className="mt-5"><InstallStatusBar appId={appId} /></div></div></DialogContent></Dialog>;
++  return <Dialog><DialogTrigger asChild><Button size="sm" variant="outline">{INSTALL_DATES}</Button></DialogTrigger>
++    <DialogContent side="right" onOpenAutoFocus={e => { e.preventDefault(); (e.currentTarget as HTMLElement | null)?.focus(); }}><DialogHeader className="pr-12"><DialogTitle className="text-xl">{INSTALL_DATES}</DialogTitle><DialogDescription className="mt-1 text-[15px] leading-relaxed">When this version becomes available and when it must install. To set timing for future updates, use App updates.</DialogDescription></DialogHeader>
++    <div className="flex-1 min-h-0 overflow-y-auto p-6"><AppTimingContent appId={appId} groupNames={groupNames} /><div className="mt-8"><InstallStatusBar appId={appId} /></div></div></DialogContent></Dialog>;
 +}
 +function AppTimingContent({ appId, groupNames }: { appId: string; groupNames: Record<string, string> }) {
 +  const { getAccessToken } = useMicrosoftAuth();
@@ -664,7 +697,7 @@ index 000000000..38090d42f
 +    });
 +    if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Your sign-in expired. Reload and sign in again.');
 +    const data = await response.json();
-+    if (!response.ok) throw new Error(data.error || 'Could not read availability and deadline from Intune.');
++    if (!response.ok) throw new Error(data.error || 'Could not read install dates from Intune.');
 +    if (body) {
 +      void client.invalidateQueries({ queryKey: ['hrm', 'app-insights'] });
 +      void client.invalidateQueries({ queryKey: ['inventory'] });
@@ -673,6 +706,33 @@ index 000000000..38090d42f
 +  }} />;
 +}
 +
++/** Shows a stored clock time as written, never shifted into the browser's time zone. */
++function clock(value: string | null | undefined, local: boolean) {
++  const input = timingInput(value);
++  if (!input) return null;
++  const text = new Date(`${input}:00Z`).toLocaleString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
++  return local ? text : `${text} UTC`;
++}
++function minutes(n: number) {
++  if (n % 1440 === 0) return n === 1440 ? '1 day' : `${n / 1440} days`;
++  if (n % 60 === 0) return n === 60 ? '1 hour' : `${n / 60} hours`;
++  return n === 1 ? '1 minute' : `${n} minutes`;
++}
++function restartSummary(r: RestartTiming | null) {
++  if (!r) return 'Off';
++  const snooze = r.restartNotificationSnoozeDurationInMinutes ? `, snooze ${minutes(r.restartNotificationSnoozeDurationInMinutes)}` : ', no snooze';
++  return `${minutes(r.gracePeriodInMinutes)}, ${minutes(r.countdownDisplayBeforeRestartInMinutes)} countdown${snooze}`.replace(/(\d+) (minute|hour|day)s? countdown/, '$1-$2 countdown');
++}
++
++const sectionHeading = 'text-base font-semibold text-text-primary';
++const fieldLabel = 'block text-sm font-medium text-text-primary';
++const hint = 'mt-1.5 text-sm leading-relaxed text-text-secondary';
++const RESTART_FIELDS = [
++  { key: 'gracePeriodInMinutes', label: 'Grace period' },
++  { key: 'countdownDisplayBeforeRestartInMinutes', label: 'Countdown' },
++  { key: 'restartNotificationSnoozeDurationInMinutes', label: 'Snooze' },
++] as const;
++
 +export function TimingEditor({ groupNames, request }: {
 +  appId: string; groupNames: Record<string, string>;
 +  request: (body?: Record<string, unknown>) => Promise<{ rows?: TimingRow[]; success?: boolean }>;
@@ -680,78 +740,137 @@ index 000000000..38090d42f
 +  const [rows, setRows] = useState<TimingRow[] | null>(null);
 +  const [selected, setSelected] = useState('');
 +  const [draft, setDraft] = useState<TimingEdit | null>(null);
++  const [editing, setEditing] = useState(false);
 +  const [busy, setBusy] = useState(false);
 +  const [error, setError] = useState('');
 +  const [saved, setSaved] = useState(false);
 +  const [stale, setStale] = useState(false);
 +  const row = rows?.find(r => r.id === selected);
 +  const label = (r: TimingRow) => r.label.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, id => groupNames[id.toLowerCase()] || id);
-+  const choose = (r?: TimingRow) => { setSelected(r?.id ?? ''); setDraft(r ? { installTimeSettings: r.installTimeSettings, restartSettings: r.restartSettings } : null); setSaved(false); };
-+  async function load() {
-+    setBusy(true); setError(''); setSaved(false);
-+    try { const data = await request(); setRows(data.rows ?? []); choose(data.rows?.[0]); setStale(false); }
-+    catch (e) { setError(e instanceof Error ? e.message : 'Could not read availability and deadline from Intune.'); setStale(true); }
++  const choose = (r?: TimingRow) => { setSelected(r?.id ?? ''); setDraft(r ? { installTimeSettings: r.installTimeSettings, restartSettings: r.restartSettings } : null); };
++  async function load(keepSaved = false, keep = selected) {
++    setBusy(true); setError(''); if (!keepSaved) setSaved(false);
++    try {
++      const data = await request(); const list = data.rows ?? [];
++      setRows(list); choose(list.find(r => r.id === keep) ?? list[0]); setStale(false); setEditing(false);
++    } catch (e) {
++      if (keepSaved) { setSaved(false); setError('Saved to Intune, but the new dates could not be read back. Press Refresh dates.'); }
++      else setError(e instanceof Error ? e.message : 'Could not read install dates from Intune.');
++      setStale(true);
++    }
 +    finally { setBusy(false); }
 +  }
++  // The panel reads the current dates when it opens (a read only; nothing changes in Intune).
++  const started = useRef(false);
++  useEffect(() => { if (!started.current) { started.current = true; void load(); } });
 +  const problem = row && draft ? timingProblem(draft, row.intent, row.restartSupported, row.restartSettings) : null;
-+  const inputClass = 'w-full min-w-0 rounded-lg border border-overlay/15 bg-bg-elevated px-3 py-2 text-sm text-text-primary';
++  const inputClass = 'mt-1.5 w-full min-w-0 rounded-lg border border-overlay/15 bg-bg-elevated px-3 py-2 text-[15px] text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan';
 +  const time = draft?.installTimeSettings;
 +  const restart = draft?.restartSettings;
-+  return <section className="space-y-3 rounded-lg border border-overlay/10 p-3" aria-label="Availability and deadline">
-+    <h4 className="text-sm font-semibold text-text-primary">Availability and deadline</h4>
-+    <p className="text-xs text-text-secondary">Set dates for this copy's Required or Available groups.</p>
-+    <details className="text-xs text-text-secondary">
-+      <summary className="cursor-pointer text-accent-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded">What these dates change</summary>
-+      <p className="mt-1">Computers that already have this version are not changed. Offline computers may install after the chosen time when they reconnect. This is not a recurring after-hours window or a startup or sign-in trigger. Review these dates again after deploying a new version.</p>
-+    </details>
-+    <Button size="sm" variant="outline" disabled={busy} onClick={() => void load()}>{busy ? 'Working…' : 'Reload dates'}</Button>
-+    {rows && rows.length === 0 && <p className="text-sm text-text-muted">This copy has no Required or Available groups. Add one, then press Reload dates.</p>}
-+    {rows && rows.length > 0 && <fieldset disabled={busy || stale} className="space-y-3 min-w-0">
-+      <label className="block text-sm text-text-secondary">Assignment
-+        <select aria-label="Timing assignment" className={inputClass} value={selected} onChange={e => choose(rows.find(r => r.id === e.target.value))}>
-+          {rows.map(r => <option key={r.id} value={r.id}>{label(r)}</option>)}
-+        </select>
-+      </label>
-+      {draft && row && <>
-+        <label className="block text-sm text-text-secondary">Time zone
-+          <select className={inputClass} aria-label="Timing time zone" value={time?.useLocalTime ? 'device' : 'utc'} onChange={e => { setSaved(false); setDraft({ ...draft, installTimeSettings: { startDateTime: time?.startDateTime ?? null, deadlineDateTime: time?.deadlineDateTime ?? null, useLocalTime: e.target.value === 'device' } }); }}>
-+            <option value="utc">UTC</option><option value="device">Device local time</option>
++  const live = row?.installTimeSettings;
++  const unchanged = !!row && JSON.stringify(draft) === JSON.stringify({ installTimeSettings: row.installTimeSettings, restartSettings: row.restartSettings });
++  const setTime = (patch: Partial<NonNullable<TimingEdit['installTimeSettings']>>) => {
++    if (!draft) return;
++    setSaved(false);
++    setDraft({ ...draft, installTimeSettings: { useLocalTime: time?.useLocalTime ?? false, startDateTime: time?.startDateTime ?? null, deadlineDateTime: time?.deadlineDateTime ?? null, ...patch } });
++  };
++
++  return <section className="space-y-5" aria-label={INSTALL_DATES}>
++    <div className="flex flex-wrap items-center justify-between gap-3">
++      <h4 className={sectionHeading}>{editing ? 'Change dates' : 'Current dates'}</h4>
++      <Button variant="outline" disabled={busy} onClick={() => void load()}>{busy ? 'Working…' : 'Refresh dates'}</Button>
++    </div>
++
++    {!rows && !error && <p className="text-sm text-text-secondary">Reading the current dates from Intune…</p>}
++    {rows && rows.length === 0 && <p className="text-sm text-text-secondary">This version has no Required or Available groups in Intune. Add one, then press Refresh dates.</p>}
++
++    {rows && rows.length > 1 && <label className={fieldLabel}>Group
++      <select aria-label="Group" className={inputClass} disabled={busy || editing} value={selected} onChange={e => { setSaved(false); choose(rows.find(r => r.id === e.target.value)); }}>
++        {rows.map(r => <option key={r.id} value={r.id}>{label(r)}</option>)}
++      </select>
++    </label>}
++
++    {row && !editing && <>
++      <dl className="divide-y divide-overlay/10 overflow-hidden rounded-lg border border-overlay/10 bg-bg-elevated text-[15px]">
++        {([
++          ...(rows && rows.length > 1 ? [] : [['Group', label(row)]]),
++          ['Available from', clock(live?.startDateTime, !!live?.useLocalTime) ?? 'As soon as possible'],
++          ...(row.intent === 'required' ? [['Must install by', clock(live?.deadlineDateTime, !!live?.useLocalTime) ?? 'As soon as it is available']] : []),
++          ['Time zone', live?.useLocalTime ? "Each computer's own clock" : 'UTC'],
++          ['Restart grace period', restartSummary(row.restartSettings)],
++        ] as [string, string][]).map(([k, v]) => <div key={k} className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 px-4 py-2.5">
++          <dt className="text-text-secondary">{k}</dt><dd className="text-right font-medium text-text-primary">{v}</dd>
++        </div>)}
++      </dl>
++      <Button disabled={busy || stale} onClick={() => { choose(row); setSaved(false); setEditing(true); }}>Edit dates</Button>
++    </>}
++
++    {row && draft && editing && <fieldset disabled={busy || stale} className="min-w-0 space-y-5">
++      <div>
++        <label className={fieldLabel}>Time zone
++          <select className={inputClass} aria-label="Time zone" value={time?.useLocalTime ? 'device' : 'utc'} onChange={e => setTime({ useLocalTime: e.target.value === 'device' })}>
++            <option value="device">Each computer's own clock</option><option value="utc">UTC</option>
 +          </select>
 +        </label>
-+        <p className="text-xs text-text-muted">{time?.useLocalTime ? 'Each device uses its own clock. Changing the time zone keeps the entered clock times.' : 'Enter UTC clock times. Changing the time zone keeps the entered clock times.'}</p>
-+        <label className="block text-sm text-text-secondary">App availability
-+          <input aria-label="App availability" type="datetime-local" className={inputClass} value={timingInput(time?.startDateTime)} onChange={e => { setSaved(false); setDraft({ ...draft, installTimeSettings: { useLocalTime: time?.useLocalTime ?? false, startDateTime: timingTimestamp(e.target.value), deadlineDateTime: time?.deadlineDateTime ?? null } }); }} />
++        <p className={hint}>Changing this keeps the clock times you entered.</p>
++      </div>
++      <div>
++        <label className={fieldLabel}>Available from
++          <input aria-label="Available from" type="datetime-local" className={inputClass} value={timingInput(time?.startDateTime)} onChange={e => setTime({ startDateTime: timingTimestamp(e.target.value) })} />
 +        </label>
-+        <p className="text-xs text-text-muted">Leave blank for as soon as possible. Required apps can download from this date. Available apps appear in Company Portal from this date.</p>
-+        {row.intent === 'required' && <>
-+          <label className="block text-sm text-text-secondary">Installation deadline
-+            <input aria-label="Installation deadline" type="datetime-local" className={inputClass} value={timingInput(time?.deadlineDateTime)} onChange={e => { setSaved(false); setDraft({ ...draft, installTimeSettings: { useLocalTime: time?.useLocalTime ?? false, startDateTime: time?.startDateTime ?? null, deadlineDateTime: timingTimestamp(e.target.value) } }); }} />
-+          </label>
-+          <p className="text-xs text-text-muted">Required installation waits until this date. Leave blank for as soon as possible after availability. Another assignment with an earlier deadline can take priority.</p>
-+        </>}
-+        <label className="flex items-start gap-2 text-sm text-text-secondary">
-+          <input type="checkbox" aria-label="Restart grace period" checked={!!restart} disabled={!row.restartSupported && !restart} onChange={e => { setSaved(false); setDraft({ ...draft, restartSettings: e.target.checked ? { gracePeriodInMinutes: 1440, countdownDisplayBeforeRestartInMinutes: 15, restartNotificationSnoozeDurationInMinutes: 240 } : null }); }} />Restart grace period
++        <p className={hint}>Leave blank to make it available right away. Required apps start downloading from this date. Available apps appear in Company Portal from this date.</p>
++      </div>
++      {row.intent === 'required' && <div>
++        <label className={fieldLabel}>Must install by
++          <input aria-label="Must install by" type="datetime-local" className={inputClass} value={timingInput(time?.deadlineDateTime)} onChange={e => setTime({ deadlineDateTime: timingTimestamp(e.target.value) })} />
 +        </label>
-+        {!row.restartSupported && <p className="text-xs text-text-muted">This app’s restart behavior does not support a grace period. Set Determine behavior based on return codes or a mandatory restart in Intune first.</p>}
-+        {restart && (['gracePeriodInMinutes', 'countdownDisplayBeforeRestartInMinutes', 'restartNotificationSnoozeDurationInMinutes'] as const).map((key, i) => <label key={key} className="block text-sm text-text-secondary">
-+          {['Grace period (minutes)', 'Restart countdown (minutes)', 'Snooze duration (minutes, 0 disables)'][i]}
-+          <input aria-label={['Grace period (minutes)', 'Restart countdown (minutes)', 'Snooze duration (minutes, 0 disables)'][i]} type="number" disabled={!row.restartSupported} min={i === 2 ? 0 : 1} max={i === 0 ? 20160 : restart.gracePeriodInMinutes} className={inputClass} value={Number.isNaN(restart[key]) ? '' : restart[key]} onChange={e => { setSaved(false); setDraft({ ...draft, restartSettings: { ...restart, [key]: e.target.value === '' ? NaN : Number(e.target.value) } }); }} />
-+        </label>)}
-+        <p className="text-xs text-text-muted">A grace period delays an Intune-managed restart after installation. With return-code behavior it applies to hard reboots, not soft reboot notifications. It cannot prevent a restart forced by the installer. Without a grace period, a required restart may happen without warning.</p>
-+        {problem && <p role="alert" className="text-sm text-status-error">{problem}</p>}
-+        <Button size="sm" disabled={busy || !!problem || JSON.stringify(draft) === JSON.stringify({ installTimeSettings: row.installTimeSettings, restartSettings: row.restartSettings })} onClick={async () => {
++        <p className={hint}>Intune calls this the installation deadline. Leave blank to install as soon as it is available. If another group has an earlier deadline, the earlier one wins.</p>
++      </div>}
++
++      <div className="space-y-3 rounded-lg border border-overlay/10 p-4">
++        <label className="flex items-start gap-3 text-[15px] font-medium text-text-primary">
++          <input type="checkbox" className="mt-1 h-4 w-4" aria-label="Restart grace period" checked={!!restart} disabled={!row.restartSupported && !restart} onChange={e => { setSaved(false); setDraft({ ...draft, restartSettings: e.target.checked ? { gracePeriodInMinutes: 1440, countdownDisplayBeforeRestartInMinutes: 15, restartNotificationSnoozeDurationInMinutes: 240 } : null }); }} />
++          <span>Restart grace period<span className="block text-sm font-normal leading-relaxed text-text-secondary">Gives people time before Intune restarts the computer after installing. It cannot stop a restart the installer forces itself.</span></span>
++        </label>
++        {!row.restartSupported && <p className="text-sm text-text-secondary">This app does not support a grace period. In Intune, set its restart behavior to Determine behavior based on return codes or to a mandatory restart first.</p>}
++        {restart && <p className="text-sm text-text-secondary">All in minutes. Countdown and snooze can't be longer than the grace period. A snooze of 0 turns snooze off.</p>}
++        {restart && <div className="grid gap-3 sm:grid-cols-3">{RESTART_FIELDS.map(({ key, label: text }, i) => <label key={key} className="block text-sm font-medium text-text-primary">
++          {text}
++          <input aria-label={`${text} (minutes)`} type="number" disabled={!row.restartSupported} min={i === 2 ? 0 : 1} max={i === 0 ? 20160 : restart.gracePeriodInMinutes} className={inputClass} value={Number.isNaN(restart[key]) ? '' : restart[key]} onChange={e => { setSaved(false); setDraft({ ...draft, restartSettings: { ...restart, [key]: e.target.value === '' ? NaN : Number(e.target.value) } }); }} />
++        </label>)}</div>}
++        {!restart && row.restartSupported && <p className="text-sm text-text-secondary">Without a grace period, a required restart can happen without warning.</p>}
++      </div>
++
++      {problem && <p role="alert" className="text-sm font-medium text-status-error">{problem}</p>}
++      <div className="flex flex-wrap gap-3">
++        <Button disabled={busy || !!problem || unchanged} onClick={async () => {
 +          setBusy(true); setError(''); setSaved(false);
++          let ok = false;
 +          try {
 +            await request({ assignmentId: row.id, token: row.token, edit: draft });
-+            // Require a new live review before another write, including after a timeout.
-+            setStale(true); setSaved(true);
-+          } catch (e) { setError(e instanceof Error ? e.message : 'Could not save timing.'); setStale(true); }
++            ok = true; setSaved(true);
++          } catch (e) { setError(e instanceof Error ? e.message : 'Could not save the dates.'); setStale(true); }
 +          finally { setBusy(false); }
++          // Every save is followed by a new read, so the panel shows what Intune actually saved
++          // and the next edit has a fresh review token.
++          if (ok) { setStale(true); await load(true, row.id); }
 +        }}>Save to Intune</Button>
-+      </>}
++        <Button variant="outline" disabled={busy} onClick={() => { choose(row); setEditing(false); }}>Cancel</Button>
++      </div>
 +    </fieldset>}
-+    {saved && <p role="status" className="text-sm text-status-success">Saved to Intune. Press Reload dates to see what Intune saved.</p>}
-+    {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
++
++    {rows && rows.length > 0 && <div className="rounded-r-lg border-l-4 border-accent-cyan bg-accent-cyan/5 px-4 py-3 text-sm leading-relaxed text-text-secondary">
++      <p className="font-semibold text-text-primary">What changing dates does</p>
++      <ul className="mt-1 list-disc space-y-0.5 pl-5">
++        <li>Computers that already have this version are not affected.</li>
++        <li>Offline computers install when they reconnect.</li>
++        <li>It sets dates once. It does not install at restart or sign-in.</li>
++        <li>Check the dates again after deploying a new version.</li>
++      </ul>
++    </div>}
++
++    {saved && <p role="status" className="text-sm font-medium text-status-success">Saved to Intune. The dates above are what Intune has now.</p>}
++    {error && <p role="alert" className="text-sm font-medium text-status-error">{error}</p>}
 +  </section>;
 +}
 diff --git a/components/hrm/InstallationPolicyPanel.test.ts b/components/hrm/InstallationPolicyPanel.test.ts
@@ -927,18 +1046,28 @@ index 000000000..687829856
 +}
 diff --git a/components/hrm/StartupInstallChoice.tsx b/components/hrm/StartupInstallChoice.tsx
 new file mode 100644
-index 000000000..bcf26ab04
+index 000000000..9dcf1ee0b
 --- /dev/null
 +++ b/components/hrm/StartupInstallChoice.tsx
-@@ -0,0 +1,10 @@
+@@ -0,0 +1,20 @@
 +'use client';
 +import { STARTUP_BETA_LABEL } from '@/lib/hrm/startup-installation';
 +export function StartupInstallChoice({ value, onChange, problem }: { value: boolean; onChange: (value: boolean) => void; problem: string | null }) {
-+  return <div className="space-y-2 rounded-lg border border-status-warning/25 bg-status-warning/5 p-3">
-+    <label className="flex items-start gap-2 text-sm font-medium text-text-primary"><input type="checkbox" className="mt-1" checked={value} disabled={!!problem && !value} onChange={e => onChange(e.target.checked)} /><span>{STARTUP_BETA_LABEL}</span></label>
-+    <p className="text-xs text-text-secondary">Beta: Windows pilot testing required. When deployed, Intune stages the package for silent installation after a later Windows startup. Does not force a restart or block sign-in. The three-day postponement policy does not apply. This sets the current deployment; future automatic updates follow the shared policy or app exception in App updates.</p>
-+    {value && <p className="text-xs text-status-warning">Intune may show retry or failure while waiting. App updates shows separate startup reports when reporting is configured. Use a Required assignment to a small pilot device group.</p>}
-+    {problem && <p className="text-xs text-text-muted">{problem}</p>}
++  return <div className="space-y-3 rounded-lg border border-status-warning/30 bg-status-warning/5 p-4">
++    <label className="flex items-start gap-3 text-[15px] font-medium text-text-primary">
++      <input type="checkbox" className="mt-1 h-4 w-4" checked={value} disabled={!!problem && !value} onChange={e => onChange(e.target.checked)} />
++      <span>{STARTUP_BETA_LABEL}<span className="mt-0.5 block text-sm font-normal leading-relaxed text-text-secondary">Installs the app the next time each computer restarts, instead of right away.</span></span>
++    </label>
++    <ul className="list-disc space-y-1 pl-12 text-sm leading-relaxed text-text-secondary">
++      <li>It never forces a restart and does not block sign-in.</li>
++      <li>The 3-day postponement does not apply.</li>
++      <li>Applies to this deployment only. Future automatic updates follow App updates.</li>
++    </ul>
++    {value && <div role="note" className="rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-sm leading-relaxed text-text-primary">
++      <p className="font-semibold">Beta: try it on a small pilot group first</p>
++      <p className="mt-0.5 text-text-secondary">Assign it as Required to a few pilot computers. Intune may show Retry or Failed until each computer restarts. Startup results appear in App updates once reporting is set up.</p>
++    </div>}
++    {problem && <p className="text-sm text-text-secondary">{problem}</p>}
 +  </div>;
 +}
 diff --git a/components/hrm/StartupInstallations.test.ts b/components/hrm/StartupInstallations.test.ts
@@ -1413,7 +1542,7 @@ index 000000000..29eb5ee86
 +});
 diff --git a/lib/hrm/app-timing.ts b/lib/hrm/app-timing.ts
 new file mode 100644
-index 000000000..ac739316b
+index 000000000..b90e7bae6
 --- /dev/null
 +++ b/lib/hrm/app-timing.ts
 @@ -0,0 +1,94 @@
@@ -1462,7 +1591,7 @@ index 000000000..ac739316b
 +  if (!Object.hasOwn(e, 'installTimeSettings') || !Object.hasOwn(e, 'restartSettings')) return 'Review the timing settings first.';
 +  if (e.installTimeSettings !== null) {
 +    const t = record(e.installTimeSettings);
-+    if (typeof t.useLocalTime !== 'boolean' || !dateValid(t.startDateTime) || !dateValid(t.deadlineDateTime)) return 'Enter valid availability and deadline dates.';
++    if (typeof t.useLocalTime !== 'boolean' || !dateValid(t.startDateTime) || !dateValid(t.deadlineDateTime)) return 'Enter valid Available from and Must install by dates.';
 +    if (intent !== 'required' && t.deadlineDateTime !== null) return 'Only Required groups can have an installation deadline.';
 +    if (t.startDateTime && t.deadlineDateTime && Date.parse(String(t.deadlineDateTime)) < Date.parse(String(t.startDateTime))) return 'The installation deadline must be at or after availability.';
 +  }
