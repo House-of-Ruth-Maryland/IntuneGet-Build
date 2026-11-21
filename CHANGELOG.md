@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Discovered apps keeps inventory visible after deployment and separates this browser's
+  Deployment list, queued tenant deployments, previous deployments, unconfirmed upload outcomes
+  and copies verified to exist in Intune (patches 0003, 0005, 0007 and 0013). None of these labels
+  claims installation on computers. Claim records an explicit tenant/package/source link before
+  staging an installer; package identity survives detected-version ID changes. Fresh deployment
+  evidence is independent of cached inventory, includes dismissed jobs and orphaned history,
+  and never treats failed reads or missing job metadata as live management or confirmed deletion.
+  Both completion paths reconcile the source claim safely on repeat reports; missed bookkeeping
+  falls back to deployment records. Queueing checks tenant-wide canonical identities before side
+  effects, and database guards prevent simultaneous duplicate requests. A previous copy needs
+  deliberate per-item acknowledgement; a queued or running deployment cannot be bypassed.
+  Local-packager reports cannot regress terminal states, success requires an Intune object ID,
+  and partial batches retain failed Deployment list entries. Help explains the states, review
+  and deliberate second-copy path. Regression coverage exercises the flow and both databases.
+
 - Install dates (was Availability and deadline) is easier to read (patches 0008, 0009 and 0013).
   The panel reads the current dates from Intune when it opens and shows them in a table: Group,
   Available from, Must install by, Time zone and Restart grace period. Edit dates opens the form;

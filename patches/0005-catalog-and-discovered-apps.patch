@@ -78,7 +78,7 @@ index d1370f88f..e5e33ccf6 100644
    );
  }
 diff --git a/app/(app)/dashboard/unmanaged/page.tsx b/app/(app)/dashboard/unmanaged/page.tsx
-index e7bce7351..7cfec681a 100644
+index e7bce7351..0a6664abd 100644
 --- a/app/(app)/dashboard/unmanaged/page.tsx
 +++ b/app/(app)/dashboard/unmanaged/page.tsx
 @@ -32,6 +32,8 @@ import { UnmanagedToolbar } from '@/components/unmanaged/UnmanagedToolbar';
@@ -120,7 +120,7 @@ index e7bce7351..7cfec681a 100644
 -          title={<T>Unmanaged Apps</T>}
 -          description={<T>Unmanaged apps detected across your devices</T>}
 +          title={<T>Discovered apps</T>}
-+          description={<T>Apps found on your devices that IntuneGet doesn't manage yet</T>}
++          description={<T>Software Intune found on your computers, including apps with deployment history</T>}
            icon={Radar}
          />
  
@@ -164,11 +164,11 @@ index e7bce7351..7cfec681a 100644
 -        title={<T>Unmanaged Apps</T>}
 -        description={<T>Unmanaged apps detected across your devices. Claim them to enable managed deployment.</T>}
 +        title={<T>Discovered apps</T>}
-+        description={<T>Apps found on your computers that IntuneGet doesn't manage yet. Claim one to install and update it with IntuneGet, or remove it from computers.</T>}
++        description={<T>Software Intune found on your computers stays visible after deployment. Claim stages an eligible catalog installer in this browser’s Deployment list and changes no computers. Review deployment state before continuing.</T>}
          icon={Radar}
          badge={lastSynced ? {
            text: fromCache ? 'Cached' : 'Live',
-@@ -320,10 +323,13 @@ export default function UnmanagedAppsPage() {
+@@ -320,14 +323,17 @@ export default function UnmanagedAppsPage() {
          )}
        </AnimatePresence>
  
@@ -183,6 +183,11 @@ index e7bce7351..7cfec681a 100644
            value={computedStats.total}
            icon={Package}
            color="cyan"
+-          description={<T>across <Var>{computedStats.totalDevices.toLocaleString()}</Var> devices</T>}
++          description={<T><Var>{computedStats.totalDevices.toLocaleString()}</Var> detections across app rows; computers can repeat</T>}
+           delay={0}
+           loading={isLoading}
+         />
 @@ -340,7 +346,7 @@ export default function UnmanagedAppsPage() {
            loading={isLoading}
          />
@@ -245,8 +250,117 @@ index e7bce7351..7cfec681a 100644
        {deviceListApp && (
          <DeviceListModal
            app={deviceListApp}
+diff --git a/app/api/intune/claim/route.ts b/app/api/intune/claim/route.ts
+index ca9ac18ff..9e43cb6cd 100644
+--- a/app/api/intune/claim/route.ts
++++ b/app/api/intune/claim/route.ts
+@@ -1,3 +1,5 @@
++import { checkDiscoveryDispatch, DiscoveryConflictError } from '@/lib/discovery-management';
++import { packageKey } from '@/lib/discovery-state';
+ /**
+  * Claim App API Route
+  * Records when a user claims an unmanaged app for deployment
+@@ -100,7 +102,7 @@ export async function POST(request: NextRequest) {
+ 
+     const body: ClaimAppRequest = await request.json();
+ 
+-    if (!body.discoveredAppId || !body.discoveredAppName || !body.wingetPackageId) {
++    if (typeof body.discoveredAppId !== 'string' || !body.discoveredAppId || typeof body.discoveredAppName !== 'string' || !body.discoveredAppName || !packageKey(body.wingetPackageId)) {
+       return NextResponse.json(
+         { error: 'Missing required fields' },
+         { status: 400 }
+@@ -108,6 +110,10 @@ export async function POST(request: NextRequest) {
+     }
+ 
+     if (storage === 'sqlite') {
++      const requested = request.headers.get('X-MSP-Tenant-Id');
++      if (requested && requested !== user.tenantId) return NextResponse.json({ error: 'Not authorized to access other tenants' }, { status: 403 });
++      try { await checkDiscoveryDispatch([{ wingetId: body.wingetPackageId }], user.tenantId); }
++      catch (error) { return NextResponse.json({ error: error instanceof DiscoveryConflictError ? error.message : 'Deployment state unavailable' }, { status: error instanceof DiscoveryConflictError ? 409 : 503 }); }
+       const claim = await getDatabase().claimedApps.upsert({
+         user_id: user.userId,
+         tenant_id: user.tenantId,
+@@ -134,6 +140,8 @@ export async function POST(request: NextRequest) {
+     }
+ 
+     const tenantId = tenantResolution.tenantId;
++    try { await checkDiscoveryDispatch([{ wingetId: body.wingetPackageId }], tenantId); }
++    catch (error) { return NextResponse.json({ error: error instanceof DiscoveryConflictError ? error.message : 'Deployment state unavailable' }, { status: error instanceof DiscoveryConflictError ? 409 : 503 }); }
+ 
+     // Ensure user profile exists (required for foreign key constraint)
+     await ensureUserProfile(supabase, user.userId, tenantId, user.userEmail, user.userName);
+diff --git a/app/api/intune/discovery-state/route.test.ts b/app/api/intune/discovery-state/route.test.ts
+new file mode 100644
+index 000000000..86bf78676
+--- /dev/null
++++ b/app/api/intune/discovery-state/route.test.ts
+@@ -0,0 +1,32 @@
++import { beforeEach, expect, it, vi } from 'vitest';
++import { NextRequest } from 'next/server';
++const mocks = vi.hoisted(() => ({ user: { userId: 'staff', tenantId: 'home' } as { userId: string; tenantId: string } | null, hosted: false, read: vi.fn(), resolve: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => mocks.user }));
++vi.mock('@/lib/supabase', () => ({ isSupabaseServerConfigured: () => mocks.hosted, createServerClient: () => ({}) }));
++vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: mocks.resolve }));
++vi.mock('@/lib/discovery-management', () => ({ readDiscoveryManagement: mocks.read }));
++import { GET } from './route';
++const req = (tenant?: string) => new NextRequest('http://localhost/api/intune/discovery-state', { headers: tenant ? { 'X-MSP-Tenant-Id': tenant } : {} });
++beforeEach(() => { vi.clearAllMocks(); mocks.user = { userId: 'staff', tenantId: 'home' }; mocks.hosted = false; mocks.read.mockResolvedValue({}); });
++it('refuses unauthenticated and foreign local tenant reads before touching the database', async () => {
++  mocks.user = null;
++  expect((await GET(req())).status).toBe(401);
++  mocks.user = { userId: 'staff', tenantId: 'home' };
++  expect((await GET(req('other'))).status).toBe(403);
++  expect(mocks.read).not.toHaveBeenCalled();
++});
++it('uses the authorized MSP tenant and disables response caching', async () => {
++  mocks.hosted = true;
++  mocks.resolve.mockResolvedValue({ tenantId: 'customer', errorResponse: null });
++  const response = await GET(req('customer'));
++  expect(mocks.resolve).toHaveBeenCalledWith(expect.objectContaining({ tokenTenantId: 'home', requestedTenantId: 'customer' }));
++  expect(mocks.read).toHaveBeenCalledExactlyOnceWith('customer');
++  expect(response.headers.get('cache-control')).toBe('no-store');
++  expect((await response.json()).tenantId).toBe('customer');
++});
++it('fails closed on an unavailable history read without exposing database details', async () => {
++  mocks.read.mockRejectedValue(new Error('private connection detail'));
++  const response = await GET(req());
++  expect(response.status).toBe(503);
++  expect(await response.text()).not.toContain('private connection detail');
++});
+diff --git a/app/api/intune/discovery-state/route.ts b/app/api/intune/discovery-state/route.ts
+new file mode 100644
+index 000000000..977716689
+--- /dev/null
++++ b/app/api/intune/discovery-state/route.ts
+@@ -0,0 +1,26 @@
++import { NextRequest, NextResponse } from 'next/server';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
++import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
++import { readDiscoveryManagement } from '@/lib/discovery-management';
++
++/** Fresh deployment evidence, independently of the inventory scan/cache. No tenant mutations. */
++export async function GET(request: NextRequest) {
++  const headers = { 'Cache-Control': 'no-store' };
++  try {
++    const user = await parseAccessToken(request.headers.get('Authorization'));
++    if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401, headers });
++    const requestedTenantId = request.headers.get('X-MSP-Tenant-Id');
++    if (!isSupabaseServerConfigured() && requestedTenantId && requestedTenantId !== user.tenantId) {
++      return NextResponse.json({ error: 'Not authorized to access other tenants' }, { status: 403, headers });
++    }
++    const resolved = isSupabaseServerConfigured() ? await resolveTargetTenantId({
++      supabase: createServerClient(), userId: user.userId, tokenTenantId: user.tenantId, requestedTenantId,
++    }) : { tenantId: user.tenantId, errorResponse: null };
++    if (resolved.errorResponse) return resolved.errorResponse;
++    const states = await readDiscoveryManagement(resolved.tenantId);
++    return NextResponse.json({ tenantId: resolved.tenantId, states, checkedAt: new Date().toISOString() }, { headers });
++  } catch {
++    return NextResponse.json({ error: 'Deployment state is unavailable. Check Deployments before adding another copy.' }, { status: 503, headers });
++  }
++}
 diff --git a/app/api/intune/unmanaged-apps/route.ts b/app/api/intune/unmanaged-apps/route.ts
-index 72a2b30c2..95c6eea2e 100644
+index 72a2b30c2..85ae975dd 100644
 --- a/app/api/intune/unmanaged-apps/route.ts
 +++ b/app/api/intune/unmanaged-apps/route.ts
 @@ -8,7 +8,8 @@ import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
@@ -259,7 +373,20 @@ index 72a2b30c2..95c6eea2e 100644
  import { compareVersions } from '@/lib/version-compare';
  import { getServicePrincipalToken, invalidateServicePrincipalToken } from '@/lib/intune/graph-client';
  import type {
-@@ -584,9 +585,11 @@ export async function GET(request: NextRequest) {
+@@ -168,11 +169,7 @@ async function buildCachedAppsResponse(
+ 
+   const apps: UnmanagedApp[] = cachedApps
+     .filter(app => includeSystem || !isSystemApp(app.app_data as unknown as GraphUnmanagedApp))
+-    .filter(app => {
+-      // Only hide deployed apps - pending/deploying/failed should remain visible
+-      const status = claimedMap.get(app.discovered_app_id);
+-      return status !== 'deployed';
+-    })
++
+     .map(cached => ({
+       id: cached.id,
+       discoveredAppId: cached.discovered_app_id,
+@@ -584,9 +581,11 @@ export async function GET(request: NextRequest) {
            wingetName: null,
            confidence: 1.0,
            partialMatches: [],
@@ -272,7 +399,7 @@ index 72a2b30c2..95c6eea2e 100644
        }
  
        unmanagedApps.push({
-@@ -602,6 +605,7 @@ export async function GET(request: NextRequest) {
+@@ -602,6 +601,7 @@ export async function GET(request: NextRequest) {
          matchedPackageName: matchResult.wingetName,
          matchConfidence: matchResult.confidence,
          partialMatches: matchResult.partialMatches,
@@ -280,8 +407,31 @@ index 72a2b30c2..95c6eea2e 100644
          isClaimed: claimedMap.has(app.id),
          claimStatus: claimedMap.get(app.id) as UnmanagedApp['claimStatus'],
          lastSynced: now,
+@@ -670,11 +670,8 @@ export async function GET(request: NextRequest) {
+       }
+     }
+ 
+-    // Only hide deployed apps - pending/deploying/failed should remain visible
+-    const visibleApps = unmanagedApps.filter(app => {
+-      const status = claimedMap.get(app.discoveredAppId);
+-      return status !== 'deployed';
+-    });
++    // Inventory remains visible independently of claim/deployment history.
++    const visibleApps = unmanagedApps;
+ 
+     return NextResponse.json({
+       apps: visibleApps,
+@@ -777,7 +774,7 @@ export async function POST(request: NextRequest) {
+     const visibleApps = cachedApps?.filter(a => {
+       // Only exclude deployed apps (not pending/deploying/failed)
+       const status = claimedMap.get(a.discovered_app_id);
+-      if (status === 'deployed') return false;
++      // A deployed claim is historical evidence, never a reason to hide inventory.
+ 
+       // Exclude Microsoft apps (consistent with frontend filtering)
+       const publisherLower = (a.publisher || '').toLowerCase();
 diff --git a/app/api/intune/unmanaged-apps/sqlite-parity.test.ts b/app/api/intune/unmanaged-apps/sqlite-parity.test.ts
-index 6f70c2f5d..bab5f8862 100644
+index 6f70c2f5d..049955bc4 100644
 --- a/app/api/intune/unmanaged-apps/sqlite-parity.test.ts
 +++ b/app/api/intune/unmanaged-apps/sqlite-parity.test.ts
 @@ -1,7 +1,9 @@
@@ -295,7 +445,7 @@ index 6f70c2f5d..bab5f8862 100644
  vi.mock('@/lib/supabase', () => ({ isSupabaseConfigured: () => false, createServerClient: vi.fn(() => { throw Error('No hosted database'); }) }));
  vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'synthetic-token', invalidateServicePrincipalToken: vi.fn() }));
  vi.mock('@/lib/matching/app-matcher', () => ({ filterUserApps: (apps: unknown[]) => apps, isSystemApp: () => false, normalizeAppName: (name: string) => name.toLowerCase(), matchDiscoveredApp: () => ({ status: 'unmatched', wingetId: null, wingetName: null, confidence: 0, partialMatches: [] }) }));
-@@ -9,7 +11,7 @@ vi.mock('@/lib/db', async () => { const { sqliteDb } = await vi.importActual<typ
+@@ -9,10 +11,10 @@ vi.mock('@/lib/db', async () => { const { sqliteDb } = await vi.importActual<typ
  import { sqliteDb, sqliteManualMappings, closeSqliteDb } from '@/lib/db/sqlite';
  import { createServerClient } from '@/lib/supabase';
  import { GET } from './route';
@@ -303,8 +453,17 @@ index 6f70c2f5d..bab5f8862 100644
 +beforeEach(() => { closeSqliteDb(); session.tenant = 'scan-tenant'; session.catalogSearch.mockClear(); vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ value: [{ id: 'detected-one', displayName: 'Fixture Scanner', platform: 'windows', deviceCount: 2 }] }), { status: 200 }))); });
  afterEach(() => { closeSqliteDb(); vi.unstubAllGlobals(); });
  afterAll(() => { vi.unstubAllEnvs(); });
- it('shows a locally persisted claim and hides it only after deployment', async () => {
-@@ -24,6 +26,8 @@ it('shows a locally persisted claim and hides it only after deployment', async (
+-it('shows a locally persisted claim and hides it only after deployment', async () => {
++it('keeps discovered inventory visible after a deployment and a changed package mapping', async () => {
+   const claim = await sqliteDb.claimedApps.upsert({ user_id: 'scan-user', tenant_id: 'scan-tenant', discovered_app_id: 'detected-one', discovered_app_name: 'Fixture Scanner', winget_package_id: 'Fixture.Scanner' });
+   await sqliteManualMappings.save({ tenant_id: 'scan-tenant', created_by: 'scan-user', discovered_app_name: ' FIXTURE SCANNER ', discovered_publisher: null, winget_package_id: 'Fixture.ChosenScanner' });
+   const request = () => new NextRequest('http://localhost/api/intune/unmanaged-apps?refresh=true', { headers: { Authorization: 'Bearer fixture' } });
+@@ -20,10 +22,12 @@ it('shows a locally persisted claim and hides it only after deployment', async (
+   expect(pending.apps).toHaveLength(1);
+   expect(pending.apps[0]).toMatchObject({ isClaimed: true, claimStatus: 'pending', matchedPackageId: 'Fixture.ChosenScanner', matchConfidence: 1 });
+   await sqliteDb.claimedApps.update(claim.id, 'scan-tenant', { status: 'deployed' });
+-  expect((await (await GET(request())).json()).apps).toEqual([]);
++  expect((await (await GET(request())).json()).apps).toHaveLength(1);
    session.tenant = 'other-scan-tenant';
    expect((await (await GET(request())).json()).apps[0]).toMatchObject({ isClaimed: false, matchedPackageId: null });
    expect(createServerClient).not.toHaveBeenCalled();
@@ -362,7 +521,7 @@ index fc9fb18ac..2313b73be 100644
    manual: { label: 'Manual', icon: UserCheck, tone: 'accent' },
    excluded: { label: 'Excluded', icon: XCircle, tone: 'muted' },
 diff --git a/components/unmanaged/ClaimAllModal.tsx b/components/unmanaged/ClaimAllModal.tsx
-index d5ce89cbe..f472d4407 100644
+index d5ce89cbe..c8baec83c 100644
 --- a/components/unmanaged/ClaimAllModal.tsx
 +++ b/components/unmanaged/ClaimAllModal.tsx
 @@ -64,9 +64,9 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
@@ -382,7 +541,7 @@ index d5ce89cbe..f472d4407 100644
                    </p>
                    <p className="text-text-secondary text-sm mt-1">
 -                    Each app will be fetched from WinGet and added to your deployment cart. This may take a moment.
-+                    Each app is added to the Deployment list with no groups. Nothing changes on devices until you choose groups for each one and press Deploy to Intune.
++                    Only eligible matched rows in the current results are included. Each source link is saved before its catalog installer is staged in this browser’s Deployment list with no groups. Nothing changes on computers. Choose groups before Deploy to Intune.
                    </p>
                  </div>
                </div>
@@ -490,10 +649,10 @@ index c6b4cbd92..8fc0c20dc 100644
            </Button>
 diff --git a/components/unmanaged/DiscoveredGuide.tsx b/components/unmanaged/DiscoveredGuide.tsx
 new file mode 100644
-index 000000000..c539f591a
+index 000000000..c3f0bb134
 --- /dev/null
 +++ b/components/unmanaged/DiscoveredGuide.tsx
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,87 @@
 +'use client';
 +
 +// HRM patch 0040: how Discovered apps works, at the top of the page. Hiding it is remembered in this browser.
@@ -518,9 +677,12 @@ index 000000000..c539f591a
 +];
 +
 +const terms: Array<[string, string]> = [
-+  ['Claimed', 'In the Deployment list, waiting to be installed. Nothing has changed on computers yet. Deploy it, or take it out of the list.'],
++  ['Claimed', 'A catalog installer staged in this browser’s Deployment list after its source link was saved. No computers changed and no existing Intune copy was adopted.'],
 +  ['To remove', 'In the Deployment list, waiting to be uninstalled. Nothing has changed on computers yet.'],
-+  ['Matched', 'IntuneGet knows which WinGet package it is, so it can install it. Remove from computers checks whether it can also remove it.'],
++  ['Matched', 'A catalog package match, not proof of management or installation. Claim is offered only without history, an active deployment or an outcome needing review. Remove from computers checks whether removal is supported.'],
++  ['Deployment state', 'Review deployments for history or an active deployment. Verified in Intune checks the exact recorded object exists, not installation on computers. Unknown reads never prove a copy was removed.'],
++  ['Deployment outcome needs review', 'A failed, cancelled or timed-out upload may have left an Intune copy. Claim is unavailable. Review Deployments and Inventory before acknowledging review with Add a second copy anyway; active deployments still block it.'],
++  ['Previous deployment not verified', 'History without its original job details stays unverified even if the Intune object exists. It cannot verify management or prove all copies were removed.'],
 +  ['Partial match / No match', 'IntuneGet isn\'t sure which package it is. Use Link package to pick one first.'],
 +  ['Microsoft Store app', 'Comes from the Store. Install or remove it in Intune as a Microsoft Store app.'],
 +];
@@ -547,7 +709,7 @@ index 000000000..c539f591a
 +      {!hidden && (
 +        <div className="px-5 pb-5 space-y-4">
 +          <p className="text-sm text-text-secondary">
-+            These apps are on HRM devices but IntuneGet doesn&apos;t manage them. Nothing on this page changes a device by itself:
++            Intune found these apps on HRM computers. They stay visible after deployment. Nothing on this page changes a computer by itself:
 +            every change goes through the Deployment list and Deploy to Intune.
 +          </p>
 +          <div className="grid gap-3 md:grid-cols-2">
@@ -578,9 +740,30 @@ index 000000000..c539f591a
 +    </section>
 +  );
 +}
+diff --git a/components/unmanaged/DiscoveryDeploymentState.tsx b/components/unmanaged/DiscoveryDeploymentState.tsx
+new file mode 100644
+index 000000000..9310753e7
+--- /dev/null
++++ b/components/unmanaged/DiscoveryDeploymentState.tsx
+@@ -0,0 +1,15 @@
++'use client';
++
++import Link from 'next/link';
++import { managementLabel, type PackageManagementState } from '@/lib/discovery-state';
++
++/** Inventory stays visible even when one or more Intune copies exist. */
++export function DiscoveryDeploymentState({ state }: { state?: PackageManagementState }) {
++  const label = managementLabel(state);
++  if (!label) return null;
++  return <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
++    <span>{label}</span>
++    <Link href="/dashboard/uploads" className="text-accent-cyan underline">Review deployments</Link>
++    {state?.copies.find(c => c.state === 'present') && <Link href="/dashboard/inventory" className="text-accent-cyan underline">Open Inventory</Link>}
++  </div>;
++}
 diff --git a/components/unmanaged/FlowSteps.tsx b/components/unmanaged/FlowSteps.tsx
 new file mode 100644
-index 000000000..c34271cc8
+index 000000000..bbc4dad6d
 --- /dev/null
 +++ b/components/unmanaged/FlowSteps.tsx
 @@ -0,0 +1,43 @@
@@ -615,9 +798,9 @@ index 000000000..c34271cc8
 +}
 +
 +export const installSteps = (name: string): FlowStep[] => [
-+  { title: 'Claim', detail: `Adds ${name} to the Deployment list. Claimed means it is waiting there. Nothing changes on computers yet.` },
++  { title: 'Claim', detail: `Saves the source link and stages the catalog installer for ${name} in this browser’s Deployment list. It changes no computers and does not adopt an existing Intune copy.` },
 +  { title: 'Choose groups in the Deployment list', detail: 'Required installs it automatically. Available lets staff install it from Company Portal.' },
-+  { title: 'Deploy to Intune', detail: "IntuneGet packages it, adds it to Intune and assigns your groups. Computers in Required groups install IntuneGet's copy, including ones that already have it." },
++  { title: 'Deploy to Intune', detail: "IntuneGet packages it, adds it to Intune and assigns your groups. Required requests installation, including on computers that already have a copy. Check Install results in Inventory for computer outcomes." },
 +  { title: 'IntuneGet keeps it up to date', detail: 'New versions show under App updates, and the app appears in Inventory.' },
 +];
 +
@@ -851,19 +1034,21 @@ index 000000000..0d8ff22bf
 +  );
 +}
 diff --git a/components/unmanaged/UnmanagedAppCard.tsx b/components/unmanaged/UnmanagedAppCard.tsx
-index cd49c673d..313fb1118 100644
+index cd49c673d..7e6276796 100644
 --- a/components/unmanaged/UnmanagedAppCard.tsx
 +++ b/components/unmanaged/UnmanagedAppCard.tsx
-@@ -1,7 +1,7 @@
+@@ -1,7 +1,9 @@
  'use client';
  
++import { canStageDiscovery } from '@/lib/discovery-state';
++import { DiscoveryDeploymentState } from './DiscoveryDeploymentState';
  import { memo } from 'react';
 -import { Monitor, Link as LinkIcon, ShoppingCart, Check, Loader2, Lightbulb } from 'lucide-react';
 +import { Monitor, Link as LinkIcon, ShoppingCart, Check, Loader2, Lightbulb, Trash2, HelpCircle } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import { AppIcon } from '@/components/AppIcon';
  import { MatchStatusBadge } from './MatchStatusBadge';
-@@ -12,6 +12,8 @@ interface UnmanagedAppCardProps {
+@@ -12,6 +14,8 @@ interface UnmanagedAppCardProps {
    app: UnmanagedApp;
    onClaim?: (app: UnmanagedApp) => void;
    onLink?: (app: UnmanagedApp) => void;
@@ -872,7 +1057,7 @@ index cd49c673d..313fb1118 100644
    onDeviceCountClick?: () => void;
    isClaimLoading?: boolean;
  }
-@@ -27,11 +29,15 @@ function UnmanagedAppCardComponent({
+@@ -27,11 +31,15 @@ function UnmanagedAppCardComponent({
    app,
    onClaim,
    onLink,
@@ -880,8 +1065,9 @@ index cd49c673d..313fb1118 100644
    onDeviceCountClick,
    isClaimLoading = false,
  }: UnmanagedAppCardProps) {
-   const canClaim = app.matchStatus === 'matched' && !app.isClaimed;
+-  const canClaim = app.matchStatus === 'matched' && !app.isClaimed;
 -  const canLink = app.matchStatus === 'unmatched' || app.matchStatus === 'partial';
++  const canClaim = app.matchStatus === 'matched' && !app.isClaimed && canStageDiscovery(app.management);
 +  // HRM patch 0040: only matched apps can be removed by IntuneGet; others get guidance instead
 +  const removable = app.matchStatus === 'matched' && !app.isStoreApp;
 +  // HRM patch: Microsoft Store apps can't be linked to a WinGet package
@@ -889,7 +1075,7 @@ index cd49c673d..313fb1118 100644
    const hasPartialSuggestions = app.partialMatches && app.partialMatches.length > 0;
  
    return (
-@@ -52,8 +58,8 @@ function UnmanagedAppCardComponent({
+@@ -52,8 +60,8 @@ function UnmanagedAppCardComponent({
              className="group-hover:border-accent-cyan/30 transition-all duration-300"
            />
            {app.isClaimed && (
@@ -900,7 +1086,7 @@ index cd49c673d..313fb1118 100644
              </div>
            )}
          </div>
-@@ -77,13 +83,13 @@ function UnmanagedAppCardComponent({
+@@ -77,13 +85,13 @@ function UnmanagedAppCardComponent({
            </div>
  
            {/* Device count + status */}
@@ -916,7 +1102,7 @@ index cd49c673d..313fb1118 100644
                >
                  <Monitor className="w-4 h-4 text-accent-cyan" />
                  <span className="text-sm font-semibold text-text-primary tabular-nums">
-@@ -94,7 +100,7 @@ function UnmanagedAppCardComponent({
+@@ -94,7 +102,7 @@ function UnmanagedAppCardComponent({
                  </span>
                </button>
              ) : (
@@ -925,7 +1111,7 @@ index cd49c673d..313fb1118 100644
                  <Monitor className="w-4 h-4 text-accent-cyan" />
                  <span className="text-sm font-semibold text-text-primary tabular-nums">
                    {app.deviceCount.toLocaleString()}
-@@ -104,7 +110,7 @@ function UnmanagedAppCardComponent({
+@@ -104,7 +112,7 @@ function UnmanagedAppCardComponent({
                  </span>
                </div>
              )}
@@ -934,9 +1120,15 @@ index cd49c673d..313fb1118 100644
            </div>
  
            {/* Matched package info */}
-@@ -132,9 +138,12 @@ function UnmanagedAppCardComponent({
-       <div className="flex items-center justify-between mt-4 pt-4 border-t border-overlay/5">
-         <div className="flex items-center gap-2">
+@@ -129,23 +137,34 @@ function UnmanagedAppCardComponent({
+       </div>
+ 
+       {/* Actions */}
+-      <div className="flex items-center justify-between mt-4 pt-4 border-t border-overlay/5">
+-        <div className="flex items-center gap-2">
++      <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-overlay/5">
++        <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
++          <DiscoveryDeploymentState state={app.management} />
            {app.isClaimed && (
 -            <span className="text-xs text-status-success flex items-center gap-1">
 -              <Check className="w-3.5 h-3.5" />
@@ -949,11 +1141,17 @@ index cd49c673d..313fb1118 100644
 +              {app.cartPurpose === 'remove' ? 'To remove' : 'Claimed'}: in Deployment list
              </span>
            )}
-           {app.claimStatus === 'deployed' && (
-@@ -146,6 +155,18 @@ function UnmanagedAppCardComponent({
+-          {app.claimStatus === 'deployed' && (
+-            <span className="text-xs text-status-success">Deployed</span>
+-          )}
+-          {app.claimStatus === 'deploying' && (
+-            <span className="text-xs text-amber-400">Deploying...</span>
+-          )}
++
          </div>
  
-         <div className="flex items-center gap-2">
+-        <div className="flex items-center gap-2">
++        <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
 +          {onRemove && !app.isClaimed && (
 +            <Button
 +              type="button"
@@ -969,7 +1167,7 @@ index cd49c673d..313fb1118 100644
            {canLink && (
              <Button
                type="button"
-@@ -155,7 +176,7 @@ function UnmanagedAppCardComponent({
+@@ -155,7 +174,7 @@ function UnmanagedAppCardComponent({
                className="border-overlay/10 hover:bg-overlay/5 text-text-secondary"
              >
                <LinkIcon className="w-4 h-4 mr-1.5" />
@@ -978,7 +1176,7 @@ index cd49c673d..313fb1118 100644
              </Button>
            )}
            {canClaim && (
-@@ -176,17 +197,7 @@ function UnmanagedAppCardComponent({
+@@ -176,17 +195,7 @@ function UnmanagedAppCardComponent({
                )}
              </Button>
            )}
@@ -997,7 +1195,7 @@ index cd49c673d..313fb1118 100644
          </div>
        </div>
      </div>
-@@ -201,9 +212,12 @@ export const UnmanagedAppCard = memo(UnmanagedAppCardComponent, (prev, next) =>
+@@ -201,10 +210,14 @@ export const UnmanagedAppCard = memo(UnmanagedAppCardComponent, (prev, next) =>
      prev.app.version === next.app.version &&
      prev.app.deviceCount === next.app.deviceCount &&
      prev.app.matchStatus === next.app.matchStatus &&
@@ -1008,13 +1206,38 @@ index cd49c673d..313fb1118 100644
 +    prev.app.cartPurpose === next.app.cartPurpose &&
 +    prev.onRemove === next.onRemove &&
      prev.app.claimStatus === next.app.claimStatus &&
++    prev.app.management === next.app.management &&
      prev.app.partialMatches === next.app.partialMatches &&
      prev.isClaimLoading === next.isClaimLoading &&
+     prev.onClaim === next.onClaim &&
+diff --git a/components/unmanaged/UnmanagedEmptyState.tsx b/components/unmanaged/UnmanagedEmptyState.tsx
+index 1eb79dec7..9a715a087 100644
+--- a/components/unmanaged/UnmanagedEmptyState.tsx
++++ b/components/unmanaged/UnmanagedEmptyState.tsx
+@@ -45,8 +45,8 @@ const config: Record<EmptyVariant, {
+   },
+   'all-claimed': {
+     icon: CheckCircle2,
+-    title: 'All matched apps claimed!',
+-    getDescription: () => 'Every matched app has been claimed and added to your deployment cart. Head to Deployments to continue.',
++    title: 'No apps available to claim',
++    getDescription: () => 'Check this browser’s Deployment list for staged installers. Review Deployments for active deployments or history; no available Claim does not mean every app is managed.',
+   },
+   'error': {
+     icon: AlertTriangle,
 diff --git a/components/unmanaged/UnmanagedListRow.tsx b/components/unmanaged/UnmanagedListRow.tsx
-index 6b56bbc07..c8431de05 100644
+index 6b56bbc07..f6523067a 100644
 --- a/components/unmanaged/UnmanagedListRow.tsx
 +++ b/components/unmanaged/UnmanagedListRow.tsx
-@@ -9,6 +9,8 @@ import {
+@@ -1,5 +1,7 @@
+ 'use client';
+ 
++import { canStageDiscovery } from '@/lib/discovery-state';
++import { DiscoveryDeploymentState } from './DiscoveryDeploymentState';
+ import { memo } from 'react';
+ import { motion, useReducedMotion } from 'framer-motion';
+ import {
+@@ -9,6 +11,8 @@ import {
    Loader2,
    CheckCircle2,
    Lightbulb,
@@ -1023,7 +1246,7 @@ index 6b56bbc07..c8431de05 100644
  } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import { AppIcon } from '@/components/AppIcon';
-@@ -20,6 +22,8 @@ interface UnmanagedListRowProps {
+@@ -20,6 +24,8 @@ interface UnmanagedListRowProps {
    app: UnmanagedApp;
    onClaim: () => void;
    onLink: () => void;
@@ -1032,7 +1255,7 @@ index 6b56bbc07..c8431de05 100644
    onDeviceCountClick?: () => void;
    isClaimLoading: boolean;
  }
-@@ -35,12 +39,16 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -35,12 +41,16 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
    app,
    onClaim,
    onLink,
@@ -1041,8 +1264,9 @@ index 6b56bbc07..c8431de05 100644
    isClaimLoading,
  }: UnmanagedListRowProps) {
    const prefersReducedMotion = useReducedMotion();
-   const canClaim = app.matchStatus === 'matched' && !app.isClaimed;
+-  const canClaim = app.matchStatus === 'matched' && !app.isClaimed;
 -  const canLink = app.matchStatus === 'unmatched' || app.matchStatus === 'partial';
++  const canClaim = app.matchStatus === 'matched' && !app.isClaimed && canStageDiscovery(app.management);
 +  // HRM patch 0040: only matched apps can be removed by IntuneGet; others get guidance instead
 +  const removable = app.matchStatus === 'matched' && !app.isStoreApp;
 +  // HRM patch: Microsoft Store apps can't be linked to a WinGet package
@@ -1050,7 +1274,7 @@ index 6b56bbc07..c8431de05 100644
    const hasPartialSuggestions = app.partialMatches && app.partialMatches.length > 0;
  
    return (
-@@ -67,8 +75,8 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -67,8 +77,8 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
              className="group-hover:scale-105 transition-transform duration-200"
            />
            {app.isClaimed && (
@@ -1061,7 +1285,15 @@ index 6b56bbc07..c8431de05 100644
              </div>
            )}
          </div>
-@@ -113,7 +121,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -92,6 +102,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+                 </button>
+               )}
+             </div>
++            <DiscoveryDeploymentState state={app.management} />
+           </div>
+ 
+           {/* Device count */}
+@@ -113,7 +124,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
            )}
  
            {/* Status badge */}
@@ -1070,7 +1302,7 @@ index 6b56bbc07..c8431de05 100644
  
            {/* Actions */}
            <div className="flex items-center gap-2">
-@@ -129,6 +137,19 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -129,6 +140,19 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
                  <span className="hidden lg:inline">Link</span>
                </Button>
              )}
@@ -1090,7 +1322,7 @@ index 6b56bbc07..c8431de05 100644
              {canClaim && (
                <Button
                  type="button"
-@@ -148,9 +169,12 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -148,9 +172,12 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
                </Button>
              )}
              {app.isClaimed && (
@@ -1107,7 +1339,7 @@ index 6b56bbc07..c8431de05 100644
              )}
            </div>
 diff --git a/components/unmanaged/UnmanagedToolbar.tsx b/components/unmanaged/UnmanagedToolbar.tsx
-index 47deadceb..af8edf7ba 100644
+index 47deadceb..443918e06 100644
 --- a/components/unmanaged/UnmanagedToolbar.tsx
 +++ b/components/unmanaged/UnmanagedToolbar.tsx
 @@ -57,8 +57,8 @@ function getFilterContextText(filters: UnmanagedAppsFilters): string {
@@ -1175,7 +1407,7 @@ index 47deadceb..af8edf7ba 100644
 -          {filters.showClaimed ? 'Showing Claimed' : 'Hiding Claimed'}
 -        </FilterChip>
 +        {/* HRM patch 0040: claimed and to-remove apps are in the Deployment list, not deployed yet */}
-+        <span title="Claimed and To remove apps are in the Deployment list and haven't been deployed yet.">
++        <span title="Claimed and To remove describe entries staged in this browser’s Deployment list. Tenant deployment state and installation on computers are checked separately.">
 +          <FilterChip
 +            active={!filters.showClaimed}
 +            onClick={() => onFiltersChange({ ...filters, showClaimed: !filters.showClaimed })}
@@ -1187,11 +1419,139 @@ index 47deadceb..af8edf7ba 100644
  
          <div className="ml-auto text-sm text-text-muted">
            Showing <span className="text-text-primary font-medium">{filteredCount}</span> of{' '}
+diff --git a/components/unmanaged/discovery-state.test.ts b/components/unmanaged/discovery-state.test.ts
+new file mode 100644
+index 000000000..39b8ad775
+--- /dev/null
++++ b/components/unmanaged/discovery-state.test.ts
+@@ -0,0 +1,37 @@
++import { createElement } from 'react';
++import { renderToStaticMarkup } from 'react-dom/server';
++import { describe, expect, it, vi } from 'vitest';
++import { UnmanagedAppCard } from './UnmanagedAppCard';
++import { UnmanagedListRow } from './UnmanagedListRow';
++import type { UnmanagedApp } from '@/types/unmanaged';
++import type { PackageManagementState } from '@/lib/discovery-state';
++vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
++const app: UnmanagedApp = { id: 'row', discoveredAppId: 'new-version-inventory-id', displayName: 'Fixture app', publisher: 'Fixture publisher', version: '2', deviceCount: 12,
++  platform: 'windows', matchStatus: 'matched', matchedPackageId: 'Vendor.App', matchedPackageName: 'Fixture app', matchConfidence: 1, isClaimed: false, lastSynced: '2026-01-01' };
++const none: PackageManagementState = { packageId: 'vendor.app', state: 'none', copies: [], checkedAt: '2026-01-01' };
++for (const view of ['grid', 'list'] as const) describe(`${view} discovered inventory`, () => {
++  const render = (extra: Partial<UnmanagedApp> = {}) => view === 'grid'
++    ? renderToStaticMarkup(createElement(UnmanagedAppCard, { app: { ...app, ...extra } }))
++    : renderToStaticMarkup(createElement(UnmanagedListRow, { app: { ...app, ...extra }, onClaim: () => {}, onLink: () => {}, isClaimLoading: false }));
++  const claimButton = (html: string) => /<button[^>]*>(?:(?!<\/button>).)*\bClaim\s*<\/button>/s.test(html);
++  it('offers staging only after a successful tenant history read with no previous deployment', () => {
++    expect(claimButton(render({ management: none }))).toBe(true);
++    expect(claimButton(render())).toBe(false);
++    expect(render()).toContain('Deployment state unavailable');
++  });
++  it.each(['verified', 'deleted', 'unverified', 'previously_deployed'] as const)('keeps %s inventory and device access without offering Claim', state => {
++    const html = render({ management: { ...none, state, copies: state === 'verified' ? [{ intuneAppId: 'id', version: '1', state: 'present' }] : [] } });
++    expect(html).toContain('Fixture app');
++    expect(html).toContain('12');
++    expect(html).toContain('Review deployments');
++    expect(claimButton(html)).toBe(false);
++    expect(html).not.toContain('installed successfully');
++  });
++  it('keeps a queued deployment separate from local list membership', () => {
++    const html = render({ management: { ...none, activeJobId: 'queued-job' } });
++    expect(html).toContain('Deployment queued or running');
++    expect(html).not.toContain('Claimed: in Deployment list');
++    expect(claimButton(html)).toBe(false);
++    expect(render({ management: none, isClaimed: true })).toContain('Claimed');
++  });
++});
+diff --git a/hooks/use-unmanaged-apps.discovery.test.ts b/hooks/use-unmanaged-apps.discovery.test.ts
+new file mode 100644
+index 000000000..9cd9213ab
+--- /dev/null
++++ b/hooks/use-unmanaged-apps.discovery.test.ts
+@@ -0,0 +1,72 @@
++// @vitest-environment happy-dom
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++import type { PackageManagementState } from '@/lib/discovery-state';
++vi.hoisted(() => { const values = new Map<string, string>(); Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => values.get(k) || null, setItem: (k: string, v: string) => values.set(k, v), removeItem: (k: string) => values.delete(k) } }); });
++const session = vi.hoisted(() => ({ tenant: 'tenant', states: {} as Record<string, PackageManagementState>, claimOk: true, identity: 'Vendor.App' }));
++const auth = vi.hoisted(() => ({ isAuthenticated: true, user: { id: 'staff', tenantId: 'home' }, getAccessToken: vi.fn(async () => 'fixture') }));
++vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => auth }));
++vi.mock('@/hooks/useMspOptional', () => ({ useMspOptional: () => ({ isMspUser: true, selectedTenantId: session.tenant }) }));
++vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: { viewMode: 'grid' }, setViewMode: vi.fn() }) }));
++vi.mock('@/hooks/use-toast', () => ({ toast: vi.fn() }));
++import { useUnmanagedApps } from './use-unmanaged-apps';
++import { useCartStore } from '@/stores/cart-store';
++let root: Root;
++let current: ReturnType<typeof useUnmanagedApps>;
++const app = { id: 'row', discoveredAppId: 'version2', displayName: 'Fixture app', publisher: 'Fixture', version: '2', deviceCount: 2, platform: 'windows', matchStatus: 'matched', matchedPackageId: 'Vendor.App', matchedPackageName: 'Fixture app', matchConfidence: 1, isClaimed: false, lastSynced: '2026-01-01' };
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++function Harness() { current = useUnmanagedApps(); return null; }
++const settle = async () => { for (let n = 0; n < 3; n++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
++beforeEach(async () => {
++  Object.assign(session, { tenant: 'tenant', states: {}, claimOk: true, identity: 'Vendor.App' });
++  useCartStore.setState({ items: [], isOpen: false });
++  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
++    const url = String(input);
++    if (url.includes('/unmanaged-apps')) return Response.json({ apps: [app], lastSynced: '2026-01-01', fromCache: true });
++    if (url.includes('/discovery-state')) return Response.json({ tenantId: session.tenant, states: session.states, checkedAt: '2026-01-01' });
++    if (url.includes('/manifest')) return Response.json({ manifest: { id: session.identity, name: 'Fixture app', version: '2' }, recommendedInstaller: { type: 'exe', architecture: 'x64', scope: 'machine', url: 'https://example.test/app.exe', sha256: 'a'.repeat(64) } });
++    if (url.includes('/claim')) return session.claimOk ? Response.json({ claim: { id: 'claim', tenantId: session.tenant, wingetPackageId: 'Vendor.App' } }) : Response.json({ error: 'Could not record claim' }, { status: 500 });
++    throw new Error('Unexpected request');
++  }));
++  root = createRoot(document.createElement('div'));
++  await act(async () => root.render(createElement(Harness)));
++  await settle();
++});
++afterEach(async () => { await act(async () => root.unmount()); useCartStore.setState({ items: [] }); vi.unstubAllGlobals(); });
++it('records provenance before staging, deduplicates repeated staging, and separates cart clearing from deployment state', async () => {
++  expect(current.fromCache).toBe(true);
++  expect(current.claimableCount).toBe(1);
++  await act(async () => { await current.handleClaimApp(current.filteredApps[0]); });
++  expect(useCartStore.getState().items[0].discovery).toEqual({ tenantId: 'tenant', discoveredAppId: 'version2', packageId: 'Vendor.App', claimId: 'claim' });
++  await act(async () => { await current.handleClaimApp(current.filteredApps[0]); });
++  expect(useCartStore.getState().items).toHaveLength(1);
++  session.states = { 'vendor.app': { packageId: 'vendor.app', state: 'none', copies: [], activeJobId: 'job', checkedAt: '2026-01-01' } };
++  await act(async () => { useCartStore.getState().clearCart(); window.dispatchEvent(new Event('focus')); });
++  await settle();
++  expect(current.filteredApps).toHaveLength(1);
++  expect(current.filteredApps[0].isClaimed).toBe(false);
++  expect(current.filteredApps[0].management?.activeJobId).toBe('job');
++  expect(current.claimableCount).toBe(0);
++});
++it('does not change the cart on claim failure or a manifest identity mismatch', async () => {
++  session.claimOk = false;
++  await act(async () => { await expect(current.handleClaimApp(current.filteredApps[0])).rejects.toThrow(); });
++  expect(useCartStore.getState().items).toHaveLength(0);
++  session.identity = 'Vendor.Other';
++  await act(async () => { await expect(current.handleClaimApp(current.filteredApps[0])).rejects.toThrow(/identity changed/); });
++  expect(useCartStore.getState().items).toHaveLength(0);
++});
++it('rechecks fresh tenant state before claiming even when cached inventory previously offered Claim', async () => {
++  session.states = { 'vendor.app': { packageId: 'vendor.app', state: 'verified', copies: [], checkedAt: '2026-01-01' } };
++  await act(async () => { await expect(current.handleClaimApp(current.filteredApps[0])).rejects.toThrow(/review/); });
++  expect(useCartStore.getState().items).toHaveLength(0);
++});
++it('rejects an old tenant modal after switching tenants and ignores foreign local cart entries', async () => {
++  const old = current.filteredApps[0];
++  session.tenant = 'other';
++  await act(async () => root.render(createElement(Harness)));
++  await settle();
++  await act(async () => { await expect(current.handleClaimApp(old)).rejects.toThrow(/review/); });
++  expect(useCartStore.getState().items).toHaveLength(0);
++});
 diff --git a/hooks/use-unmanaged-apps.ts b/hooks/use-unmanaged-apps.ts
-index 6a46ef642..b4ea4f965 100644
+index 6a46ef642..4139ceeb3 100644
 --- a/hooks/use-unmanaged-apps.ts
 +++ b/hooks/use-unmanaged-apps.ts
-@@ -9,6 +9,8 @@ import { generateDetectionRules, generateInstallCommand, generateUninstallComman
+@@ -1,5 +1,6 @@
+ 'use client';
+ 
++import { canStageDiscovery, packageKey, type PackageManagementState } from '@/lib/discovery-state';
+ import { useState, useEffect, useMemo, useDeferredValue, useCallback, useRef } from 'react';
+ import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
+ import { useMspOptional } from '@/hooks/useMspOptional';
+@@ -9,6 +10,8 @@ import { generateDetectionRules, generateInstallCommand, generateUninstallComman
  import { buildCartItemRequirementRules } from '@/lib/requirement-rules';
  import { DEFAULT_PSADT_CONFIG, getDefaultProcessesToClose } from '@/types/psadt';
  import { toast } from '@/hooks/use-toast';
@@ -1200,7 +1560,7 @@ index 6a46ef642..b4ea4f965 100644
  import type {
    UnmanagedApp,
    UnmanagedAppsResponse,
-@@ -73,8 +75,19 @@ export interface UseUnmanagedAppsReturn {
+@@ -73,8 +76,19 @@ export interface UseUnmanagedAppsReturn {
    cancelClaimAll: () => void;
    retryFailedClaims: () => Promise<void>;
    clearFilters: () => void;
@@ -1220,7 +1580,38 @@ index 6a46ef642..b4ea4f965 100644
  function isMicrosoftApp(app: UnmanagedApp): boolean {
    const publisherLower = (app.publisher || '').toLowerCase();
    const packageIdLower = (app.matchedPackageId || '').toLowerCase();
-@@ -130,6 +143,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+@@ -88,7 +102,7 @@ function isMicrosoftApp(app: UnmanagedApp): boolean {
+ }
+ 
+ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+-  const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
++  const { getAccessToken, isAuthenticated, user } = useMicrosoftAuth();
+   const { isMspUser, selectedTenantId } = useMspOptional();
+   const addItem = useCartStore((state) => state.addItem);
+   const addItemSilent = useCartStore((state) => state.addItemSilent);
+@@ -102,9 +116,20 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+     }
+ 
+     return headers;
+-  }, [isMspUser, selectedTenantId]);
++  }, [isMspUser, selectedTenantId, user?.id, user?.tenantId]);
+ 
+   // Data state
++  const requestVersion = useRef(0);
++  const scopeRef = useRef(mspHeaders);
++  scopeRef.current = mspHeaders;
++  const [management, setManagement] = useState<{ tenantId: string; states: Record<string, PackageManagementState> } | null>(null);
++  const readManagement = useCallback(async (accessToken: string) => {
++    const response = await fetch('/api/intune/discovery-state', { cache: 'no-store', signal: AbortSignal.timeout(15_000),
++      headers: { Authorization: `Bearer ${accessToken}`, ...mspHeaders } });
++    if (!response.ok) throw new Error('Check Deployments before adding another copy. Deployment state is unavailable.');
++    return await response.json() as { tenantId: string; states: Record<string, PackageManagementState>; checkedAt: string };
++  }, [mspHeaders]);
++
+   const [apps, setApps] = useState<UnmanagedApp[]>([]);
+   const [lastSynced, setLastSynced] = useState<string | null>(null);
+   const [fromCache, setFromCache] = useState(false);
+@@ -130,6 +155,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
    const [claimingAppId, setClaimingAppId] = useState<string | null>(null);
    const [claimAllModal, setClaimAllModal] = useState<ClaimAllModalState | null>(null);
    const [deviceListApp, setDeviceListApp] = useState<UnmanagedApp | null>(null);
@@ -1228,30 +1619,344 @@ index 6a46ef642..b4ea4f965 100644
  
    // Get current access token
    const getToken = useCallback(async (): Promise<string | null> => {
-@@ -266,6 +280,11 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+@@ -140,6 +166,8 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+ 
+   // Fetch unmanaged apps. Returns true on success, false on failure.
+   const fetchApps = useCallback(async (forceRefresh = false): Promise<boolean> => {
++    const version = ++requestVersion.current;
++    const scope = mspHeaders;
+     setError(null);
+     const accessToken = await getToken();
+     if (!accessToken) {
+@@ -170,8 +198,12 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+         throw new Error(errorData.error || 'Failed to fetch unmanaged apps');
+       }
+ 
+-      setPermissionError(null);
+       const data: UnmanagedAppsResponse = await response.json();
++      let latest: Awaited<ReturnType<typeof readManagement>> | null = null;
++      try { latest = await readManagement(accessToken); } catch { /* Keep inventory; disable unsafe staging until verification can be retried. */ }
++      if (version !== requestVersion.current || scopeRef.current !== scope) return false;
++      setPermissionError(null);
++      setManagement(latest);
+       setApps(data.apps);
+       setLastSynced(data.lastSynced);
+       setFromCache(data.fromCache);
+@@ -179,6 +211,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+       setStaleReason(data.stale === true ? data.staleReason ?? null : null);
+       return true;
+     } catch (err) {
++      if (version !== requestVersion.current || scopeRef.current !== scope) return false;
+       console.error('Error fetching unmanaged apps:', err);
+       const timedOut =
+         err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+@@ -190,7 +223,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+       setError(message);
+       return false;
+     }
+-  }, [getToken, mspHeaders]);
++  }, [getToken, mspHeaders, readManagement]);
+ 
+   // Initial load — fires once per tenant when authentication is ready.
+   // fetchApps identity changes (due to mspHeaders/getToken recreations) must
+@@ -198,11 +231,18 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+   const loadedForTenantRef = useRef<string | null>(null);
+   const fetchAppsRef = useRef(fetchApps);
+   fetchAppsRef.current = fetchApps;
+-  const tenantKey = isMspUser ? (selectedTenantId ?? 'self') : 'self';
++  const tenantKey = `${user?.id || ''}:${isMspUser ? (selectedTenantId ?? user?.tenantId ?? 'self') : user?.tenantId ?? 'self'}`;
+ 
+   useEffect(() => {
+-    if (!isAuthenticated || loadedForTenantRef.current === tenantKey) return;
++    if (!isAuthenticated) { requestVersion.current++; loadedForTenantRef.current = null; setApps([]); setManagement(null); return; }
++    if (loadedForTenantRef.current === tenantKey) return;
+     loadedForTenantRef.current = tenantKey;
++    requestVersion.current++;
++    setApps([]);
++    setManagement(null);
++    setClaimModalApp(null);
++    setLinkModalApp(null);
++    setDeviceListApp(null);
+ 
+     const load = async () => {
+       setIsLoading(true);
+@@ -212,6 +252,23 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+     load();
+   }, [isAuthenticated, tenantKey]);
+ 
++  useEffect(() => {
++    if (!isAuthenticated) return;
++    let disposed = false;
++    const refresh = async () => {
++      const scope = mspHeaders;
++      const token = await getToken();
++      if (!token || disposed) return;
++      try {
++        const data = await readManagement(token);
++        if (!disposed && scopeRef.current === scope) setManagement(data);
++      } catch { if (!disposed && scopeRef.current === scope) setManagement(null); }
++    };
++    window.addEventListener('focus', refresh);
++    const timer = setInterval(refresh, 60_000);
++    return () => { disposed = true; clearInterval(timer); window.removeEventListener('focus', refresh); };
++  }, [isAuthenticated, getToken, mspHeaders, readManagement]);
++
+   // Refresh handler
+   const handleRefresh = useCallback(async () => {
+     setIsRefreshing(true);
+@@ -264,8 +321,13 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+ 
+   // Cart winget IDs for quick lookup
    const cartWingetIds = useMemo(() => {
-     return new Set(cartItems.map(item => item.wingetId));
-   }, [cartItems]);
+-    return new Set(cartItems.map(item => item.wingetId));
+-  }, [cartItems]);
++    return new Set(cartItems.filter(item => !item.discovery || item.discovery.tenantId === management?.tenantId).map(item => packageKey(item.wingetId)));
++  }, [cartItems, management?.tenantId]);
 +  // HRM patch 0040: packages in the Deployment list only to be removed
-+  const cartRemovalIds = useMemo(() => new Set(cartItems.filter((item) => item.hrmRemoval).map((item) => item.wingetId)), [cartItems]);
++  const cartRemovalIds = useMemo(() => new Set(cartItems.filter((item) => item.hrmRemoval && (!item.discovery || item.discovery.tenantId === management?.tenantId)).map((item) => packageKey(item.wingetId))), [cartItems, management?.tenantId]);
 +  const purposeOf = useCallback((app: UnmanagedApp): UnmanagedApp['cartPurpose'] =>
-+    !app.matchedPackageId || !cartWingetIds.has(app.matchedPackageId) ? undefined : cartRemovalIds.has(app.matchedPackageId) ? 'remove' : 'install',
++    !app.matchedPackageId || !cartWingetIds.has(packageKey(app.matchedPackageId)) ? undefined : cartRemovalIds.has(packageKey(app.matchedPackageId)) ? 'remove' : 'install',
 +  [cartWingetIds, cartRemovalIds]);
  
    // Non-Microsoft apps (base filtering + dedup by discoveredAppId)
    const nonMicrosoftApps = useMemo(() => {
-@@ -310,8 +329,8 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+@@ -309,9 +371,9 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+     return indexedApps.filter(({ app, search }) =>
        (!needle || search.includes(needle)) &&
        (filters.matchStatus === 'all' || app.matchStatus === filters.matchStatus) &&
-       (filters.showClaimed || !app.matchedPackageId || !cartWingetIds.has(app.matchedPackageId))
+-      (filters.showClaimed || !app.matchedPackageId || !cartWingetIds.has(app.matchedPackageId))
 -    ).map(({ app }) => ({ ...app, isClaimed: !!app.matchedPackageId && cartWingetIds.has(app.matchedPackageId) }));
 -  }, [indexedApps, deferredSearch, filters.matchStatus, filters.showClaimed, cartWingetIds]);
-+    ).map(({ app }) => ({ ...app, isClaimed: !!app.matchedPackageId && cartWingetIds.has(app.matchedPackageId), cartPurpose: purposeOf(app) }));
-+  }, [indexedApps, deferredSearch, filters.matchStatus, filters.showClaimed, cartWingetIds, purposeOf]);
++      (filters.showClaimed || !app.matchedPackageId || !cartWingetIds.has(packageKey(app.matchedPackageId)))
++    ).map(({ app }) => ({ ...app, isClaimed: !!app.matchedPackageId && cartWingetIds.has(packageKey(app.matchedPackageId)), cartPurpose: purposeOf(app), tenantId: management?.tenantId, management: management ? (management.states[packageKey(app.matchedPackageId) || ''] || { packageId: packageKey(app.matchedPackageId) || '', state: 'none', copies: [], checkedAt: new Date().toISOString() }) : undefined }));
++  }, [indexedApps, deferredSearch, filters.matchStatus, filters.showClaimed, cartWingetIds, purposeOf, management]);
  
    // Status counts
    const statusCounts = useMemo(() => {
-@@ -751,6 +770,52 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+@@ -327,7 +389,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+   const computedStats = useMemo((): UnmanagedAppsStats => {
+     const appsWithClaimSync = nonMicrosoftApps.map(app => ({
+       ...app,
+-      isClaimed: app.matchedPackageId ? cartWingetIds.has(app.matchedPackageId) : false,
++      isClaimed: app.matchedPackageId ? cartWingetIds.has(packageKey(app.matchedPackageId)) : false,
+     }));
+ 
+     return {
+@@ -343,7 +405,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+   // Claimable count (matched, not claimed, has packageId)
+   const claimableCount = useMemo(() => {
+     return filteredApps.filter(
+-      (app) => app.matchStatus === 'matched' && !app.isClaimed && app.matchedPackageId
++      (app) => app.matchStatus === 'matched' && !app.isClaimed && app.matchedPackageId && canStageDiscovery(app.management)
+     ).length;
+   }, [filteredApps]);
+ 
+@@ -355,6 +417,12 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+     setClaimingAppId(app.discoveredAppId);
+ 
+     try {
++      const scope = mspHeaders;
++      const latest = await readManagement(accessToken);
++      const key = packageKey(app.matchedPackageId);
++      if (!key || (app.tenantId && app.tenantId !== latest.tenantId) || scopeRef.current !== scope || !canStageDiscovery(latest.states[key] || { packageId: key, state: 'none', copies: [], checkedAt: latest.checkedAt })) {
++        throw new Error('This package has a deployment to review. Open Deployments before adding another copy.');
++      }
+       const manifestResponse = await fetch(
+         `/api/winget/manifest?id=${encodeURIComponent(app.matchedPackageId)}&arch=x64`
+       );
+@@ -370,6 +438,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+ 
+       const { recommendedInstaller, manifest } = await manifestResponse.json();
+ 
++      if (manifest?.id && packageKey(manifest.id) !== key) throw new Error('The catalog package identity changed. Choose the package again.');
+       if (!recommendedInstaller) {
+         throw new Error('No compatible installer found for this package');
+       }
+@@ -386,8 +455,38 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+         recommendedInstaller.type
+       );
+ 
++
++
++      const claimResponse = await fetch('/api/intune/claim', {
++        method: 'POST',
++        headers: {
++          Authorization: `Bearer ${accessToken}`,
++          'Content-Type': 'application/json',
++          ...mspHeaders,
++        },
++        body: JSON.stringify({
++          discoveredAppId: app.discoveredAppId,
++          discoveredAppName: app.displayName,
++          wingetPackageId: app.matchedPackageId,
++          deviceCount: app.deviceCount,
++        }),
++      });
++
++      if (!claimResponse.ok) {
++        const errorData = await claimResponse.json().catch(() => ({}));
++        if (claimResponse.status === 403) {
++          throw new Error('Permission denied. You may not have access to claim apps.');
++        } else if (claimResponse.status >= 500) {
++          throw new Error('Could not record the discovered app link. Try again.');
++        }
++        throw new Error(errorData.error || 'Failed to record claim');
++      }
++
++      const recorded = await claimResponse.json();
++      if (!recorded.claim?.id || recorded.claim.tenantId !== latest.tenantId || packageKey(recorded.claim.wingetPackageId) !== key || scopeRef.current !== scope) throw new Error('The discovered app link changed. Try again.');
+       addItem({
+         appSource: 'win32',
++        discovery: { tenantId: latest.tenantId, discoveredAppId: app.discoveredAppId, packageId: app.matchedPackageId!, claimId: recorded.claim.id },
+         wingetId: app.matchedPackageId,
+         displayName: manifest?.name || app.displayName,
+         publisher: manifest?.publisher || app.publisher || '',
+@@ -422,31 +521,6 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+         },
+       });
+ 
+-      const claimResponse = await fetch('/api/intune/claim', {
+-        method: 'POST',
+-        headers: {
+-          Authorization: `Bearer ${accessToken}`,
+-          'Content-Type': 'application/json',
+-          ...mspHeaders,
+-        },
+-        body: JSON.stringify({
+-          discoveredAppId: app.discoveredAppId,
+-          discoveredAppName: app.displayName,
+-          wingetPackageId: app.matchedPackageId,
+-          deviceCount: app.deviceCount,
+-        }),
+-      });
+-
+-      if (!claimResponse.ok) {
+-        const errorData = await claimResponse.json().catch(() => ({}));
+-        if (claimResponse.status === 403) {
+-          throw new Error('Permission denied. You may not have access to claim apps.');
+-        } else if (claimResponse.status >= 500) {
+-          throw new Error('Server error while recording claim. The app was added to your cart.');
+-        }
+-        throw new Error(errorData.error || 'Failed to record claim');
+-      }
+-
+       setApps((prev) =>
+         prev.map((a) =>
+           a.discoveredAppId === app.discoveredAppId
+@@ -464,7 +538,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+     } finally {
+       setClaimingAppId(null);
+     }
+-  }, [getToken, addItem, mspHeaders]);
++  }, [getToken, addItem, mspHeaders, readManagement]);
+ 
+   // Claim single app (used by handleClaimAll)
+   const claimSingleApp = useCallback(async (
+@@ -472,6 +546,12 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+     accessToken: string
+   ): Promise<{ app: UnmanagedApp; success: boolean }> => {
+     try {
++      const scope = mspHeaders;
++      const latest = await readManagement(accessToken);
++      const key = packageKey(app.matchedPackageId);
++      if (!key || (app.tenantId && app.tenantId !== latest.tenantId) || scopeRef.current !== scope || !canStageDiscovery(latest.states[key] || { packageId: key, state: 'none', copies: [], checkedAt: latest.checkedAt })) {
++        throw new Error('This package has a deployment to review. Open Deployments before adding another copy.');
++      }
+       const manifestResponse = await fetch(
+         `/api/winget/manifest?id=${encodeURIComponent(app.matchedPackageId!)}&arch=x64`
+       );
+@@ -482,6 +562,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+ 
+       const { recommendedInstaller, manifest } = await manifestResponse.json();
+ 
++      if (manifest?.id && packageKey(manifest.id) !== key) throw new Error('The catalog package identity changed. Choose the package again.');
+       if (!recommendedInstaller) {
+         return { app, success: false };
+       }
+@@ -498,8 +579,32 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+         recommendedInstaller.type
+       );
+ 
++
++
++      const claimResponse = await fetch('/api/intune/claim', {
++        method: 'POST',
++        headers: {
++          Authorization: `Bearer ${accessToken}`,
++          'Content-Type': 'application/json',
++          ...mspHeaders,
++        },
++        body: JSON.stringify({
++          discoveredAppId: app.discoveredAppId,
++          discoveredAppName: app.displayName,
++          wingetPackageId: app.matchedPackageId,
++          deviceCount: app.deviceCount,
++        }),
++      });
++
++      if (!claimResponse.ok) {
++        return { app, success: false };
++      }
++
++      const recorded = await claimResponse.json();
++      if (!recorded.claim?.id || recorded.claim.tenantId !== latest.tenantId || packageKey(recorded.claim.wingetPackageId) !== key || scopeRef.current !== scope) throw new Error('The discovered app link changed. Try again.');
+       addItemSilent({
+         appSource: 'win32',
++        discovery: { tenantId: latest.tenantId, discoveredAppId: app.discoveredAppId, packageId: app.matchedPackageId!, claimId: recorded.claim.id },
+         wingetId: app.matchedPackageId!,
+         displayName: manifest?.name || app.displayName,
+         publisher: manifest?.publisher || app.publisher || '',
+@@ -521,6 +626,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+           manifest?.name || app.displayName
+         ),
+         detectionRules,
++        requirementRules: buildCartItemRequirementRules(manifest?.name || app.displayName, recommendedInstaller.type, recommendedInstaller.productCode, undefined),
+         psadtConfig: {
+           ...DEFAULT_PSADT_CONFIG,
+           processesToClose,
+@@ -528,31 +634,12 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+         },
+       });
+ 
+-      const claimResponse = await fetch('/api/intune/claim', {
+-        method: 'POST',
+-        headers: {
+-          Authorization: `Bearer ${accessToken}`,
+-          'Content-Type': 'application/json',
+-          ...mspHeaders,
+-        },
+-        body: JSON.stringify({
+-          discoveredAppId: app.discoveredAppId,
+-          discoveredAppName: app.displayName,
+-          wingetPackageId: app.matchedPackageId,
+-          deviceCount: app.deviceCount,
+-        }),
+-      });
+-
+-      if (!claimResponse.ok) {
+-        return { app, success: false };
+-      }
+-
+       return { app, success: true };
+     } catch (error) {
+       console.error(`Error claiming app ${app.displayName}:`, error);
+       return { app, success: false };
+     }
+-  }, [addItemSilent, mspHeaders]);
++  }, [addItemSilent, mspHeaders, readManagement]);
+ 
+   // Claim All cancellation ref
+   const claimAllCancelledRef = useRef(false);
+@@ -668,7 +755,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+   // Claim all matched apps handler - opens confirmation first
+   const handleClaimAll = useCallback(async () => {
+     const claimableApps = filteredApps.filter(
+-      (app) => app.matchStatus === 'matched' && !app.isClaimed && app.matchedPackageId
++      (app) => app.matchStatus === 'matched' && !app.isClaimed && app.matchedPackageId && canStageDiscovery(app.management)
+     );
+ 
+     if (claimableApps.length === 0) {
+@@ -751,6 +838,52 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
      setFilters(defaultFilters);
    }, []);
  
@@ -1304,7 +2009,7 @@ index 6a46ef642..b4ea4f965 100644
    return {
      apps,
      filteredApps,
-@@ -788,5 +853,10 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
+@@ -788,5 +921,10 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
      cancelClaimAll,
      retryFailedClaims,
      clearFilters,
@@ -1315,6 +2020,300 @@ index 6a46ef642..b4ea4f965 100644
 +    cartRemovalCount,
    };
  }
+diff --git a/lib/__tests__/discovery-completion.test.ts b/lib/__tests__/discovery-completion.test.ts
+new file mode 100644
+index 000000000..c565e6f56
+--- /dev/null
++++ b/lib/__tests__/discovery-completion.test.ts
+@@ -0,0 +1,73 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { NextRequest } from 'next/server';
++vi.mock('@/lib/db', async () => { const { sqliteDb } = await vi.importActual<typeof import('@/lib/db/sqlite')>('@/lib/db/sqlite'); return { getDatabase: () => sqliteDb, isSqliteMode: () => true, verifyPackagerApiKey: () => true }; });
++vi.mock('@/lib/features', () => ({ getFeatureFlags: () => ({ localPackager: true }) }));
++vi.mock('@/lib/callback-signature', () => ({ verifyCallbackSignature: () => true }));
++vi.mock('@/lib/msp/batch-orchestrator', () => ({ onJobCompleted: vi.fn(async () => {}) }));
++vi.mock('@/lib/auto-update/cleanup', () => ({ handleAutoUpdateJobCompletion: vi.fn(async () => {}) }));
++vi.mock('@/lib/update-policies/ensure-policy', () => ({ parseCartUpdatePolicy: () => null, ensureUpdatePolicy: vi.fn() }));
++vi.mock('@/lib/installer-preflight', () => ({ quarantineInstaller: vi.fn() }));
++vi.mock('@/lib/notifications/notify-deployment', () => ({ notifyDeploymentWebhooks: vi.fn(async () => ({})) }));
++vi.mock('@/lib/supabase', () => ({ isSupabaseServerConfigured: () => false, createServerClient: () => ({ from: () => ({ delete: () => ({ eq: () => ({ eq: () => ({ eq: async () => ({ error: null }) }) }) }) }) }) }));
++import { closeSqliteDb, sqliteDb } from '@/lib/db/sqlite';
++import { POST as callback } from '@/app/api/package/callback/route';
++import { PATCH as local } from '@/app/api/packager/jobs/route';
++const APP = '11111111-1111-4111-8111-111111111111';
++beforeEach(() => { vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('DATABASE_PATH', ':memory:'); vi.stubEnv('CALLBACK_SECRET', 'fixture'); closeSqliteDb(); });
++afterEach(() => { closeSqliteDb(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
++async function setup() {
++  const claim = await sqliteDb.claimedApps.upsert({ user_id: 'staff', tenant_id: 'tenant', discovered_app_id: 'detected', discovered_app_name: 'Fixture', winget_package_id: 'Vendor.App', device_count_at_claim: 1 });
++  const job = await sqliteDb.jobs.create({ user_id: 'staff', tenant_id: 'tenant', winget_id: 'Vendor.App', display_name: 'Fixture', version: '1', installer_type: 'exe', installer_url: 'https://example.test/app.exe', status: 'uploading', package_config: { discovery: { tenantId: 'tenant', discoveredAppId: 'detected', packageId: 'Vendor.App', claimId: claim.id } } });
++  await sqliteDb.jobs.update(job.id, { packager_id: 'packager' });
++  return job;
++}
++function send(kind: 'callback' | 'local', jobId: string, status = 'deployed', extra = {}) {
++  const req = new NextRequest('http://localhost/api/fixture', { method: kind === 'callback' ? 'POST' : 'PATCH', headers: { Authorization: 'Bearer fixture', 'X-Signature': 'fixture' }, body: JSON.stringify({ jobId, packagerId: 'packager', status, intuneAppId: APP, ...extra }) });
++  return kind === 'callback' ? callback(req) : local(req);
++}
++for (const kind of ['callback', 'local'] as const) describe(`${kind} completion`, () => {
++  it('requires an Intune object ID before recording successful deployment', async () => {
++    const j = await setup();
++    expect((await send(kind, j.id, 'deployed', { intuneAppId: undefined })).status).toBe(400);
++    expect((await sqliteDb.jobs.getById(j.id))?.status).toBe('uploading');
++  });
++  it('links only the source claim once and ignores terminal regressions', async () => {
++    const j = await setup();
++    expect((await send(kind, j.id)).status).toBe(200);
++    expect((await sqliteDb.claimedApps.listByTenant('tenant'))[0]).toMatchObject({ status: 'deployed', intune_app_id: APP });
++    expect((await send(kind, j.id)).status).toBe(200);
++    await send(kind, j.id, 'failed');
++    expect((await sqliteDb.jobs.getById(j.id))?.status).toBe('deployed');
++    expect(await sqliteDb.uploadHistory.getByUserId('staff')).toHaveLength(1);
++  });
++  it('recovers a failed claim side effect on an idempotent terminal retry', async () => {
++    const j = await setup();
++    const update = vi.spyOn(sqliteDb.claimedApps, 'update').mockRejectedValueOnce(new Error('database busy'));
++    expect((await send(kind, j.id)).status).toBe(200);
++    expect((await sqliteDb.claimedApps.listByTenant('tenant'))[0].status).toBe('pending');
++    expect((await send(kind, j.id)).status).toBe(200);
++    expect((await sqliteDb.claimedApps.listByTenant('tenant'))[0].status).toBe('deployed');
++    expect(await sqliteDb.uploadHistory.getByUserId('staff')).toHaveLength(1);
++    update.mockRestore();
++  });
++  it('does not revive a cancelled job on a late deployed callback', async () => {
++    const j = await setup();
++    await sqliteDb.jobs.update(j.id, { status: 'cancelled' });
++    expect((await send(kind, j.id)).status).toBe(200);
++    expect((await sqliteDb.jobs.getById(j.id))?.status).toBe('cancelled');
++    expect((await sqliteDb.claimedApps.listByTenant('tenant'))[0].status).toBe('pending');
++    expect(await sqliteDb.uploadHistory.getByUserId('staff')).toHaveLength(0);
++  });
++});
++it('ignores a late local packaging report after upload has started', async () => {
++  const j = await setup();
++  expect((await send('local', j.id, 'uploading')).status).toBe(200);
++  expect((await send('local', j.id, 'packaging')).status).toBe(200);
++  expect((await sqliteDb.jobs.getById(j.id))?.status).toBe('uploading');
++  expect((await sqliteDb.jobs.getById(j.id))?.upload_started_at).toBeTruthy();
++});
++it('rejects another local packager before changing terminal or claim state', async () => {
++  const j = await setup();
++  expect((await send('local', j.id, 'deployed', { packagerId: 'someone-else' })).status).toBe(400);
++  expect((await sqliteDb.jobs.getById(j.id))?.status).toBe('uploading');
++});
+diff --git a/lib/__tests__/discovery-management.test.ts b/lib/__tests__/discovery-management.test.ts
+new file mode 100644
+index 000000000..1aa3ecb9f
+--- /dev/null
++++ b/lib/__tests__/discovery-management.test.ts
+@@ -0,0 +1,209 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { closeSqliteDb, sqliteDb } from '@/lib/db/sqlite';
++import { checkDiscoveryDispatch, readDiscoveryManagement, reconcileDiscoveryClaim, validateDiscoveryProvenance } from '@/lib/discovery-management';
++import { canStageDiscovery, managementLabel, packageKey, reviewAcknowledged } from '@/lib/discovery-state';
++import type { PackagingJob } from '@/lib/db/types';
++vi.mock('@/lib/graph-token', () => ({ acquireGraphToken: vi.fn(async () => ({ accessToken: 'fixture' })) }));
++
++const APP1 = '11111111-1111-4111-8111-111111111111';
++const APP2 = '22222222-2222-4222-8222-222222222222';
++const PROBE = vi.fn(async () => 'present' as const);
++beforeEach(() => { vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('DATABASE_PATH', ':memory:'); closeSqliteDb(); PROBE.mockClear(); });
++afterEach(() => { closeSqliteDb(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
++const job = (extra: Partial<PackagingJob> = {}) => sqliteDb.jobs.create({ user_id: 'staff', tenant_id: 'tenant', winget_id: 'Vendor.App', display_name: 'Fixture app', version: '1', installer_type: 'exe', installer_url: 'https://example.test/app.exe', status: 'queued', ...extra });
++const state = async (probe: (tenant: string, id: string) => Promise<'present' | 'absent' | 'unknown'> = PROBE) =>
++  (await readDiscoveryManagement('tenant', { db: sqliteDb, probe }))['vendor.app'];
++const item = { wingetId: 'VENDOR.APP', appSource: 'win32' };
++
++describe('tenant package deployment evidence', () => {
++  it('canonicalizes exact package identity and never names or publishers', () => {
++    expect(packageKey(' Vendor.App ')).toBe('vendor.app');
++    expect(packageKey('Vendor App')).toBeNull();
++    expect(packageKey(undefined)).toBeNull();
++  });
++  it('binds saved review acknowledgement to the current tenant and package', () => {
++    const reviewed = { ...item, forceCreate: true, deploymentReview: { tenantId: 'tenant', packageId: 'Vendor.App' } };
++    expect(reviewAcknowledged(reviewed, 'tenant')).toBe(true);
++    expect(reviewAcknowledged(reviewed, 'other')).toBe(false);
++    expect(reviewAcknowledged({ ...reviewed, wingetId: 'Vendor.Other' }, 'tenant')).toBe(false);
++    expect(reviewAcknowledged({ ...item, forceCreate: true }, 'tenant')).toBe(false);
++  });
++  it('separates queued jobs from previous or verified copies even after cart clearing', async () => {
++    await job();
++    const s = await state();
++    expect(s.state).toBe('none');
++    expect(s.activeJobId).toBeTruthy();
++    expect(managementLabel(s)).toBe('Deployment queued or running');
++    expect(canStageDiscovery(s)).toBe(false);
++    expect(PROBE).not.toHaveBeenCalled();
++    await expect(checkDiscoveryDispatch([{ ...item, forceCreate: true }], 'tenant', sqliteDb)).rejects.toThrow(/queued or running/);
++  });
++  it.each(['failed', 'cancelled', 'qa_failed', 'duplicate_skipped', 'completed'])('does not promote %s to deployed', async status => {
++    await job({ status, intune_app_id: APP1 });
++    const s = await state();
++    expect(s.state).toBe('none');
++    expect(s.activeJobId).toBeUndefined();
++    expect(canStageDiscovery(s)).toBe(true);
++    expect(PROBE).not.toHaveBeenCalled();
++    await expect(checkDiscoveryDispatch([item], 'tenant', sqliteDb)).resolves.toBeUndefined();
++  });
++  it('requires live presence, checks all versions, and retains dismissed deployment evidence', async () => {
++    const old = await job({ status: 'deployed' });
++    await sqliteDb.jobs.update(old.id, { intune_app_id: APP1, archived_at: '2026-01-01T00:00:00Z' });
++    const newer = await job({ status: 'deployed', version: '2' });
++    await sqliteDb.jobs.update(newer.id, { intune_app_id: APP2 });
++    const s = await state(async (_, id) => id === APP1 ? 'present' : 'absent');
++    expect(s.state).toBe('verified');
++    expect(s.copies).toHaveLength(2);
++    expect(s.copies.find(c => c.intuneAppId === APP1)?.version).toBe('1');
++    expect(canStageDiscovery(s)).toBe(false);
++    await expect(checkDiscoveryDispatch([item], 'tenant', sqliteDb)).rejects.toThrow(/previously deployed/);
++    await expect(checkDiscoveryDispatch([{ ...item, forceCreate: true }], 'tenant', sqliteDb)).rejects.toThrow(/previously deployed/);
++    await expect(checkDiscoveryDispatch([{ ...item, forceCreate: true, deploymentReview: { tenantId: 'other', packageId: 'Vendor.App' } }], 'tenant', sqliteDb)).rejects.toThrow(/previously deployed/);
++    await expect(checkDiscoveryDispatch([{ ...item, forceCreate: true, deploymentReview: { tenantId: 'tenant', packageId: 'Vendor.Other' } }], 'tenant', sqliteDb)).rejects.toThrow(/previously deployed/);
++    await expect(checkDiscoveryDispatch([{ ...item, forceCreate: true, replacesIntuneAppId: APP1 }], 'tenant', sqliteDb)).resolves.toBeUndefined();
++    await expect(checkDiscoveryDispatch([{ ...item, forceCreate: true, deploymentReview: { tenantId: 'tenant', packageId: 'Vendor.App' } }], 'tenant', sqliteDb)).resolves.toBeUndefined();
++    expect((await readDiscoveryManagement('other-tenant', { db: sqliteDb, probe: PROBE }))['vendor.app']).toBeUndefined();
++  });
++  it.each(['absent', 'unknown', 'throw'] as const)('keeps %s objects separate from verified management', async result => {
++    const j = await job({ status: 'deployed' });
++    await sqliteDb.jobs.update(j.id, { intune_app_id: APP1 });
++    const s = await state(async () => { if (result === 'throw') throw new Error('offline'); return result; });
++    expect(s.state).toBe(result === 'absent' ? 'deleted' : 'unverified');
++    expect(canStageDiscovery(s)).toBe(false);
++  });
++  it('keeps missing completion bookkeeping recoverable from the deployed job', async () => {
++    const j = await job({ status: 'deployed' });
++    await sqliteDb.jobs.update(j.id, { intune_app_id: APP1 });
++    expect(await sqliteDb.uploadHistory.getByUserId('staff')).toEqual([]);
++    expect((await state()).state).toBe('verified');
++    expect(canStageDiscovery(undefined)).toBe(false);
++  });
++  it('keeps orphaned historical copies unverified even when another recorded copy is deleted', async () => {
++    const j = await job({ status: 'deployed' });
++    await sqliteDb.jobs.update(j.id, { intune_app_id: APP1 });
++    await sqliteDb.uploadHistory.create({ user_id: 'staff', intune_tenant_id: 'tenant', winget_id: 'VENDOR.APP', version: '0.5', display_name: 'Fixture', intune_app_id: APP2 });
++    const s = await state(async () => 'absent');
++    expect(s.state).toBe('unverified');
++    expect(s.copies).toHaveLength(2);
++    expect(s.copies.find(c => c.intuneAppId === APP2)?.state).toBe('unknown');
++    await expect(checkDiscoveryDispatch([item], 'tenant', sqliteDb)).rejects.toThrow(/previously deployed/);
++    expect((await readDiscoveryManagement('foreign', { db: sqliteDb, probe: PROBE }))['vendor.app']).toBeUndefined();
++  });
++  it('does not call a historical deployment with no Intune ID verified', async () => {
++    await job({ status: 'deployed' });
++    expect((await state()).state).toBe('unverified');
++    expect(PROBE).not.toHaveBeenCalled();
++  });
++  it('never reports all copies removed when another deployment lacks a trustworthy object ID', async () => {
++    await job({ status: 'deployed' });
++    const known = await job({ status: 'deployed' });
++    await sqliteDb.jobs.update(known.id, { intune_app_id: APP1 });
++    expect((await state(async () => 'absent')).state).toBe('unverified');
++  });
++  it.each(['failed', 'cancelled'])('keeps an unconfirmed %s upload out of Claim without claiming it succeeded', async status => {
++    const j = await job({ status });
++    await sqliteDb.jobs.update(j.id, { upload_started_at: '2026-01-01T00:00:00Z' });
++    const s = await state();
++    expect(s.state).toBe('unverified');
++    expect(s.unconfirmedAttempt).toBe(true);
++    expect(managementLabel(s)).toBe('Deployment outcome needs review');
++    expect(PROBE).not.toHaveBeenCalled();
++    await expect(checkDiscoveryDispatch([item], 'tenant', sqliteDb)).rejects.toThrow(/unconfirmed outcome/);
++    await expect(checkDiscoveryDispatch([{ ...item, forceCreate: true, deploymentReview: { tenantId: 'tenant', packageId: 'Vendor.App' } }], 'tenant', sqliteDb)).resolves.toBeUndefined();
++  });
++  it('does not convert a missed completion timeout into permission to deploy again', async () => {
++    await job({ status: 'failed', error_message: 'Job timed out after 75 minutes without progress' });
++    expect((await state()).unconfirmedAttempt).toBe(true);
++    await expect(checkDiscoveryDispatch([item], 'tenant', sqliteDb)).rejects.toThrow(/unconfirmed/);
++  });
++  it.each([[404, {}, 'deleted'], [403, {}, 'unverified'], [429, {}, 'unverified'], [200, { id: APP2 }, 'unverified'], [200, { id: APP1 }, 'verified']] as const)('uses the actual %s response without treating errors or identity mismatches as absence', async (status, body, expected) => {
++    const j = await job({ status: 'deployed' });
++    await sqliteDb.jobs.update(j.id, { intune_app_id: APP1 });
++    vi.stubGlobal('fetch', vi.fn(async () => Response.json(body, { status })));
++    const s = (await readDiscoveryManagement('tenant', { db: sqliteDb }))['vendor.app'];
++    expect(s.state).toBe(expected);
++    expect(fetch).toHaveBeenCalledWith(expect.stringContaining(APP1), expect.objectContaining({ cache: 'no-store', headers: { Authorization: 'Bearer fixture' } }));
++  });
++  it('does not verify a recorded object when the stored package identity disagrees', async () => {
++    const j = await job({ status: 'deployed', package_config: { wingetId: 'Vendor.Other' } });
++    await sqliteDb.jobs.update(j.id, { intune_app_id: APP1 });
++    expect((await state()).state).toBe('unverified');
++    expect(PROBE).not.toHaveBeenCalled();
++  });
++  it('ignores custom, removal and Store namespaces, not inventory publisher differences', async () => {
++    await job({ package_config: { sourceType: 'custom' }, status: 'deployed' });
++    await job({ package_config: { hrmRemoval: { discoveredName: 'Fixture app' } }, status: 'deployed' });
++    await job({ app_source: 'store', status: 'deployed' });
++    expect(await state()).toBeUndefined();
++    await expect(checkDiscoveryDispatch([{ ...item, hrmRemoval: {} }, { ...item, sourceType: 'custom' }], 'tenant', sqliteDb)).resolves.toBeUndefined();
++  });
++  it('fails closed on duplicate items and failed history reads', async () => {
++    await expect(checkDiscoveryDispatch([item, { ...item, wingetId: 'vendor.app' }], 'tenant', sqliteDb)).rejects.toThrow(/more than once/);
++    const spy = vi.spyOn(sqliteDb.jobs, 'getDiscoveryJobs').mockRejectedValue(new Error('database busy'));
++    await expect(checkDiscoveryDispatch([item], 'tenant', sqliteDb)).rejects.toThrow(/database busy/);
++    spy.mockRestore();
++  });
++});
++
++describe('explicit claim provenance and completion recovery', () => {
++  async function linked() {
++    const claim = await sqliteDb.claimedApps.upsert({ tenant_id: 'tenant', user_id: 'staff', discovered_app_id: 'detected-old-version', discovered_app_name: 'Fixture app', winget_package_id: 'Vendor.App', device_count_at_claim: 2 });
++    return { tenantId: 'tenant', discoveredAppId: claim.discovered_app_id, packageId: 'Vendor.App', claimId: claim.id };
++  }
++  it('reconciles the original claim idempotently and supports detected-ID rollover through package state', async () => {
++    const discovery = await linked();
++    const j = await job({ status: 'deployed', package_config: { discovery } });
++    const deployed = (await sqliteDb.jobs.update(j.id, { intune_app_id: APP1 }))!;
++    await reconcileDiscoveryClaim(deployed, sqliteDb);
++    await reconcileDiscoveryClaim(deployed, sqliteDb);
++    expect((await sqliteDb.claimedApps.listByTenant('tenant'))[0]).toMatchObject({ status: 'deployed', intune_app_id: APP1 });
++    // No lookup by detected id: the newest scan may use an unrelated inventory version id.
++    expect((await state()).state).toBe('verified');
++  });
++  it('rejects tenant, package and stale claim mismatches before queueing', async () => {
++    const discovery = await linked();
++    for (const d of [ { ...discovery, tenantId: 'other' }, { ...discovery, packageId: 'Vendor.Other' }, { ...discovery, claimId: 'stale' } ]) {
++      await expect(validateDiscoveryProvenance({ ...item, discovery: d }, 'tenant', sqliteDb)).rejects.toThrow();
++    }
++    await expect(validateDiscoveryProvenance({ ...item, discovery, sourceType: 'custom' }, 'tenant', sqliteDb)).rejects.toThrow();
++    expect((await sqliteDb.claimedApps.listByTenant('tenant'))[0].status).toBe('pending');
++  });
++  it('never links catalog, removal, custom or unsuccessful jobs to arbitrary claims', async () => {
++    const discovery = await linked();
++    for (const extra of [ { status: 'failed', package_config: { discovery } }, { status: 'deployed', package_config: {} }, { status: 'deployed', package_config: { discovery, hrmRemoval: {} } }, { status: 'deployed', package_config: { discovery, sourceType: 'custom' } } ]) {
++      const j = await job(extra);
++      await reconcileDiscoveryClaim({ ...j, intune_app_id: APP1 }, sqliteDb);
++    }
++    expect((await sqliteDb.claimedApps.listByTenant('tenant'))[0].status).toBe('pending');
++  });
++  it('does not let an old terminal retry replace a newer linked deployment', async () => {
++    const discovery = await linked();
++    const older = await job({ status: 'deployed', package_config: { discovery } });
++    const newer = await job({ status: 'deployed', package_config: { discovery }, version: '2' });
++    const old = (await sqliteDb.jobs.update(older.id, { created_at: '2026-01-01T00:00:00Z', intune_app_id: APP1 }))!;
++    const recent = (await sqliteDb.jobs.update(newer.id, { created_at: '2026-01-02T00:00:00Z', intune_app_id: APP2 }))!;
++    await reconcileDiscoveryClaim(recent, sqliteDb);
++    await reconcileDiscoveryClaim(old, sqliteDb);
++    expect((await sqliteDb.claimedApps.listByTenant('tenant'))[0].intune_app_id).toBe(APP2);
++  });
++});
++
++describe('atomic dispatch reservation', () => {
++  const origin = { deploymentOrigin: { kind: 'catalog', tenantId: 'tenant', packageId: 'Vendor.App' } };
++  it('blocks a second concurrent request even with forceCreate and releases after cancellation', async () => {
++    const results = await Promise.allSettled([job({ package_config: origin }), job({ package_config: { ...origin, forceCreate: true } })]);
++    expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
++    expect(results.filter(r => r.status === 'rejected')).toHaveLength(1);
++    const current = (await sqliteDb.jobs.getDiscoveryJobs('tenant'))[0];
++    await sqliteDb.jobs.update(current.id, { status: 'cancelled' });
++    await expect(job({ package_config: origin })).resolves.toBeTruthy();
++  });
++  it('requires an explicit second copy for history, includes archived jobs and isolates tenants', async () => {
++    const old = await job({ status: 'deployed' });
++    await sqliteDb.jobs.update(old.id, { archived_at: '2026-01-01T00:00:00Z' });
++    await expect(job({ package_config: origin })).rejects.toThrow(/previously deployed/);
++    await expect(job({ package_config: origin, tenant_id: 'other' })).resolves.toBeTruthy();
++    await expect(job({ package_config: { ...origin, forceCreate: true } })).resolves.toBeTruthy();
++  });
++});
 diff --git a/lib/catalog/snapshot-source.test.ts b/lib/catalog/snapshot-source.test.ts
 index acd955b80..c1a2f45b9 100644
 --- a/lib/catalog/snapshot-source.test.ts
@@ -1432,6 +2431,209 @@ index 119ada8d5..4bdb560f2 100644
    // A release whose packaging profile is no longer current is withheld until
    // the automation verifies it again; other apps stay deployable meanwhile.
    const entries = catalogEntries(CURATED_APPS, payload).map(entry => {
+diff --git a/lib/discovery-management.ts b/lib/discovery-management.ts
+new file mode 100644
+index 000000000..5595d2061
+--- /dev/null
++++ b/lib/discovery-management.ts
+@@ -0,0 +1,145 @@
++import { getDatabase } from '@/lib/db';
++import type { DatabaseAdapter, PackagingJob, DiscoveryJobEvidence } from '@/lib/db/types';
++import { acquireGraphToken } from '@/lib/graph-token';
++import { packageKey, reviewAcknowledged, type DiscoveryProvenance, type PackageManagementState } from './discovery-state';
++
++const TERMINAL = new Set(['deployed', 'completed', 'failed', 'cancelled', 'duplicate_skipped', 'qa_failed']);
++const GUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
++export class DiscoveryConflictError extends Error {}
++function config(job: DiscoveryJobEvidence): Record<string, unknown> {
++  return job.package_config && typeof job.package_config === 'object' && !Array.isArray(job.package_config)
++    ? job.package_config as Record<string, unknown> : {};
++}
++export function ordinaryPackage(job: DiscoveryJobEvidence): string | null {
++  const c = config(job);
++  const origin = c.deploymentOrigin as { kind?: string } | undefined;
++  if (c.sourceType === 'custom' || c.hrmRemoval || job.app_source === 'store' || c.appSource === 'store'
++    || (origin && ['custom', 'removal', 'store'].includes(origin.kind || ''))
++    || job.winget_id?.toLowerCase().startsWith('custom.')) return null;
++  return packageKey(job.winget_id);
++}
++
++type Probe = (tenantId: string, appId: string) => Promise<'present' | 'absent' | 'unknown'>;
++/** No cross-request cache: a historical deployment is never silently promoted to current management. */
++export async function readDiscoveryManagement(tenantId: string, deps: { db?: DatabaseAdapter; probe?: Probe; verify?: boolean } = {}) {
++  const jobs = await (deps.db || getDatabase()).jobs.getDiscoveryJobs(tenantId);
++  const states: Record<string, PackageManagementState> = {};
++  const unverifiedHistoryCopies = new Set<PackageManagementState['copies'][number]>();
++  const incompleteEvidence = new Set<string>();
++  const now = new Date().toISOString();
++  for (const job of jobs) {
++    if (job.tenant_id !== tenantId) continue;
++    const key = ordinaryPackage(job);
++    if (!key) continue;
++    const state = states[key] ||= { packageId: key, state: 'none', copies: [], checkedAt: now };
++    // Jobs are newest first. Unknown nonterminal statuses fail closed against another deployment.
++    if (!TERMINAL.has(job.status) && !state.activeJobId) {
++      state.activeJobId = job.id;
++      state.activeStatus = job.status;
++    }
++    if (['failed', 'cancelled'].includes(job.status) && (job.intune_app_id || job.upload_started_at
++      || job.error_stage === 'upload' || job.error_message?.startsWith('Job timed out after '))) {
++      state.unconfirmedAttempt = true;
++      if (state.state === 'none') state.state = 'unverified';
++    }
++    if (job.status !== 'deployed') continue;
++    state.state = 'previously_deployed';
++    const c = config(job);
++    const origin = c.deploymentOrigin as { tenantId?: string; packageId?: string } | undefined;
++    const identityMatches = (!c.wingetId || packageKey(c.wingetId) === key)
++      && (!origin || (origin.tenantId === tenantId && packageKey(origin.packageId) === key));
++    if (!identityMatches || !job.intune_app_id) incompleteEvidence.add(key);
++    if (identityMatches && job.intune_app_id && !state.copies.some(c => c.intuneAppId === job.intune_app_id)) {
++      const copy: PackageManagementState['copies'][number] = { intuneAppId: job.intune_app_id, version: job.version, state: 'unknown' };
++      state.copies.push(copy);
++      if (job.historyOnly) unverifiedHistoryCopies.add(copy);
++    }
++  }
++  if (deps.verify === false) return states;
++  const deadline = Date.now() + 8_000;
++  let token: Promise<string> | undefined;
++  const probe: Probe = deps.probe || (async (tenant, id) => {
++    if (!GUID.test(id) || Date.now() >= deadline) return 'unknown';
++    token ||= acquireGraphToken(tenant).then(t => t.accessToken);
++    const bearer = await Promise.race([token, new Promise<never>((_, reject) => {
++      const timer = setTimeout(() => reject(new Error('Intune read timeout')), Math.max(1, deadline - Date.now()));
++      timer.unref?.();
++    })]);
++    if (Date.now() >= deadline) return 'unknown';
++    const response = await fetch(`https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/${encodeURIComponent(id)}?$select=id`, {
++      headers: { Authorization: `Bearer ${bearer}` }, cache: 'no-store',
++      signal: AbortSignal.timeout(Math.max(1, Math.min(3_000, deadline - Date.now()))),
++    });
++    if (response.status === 404) return 'absent';
++    if (!response.ok) return 'unknown';
++    const body = await response.json();
++    return typeof body?.id === 'string' && body.id.toLowerCase() === id.toLowerCase() ? 'present' : 'unknown';
++  });
++  // Bounded request fan-out. Unchecked copies remain unknown, never absent or verified.
++  const copies = Object.values(states).flatMap(s => s.copies).filter(c => !unverifiedHistoryCopies.has(c));
++  let next = 0;
++  await Promise.all(Array.from({ length: Math.min(4, copies.length) }, async () => {
++    while (next < Math.min(80, copies.length) && Date.now() < deadline) {
++      const copy = copies[next++];
++      try { copy.state = await probe(tenantId, copy.intuneAppId); } catch { copy.state = 'unknown'; }
++    }
++  }));
++  for (const state of Object.values(states)) {
++    if (state.copies.some(c => c.state === 'present')) state.state = 'verified';
++    else if (!incompleteEvidence.has(state.packageId) && state.copies.length && state.copies.every(c => c.state === 'absent')) state.state = 'deleted';
++    else if (state.state === 'previously_deployed') state.state = 'unverified';
++  }
++  return states;
++}
++
++/** Validate the immutable discovery tuple before it becomes job configuration. */
++export async function validateDiscoveryProvenance(item: { wingetId: string; discovery?: DiscoveryProvenance; sourceType?: string; hrmRemoval?: unknown; appSource?: string }, tenantId: string, db = getDatabase()) {
++  const d = item.discovery;
++  if (!d) return;
++  if (d.tenantId !== tenantId || !d.claimId || !d.discoveredAppId || !packageKey(d.packageId)
++    || packageKey(d.packageId) !== packageKey(item.wingetId) || item.sourceType === 'custom' || item.hrmRemoval || item.appSource === 'store') {
++    throw new DiscoveryConflictError('The discovered app no longer matches this tenant and package. Add it again from Discovered apps.');
++  }
++  const claim = (await db.claimedApps.listByTenant(tenantId)).find(c => c.discovered_app_id === d.discoveredAppId);
++  if (!claim || claim.id !== d.claimId || claim.tenant_id !== tenantId || packageKey(claim.winget_package_id) !== packageKey(item.wingetId)) {
++    throw new DiscoveryConflictError('The discovered app link changed. Add it again from Discovered apps.');
++  }
++}
++
++/** Both completion paths use the same tenant/package/provenance checks. Repeat calls are harmless. */
++export async function reconcileDiscoveryClaim(job: PackagingJob, db = getDatabase()) {
++  const key = ordinaryPackage(job);
++  const d = config(job).discovery as DiscoveryProvenance | undefined;
++  if (!key || !d || !job.tenant_id || job.status !== 'deployed' || !job.intune_app_id) return;
++  if (config(job).wingetId && packageKey(config(job).wingetId) !== key) return;
++  await validateDiscoveryProvenance({ wingetId: job.winget_id, discovery: d }, job.tenant_id, db);
++  const latest = (await db.jobs.getDiscoveryJobs(job.tenant_id)).find(other => other.status === 'deployed'
++    && ordinaryPackage(other) === key && other.tenant_id === job.tenant_id
++    && (config(other).discovery as DiscoveryProvenance | undefined)?.claimId === d.claimId);
++  if (latest && latest.id !== job.id) return;
++  await db.claimedApps.update(d.claimId, job.tenant_id, { status: 'deployed', intune_app_id: job.intune_app_id });
++}
++
++/** Server checkpoint, before QA demand or queue side effects. A deliberate second copy is per item. */
++export async function checkDiscoveryDispatch(items: { wingetId: string; discovery?: DiscoveryProvenance; sourceType?: string; hrmRemoval?: unknown; appSource?: string; forceCreate?: boolean; deploymentReview?: { tenantId: string; packageId: string }; replacesIntuneAppId?: string }[], tenantId: string, db = getDatabase()) {
++  const ordinary = items.filter(i => i.sourceType !== 'custom' && !i.hrmRemoval && i.appSource !== 'store' && !packageKey(i.wingetId)?.startsWith('custom.'));
++  if (!ordinary.length) return;
++  const states = await readDiscoveryManagement(tenantId, { db, verify: false });
++  const submitted = new Set<string>();
++  for (const item of ordinary) {
++    const key = packageKey(item.wingetId);
++    if (!key) { if (item.discovery) throw new DiscoveryConflictError('Invalid catalog package identity.'); continue; }
++    await validateDiscoveryProvenance(item, tenantId, db);
++    if (submitted.has(key)) throw new DiscoveryConflictError('This package appears more than once. Keep one copy in the Deployment list.');
++    submitted.add(key);
++    const state = states[key];
++    const reviewed = reviewAcknowledged(item, tenantId, state?.copies);
++    if (state?.activeJobId) throw new DiscoveryConflictError('This package already has a queued or running deployment. Review Deployments before trying again.');
++    if (state?.unconfirmedAttempt && !reviewed) throw new DiscoveryConflictError('A previous upload has an unconfirmed outcome. Review Deployments and Inventory before choosing Add a second copy anyway.');
++    if (state && state.state !== 'none' && !reviewed) {
++      throw new DiscoveryConflictError('This package was previously deployed. Review it in Inventory, or choose Add a second copy anyway in the Deployment list. This does not confirm that a previous copy still exists or installed on computers.');
++    }
++    // An old cart's blanket force flag must not bypass a history row inserted after this read.
++    if (item.forceCreate === true && !reviewed && !item.replacesIntuneAppId) item.forceCreate = false;
++  }
++}
+diff --git a/lib/discovery-state.ts b/lib/discovery-state.ts
+new file mode 100644
+index 000000000..598a750c7
+--- /dev/null
++++ b/lib/discovery-state.ts
+@@ -0,0 +1,46 @@
++/** Browser-safe identities. Display names, publishers and detected version IDs are not package identities. */
++export function packageKey(value: unknown): string | null {
++  return typeof value === 'string' && /^[a-z0-9][a-z0-9._+-]{0,199}$/i.test(value.trim())
++    ? value.trim().toLowerCase() : null;
++}
++
++export interface DiscoveryProvenance {
++  tenantId: string;
++  discoveredAppId: string;
++  packageId: string;
++  claimId: string;
++}
++
++export interface PackageManagementState {
++  packageId: string;
++  /** A deployment job is queued/running, independently of any older live copies. */
++  activeJobId?: string;
++  activeStatus?: string;
++  /** A cancelled/failed upload or lost completion may have left an Intune object. */
++  unconfirmedAttempt?: boolean;
++  /** Only a successful, identity-checked Graph read makes a copy verified. */
++  state: 'none' | 'previously_deployed' | 'verified' | 'deleted' | 'unverified';
++  copies: { intuneAppId: string; version: string; state: 'present' | 'absent' | 'unknown' }[];
++  checkedAt: string;
++}
++
++export function managementLabel(state?: PackageManagementState): string {
++  if (!state) return 'Deployment state unavailable';
++  if (state.activeJobId) return 'Deployment queued or running';
++  if (state.unconfirmedAttempt) return 'Deployment outcome needs review';
++  if (state.state === 'verified') return 'Verified in Intune';
++  if (state.state === 'deleted') return 'Previous copies removed from Intune';
++  if (state.state === 'unverified') return 'Previous deployment not verified';
++  if (state.state === 'previously_deployed') return 'Previously deployed';
++  return '';
++}
++
++/** Claim is a staging action, never adoption of an existing Intune object. */
++export function canStageDiscovery(state?: PackageManagementState): boolean {
++  return !!state && state.state === 'none' && !state.activeJobId && !state.unconfirmedAttempt;
++}
++
++export function reviewAcknowledged(item: { wingetId: string; forceCreate?: boolean; deploymentReview?: { tenantId: string; packageId: string }; replacesIntuneAppId?: string }, tenantId: string | null, copies: readonly { intuneAppId: string }[] = []): boolean {
++  return !!tenantId && item.forceCreate === true && ((item.deploymentReview?.tenantId === tenantId && packageKey(item.deploymentReview.packageId) === packageKey(item.wingetId))
++    || (typeof item.replacesIntuneAppId === 'string' && copies.some(c => c.intuneAppId.toLowerCase() === item.replacesIntuneAppId!.toLowerCase())));
++}
 diff --git a/lib/hrm/__tests__/catalog-links.test.ts b/lib/hrm/__tests__/catalog-links.test.ts
 new file mode 100644
 index 000000000..581aa1bd1
@@ -2245,17 +3447,48 @@ index 000000000..c97a1106f
 +    isStoreApp: false,
 +  };
 +}
+diff --git a/stores/cart-store.ts b/stores/cart-store.ts
+index 05623362d..fc01fe6df 100644
+--- a/stores/cart-store.ts
++++ b/stores/cart-store.ts
+@@ -3,6 +3,7 @@
+  * Zustand store for managing the upload cart
+  */
+ 
++import { packageKey } from '@/lib/discovery-state';
+ import { create } from 'zustand';
+ import { persist } from 'zustand/middleware';
+ import type { CartItem, Win32CartItem, StoreCartItem, NewCartItem } from '@/types/upload';
+@@ -103,6 +104,7 @@ export const useCartStore = create<CartStore>()(
+       autoOpenOnAdd: true,
+ 
+       addItem: (item) => {
++        if (item.discovery && get().items.some(existing => existing.discovery?.tenantId === item.discovery!.tenantId && packageKey(existing.wingetId) === packageKey(item.wingetId) && !existing.hrmRemoval)) return;
+         const id = generateCartItemId(item);
+         const shouldOpenCart = get().autoOpenOnAdd;
+         set((state) => ({
+@@ -119,6 +121,7 @@ export const useCartStore = create<CartStore>()(
+       },
+ 
+       addItemSilent: (item) => {
++        if (item.discovery && get().items.some(existing => existing.discovery?.tenantId === item.discovery!.tenantId && packageKey(existing.wingetId) === packageKey(item.wingetId) && !existing.hrmRemoval)) return;
+         const id = generateCartItemId(item);
+         set((state) => ({
+           items: [
 diff --git a/types/unmanaged.ts b/types/unmanaged.ts
-index 4bc758c5c..fcbf566e3 100644
+index 4bc758c5c..878287ada 100644
 --- a/types/unmanaged.ts
 +++ b/types/unmanaged.ts
-@@ -42,7 +42,11 @@ export interface UnmanagedApp {
+@@ -42,7 +42,14 @@ export interface UnmanagedApp {
    matchedPackageName: string | null;
    matchConfidence: number | null;
    partialMatches?: PartialMatch[];
 +  /** HRM patch: a Microsoft Store (MSIX) app, which IntuneGet can't deploy from WinGet */
 +  isStoreApp?: boolean;
++  /** Local Deployment list membership, separate from tenant deployment history. */
    isClaimed: boolean;
++  tenantId?: string;
++  management?: import("@/lib/discovery-state").PackageManagementState;
 +  /** HRM patch 0040: what the Deployment list will do with it: install (claimed) or remove */
 +  cartPurpose?: 'install' | 'remove';
    claimStatus?: ClaimStatus;

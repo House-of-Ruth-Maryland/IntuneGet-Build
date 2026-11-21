@@ -98,7 +98,7 @@ HRM IT notes.
 - When a patch calls something new from a module that upstream tests mock with `vi.mock`, add it to
   that mock in the same patch.
 - **Migration numbers:** every HRM SQLite migration is in `lib/db/sqlite-migrations.ts`, which is in
-  `0003-database.patch` (HRM uses 9 to 25 today; upstream v0.8.5 goes up to 8). A new migration takes
+  `0003-database.patch` (HRM uses 9 to 26 today; upstream v0.8.5 goes up to 8). A new migration takes
   the next number after the highest of both. Use `IF NOT EXISTS` so a table created by an earlier build is kept. If upstream reaches the
   same number, renumber the HRM migration above upstream's highest before building. The weekly check flags this.
 - **App mapping IDs:** `0002-self-hosted-fixes.patch` (was patch 0004) checks that every built-in app mapping resolves in WinGet. Run it on a
