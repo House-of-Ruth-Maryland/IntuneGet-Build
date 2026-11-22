@@ -972,10 +972,15 @@ index 000000000..092115fb3
 +  return !newest || newest.intune_app_id === intuneAppId;
 +}
 diff --git a/app/api/package/callback/route.ts b/app/api/package/callback/route.ts
-index 3ea3af3fe..c6d349dd3 100644
+index 3ea3af3fe..109477a6d 100644
 --- a/app/api/package/callback/route.ts
 +++ b/app/api/package/callback/route.ts
-@@ -6,11 +6,14 @@
+@@ -1,3 +1,4 @@
++import { reconcileDiscoveryClaim } from '@/lib/discovery-management';
+ /**
+  * Package Callback API Route
+  * Receives results from GitHub Actions packaging workflow
+@@ -6,11 +7,14 @@
  
  import { NextRequest, NextResponse } from 'next/server';
  import { getDatabase } from '@/lib/db';
@@ -990,7 +995,48 @@ index 3ea3af3fe..c6d349dd3 100644
  import {
    packageCallbackSchema,
    sanitizeErrorDetails,
-@@ -197,6 +200,37 @@ export async function POST(request: NextRequest) {
+@@ -47,6 +51,9 @@ export async function POST(request: NextRequest) {
+       );
+     }
+     const data = parsed.data;
++    if (data.status === 'deployed' && !data.intuneAppId) {
++      return NextResponse.json({ error: 'A deployed callback requires an Intune app ID' }, { status: 400 });
++    }
+     const db = getDatabase();
+     const currentJob = await db.jobs.getById(data.jobId);
+     if (!currentJob) {
+@@ -54,6 +61,9 @@ export async function POST(request: NextRequest) {
+     }
+ 
+     if (!shouldApplyCallback(currentJob.status, data.status, currentJob.updated_at, data.heartbeatAt)) {
++      if (currentJob.status === 'deployed') {
++        try { await reconcileDiscoveryClaim(currentJob, db); } catch { console.warn('Discovery link reconciliation deferred'); }
++      }
+       return NextResponse.json({
+         success: true,
+         ignored: true,
+@@ -82,6 +92,9 @@ export async function POST(request: NextRequest) {
+     }
+ 
+     // Handle deployed status
++    if (data.status === 'uploading' && !currentJob.upload_started_at) {
++      updateData.upload_started_at = new Date().toISOString();
++    }
+     if (data.status === 'deployed') {
+       updateData.intune_app_id = data.intuneAppId;
+       updateData.intune_app_url = data.intuneAppUrl;
+@@ -176,6 +189,10 @@ export async function POST(request: NextRequest) {
+       });
+     }
+ 
++    if (updatedJob.status === 'deployed') {
++      try { await reconcileDiscoveryClaim(updatedJob, db); } catch { console.warn('Discovery link reconciliation deferred'); }
++    }
++
+     // Side effects run only after the state transition succeeds, making callback
+     // retries idempotent and preventing duplicate history rows.
+     if (data.status === 'deployed' && data.intuneAppId) {
+@@ -197,6 +214,37 @@ export async function POST(request: NextRequest) {
          console.error(`[Callback] Failed to create upload history for ${data.jobId}:`, historyError);
        }
  
@@ -1028,7 +1074,7 @@ index 3ea3af3fe..c6d349dd3 100644
        // Materialize an update policy chosen in the cart, now that the
        // upload_history row exists to anchor original_upload_history_id.
        const chosenPolicy = parseCartUpdatePolicy(currentJob.package_config);
-@@ -212,6 +246,17 @@ export async function POST(request: NextRequest) {
+@@ -212,6 +260,17 @@ export async function POST(request: NextRequest) {
            console.warn(`[Callback] Update policy not saved for ${data.jobId}:`, policyResult);
          }
        }
@@ -1253,9 +1299,27 @@ index d29f428c0..dac880c43 100644
  export async function POST(request: NextRequest) {
    try {
 diff --git a/app/api/package/route.test.ts b/app/api/package/route.test.ts
-index 8f8432c62..60918e2f5 100644
+index 8f8432c62..afbf22f93 100644
 --- a/app/api/package/route.test.ts
 +++ b/app/api/package/route.test.ts
+@@ -172,7 +172,7 @@ describe('GET /api/package (userId listing)', () => {
+       userName: 'User One',
+     });
+     getDatabaseMock.mockReturnValue({
+-      jobs: {
++      jobs: { getDiscoveryJobs: vi.fn(async () => []),
+         getByUserId: getByUserIdMock,
+         getByTenantId: getByTenantIdMock,
+         getById: getByIdMock,
+@@ -370,7 +370,7 @@ describe('POST /api/package (workflow dispatch)', () => {
+     delete process.env.QA_MAINTENANCE_MODE;
+     delete process.env.QA_DEFERRED_CUSTOMER_UPLOADS_UNTIL;
+     getDatabaseMock.mockReturnValue({
+-      jobs: {
++      jobs: { getDiscoveryJobs: vi.fn(async () => []),
+         create: createMock,
+         update: updateMock,
+         getApprovalFailures: getApprovalFailuresMock,
 @@ -576,6 +576,47 @@ describe('POST /api/package (workflow dispatch)', () => {
      expect(job.package_config.psadtConfig).toMatchObject({customDetection:true,detectionRules:rules});
    });
@@ -1304,18 +1368,29 @@ index 8f8432c62..60918e2f5 100644
    it('returns an actionable conflict for removed versions before creating or dispatching jobs', async () => {
      getLiveInstallersMock.mockResolvedValueOnce([]);
      const response = await POST(new NextRequest('http://localhost:3000/api/package', {
+@@ -2283,7 +2324,7 @@ describe('POST /api/package (curated licence attestation)', () => {
+     acrobatItem = cart(0);
+     chromeItem = cart(1, CURATED_APPS[0]);
+     getDatabaseMock.mockReturnValue({
+-      jobs: { create: createMock, update: updateMock, getApprovalFailures: getApprovalFailuresMock },
++      jobs: { getDiscoveryJobs: vi.fn(async () => []), create: createMock, update: updateMock, getApprovalFailures: getApprovalFailuresMock },
+       curatedLicenceAttestations: {
+         get: vi.fn(async (tenantId: string, id: string, version: string) => acceptances.has(`${tenantId}|${id}|${version}`)
+           ? { id: 'acceptance', tenant_id: tenantId, app_id: acrobat.id, attestation_id: id, attestation_version: version,
 diff --git a/app/api/package/route.ts b/app/api/package/route.ts
-index 5d28e8116..7da9bfc5c 100644
+index 5d28e8116..2061b27c9 100644
 --- a/app/api/package/route.ts
 +++ b/app/api/package/route.ts
-@@ -1,4 +1,6 @@
+@@ -1,4 +1,8 @@
++import { packageKey } from '@/lib/discovery-state';
++import { checkDiscoveryDispatch, DiscoveryConflictError } from '@/lib/discovery-management';
 +import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
  import { isQaMaintenanceMode } from '@/lib/qa/maintenance';
 +import { dispatchFailureFields } from '@/lib/hrm/dispatch-failure';
  import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
  import { reconcileCuratedCartItem } from '@/lib/curated-catalog/server';
  import { findCuratedApp } from '@/lib/curated-catalog/definitions';
-@@ -19,6 +21,9 @@ import {
+@@ -19,6 +23,9 @@ import {
    type WorkflowInputs,
  } from '@/lib/github-actions';
  import { getAppConfig } from '@/lib/config';
@@ -1325,7 +1400,7 @@ index 5d28e8116..7da9bfc5c 100644
  import { parseAccessToken } from '@/lib/auth-utils';
  import { getFeatureFlags } from '@/lib/features';
  import { isValidInstallerUrl, isValidSha256 } from '@/lib/custom-app';
-@@ -195,6 +200,12 @@ export async function POST(request: NextRequest) {
+@@ -195,6 +202,12 @@ export async function POST(request: NextRequest) {
        if (psadtConfig !== undefined && (psadtConfig === null || typeof psadtConfig !== 'object' || Array.isArray(psadtConfig))) {
          return NextResponse.json({ error: 'Invalid PSADT settings' }, { status: 400 });
        }
@@ -1338,7 +1413,7 @@ index 5d28e8116..7da9bfc5c 100644
        const flag = (item as unknown as { psadtConfig?: { customDetection?: unknown } }).psadtConfig?.customDetection;
        if (flag !== undefined && typeof flag !== 'boolean') {
          return NextResponse.json({ error: 'Invalid custom detection setting' }, { status: 400 });
-@@ -207,11 +218,44 @@ export async function POST(request: NextRequest) {
+@@ -207,11 +220,54 @@ export async function POST(request: NextRequest) {
        } else if (isStoreCartItem(item) && (item as unknown as { psadtConfig?: { customDetection?: boolean } }).psadtConfig?.customDetection) {
          return NextResponse.json({ error: 'Custom detection is not supported for Store apps' }, { status: 400 });
        }
@@ -1380,10 +1455,20 @@ index 5d28e8116..7da9bfc5c 100644
 +      if (held) return NextResponse.json({ error: held },{ status: 409 });
 +    }
 +
++    try {
++      await checkDiscoveryDispatch(items, tenantId, db);
++    } catch (error) {
++      return NextResponse.json({ error: 'Review existing deployment', code: 'DISCOVERY_DEPLOYMENT_CONFLICT', message: error instanceof DiscoveryConflictError ? error.message : 'Deployment history could not be checked. Try again.' }, { status: error instanceof DiscoveryConflictError ? 409 : 503 });
++    }
++    for (const item of items) {
++      // Source provenance is server-authored; a browser cannot turn a removal into managed-install evidence.
++      item.deploymentOrigin = { tenantId, packageId: item.wingetId, kind: item.hrmRemoval ? 'removal' : (item.sourceType === 'custom' || packageKey(item.wingetId)?.startsWith('custom.')) ? 'custom' : item.appSource === 'store' ? 'store' : item.discovery ? 'discovery' : 'catalog' };
++    }
++
      // This checkpoint precedes every Store/Win32 insert and curated QA demand.
      // Neither request-level nor item-level forceCreate bypasses approval safety.
      // Check the stored canonical ID and any legacy submitted casing before demand.
-@@ -428,6 +472,17 @@ export async function POST(request: NextRequest) {
+@@ -428,6 +484,17 @@ export async function POST(request: NextRequest) {
        if (item.psadtConfig?.customDetection && !canUseCustomDetection(item)) {
          return NextResponse.json({ error: 'Custom detection is not supported for this resolved installer' }, { status: 400 });
        }
@@ -1401,10 +1486,13 @@ index 5d28e8116..7da9bfc5c 100644
      }
  
      // Enforce installer health before creating job rows. Work in pairs to
-@@ -850,6 +905,10 @@ export async function POST(request: NextRequest) {
+@@ -849,7 +916,12 @@ export async function POST(request: NextRequest) {
+                 ? JSON.stringify(item.relationships)
                  : undefined,
                installScope: item.installScope,
-               forceCreate: item.forceCreate || forceCreate,
+-              forceCreate: item.forceCreate || forceCreate,
++              // Ordinary catalog deployments require the per-item, tenant-bound review.
++              forceCreate: item.forceCreate || (item.sourceType === 'custom' ? forceCreate : undefined),
 +              // HRM patch 0024: Deploy again on a deployed app replaces it: the new app supersedes it (update),
 +              // gets the groups chosen in the panel (or, if none were chosen, the old app's current groups),
 +              // and the old app's groups are removed so devices aren't targeted twice.
@@ -1412,7 +1500,7 @@ index 5d28e8116..7da9bfc5c 100644
                qaOverride: item.sourceType === 'curated' ? false : isQaMaintenanceMode() || item.qaOverride,
                sourceType: item.sourceType,
                curatedReleaseId: item.curatedReleaseId,
-@@ -909,9 +968,10 @@ export async function POST(request: NextRequest) {
+@@ -909,9 +981,10 @@ export async function POST(request: NextRequest) {
                  status: reputationHold ? 'awaiting_qa' : 'failed',
                  status_message: reputationHold ? dispatchError : null,
                  progress_percent: 0,
@@ -1426,7 +1514,7 @@ index 5d28e8116..7da9bfc5c 100644
                  error_message: dispatchError,
                  completed_at: reputationHold ? null : new Date().toISOString(),
                }).catch((updateError) => {
-@@ -1090,12 +1150,16 @@ export async function GET(request: NextRequest) {
+@@ -1090,12 +1163,16 @@ export async function GET(request: NextRequest) {
      const scope = searchParams.get('scope');
      if (scope === 'tenant') {
        const mspTenantId = request.headers.get('X-MSP-Tenant-Id');
@@ -1449,6 +1537,76 @@ index 5d28e8116..7da9bfc5c 100644
        if (errorResponse) {
          return errorResponse;
        }
+diff --git a/app/api/packager/jobs/logging.test.ts b/app/api/packager/jobs/logging.test.ts
+index b2e79aca9..c21043bf1 100644
+--- a/app/api/packager/jobs/logging.test.ts
++++ b/app/api/packager/jobs/logging.test.ts
+@@ -32,6 +32,7 @@ import { PATCH, POST } from './route';
+ 
+ const job = {
+   id: 'job-1',
++  packager_id: 'packager-1',
+   user_id: 'user-1',
+   tenant_id: 'tenant-1',
+   winget_id: 'Test.App',
+diff --git a/app/api/packager/jobs/route.ts b/app/api/packager/jobs/route.ts
+index d6c14302a..29893dead 100644
+--- a/app/api/packager/jobs/route.ts
++++ b/app/api/packager/jobs/route.ts
+@@ -1,3 +1,5 @@
++import { reconcileDiscoveryClaim } from '@/lib/discovery-management';
++import { packageCallbackSchema, shouldApplyCallback, terminalPackageStatuses, type PackageJobStatus } from '@/lib/package-callback';
+ /**
+  * Packager Jobs API
+  * Provides endpoints for the local packager to claim and update jobs
+@@ -191,6 +193,10 @@ export async function PATCH(request: NextRequest) {
+   try {
+     const body = await request.json();
+     const { jobId, packagerId, status, progressPercent, progressMessage, error: errorMessage, intuneAppId, intuneAppUrl, duplicateInfo } = body;
++    const incoming = status === undefined ? undefined : packageCallbackSchema.shape.status.safeParse(status);
++    if ((incoming && !incoming.success) || (status === 'deployed' && (typeof intuneAppId !== 'string' || !intuneAppId.trim()))) {
++      return NextResponse.json({ error: 'Invalid deployment status or missing Intune app ID' }, { status: 400 });
++    }
+ 
+     if (!jobId || !packagerId) {
+       return NextResponse.json(
+@@ -201,6 +207,16 @@ export async function PATCH(request: NextRequest) {
+ 
+     const db = getDatabase();
+     const existingJob = await db.jobs.getById(jobId);
++    if (!existingJob || existingJob.packager_id !== packagerId) return NextResponse.json({ error: 'Job not owned by this packager' }, { status: 400 });
++    if (terminalPackageStatuses.has(existingJob.status as PackageJobStatus) || existingJob.status === 'qa_failed') {
++      if (existingJob.status === 'deployed') {
++        try { await reconcileDiscoveryClaim(existingJob, db); } catch { console.warn('Discovery link reconciliation deferred'); }
++      }
++      return NextResponse.json({ success: true, ignored: true, job: existingJob });
++    }
++    if (incoming?.success && !shouldApplyCallback(existingJob.status, incoming.data, existingJob.updated_at)) {
++      return NextResponse.json({ success: true, ignored: true, job: existingJob });
++    }
+     const now = new Date().toISOString();
+ 
+     // Build update object
+@@ -242,7 +258,7 @@ export async function PATCH(request: NextRequest) {
+     }
+ 
+     // Update the job (only if owned by this packager)
+-    const job = await db.jobs.update(jobId, updateData, { packager_id: packagerId });
++    const job = await db.jobs.update(jobId, updateData, { packager_id: packagerId, status: existingJob.status });
+ 
+     if (!job) {
+       return NextResponse.json(
+@@ -251,6 +267,10 @@ export async function PATCH(request: NextRequest) {
+       );
+     }
+ 
++    if (job.status === 'deployed') {
++      try { await reconcileDiscoveryClaim(job, db); } catch { console.warn('Discovery link reconciliation deferred'); }
++    }
++
+     // Log terminal transitions once, so the server log shows the outcome of
+     // every deployment the local packager runs.
+     if (status && status !== existingJob?.status) {
 diff --git a/components/AssignmentConfig.tsx b/components/AssignmentConfig.tsx
 index f1120662d..b1dbb72ad 100644
 --- a/components/AssignmentConfig.tsx
@@ -4524,7 +4682,7 @@ index fcbfd693e..5525d3b70 100644
    });
  });
 diff --git a/components/UploadCart.deployment-errors.test.ts b/components/UploadCart.deployment-errors.test.ts
-index ddf00bb07..9a688bf00 100644
+index ddf00bb07..adcac2da5 100644
 --- a/components/UploadCart.deployment-errors.test.ts
 +++ b/components/UploadCart.deployment-errors.test.ts
 @@ -32,7 +32,7 @@ const item: Win32CartItem = {
@@ -4567,6 +4725,18 @@ index ddf00bb07..9a688bf00 100644
  describe('deployment result presentation', () => {
    it('shows the fixed failure reason for its app and retains the cart without claiming no Intune changes', async () => {
      await deploy(Response.json({ success: false, jobs: [], errors: [{ wingetId: item.wingetId, error: 'Packaging pipeline not configured' }], message: '0 job(s) processed, 1 failed' }));
+@@ -81,9 +86,9 @@ describe('deployment result presentation', () => {
+     expect(document.body.textContent).not.toContain('private-fixture');
+   });
+ 
+-  it('preserves partial success navigation and clears the cart', async () => {
++  it('preserves partial success navigation and retains failed items for review', async () => {
+     await deploy(Response.json({ success: true, jobs: [{ id: 'job-1' }], errors: [{ wingetId: item.wingetId, error: 'Packaging pipeline not configured' }] }));
+-    expect(useCartStore.getState().items).toHaveLength(0);
++    expect(useCartStore.getState().items).toHaveLength(1);
+     expect(mocks.push).toHaveBeenCalledWith('/dashboard/uploads?jobs=job-1');
+     expect(mocks.success).toHaveBeenCalled();
+   });
 @@ -93,4 +98,16 @@ describe('deployment result presentation', () => {
      expect(document.querySelector('[role="alert"]')?.textContent).toContain('Deployment failed (500)');
      expect(useCartStore.getState().items).toHaveLength(1);
@@ -4608,10 +4778,18 @@ index 7a6edf5c0..15baee731 100644
      expect(button('Deploy to Intune').disabled).toBe(true);
      expect(button('Review current version')).toBeDefined();
 diff --git a/components/UploadCart.tsx b/components/UploadCart.tsx
-index 91ecf4da8..bbd02aba8 100644
+index 91ecf4da8..84c2fbb11 100644
 --- a/components/UploadCart.tsx
 +++ b/components/UploadCart.tsx
-@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
+@@ -1,5 +1,7 @@
+ 'use client';
+ 
++import { packageKey, reviewAcknowledged, type PackageManagementState } from '@/lib/discovery-state';
++
+ import { useState, useEffect } from 'react';
+ import { useRouter } from 'next/navigation';
+ import {
+@@ -20,6 +22,7 @@ import { Button } from '@/components/ui/button';
  import { AppIcon } from '@/components/AppIcon';
  import { useCartStore } from '@/stores/cart-store';
  import { describeDeploymentFailure } from '@/lib/deployment-failure-message';
@@ -4619,7 +4797,7 @@ index 91ecf4da8..bbd02aba8 100644
  import dynamic from 'next/dynamic';
  const CartItemConfig = dynamic(() => import('@/components/CartItemConfig').then(m => m.CartItemConfig));
  const PackageConfig = dynamic(() => import('@/components/PackageConfig').then(m => m.PackageConfig));
-@@ -43,6 +44,7 @@ import {
+@@ -43,6 +46,7 @@ import {
    AlertDialogCancel,
  } from '@/components/ui/alert-dialog';
  import { toast } from 'sonner';
@@ -4627,7 +4805,16 @@ index 91ecf4da8..bbd02aba8 100644
  import { useQaStatuses } from '@/hooks/use-qa';
  const QaDetailsDialog = dynamic(() => import('@/components/qa/QaDetailsDialog').then(m => m.QaDetailsDialog));
  import type { QaStatus } from '@/types/qa';
-@@ -107,7 +109,9 @@ export function UploadCart() {
+@@ -55,6 +59,8 @@ interface PackagingJob {
+   display_name: string;
+   status: string;
+   github_run_url?: string;
++  package_config?: { id?: string };
++  version?: string;
+ }
+ 
+ interface PackageApiResponse {
+@@ -107,7 +113,9 @@ export function UploadCart() {
    const updateItem = useCartStore((state) => state.updateItem);
    const clearCart = useCartStore((state) => state.clearCart);
    const [isDeploying, setIsDeploying] = useState(false);
@@ -4638,7 +4825,16 @@ index 91ecf4da8..bbd02aba8 100644
    const [error, setError] = useState<DeploymentError | null>(null);
    const [editingItem, setEditingItem] = useState<CartItem | null>(null);
    const [isRefreshing, setIsRefreshing] = useState(false);
-@@ -138,6 +142,8 @@ export function UploadCart() {
+@@ -124,6 +132,8 @@ export function UploadCart() {
+   // winget id -> email of whoever already deployed it in this tenant, so we can
+   // warn before a teammate's app is deployed a second time.
+   const [tenantDeployedBy, setTenantDeployedBy] = useState<Map<string, string | null>>(new Map());
++  const [reviewTenantId, setReviewTenantId] = useState<string | null>(null);
++  const [tenantCopyIds, setTenantCopyIds] = useState<Map<string, Set<string>>>(new Map());
+ 
+   const { isAuthenticated, getAccessToken, signIn, requestAdminConsent } = useMicrosoftAuth();
+   const { isMspUser, selectedTenantId } = useMspOptional();
+@@ -138,17 +148,22 @@ export function UploadCart() {
      canDeploy,
    } = usePermissionStatus();
    const needsPermissions = isAuthenticated && !canDeploy && permissionStatus !== 'checking';
@@ -4647,7 +4843,38 @@ index 91ecf4da8..bbd02aba8 100644
  
    // Load tenant-wide deployments when the cart opens so we can flag apps a
    // teammate already deployed (non-fatal: on any failure we just skip warnings).
-@@ -175,13 +181,13 @@ export function UploadCart() {
+   useEffect(() => {
+     if (!isOpen || !isAuthenticated || items.length === 0) return;
+     let cancelled = false;
++    setTenantDeployedBy(new Map());
++    setReviewTenantId(null);
++    setTenantCopyIds(new Map());
+     (async () => {
+       try {
+         const accessToken = await getAccessToken();
+         if (!accessToken) return;
+-        const response = await fetch('/api/intune/apps/deployed?scope=tenant', {
++        const response = await fetch('/api/intune/discovery-state', {
+           headers: {
+             Authorization: `Bearer ${accessToken}`,
+             ...(isMspUser && selectedTenantId ? { 'X-MSP-Tenant-Id': selectedTenantId } : {}),
+@@ -157,10 +172,12 @@ export function UploadCart() {
+         if (!response.ok || cancelled) return;
+         const data = await response.json();
+         const map = new Map<string, string | null>();
+-        for (const d of (data.tenantDeployments || []) as { wingetId: string; deployedBy: string | null }[]) {
+-          map.set(d.wingetId, d.deployedBy);
++        const copies = new Map<string, Set<string>>();
++        for (const [key, state] of Object.entries(data.states || {}) as [string, PackageManagementState][]) {
++          if (state.state !== 'none' || state.activeJobId) map.set(key, null);
++          copies.set(key, new Set(state.copies.map(copy => copy.intuneAppId)));
+         }
+-        if (!cancelled) setTenantDeployedBy(map);
++        if (!cancelled) { setTenantDeployedBy(map); setReviewTenantId(data.tenantId); setTenantCopyIds(copies); }
+       } catch {
+         // Non-fatal: no warnings shown
+       }
+@@ -175,13 +192,13 @@ export function UploadCart() {
    // (item config, large-deploy confirm) is open - Escape should dismiss that
    // layer, not the whole cart.
    useEffect(() => {
@@ -4663,8 +4890,20 @@ index 91ecf4da8..bbd02aba8 100644
  
    const handleReviewCurrentVersion = async () => {
      if (!blockedItem || !isWin32CartItem(blockedItem) || isRefreshing) return;
-@@ -305,7 +311,7 @@ export function UploadCart() {
-       closeCart();
+@@ -301,11 +318,17 @@ export function UploadCart() {
+ 
+       const jobCount = data.jobs.length;
+       const jobIds = data.jobs.map((job) => job.id).join(',');
+-      clearCart();
+-      closeCart();
++      const failedKeys = new Set((data.errors || []).map(failure => packageKey(failure.wingetId)));
++      for (const submitted of items) {
++        if (failedKeys.has(packageKey(submitted.wingetId))) continue;
++        const accepted = data.jobs.some(job => job.package_config?.id === submitted.id || (packageKey(job.winget_id) === packageKey(submitted.wingetId) && (!job.version || job.version === submitted.version)));
++        if (accepted || !data.errors?.length) removeItem(submitted.id);
++      }
++      if (data.errors?.length) setError({ title: 'Some deployments could not be started', message: describeDeploymentFailure(data, items), retryable: true });
++      else closeCart();
        toast.success(`${jobCount} deployment${jobCount !== 1 ? 's' : ''} started`, {
          action: {
 -          label: 'View Progress',
@@ -4672,7 +4911,7 @@ index 91ecf4da8..bbd02aba8 100644
            onClick: () => router.push(`/dashboard/uploads?jobs=${jobIds}`),
          },
        });
-@@ -326,15 +332,7 @@ export function UploadCart() {
+@@ -326,15 +349,7 @@ export function UploadCart() {
      clearCart();
    };
  
@@ -4689,7 +4928,7 @@ index 91ecf4da8..bbd02aba8 100644
  
    return (
      <>
-@@ -342,7 +340,7 @@ export function UploadCart() {
+@@ -342,7 +357,7 @@ export function UploadCart() {
        {!isOpen && items.length > 0 && (
          <button
            onClick={toggleCart}
@@ -4698,7 +4937,7 @@ index 91ecf4da8..bbd02aba8 100644
            className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-accent-cyan hover:bg-accent-cyan-dim text-white shadow-lg transition-all hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base"
          >
            <ShoppingCart className="w-5 h-5" />
-@@ -367,7 +365,7 @@ export function UploadCart() {
+@@ -367,7 +382,7 @@ export function UploadCart() {
                <div className="flex items-center gap-3">
                  <ShoppingCart className="w-5 h-5 text-accent-cyan" />
                  <h2 id="cart-title" className="text-lg font-semibold text-text-primary">
@@ -4707,7 +4946,7 @@ index 91ecf4da8..bbd02aba8 100644
                  </h2>
                  <span className="px-2 py-0.5 bg-gradient-to-r from-accent-cyan/20 to-accent-violet/20 text-accent-cyan text-sm font-medium rounded border border-accent-cyan/20">
                    {items.length}
-@@ -375,7 +373,7 @@ export function UploadCart() {
+@@ -375,7 +390,7 @@ export function UploadCart() {
                </div>
                <button
                  onClick={closeCart}
@@ -4716,7 +4955,7 @@ index 91ecf4da8..bbd02aba8 100644
                  className="text-text-secondary hover:text-text-primary transition-colors"
                >
                  <X className="w-6 h-6" />
-@@ -389,9 +387,9 @@ export function UploadCart() {
+@@ -389,9 +404,9 @@ export function UploadCart() {
                    <div className="w-16 h-16 rounded-full bg-bg-elevated flex items-center justify-center mb-4 animate-float-slow">
                      <ShoppingCart className="w-8 h-8 text-text-muted" />
                    </div>
@@ -4728,7 +4967,7 @@ index 91ecf4da8..bbd02aba8 100644
                    </p>
                  </div>
                ) : (
-@@ -431,7 +429,7 @@ export function UploadCart() {
+@@ -431,7 +446,7 @@ export function UploadCart() {
                              onClick={() => removeItem(item.id)}
                              className="text-text-muted hover:text-status-error transition-colors p-1"
                              disabled={isDeploying}
@@ -4737,7 +4976,7 @@ index 91ecf4da8..bbd02aba8 100644
                            >
                              <Trash2 className="w-4 h-4" />
                            </button>
-@@ -477,7 +475,8 @@ export function UploadCart() {
+@@ -477,7 +492,8 @@ export function UploadCart() {
                          {item.forceCreate && (
                            <span className="px-2 py-1 bg-accent-cyan/10 rounded text-accent-cyan text-xs font-medium border border-accent-cyan/20 inline-flex items-center gap-1">
                              <RefreshCw className="w-3 h-3" />
@@ -4747,7 +4986,7 @@ index 91ecf4da8..bbd02aba8 100644
                            </span>
                          )}
                          {item.qaOverride && (
-@@ -486,8 +485,31 @@ export function UploadCart() {
+@@ -486,8 +502,31 @@ export function UploadCart() {
                              Test override
                            </span>
                          )}
@@ -4779,26 +5018,28 @@ index 91ecf4da8..bbd02aba8 100644
                        {hasFailedQaForItem(item, qaStatusesData?.statuses[item.wingetId]) && !item.qaOverride && (
                          <div className="mt-3 flex items-start gap-2 rounded-lg border border-status-error/20 bg-status-error/10 p-2.5">
                            <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-status-error" />
-@@ -520,22 +542,22 @@ export function UploadCart() {
+@@ -520,22 +559,20 @@ export function UploadCart() {
                        {/* Teammate-duplicate warning: this app was already
                            deployed to the tenant by someone. Deploying again
                            would create a second Intune app unless forced. */}
 -                      {tenantDeployedBy.has(item.wingetId) && !item.forceCreate && (
-+                      {tenantDeployedBy.has(item.wingetId) && !item.forceCreate && !item.hrmRemoval && (
++                      {tenantDeployedBy.has(packageKey(item.wingetId) || '') && !reviewAcknowledged(item, reviewTenantId, [...(tenantCopyIds.get(packageKey(item.wingetId) || '') || [])].map(intuneAppId => ({ intuneAppId }))) && !item.hrmRemoval && (
                          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-500/20 dark:bg-amber-500/10">
                            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-400" />
                            <div className="text-xs flex-1">
-                             <p className="font-medium text-amber-900 dark:text-amber-300">Already deployed in this tenant</p>
+-                            <p className="font-medium text-amber-900 dark:text-amber-300">Already deployed in this tenant</p>
++                            <p className="font-medium text-amber-900 dark:text-amber-300">Review previous or active deployment</p>
                              <p className="mt-0.5 text-amber-800 dark:text-amber-200/80">
-                               {tenantDeployedBy.get(item.wingetId)
+-                              {tenantDeployedBy.get(item.wingetId)
 -                                ? `Deployed by ${tenantDeployedBy.get(item.wingetId)}. Deploying again is skipped unless you deploy as a new app.`
 -                                : 'Deploying again is skipped unless you deploy as a new app.'}
-+                                ? `Deployed by ${tenantDeployedBy.get(item.wingetId)}. It will be skipped. To deploy a new version or change it, open the app in Inventory or the App catalog and use Deploy again.`
-+                                : 'It will be skipped. To deploy a new version or change it, open the app in Inventory or the App catalog and use Deploy again.'}
++                              Ordinary queueing stops until previous deployment history or an uncertain upload outcome is acknowledged. Review Inventory or Deployments first; history does not confirm a copy still exists or installed on computers. Add a second copy anyway acknowledges history or review of an uncertain outcome for this item in this tenant. Review again after changing tenant or package; it never bypasses a queued or running deployment.
                              </p>
                              <button
-                               onClick={() => updateItem(item.id, { forceCreate: true })}
-                               disabled={isDeploying}
+-                              onClick={() => updateItem(item.id, { forceCreate: true })}
+-                              disabled={isDeploying}
++                              onClick={() => { if (reviewTenantId) updateItem(item.id, { forceCreate: true, deploymentReview: { tenantId: reviewTenantId, packageId: item.wingetId } }); }}
++                              disabled={isDeploying || !reviewTenantId}
                                className="mt-1.5 font-medium text-amber-800 underline underline-offset-2 transition-colors hover:text-amber-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2 disabled:opacity-50 dark:text-amber-300 dark:hover:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-bg-elevated"
                              >
 -                              Deploy as new app anyway
@@ -4806,7 +5047,7 @@ index 91ecf4da8..bbd02aba8 100644
                              </button>
                            </div>
                          </div>
-@@ -606,7 +628,7 @@ export function UploadCart() {
+@@ -606,7 +643,7 @@ export function UploadCart() {
                        )}
                        {!error.retryable && !needsVersionReview && (
                          <p className="text-text-muted mt-1">
@@ -4815,7 +5056,7 @@ index 91ecf4da8..bbd02aba8 100644
                          </p>
                        )}
                      </div>
-@@ -637,27 +659,27 @@ export function UploadCart() {
+@@ -637,27 +674,27 @@ export function UploadCart() {
                          disabled={isDeploying}
                          className="flex-1 border-overlay/10 text-text-secondary hover:bg-overlay/5 hover:border-black/20"
                        >
@@ -4849,7 +5090,7 @@ index 91ecf4da8..bbd02aba8 100644
                      className={`flex-1 text-white border-0 disabled:opacity-50 ${
                        isAuthenticated && !canDeploy && permissionStatus !== 'checking'
                          ? 'bg-status-error hover:bg-status-error/90'
-@@ -677,7 +699,7 @@ export function UploadCart() {
+@@ -677,7 +714,7 @@ export function UploadCart() {
                      ) : isAuthenticated && !canDeploy ? (
                        <>
                          <Shield className="w-4 h-4 mr-2" />
@@ -4858,7 +5099,7 @@ index 91ecf4da8..bbd02aba8 100644
                        </>
                      ) : awaitingCuratedSettings ? (
                        <>
-@@ -723,30 +745,20 @@ export function UploadCart() {
+@@ -723,30 +760,20 @@ export function UploadCart() {
              />
            )}
  
@@ -6127,10 +6368,30 @@ index ec5f597ad..59f16e8b9 100644
      maxProgress: 90,
    },
 diff --git a/types/upload.ts b/types/upload.ts
-index 66c59c9e6..c04fe3c9a 100644
+index 66c59c9e6..4c591d070 100644
 --- a/types/upload.ts
 +++ b/types/upload.ts
-@@ -178,6 +178,9 @@ interface CartItemBase {
+@@ -137,6 +137,10 @@ export interface PackageConfiguration {
+ 
+ // Base fields shared by all cart item types
+ interface CartItemBase {
++  /** Explicit source link; validated again for the resolved tenant before queueing. */
++  discovery?: import("@/lib/discovery-state").DiscoveryProvenance;
++  deploymentOrigin?: { kind: "discovery" | "catalog" | "custom" | "removal" | "store"; tenantId: string; packageId: string };
++
+   id: string; // Unique cart item ID
+   wingetId: string;
+   // How the item was added to the cart; absent = winget catalog
+@@ -161,6 +165,8 @@ interface CartItemBase {
+ 
+   // Redeploy flag - skip duplicate detection during deployment
+   forceCreate?: boolean;
++  /** Review acknowledgement belongs to one tenant and canonical package, not every use of a saved cart. */
++  deploymentReview?: { tenantId: string; packageId: string };
+ 
+   // Explicit acknowledgement of a failed QA result for this exact version.
+   qaOverride?: boolean;
+@@ -178,6 +184,9 @@ interface CartItemBase {
      removeAssignmentsFromPreviousApp: boolean;
    };
  
@@ -6140,7 +6401,7 @@ index 66c59c9e6..c04fe3c9a 100644
    // Cart metadata
    addedAt: string;
  }
-@@ -190,6 +193,8 @@ export interface Win32CartItem extends CartItemBase {
+@@ -190,6 +199,8 @@ export interface Win32CartItem extends CartItemBase {
    // Server-set audit snapshot of the tenant's licence acceptance (curated apps)
    curatedLicenceAcceptance?: CuratedLicenceAcceptanceSnapshot;
    localeCode?: string; // Selected locale for language variant packages

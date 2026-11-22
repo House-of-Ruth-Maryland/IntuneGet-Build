@@ -1,3 +1,70 @@
+diff --git a/lib/__tests__/discovery-dispatch-postgres.test.ts b/lib/__tests__/discovery-dispatch-postgres.test.ts
+new file mode 100644
+index 000000000..edc31832c
+--- /dev/null
++++ b/lib/__tests__/discovery-dispatch-postgres.test.ts
+@@ -0,0 +1,24 @@
++import { readFileSync } from 'node:fs';
++import { PGlite } from '@electric-sql/pglite';
++import { expect, it } from 'vitest';
++
++it('enforces the hosted guard for existing history, active jobs, tenant scope and explicit second copies', async () => {
++  const db = new PGlite();
++  try {
++    await db.exec(`CREATE TABLE packaging_jobs (id text PRIMARY KEY, tenant_id text, winget_id text,
++      status text, intune_app_id text, upload_started_at timestamptz, error_stage text, error_message text, app_source text DEFAULT 'win32', package_config jsonb DEFAULT '{}');`);
++    await db.exec(readFileSync(new URL('../../supabase/migrations/20261121000000_discovery_dispatch_guard.sql', import.meta.url), 'utf8'));
++    const insert = (id: string, tenant: string, status: string, conf: object) => db.query(
++      'INSERT INTO packaging_jobs(id,tenant_id,winget_id,status,package_config) VALUES ($1,$2,$3,$4,$5)',
++      [id, tenant, 'Vendor.App', status, JSON.stringify(conf)]);
++    const origin = { deploymentOrigin: { kind: 'catalog', tenantId: 'tenant', packageId: 'Vendor.App' } };
++    await insert('old', 'tenant', 'deployed', {});
++    await expect(insert('blocked-history', 'tenant', 'queued', origin)).rejects.toThrow(/previously deployed/);
++    await insert('another-tenant', 'other', 'queued', origin);
++    await insert('explicit', 'tenant', 'queued', { ...origin, forceCreate: true });
++    await expect(insert('blocked-active', 'tenant', 'queued', { ...origin, forceCreate: true })).rejects.toThrow(/already queued/);
++    await db.exec("UPDATE packaging_jobs SET status='cancelled' WHERE id='explicit'");
++    await insert('retry-after-cancel', 'tenant', 'queued', { ...origin, forceCreate: true });
++    await insert('removal', 'tenant', 'queued', { deploymentOrigin: { kind: 'removal' }, hrmRemoval: {} });
++  } finally { await db.close(); }
++}, 30_000);
+diff --git a/lib/db/__tests__/discovery-hosted.test.ts b/lib/db/__tests__/discovery-hosted.test.ts
+new file mode 100644
+index 000000000..dc6daeca6
+--- /dev/null
++++ b/lib/db/__tests__/discovery-hosted.test.ts
+@@ -0,0 +1,31 @@
++import { beforeEach, expect, it, vi } from 'vitest';
++const fixture = vi.hoisted(() => ({ requests: [] as {table: string; field: string; tenant: string; start: number}[], fail: false }));
++vi.mock('@/lib/supabase', () => ({ createServerClient: () => ({ from: (table: string) => {
++  let field = '', tenant = '', start = 0;
++  const query = { select: () => query, eq: (f: string, t: string) => { field = f; tenant = t; return query; }, order: () => query,
++    range: (offset: number) => { start = offset; return query; }, abortSignal: async () => {
++      fixture.requests.push({ table, field, tenant, start });
++      if (fixture.fail) return { error: new Error('offline'), data: null };
++      const data = table === 'packaging_jobs'
++        ? (start === 0 ? Array.from({ length: 500 }, (_, n) => ({ id: `job-${n}`, tenant_id: tenant, status: 'failed' })) : [{ id: 'older', tenant_id: tenant, status: 'deployed' }])
++        : [{ id: 'historical', intune_tenant_id: tenant, packaging_job_id: null, winget_id: 'Vendor.App', version: '1', intune_app_id: 'copy' }];
++      return { data, error: null };
++    } };
++  return query;
++} }) }));
++import { supabaseDb } from '../supabase-adapter';
++beforeEach(() => { fixture.requests.length = 0; fixture.fail = false; });
++it('reads the complete authorized tenant history across hosted page limits and preserves orphan evidence', async () => {
++  const rows = await supabaseDb.jobs.getDiscoveryJobs('customer');
++  expect(rows).toHaveLength(502);
++  expect(rows.at(-1)).toMatchObject({ historyOnly: true, tenant_id: 'customer', winget_id: 'Vendor.App', status: 'deployed' });
++  expect(fixture.requests).toEqual([
++    { table: 'packaging_jobs', field: 'tenant_id', tenant: 'customer', start: 0 },
++    { table: 'packaging_jobs', field: 'tenant_id', tenant: 'customer', start: 500 },
++    { table: 'upload_history', field: 'intune_tenant_id', tenant: 'customer', start: 0 },
++  ]);
++});
++it('does not substitute an empty deployment history for a hosted read failure', async () => {
++  fixture.fail = true;
++  await expect(supabaseDb.jobs.getDiscoveryJobs('customer')).rejects.toThrow('offline');
++});
 diff --git a/lib/db/__tests__/hrm-fleet-queries.test.ts b/lib/db/__tests__/hrm-fleet-queries.test.ts
 new file mode 100644
 index 000000000..1fdae058d
@@ -81,17 +148,22 @@ index 000000000..1fdae058d
 +  expect(await sqliteInstallStatus.lastAttempt!('tenant', 'old-app')).toBe('2026-11-06T00:00:00Z');
 +});
 diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
-index 612cbd4f9..259b8aa3e 100644
+index 612cbd4f9..a26c95611 100644
 --- a/lib/db/__tests__/job-create.test.ts
 +++ b/lib/db/__tests__/job-create.test.ts
-@@ -49,8 +49,8 @@ function readStoredJob(id: string): Record<string, unknown> {
+@@ -1,3 +1,4 @@
++import { MIGRATIONS } from '../sqlite-migrations';
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import Database from 'better-sqlite3';
+ import { mkdtempSync, rmSync } from 'node:fs';
+@@ -49,8 +50,8 @@ function readStoredJob(id: string): Record<string, unknown> {
    closeDb?.();
    const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
    try {
 -    // Version 8 includes manual mappings and automatic update scope.
 -    expect(stored.pragma('user_version', { simple: true })).toBe(8);
 +    // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts, skipped versions, retirements, rollback readiness, removals, report checkpoints) follow manual mappings, automatic update scope, and webhooks.
-+    expect(stored.pragma('user_version', { simple: true })).toBe(25);
++    expect(stored.pragma('user_version', { simple: true })).toBe(MIGRATIONS.at(-1)!.version);
      return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
    } finally {
      stored.close();
@@ -265,6 +337,23 @@ index 000000000..49d6d17d9
 +    raw.close();
 +  });
 +});
+diff --git a/lib/db/discovery-evidence.ts b/lib/db/discovery-evidence.ts
+new file mode 100644
+index 000000000..e889fb294
+--- /dev/null
++++ b/lib/db/discovery-evidence.ts
+@@ -0,0 +1,11 @@
++import type { DiscoveryJobEvidence, UploadHistoryRecord } from './types';
++
++/** Lost legacy job metadata cannot prove installation intent, so these copies remain unverified. */
++export function orphanDeploymentEvidence(history: UploadHistoryRecord[], jobs: DiscoveryJobEvidence[]): DiscoveryJobEvidence[] {
++  const ids = new Set(jobs.map(j => j.id));
++  return history.filter(h => !h.packaging_job_id || !ids.has(h.packaging_job_id)).map(h => ({
++    id: `history:${h.id}`, tenant_id: h.intune_tenant_id, winget_id: h.winget_id, version: h.version,
++    status: 'deployed', intune_app_id: h.intune_app_id, app_source: null, package_config: null,
++    upload_started_at: null, error_stage: null, error_message: null, historyOnly: true,
++  }));
++}
 diff --git a/lib/db/sqlite-auto-update.test.ts b/lib/db/sqlite-auto-update.test.ts
 index 40dd1b163..2a1550f67 100644
 --- a/lib/db/sqlite-auto-update.test.ts
@@ -358,10 +447,10 @@ index f4f2dbc07..96ef71f3a 100644
      );
      db.close();
 diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
-index 228492fe3..1ca62981f 100644
+index 228492fe3..f4e938690 100644
 --- a/lib/db/sqlite-migrations.ts
 +++ b/lib/db/sqlite-migrations.ts
-@@ -306,6 +306,234 @@ export const MIGRATIONS: SqliteMigration[] = [
+@@ -306,6 +306,253 @@ export const MIGRATIONS: SqliteMigration[] = [
        db.exec("ALTER TABLE app_update_policies ADD COLUMN auto_update_scope TEXT NOT NULL DEFAULT 'all' CHECK (auto_update_scope IN ('all', 'minor', 'major'));");
      },
    },
@@ -593,14 +682,35 @@ index 228492fe3..1ca62981f 100644
 +      db.exec(`CREATE TABLE IF NOT EXISTS hrm_install_attempts (tenant_id TEXT NOT NULL,app_id TEXT NOT NULL,attempted_at TEXT NOT NULL,PRIMARY KEY(tenant_id,app_id));`);
 +    },
 +  },
++  { version: 26, name: 'serialize catalog discovery dispatch against prior deployments', up: db => {
++    // A trigger checks existing rows without requiring old duplicates to be deleted.
++    // Each new request carries server-authored origin; legacy/automatic flows are unchanged.
++    db.exec(`CREATE TRIGGER IF NOT EXISTS hrm_discovery_dispatch_guard BEFORE INSERT ON packaging_jobs
++      WHEN json_extract(NEW.package_config, '$.deploymentOrigin.kind') IN ('catalog','discovery')
++        AND NEW.status NOT IN ('deployed','completed','failed','cancelled','duplicate_skipped','qa_failed')
++      BEGIN
++        SELECT RAISE(ABORT, 'Review existing deployment: package already queued or previously deployed')
++        WHERE EXISTS (SELECT 1 FROM packaging_jobs j WHERE j.tenant_id = NEW.tenant_id
++          AND lower(trim(j.winget_id)) = lower(trim(NEW.winget_id))
++          AND COALESCE(j.app_source,'win32') != 'store'
++          AND COALESCE(json_extract(j.package_config,'$.appSource'),'win32') != 'store'
++          AND COALESCE(json_extract(j.package_config,'$.sourceType'),'winget') != 'custom'
++          AND json_extract(j.package_config,'$.hrmRemoval') IS NULL
++          AND (j.status NOT IN ('deployed','completed','failed','cancelled','duplicate_skipped','qa_failed')
++            OR ((j.status = 'deployed' OR (j.status IN ('failed','cancelled') AND (j.intune_app_id IS NOT NULL OR j.upload_started_at IS NOT NULL OR j.error_stage = 'upload' OR j.error_message LIKE 'Job timed out after %'))) AND COALESCE(json_extract(NEW.package_config,'$.forceCreate'),0) != 1)));
++      END;`);
++  } },
++
  ];
  
  export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
 diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
-index 5f548532d..074333542 100644
+index 5f548532d..de2c1fd3e 100644
 --- a/lib/db/sqlite.ts
 +++ b/lib/db/sqlite.ts
-@@ -1,10 +1,26 @@
+@@ -1,10 +1,28 @@
++import { orphanDeploymentEvidence } from './discovery-evidence';
++import type { DiscoveryJobEvidence } from './types';
 +import { createStartupReportStore } from '@/lib/hrm/startup-report-store';
  /**
   * SQLite Database Implementation for Self-Hosted Mode
@@ -627,7 +737,7 @@ index 5f548532d..074333542 100644
  import type { PackageAssignment, IntuneAppCategorySelection } from '@/types/upload';
  import type { Json } from '@/types/database';
  import type { SavedCustomAppDefinition } from '@/lib/custom-app-definitions';
-@@ -21,6 +37,8 @@ import type {
+@@ -21,6 +39,8 @@ import type {
    AutoUpdateHistoryQuery,
    UpdateCheckResult,
    UpdateCheckQuery,
@@ -636,7 +746,7 @@ index 5f548532d..074333542 100644
    CuratedLicenceAttestationRecord,
    CuratedLicenceAttestationInput,
    ClaimedAppInput,
-@@ -32,6 +50,7 @@ import type {
+@@ -32,6 +52,7 @@ import type {
    AutoUpdateHistoryWithPolicy,
    AutoUpdateStatus,
  } from '@/types/update-policies';
@@ -644,7 +754,7 @@ index 5f548532d..074333542 100644
  import { runSqliteMigrations } from './sqlite-migrations';
  import { INTUNE_APPROVAL_CHECKPOINT_STATUSES } from '@/lib/intune-approval';
  
-@@ -197,6 +216,191 @@ export const sqliteManualMappings = {
+@@ -197,6 +218,191 @@ export const sqliteManualMappings = {
    },
  };
  
@@ -836,7 +946,7 @@ index 5f548532d..074333542 100644
  /** SQLite implementation of the database adapter. */
  export const sqliteDb: DatabaseAdapter = {
    customAppDefinitions: {
-@@ -278,6 +482,14 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -278,6 +484,14 @@ export const sqliteDb: DatabaseAdapter = {
        return rows.map(parseJobRow);
      },
  
@@ -851,7 +961,20 @@ index 5f548532d..074333542 100644
      async getAnalyticsJobs(scope: AnalyticsJobScope): Promise<AnalyticsJob[]> {
        const key = scope.tenantId === undefined ? 'user_id' : 'tenant_id';
        const identity = scope.tenantId ?? scope.userId;
-@@ -647,6 +859,34 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -291,6 +505,12 @@ export const sqliteDb: DatabaseAdapter = {
+       return rows;
+     },
+ 
++    async getDiscoveryJobs(tenantId: string): Promise<DiscoveryJobEvidence[]> {
++      const jobs = (getDb().prepare("SELECT * FROM packaging_jobs WHERE tenant_id = ? ORDER BY created_at DESC, id DESC").all(tenantId) as Record<string, unknown>[]).map(parseJobRow);
++      const history = getDb().prepare("SELECT * FROM upload_history WHERE intune_tenant_id = ? ORDER BY deployed_at DESC, id DESC").all(tenantId) as UploadHistoryRecord[];
++      return [...jobs, ...orphanDeploymentEvidence(history, jobs)];
++    },
++
+     async getByTenantId(tenantId: string, limit: number = 50): Promise<PackagingJob[]> {
+       const database = getDb();
+       // Every user's jobs in this tenant, most recent first, no age cutoff.
+@@ -647,6 +867,34 @@ export const sqliteDb: DatabaseAdapter = {
        return row ?? null;
      },
  
@@ -886,7 +1009,7 @@ index 5f548532d..074333542 100644
      async listAll(limit: number = 1000): Promise<UploadHistoryRecord[]> {
        const database = getDb();
        return database
-@@ -805,6 +1045,11 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -805,6 +1053,11 @@ export const sqliteDb: DatabaseAdapter = {
        return parseHistoryRow(row);
      },
  
@@ -898,7 +1021,7 @@ index 5f548532d..074333542 100644
      async update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null> {
        const database = getDb();
        const { clause, values } = buildSetClause(data as Record<string, unknown>);
-@@ -848,10 +1093,12 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -848,10 +1101,12 @@ export const sqliteDb: DatabaseAdapter = {
            h.*,
            p.winget_id AS policy_winget_id,
            p.tenant_id AS policy_tenant_id,
@@ -913,7 +1036,7 @@ index 5f548532d..074333542 100644
          WHERE ${conditions.join(' AND ')}
          ORDER BY h.triggered_at DESC
          LIMIT ? OFFSET ?
-@@ -874,6 +1121,13 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -874,6 +1129,13 @@ export const sqliteDb: DatabaseAdapter = {
            tenant_id: row.policy_tenant_id as string,
          },
          display_name: (row.packaging_display_name as string | null) ?? undefined,
@@ -927,7 +1050,7 @@ index 5f548532d..074333542 100644
        }));
      },
  
-@@ -941,6 +1195,11 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -941,6 +1203,11 @@ export const sqliteDb: DatabaseAdapter = {
               latest_version = excluded.latest_version,
               is_critical = excluded.is_critical,
               is_managed = excluded.is_managed,
@@ -939,7 +1062,7 @@ index 5f548532d..074333542 100644
               updated_at = excluded.updated_at`
          )
          .run(
-@@ -1010,6 +1269,62 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -1010,6 +1277,62 @@ export const sqliteDb: DatabaseAdapter = {
          .run(userId, tenantId, ...values);
        return result.changes;
      },
@@ -1002,7 +1125,7 @@ index 5f548532d..074333542 100644
    },
  
    curatedLicenceAttestations: {
-@@ -1138,3 +1453,7 @@ export function closeSqliteDb(): void {
+@@ -1138,3 +1461,7 @@ export function closeSqliteDb(): void {
      db = null;
    }
  }
@@ -1011,10 +1134,16 @@ index 5f548532d..074333542 100644
 +
 +export const sqliteStartupReports = createStartupReportStore(getDb);
 diff --git a/lib/db/supabase-adapter.ts b/lib/db/supabase-adapter.ts
-index 590493b95..3d01c56aa 100644
+index 590493b95..0faa8a50c 100644
 --- a/lib/db/supabase-adapter.ts
 +++ b/lib/db/supabase-adapter.ts
-@@ -19,9 +19,13 @@ import type {
+@@ -1,3 +1,5 @@
++import { orphanDeploymentEvidence } from './discovery-evidence';
++import type { DiscoveryJobEvidence } from './types';
+ /**
+  * Supabase Database Adapter
+  * Wraps the existing Supabase client to conform to the DatabaseAdapter interface
+@@ -19,9 +21,13 @@ import type {
    ClaimedAppRecord,
    CuratedLicenceAttestationInput,
    CuratedLicenceAttestationRecord,
@@ -1028,7 +1157,7 @@ index 590493b95..3d01c56aa 100644
  import type { PostgrestError } from '@supabase/supabase-js';
  import type { SavedCustomAppDefinition } from '@/lib/custom-app-definitions';
  
-@@ -123,6 +127,9 @@ function getUploadHistoryQuery(supabase: ReturnType<typeof createServerClient>):
+@@ -123,6 +129,9 @@ function getUploadHistoryQuery(supabase: ReturnType<typeof createServerClient>):
  /**
   * Supabase implementation of the database adapter
   */
@@ -1038,7 +1167,7 @@ index 590493b95..3d01c56aa 100644
  export const supabaseDb: DatabaseAdapter = {
    customAppDefinitions: {
      async list(userId, tenantId, limit, offset) {
-@@ -228,6 +235,18 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -228,6 +237,18 @@ export const supabaseDb: DatabaseAdapter = {
        return ((data as unknown as PackagingJob[]) || []).filter((job) => !job.archived_at);
      },
  
@@ -1057,7 +1186,38 @@ index 590493b95..3d01c56aa 100644
      async getAnalyticsJobs(scope: AnalyticsJobScope): Promise<AnalyticsJob[]> {
        const key = scope.tenantId === undefined ? 'user_id' : 'tenant_id';
        const identity = scope.tenantId ?? scope.userId;
-@@ -637,6 +656,46 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -251,6 +272,30 @@ export const supabaseDb: DatabaseAdapter = {
+       });
+     },
+ 
++    async getDiscoveryJobs(tenantId: string): Promise<DiscoveryJobEvidence[]> {
++      const rows: PackagingJob[] = [];
++      const history: UploadHistoryRecord[] = [];
++      const signal = AbortSignal.timeout(10_000);
++      // Explicit pagination avoids silently losing old versions or missing legacy jobs.
++      for (const table of ['packaging_jobs', 'upload_history'] as const) {
++        let complete = false;
++        for (let offset = 0; offset < 100_000; offset += 500) {
++          const client = createServerClient();
++          const query = table === 'packaging_jobs'
++            ? client.from('packaging_jobs').select('*').eq('tenant_id', tenantId)
++            : client.from('upload_history').select('*').eq('intune_tenant_id', tenantId);
++          const { data, error } = await query.order(table === 'packaging_jobs' ? 'created_at' : 'deployed_at', { ascending: false })
++            .order('id', { ascending: false }).range(offset, offset + 499).abortSignal(signal);
++          if (error) throw error;
++          if (table === 'packaging_jobs') rows.push(...(data || []) as unknown as PackagingJob[]);
++          else history.push(...(data || []) as unknown as UploadHistoryRecord[]);
++          if (!data || data.length < 500) { complete = true; break; }
++        }
++        if (!complete) throw new Error('Deployment history exceeds the read limit');
++      }
++      return [...rows, ...orphanDeploymentEvidence(history, rows)];
++    },
++
+     async getByTenantId(tenantId: string, limit: number = 50): Promise<PackagingJob[]> {
+       const supabase = createServerClient();
+ 
+@@ -637,6 +682,46 @@ export const supabaseDb: DatabaseAdapter = {
        return data ?? null;
      },
  
@@ -1104,7 +1264,7 @@ index 590493b95..3d01c56aa 100644
      async listAll(limit: number = 1000): Promise<UploadHistoryRecord[]> {
        const supabase = createServerClient();
        const query = getUploadHistoryQuery(supabase);
-@@ -822,6 +881,16 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -822,6 +907,16 @@ export const supabaseDb: DatabaseAdapter = {
        return (updated as unknown as AutoUpdateHistory) ?? null;
      },
  
@@ -1121,7 +1281,7 @@ index 590493b95..3d01c56aa 100644
      async list(userId: string, query: Parameters<DatabaseAdapter['autoUpdateHistory']['list']>[1]): Promise<AutoUpdateHistoryWithPolicy[]> {
        const supabase = createServerClient();
  
-@@ -1037,6 +1106,63 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -1037,6 +1132,63 @@ export const supabaseDb: DatabaseAdapter = {
        }
        return staleIds.length;
      },
@@ -1186,7 +1346,7 @@ index 590493b95..3d01c56aa 100644
  
    curatedLicenceAttestations: {
 diff --git a/lib/db/types.ts b/lib/db/types.ts
-index adaa21bf6..c1ad77bea 100644
+index adaa21bf6..2eeaedf1d 100644
 --- a/lib/db/types.ts
 +++ b/lib/db/types.ts
 @@ -45,6 +45,26 @@ export interface UpdateCheckResult {
@@ -1216,7 +1376,25 @@ index adaa21bf6..c1ad77bea 100644
  export interface UpdateCheckQuery {
    tenantId?: string;
    includeDismissed?: boolean;
-@@ -229,6 +249,7 @@ export interface DatabaseAdapter {
+@@ -133,6 +153,8 @@ export type CuratedLicenceAttestationInput = Omit<CuratedLicenceAttestationRecor
+ 
+ export type ClaimedAppStatus = 'pending' | 'deploying' | 'deployed' | 'failed';
+ 
++export type DiscoveryJobEvidence = Pick<PackagingJob, 'id' | 'tenant_id' | 'winget_id' | 'version' | 'status' | 'intune_app_id' | 'app_source' | 'package_config' | 'upload_started_at' | 'error_stage' | 'error_message'> & { historyOnly?: boolean };
++
+ /**
+  * A discovered app a user claimed for deployment, one per tenant and app
+  */
+@@ -223,12 +245,16 @@ export interface DatabaseAdapter {
+      */
+     getByTenantId(tenantId: string, limit?: number): Promise<PackagingJob[]>;
+ 
++    /** Complete tenant deployment evidence, including dismissed jobs and old versions. */
++    getDiscoveryJobs(tenantId: string): Promise<DiscoveryJobEvidence[]>;
++
+     /** Failed and cancelled approval checkpoints include dismissed jobs and every user/version in the tenant. */
+     getApprovalFailures(tenantId: string, wingetId: string,
+       cursor?: { createdAt: string; id: string }): Promise<PackagingJob[]>;
  
      /** Complete summary input, independent of the uploads page limit. */
      getAnalyticsJobs(scope: AnalyticsJobScope): Promise<AnalyticsJob[]>;
@@ -1224,7 +1402,7 @@ index adaa21bf6..c1ad77bea 100644
  
      /**
       * Create a new job
-@@ -297,11 +318,18 @@ export interface DatabaseAdapter {
+@@ -297,11 +323,18 @@ export interface DatabaseAdapter {
       */
      getLatest(userId: string, tenantId: string, wingetId: string): Promise<UploadHistoryRecord | null>;
  
@@ -1243,7 +1421,7 @@ index adaa21bf6..c1ad77bea 100644
    };
  
    updateCheckResults: {
-@@ -335,6 +363,12 @@ export interface DatabaseAdapter {
+@@ -335,6 +368,12 @@ export interface DatabaseAdapter {
        tenantId: string,
        keep: Array<{ wingetId: string; intuneAppId: string }>
      ): Promise<number>;
@@ -1256,7 +1434,7 @@ index adaa21bf6..c1ad77bea 100644
    };
  
    updatePolicies: {
-@@ -391,6 +425,11 @@ export interface DatabaseAdapter {
+@@ -391,6 +430,11 @@ export interface DatabaseAdapter {
       */
      update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null>;
  
@@ -1268,7 +1446,7 @@ index adaa21bf6..c1ad77bea 100644
      /**
       * List a user's history with the policy target and deployed app name,
       * newest first, honoring the optional filters and pagination.
-@@ -443,4 +482,14 @@ export interface DatabaseAdapter {
+@@ -443,4 +487,14 @@ export interface DatabaseAdapter {
        data: Partial<Pick<ClaimedAppRecord, 'status' | 'intune_app_id'>>
      ): Promise<ClaimedAppRecord | null>;
    };
@@ -1283,3 +1461,32 @@ index adaa21bf6..c1ad77bea 100644
 +    listRecent(): Promise<VersionSyncEvent[]>;
 +  };
  }
+diff --git a/supabase/migrations/20261121000000_discovery_dispatch_guard.sql b/supabase/migrations/20261121000000_discovery_dispatch_guard.sql
+new file mode 100644
+index 000000000..acd867fda
+--- /dev/null
++++ b/supabase/migrations/20261121000000_discovery_dispatch_guard.sql
+@@ -0,0 +1,23 @@
++-- Serialize ordinary catalog/discovery jobs across browsers and server processes.
++-- Existing duplicates are retained; forceCreate permits history, never an active job.
++CREATE OR REPLACE FUNCTION public.hrm_discovery_dispatch_guard() RETURNS trigger
++LANGUAGE plpgsql SET search_path = public AS $$
++BEGIN
++  IF NEW.package_config->'deploymentOrigin'->>'kind' IN ('catalog','discovery')
++     AND NEW.status::text NOT IN ('deployed','completed','failed','cancelled','duplicate_skipped','qa_failed') THEN
++    PERFORM pg_advisory_xact_lock(hashtextextended(NEW.tenant_id::text || ':' || lower(trim(NEW.winget_id)),0));
++    IF EXISTS (SELECT 1 FROM public.packaging_jobs j
++      WHERE j.tenant_id = NEW.tenant_id AND lower(trim(j.winget_id)) = lower(trim(NEW.winget_id))
++      AND COALESCE(j.app_source,'win32') != 'store'
++      AND COALESCE(j.package_config->>'appSource','win32') != 'store'
++      AND COALESCE(j.package_config->>'sourceType','winget') != 'custom'
++      AND j.package_config->>'hrmRemoval' IS NULL
++      AND (j.status::text NOT IN ('deployed','completed','failed','cancelled','duplicate_skipped','qa_failed')
++        OR ((j.status::text = 'deployed' OR (j.status::text IN ('failed','cancelled') AND (j.intune_app_id IS NOT NULL OR j.upload_started_at IS NOT NULL OR j.error_stage = 'upload' OR j.error_message LIKE 'Job timed out after %'))) AND COALESCE(NEW.package_config->>'forceCreate','false') != 'true')))
++    THEN RAISE EXCEPTION 'Review existing deployment: package already queued or previously deployed'; END IF;
++  END IF;
++  RETURN NEW;
++END $$;
++DROP TRIGGER IF EXISTS hrm_discovery_dispatch_guard ON public.packaging_jobs;
++CREATE TRIGGER hrm_discovery_dispatch_guard BEFORE INSERT ON public.packaging_jobs
++FOR EACH ROW EXECUTE FUNCTION public.hrm_discovery_dispatch_guard();
