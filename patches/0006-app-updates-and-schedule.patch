@@ -674,7 +674,7 @@ index dc8230402..17592ba5b 100644
      process.env.CRON_SECRET = 'secret';
      expect((await route.GET(request('other'))).status).toBe(401);
 diff --git a/app/api/cron/check-updates/route.ts b/app/api/cron/check-updates/route.ts
-index 1f9cf4fd3..4b30b3d30 100644
+index 78f714024..561703ae8 100644
 --- a/app/api/cron/check-updates/route.ts
 +++ b/app/api/cron/check-updates/route.ts
 @@ -9,6 +9,13 @@ import { NextResponse } from 'next/server';
@@ -691,7 +691,7 @@ index 1f9cf4fd3..4b30b3d30 100644
  import { parseVersion, compareVersions } from '@/lib/version-compare';
  import {
    AutoUpdateTrigger,
-@@ -269,8 +276,29 @@ export async function GET(request: Request) {
+@@ -271,8 +278,29 @@ export async function GET(request: Request) {
    // packager. Schedule this route externally (see the self-hosting docs).
    if (isSqliteMode()) {
      try {
@@ -2955,7 +2955,7 @@ index 000000000..e9171e045
 +  return { ...query, action };
 +}
 diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
-index a74977001..b7d71657e 100644
+index eebc25b5e..5e14aae43 100644
 --- a/lib/auto-update/__tests__/sqlite.test.ts
 +++ b/lib/auto-update/__tests__/sqlite.test.ts
 @@ -1,3 +1,6 @@
@@ -2965,7 +2965,7 @@ index a74977001..b7d71657e 100644
  import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  import { mkdtempSync, rmSync } from 'node:fs';
  import { tmpdir } from 'node:os';
-@@ -30,6 +33,7 @@ let tempDir: string;
+@@ -34,6 +37,7 @@ let tempDir: string;
  
  beforeEach(() => {
    vi.resetModules();
@@ -2973,7 +2973,7 @@ index a74977001..b7d71657e 100644
    tempDir = mkdtempSync(join(tmpdir(), 'intuneget-autoupdate-'));
    process.env.DATABASE_PATH = join(tempDir, 'app.db');
    getAppsByWingetIdsMock.mockReset();
-@@ -83,6 +87,17 @@ const deploymentConfig = {
+@@ -87,6 +91,17 @@ const deploymentConfig = {
    detectionRules: [],
  };
  
@@ -2991,7 +2991,7 @@ index a74977001..b7d71657e 100644
  async function seedDeployment(db: Awaited<ReturnType<typeof load>>['db'], withPrior = true) {
    const policy = await db.updatePolicies.upsert({
      user_id: 'u1',
-@@ -238,6 +253,26 @@ describe('sqlite auto-update check', () => {
+@@ -351,6 +366,26 @@ describe('sqlite auto-update check', () => {
      expect(await db.updateCheckResults.list('u2', { includeDismissed: true })).toHaveLength(1);
    });
  
@@ -3018,7 +3018,7 @@ index a74977001..b7d71657e 100644
    it('records nothing when every deployed app is up to date', async () => {
      const { db, runSqliteUpdateCheck } = await load();
      await seedDeployment(db);
-@@ -315,3 +350,309 @@ it.each(['minor', 'major'] as const)('SQLite scope %s holds before history, jobs
+@@ -428,3 +463,309 @@ it.each(['minor', 'major'] as const)('SQLite scope %s holds before history, jobs
    expect(history).not.toHaveBeenCalled();
    expect(acquireGraphTokenMock).not.toHaveBeenCalled();
  });
@@ -3353,7 +3353,7 @@ index a266e0d18..24fde1240 100644
    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
  
 diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
-index d09e7f116..2a5ee22f0 100644
+index 9db764f3e..6c0edaafb 100644
 --- a/lib/auto-update/sqlite.ts
 +++ b/lib/auto-update/sqlite.ts
 @@ -18,6 +18,10 @@
@@ -3367,7 +3367,7 @@ index d09e7f116..2a5ee22f0 100644
  import type { DatabaseAdapter, UploadHistoryRecord } from '@/lib/db/types';
  import { findPendingApprovalBlocks } from '@/lib/intune-approval-guard';
  import type { Json } from '@/types/database';
-@@ -73,6 +77,10 @@ export interface SqliteUpdateCheckSummary {
+@@ -77,6 +81,10 @@ export interface SqliteUpdateCheckSummary {
    triggered: number;
    skipped: number;
    errors: number;
@@ -3378,7 +3378,7 @@ index d09e7f116..2a5ee22f0 100644
  }
  
  function isMajorBump(current: string, latest: string): boolean {
-@@ -127,13 +135,32 @@ async function checkRateLimits(
+@@ -131,13 +139,32 @@ async function checkRateLimits(
  /**
   * Apply the safety gates and create a queued packaging job for an update.
   */
@@ -3412,7 +3412,7 @@ index d09e7f116..2a5ee22f0 100644
      if (!canAutoUpdate(policy)) {
        return { success: false, skipped: true, skipReason: 'Policy does not allow auto-update or is disabled' };
      }
-@@ -172,6 +199,13 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+@@ -194,6 +221,13 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
        }
      }
  
@@ -3426,7 +3426,7 @@ index d09e7f116..2a5ee22f0 100644
      if (
        DEFAULT_SAFETY_CONFIG.requirePriorDeployment &&
        !options?.skipPriorDeploymentCheck &&
-@@ -195,6 +229,25 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+@@ -217,6 +251,25 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
      }
  
      const updateType = classifyUpdateType(updateInfo.currentVersion, updateInfo.latestVersion);
@@ -3452,9 +3452,9 @@ index d09e7f116..2a5ee22f0 100644
      const now = new Date().toISOString();
  
      let historyId: string | undefined;
-@@ -213,6 +266,14 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
- 
+@@ -236,6 +289,14 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
        const sourceIntuneAppId = updateInfo.currentIntuneAppId || null;
+       const migration = parseAssignmentMigration(config);
        const autoSupersede = Boolean(sourceIntuneAppId);
 +      // HRM patch 0024: the policy's settings are a snapshot from the first deployment. When the update
 +      // replaces an Intune app, take categories, ESP and dependencies from the job that deployed that app,
@@ -3467,7 +3467,7 @@ index d09e7f116..2a5ee22f0 100644
  
        const job = await db.jobs.create({
          user_id: policy.user_id,
-@@ -233,16 +294,22 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+@@ -256,16 +317,22 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
            sourceType: updateInfo.sourceType || config.sourceType,
            curatedReleaseId: updateInfo.curatedReleaseId,
            curatedLicenceAcceptance: curatedLicenceAcceptance ?? undefined,
@@ -3495,7 +3495,7 @@ index d09e7f116..2a5ee22f0 100644
            sourceIntuneAppId,
            autoSupersede,
            supersedenceType: autoSupersede ? 'update' : undefined,
-@@ -266,7 +333,8 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+@@ -293,7 +360,8 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
        await db.updatePolicies.update(policy.id, policy.user_id, {
          last_auto_update_at: now,
          last_auto_update_version: updateInfo.latestVersion,
@@ -3505,7 +3505,7 @@ index d09e7f116..2a5ee22f0 100644
          updated_at: now,
        });
  
-@@ -300,23 +368,64 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
+@@ -327,23 +395,64 @@ const scopeReason = !options?.bypassUpdateScope && autoUpdateScopeReason(policy.
   */
  export async function runSqliteUpdateCheck(
    db: DatabaseAdapter,
@@ -3577,7 +3577,7 @@ index d09e7f116..2a5ee22f0 100644
    const latestVersionByWinget = new Map(apps.map((app) => [app.winget_id, app.latest_version]));
  
    const keepByScope = new Map<string, Array<{ wingetId: string; intuneAppId: string }>>();
-@@ -329,9 +438,14 @@ export async function runSqliteUpdateCheck(
+@@ -356,9 +465,14 @@ export async function runSqliteUpdateCheck(
    for (const policy of policies) {
      // A user-scoped check (the on-demand refresh) must never clean another
      // user's scopes, so only their own policies seed the cleanup set.
@@ -3593,7 +3593,7 @@ index d09e7f116..2a5ee22f0 100644
  
    for (const deployment of newest.values()) {
      const tenantId = deployment.intune_tenant_id ?? '';
-@@ -339,7 +453,14 @@ export async function runSqliteUpdateCheck(
+@@ -366,7 +480,14 @@ export async function runSqliteUpdateCheck(
      allScopes.add(scopeKey);
  
      const latestVersion = latestVersionByWinget.get(deployment.winget_id);
@@ -3609,7 +3609,7 @@ index d09e7f116..2a5ee22f0 100644
      if (compareVersions(deployment.version, latestVersion) >= 0) continue;
  
      await db.updateCheckResults.upsert({
-@@ -362,6 +483,66 @@ export async function runSqliteUpdateCheck(
+@@ -389,6 +510,66 @@ export async function runSqliteUpdateCheck(
      keepByScope.set(scopeKey, keep);
    }
  
@@ -3676,7 +3676,7 @@ index d09e7f116..2a5ee22f0 100644
    // Clean every known scope. A scope whose apps are all up to date gets an empty
    // keep list, so its previously detected updates are removed.
    for (const scopeKey of allScopes) {
-@@ -369,12 +550,30 @@ export async function runSqliteUpdateCheck(
+@@ -396,12 +577,30 @@ export async function runSqliteUpdateCheck(
      await db.updateCheckResults.deleteMissing(userId, tenantId, keepByScope.get(scopeKey) ?? []);
    }
  
@@ -3707,7 +3707,7 @@ index d09e7f116..2a5ee22f0 100644
      if (!canAutoUpdate(policy)) continue;
  
      const latestVersion = latestVersionByWinget.get(policy.winget_id);
-@@ -384,12 +583,23 @@ export async function runSqliteUpdateCheck(
+@@ -411,12 +610,23 @@ export async function runSqliteUpdateCheck(
  
      const deployment = await db.uploadHistory.getLatest(policy.user_id, policy.tenant_id, policy.winget_id);
      if (!deployment) continue;
@@ -3731,7 +3731,7 @@ index d09e7f116..2a5ee22f0 100644
  
      const config = policy.deployment_config as DeploymentConfig | null;
      const resolution = await getLatestInstallerInfo(
-@@ -402,6 +612,13 @@ export async function runSqliteUpdateCheck(
+@@ -429,6 +639,13 @@ export async function runSqliteUpdateCheck(
        skipped += 1;
        continue;
      }
@@ -3745,7 +3745,7 @@ index d09e7f116..2a5ee22f0 100644
  
      const result = await triggerSqliteAutoUpdate(db, policy, {
        sourceType: resolution.info.sourceType,
-@@ -422,13 +639,60 @@ export async function runSqliteUpdateCheck(
+@@ -450,13 +667,60 @@ export async function runSqliteUpdateCheck(
        installerSuccessCodes: resolution.info.installerSuccessCodes,
      });
  

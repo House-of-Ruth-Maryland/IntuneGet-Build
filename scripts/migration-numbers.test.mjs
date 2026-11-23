@@ -49,8 +49,8 @@ test('reports a clash only when HRM uses a number upstream has reached', () => {
   assert.equal(verdict([1], []), 'ok (upstream up to 1, HRM uses none)');
 });
 
-test("this repo's patches add HRM migrations 9 upwards with no gaps", () => {
+test("this repo's patches add migrations 10 upwards while preserving the version9 HRM schema", () => {
   const found = migrationsInPatchDir(fileURLToPath(new URL('../patches', import.meta.url)));
-  assert.ok(found.length >= 16, `expected at least 9 to 24, got ${found.join(' ')}`);
-  assert.deepEqual(found, Array.from({ length: found.length }, (_, i) => 9 + i));
+  assert.ok(found.length >= 19, `expected migrations10 to28, got ${found.join(' ')}`);
+  assert.deepEqual(found, Array.from({ length: found.length }, (_, i) => 10 + i));
 });

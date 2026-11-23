@@ -148,7 +148,7 @@ index 000000000..1fdae058d
 +  expect(await sqliteInstallStatus.lastAttempt!('tenant', 'old-app')).toBe('2026-11-06T00:00:00Z');
 +});
 diff --git a/lib/db/__tests__/job-create.test.ts b/lib/db/__tests__/job-create.test.ts
-index 612cbd4f9..a26c95611 100644
+index 1fd336ac8..a26c95611 100644
 --- a/lib/db/__tests__/job-create.test.ts
 +++ b/lib/db/__tests__/job-create.test.ts
 @@ -1,3 +1,4 @@
@@ -160,8 +160,8 @@ index 612cbd4f9..a26c95611 100644
    closeDb?.();
    const stored = new Database(databasePath, { readonly: true, fileMustExist: true });
    try {
--    // Version 8 includes manual mappings and automatic update scope.
--    expect(stored.pragma('user_version', { simple: true })).toBe(8);
+-    // Version 9 also includes authenticated callback run ownership.
+-    expect(stored.pragma('user_version', { simple: true })).toBe(9);
 +    // Versions 10-15 (HRM install status, releases, activity, pilots, update schedule, paused alerts, skipped versions, retirements, rollback readiness, removals, report checkpoints) follow manual mappings, automatic update scope, and webhooks.
 +    expect(stored.pragma('user_version', { simple: true })).toBe(MIGRATIONS.at(-1)!.version);
      return stored.prepare('SELECT * FROM packaging_jobs WHERE id = ?').get(id) as Record<string, unknown>;
@@ -354,6 +354,35 @@ index 000000000..e889fb294
 +    upload_started_at: null, error_stage: null, error_message: null, historyOnly: true,
 +  }));
 +}
+diff --git a/lib/db/hrm-upstream-upgrade.test.ts b/lib/db/hrm-upstream-upgrade.test.ts
+new file mode 100644
+index 000000000..c9c0cfab3
+--- /dev/null
++++ b/lib/db/hrm-upstream-upgrade.test.ts
+@@ -0,0 +1,23 @@
++import Database from 'better-sqlite3';
++import {expect,it} from 'vitest';
++import {MIGRATIONS,runSqliteMigrations} from './sqlite-migrations';
++function seed(db:Database.Database,version:number){for(const migration of MIGRATIONS.filter(row=>row.version<=version)){migration.up(db);db.pragma(`user_version=${migration.version}`)}}
++it.each([26,27])('preserves existing HRM version %i data while adding callback ownership',version=>{
++ const db=new Database(':memory:');try{
++  seed(db,version);
++  const config=JSON.stringify({assignments:[{type:'group',groupId:'fixture-group',intent:'available'}],psadtConfig:{allowDefer:true,deferDays:3}});
++  db.prepare('INSERT INTO app_update_policies(id,user_id,tenant_id,winget_id,policy_type,deployment_config,is_enabled) VALUES(?,?,?,?,?,?,?)').run('policy','fixture-user','fixture-tenant','Example.App','auto_update',config,1);
++  db.prepare('INSERT INTO packaging_jobs(id,user_id,winget_id,version,display_name,installer_type,installer_url,status,package_config) VALUES(?,?,?,?,?,?,?,?,?)').run('job','fixture-user','Example.App','1.0','Example app','exe','https://example.test/app.exe','deployed',config);
++  const before=db.prepare('SELECT * FROM app_update_policies').all();
++  runSqliteMigrations(db);runSqliteMigrations(db);
++  expect(db.pragma('user_version',{simple:true})).toBe(28);expect(db.prepare('SELECT * FROM app_update_policies').all()).toEqual(before);
++  expect(db.prepare('SELECT package_config,callback_run_id FROM packaging_jobs WHERE id=?').get('job')).toEqual({package_config:config,callback_run_id:null});
++  expect((db.pragma('table_info(hrm_installation_policies)') as {name:string}[]).some(row=>row.name==='restart_pilot_target')).toBe(true);
++ }finally{db.close()}
++});
++it('handles an existing plain upstream v0.8.6 version9 database without skipping HRM webhooks',()=>{
++ const db=new Database(':memory:');try{seed(db,8);db.exec('ALTER TABLE packaging_jobs ADD COLUMN callback_run_id TEXT');db.pragma('user_version=9');runSqliteMigrations(db);expect(db.prepare("SELECT name FROM sqlite_master WHERE name='webhook_configurations'").get()).toBeTruthy();expect(db.pragma('user_version',{simple:true})).toBe(28)}finally{db.close()}
++});
++it('creates the complete combined schema on a fresh installation',()=>{
++ const db=new Database(':memory:');try{runSqliteMigrations(db);expect(db.pragma('user_version',{simple:true})).toBe(28);expect(db.prepare('SELECT callback_run_id FROM packaging_jobs').all()).toEqual([]);expect(db.prepare('SELECT restart_pilot_target FROM hrm_installation_policies').all()).toEqual([])}finally{db.close()}
++});
 diff --git a/lib/db/sqlite-auto-update.test.ts b/lib/db/sqlite-auto-update.test.ts
 index 40dd1b163..2a1550f67 100644
 --- a/lib/db/sqlite-auto-update.test.ts
@@ -411,10 +440,10 @@ index 24e4c6a4d..8b4565a6a 100644
      database.prepare(`UPDATE app_update_policies SET last_auto_update_version = NULL,
        consecutive_failures = consecutive_failures + 1,
 diff --git a/lib/db/sqlite-migrations.test.ts b/lib/db/sqlite-migrations.test.ts
-index f4f2dbc07..96ef71f3a 100644
+index cd20601e3..704e4b3dc 100644
 --- a/lib/db/sqlite-migrations.test.ts
 +++ b/lib/db/sqlite-migrations.test.ts
-@@ -29,6 +29,23 @@ describe('sqlite migrations', () => {
+@@ -42,6 +42,23 @@ describe('sqlite migrations', () => {
      insert.run('mapping-three', 'other-tenant', 'user', 'fixture', 'Fixture.App', 'fixture', 'fixture');
      db.close();
    });
@@ -438,7 +467,7 @@ index f4f2dbc07..96ef71f3a 100644
    it('creates every table and records the latest version on a fresh database', () => {
      const db = new Database(':memory:');
      runSqliteMigrations(db);
-@@ -43,6 +60,7 @@ describe('sqlite migrations', () => {
+@@ -56,6 +73,7 @@ describe('sqlite migrations', () => {
          'update_check_results',
          'curated_licence_attestations',
          'claimed_apps',
@@ -447,15 +476,14 @@ index f4f2dbc07..96ef71f3a 100644
      );
      db.close();
 diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
-index 228492fe3..92284e7ee 100644
+index f598a05d4..2ce7d48af 100644
 --- a/lib/db/sqlite-migrations.ts
 +++ b/lib/db/sqlite-migrations.ts
-@@ -306,6 +306,257 @@ export const MIGRATIONS: SqliteMigration[] = [
-       db.exec("ALTER TABLE app_update_policies ADD COLUMN auto_update_scope TEXT NOT NULL DEFAULT 'all' CHECK (auto_update_scope IN ('all', 'minor', 'major'));");
-     },
+@@ -308,7 +308,258 @@ export const MIGRATIONS: SqliteMigration[] = [
    },
-+  {
-+    version: 9,
+   {
+     version: 9,
+-    name: 'authenticated callback run ownership',
 +    name: 'local webhook configurations',
 +    up: db => {
 +      db.exec(`CREATE TABLE IF NOT EXISTS webhook_configurations (
@@ -705,9 +733,29 @@ index 228492fe3..92284e7ee 100644
 +    if (!(db.pragma('table_info(hrm_installation_policies)') as Array<{name:string}>).some(column => column.name === 'restart_pilot_target')) db.exec('ALTER TABLE hrm_installation_policies ADD COLUMN restart_pilot_target TEXT');
 +  } },
 +
++  {
++    version: 28,
++    name: 'authenticated callback run ownership (upstream v0.8.6)',
+     up: db => addColumnIfMissing(db, 'packaging_jobs', 'callback_run_id', 'TEXT'),
+   },
  ];
- 
- export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+@@ -325,6 +576,16 @@ export function getSqliteSchemaVersion(db: BetterSqlite3.Database): number {
+  */
+ export function runSqliteMigrations(db: BetterSqlite3.Database): void {
+   const currentVersion = getSqliteSchemaVersion(db);
++  // Upstream v0.8.6 used version 9 for callback ownership; HRM already used
++  // 9-27. A plain upstream database needs HRM's idempotent webhook step before
++  // the remaining HRM migrations. Existing HRM version numbers stay intact.
++  if (currentVersion === 9) {
++    const columns = db.pragma('table_info(packaging_jobs)') as Array<{name:string}>;
++    const webhookTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='webhook_configurations'").get();
++    if (columns.some(column=>column.name==='callback_run_id') && !webhookTable) {
++      db.transaction(()=>MIGRATIONS.find(migration=>migration.version===9)!.up(db))();
++    }
++  }
+   const pending = MIGRATIONS.filter((migration) => migration.version > currentVersion).sort(
+     (a, b) => a.version - b.version
+   );
 diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
 index 5f548532d..de2c1fd3e 100644
 --- a/lib/db/sqlite.ts
@@ -1350,7 +1398,7 @@ index 590493b95..0faa8a50c 100644
  
    curatedLicenceAttestations: {
 diff --git a/lib/db/types.ts b/lib/db/types.ts
-index adaa21bf6..2eeaedf1d 100644
+index 1f174cb21..b8a308ef4 100644
 --- a/lib/db/types.ts
 +++ b/lib/db/types.ts
 @@ -45,6 +45,26 @@ export interface UpdateCheckResult {
@@ -1380,7 +1428,7 @@ index adaa21bf6..2eeaedf1d 100644
  export interface UpdateCheckQuery {
    tenantId?: string;
    includeDismissed?: boolean;
-@@ -133,6 +153,8 @@ export type CuratedLicenceAttestationInput = Omit<CuratedLicenceAttestationRecor
+@@ -136,6 +156,8 @@ export type CuratedLicenceAttestationInput = Omit<CuratedLicenceAttestationRecor
  
  export type ClaimedAppStatus = 'pending' | 'deploying' | 'deployed' | 'failed';
  
@@ -1389,7 +1437,7 @@ index adaa21bf6..2eeaedf1d 100644
  /**
   * A discovered app a user claimed for deployment, one per tenant and app
   */
-@@ -223,12 +245,16 @@ export interface DatabaseAdapter {
+@@ -226,12 +248,16 @@ export interface DatabaseAdapter {
       */
      getByTenantId(tenantId: string, limit?: number): Promise<PackagingJob[]>;
  
@@ -1406,7 +1454,7 @@ index adaa21bf6..2eeaedf1d 100644
  
      /**
       * Create a new job
-@@ -297,11 +323,18 @@ export interface DatabaseAdapter {
+@@ -300,11 +326,18 @@ export interface DatabaseAdapter {
       */
      getLatest(userId: string, tenantId: string, wingetId: string): Promise<UploadHistoryRecord | null>;
  
@@ -1425,7 +1473,7 @@ index adaa21bf6..2eeaedf1d 100644
    };
  
    updateCheckResults: {
-@@ -335,6 +368,12 @@ export interface DatabaseAdapter {
+@@ -338,6 +371,12 @@ export interface DatabaseAdapter {
        tenantId: string,
        keep: Array<{ wingetId: string; intuneAppId: string }>
      ): Promise<number>;
@@ -1438,7 +1486,7 @@ index adaa21bf6..2eeaedf1d 100644
    };
  
    updatePolicies: {
-@@ -391,6 +430,11 @@ export interface DatabaseAdapter {
+@@ -394,6 +433,11 @@ export interface DatabaseAdapter {
       */
      update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null>;
  
@@ -1450,7 +1498,7 @@ index adaa21bf6..2eeaedf1d 100644
      /**
       * List a user's history with the policy target and deployed app name,
       * newest first, honoring the optional filters and pagination.
-@@ -443,4 +487,14 @@ export interface DatabaseAdapter {
+@@ -446,4 +490,14 @@ export interface DatabaseAdapter {
        data: Partial<Pick<ClaimedAppRecord, 'status' | 'intune_app_id'>>
      ): Promise<ClaimedAppRecord | null>;
    };

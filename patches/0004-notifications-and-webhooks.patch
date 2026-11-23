@@ -575,10 +575,10 @@ index 0b4cc7cbe..a9c94a887 100644
    });
  });
 diff --git a/docs/SELF_HOSTING.md b/docs/SELF_HOSTING.md
-index 728d2a802..290fc89de 100644
+index b2ac8206b..9839c8e62 100644
 --- a/docs/SELF_HOSTING.md
 +++ b/docs/SELF_HOSTING.md
-@@ -187,18 +187,32 @@ Optional catalog snapshot overrides (sensible defaults, normally unset):
+@@ -202,18 +202,32 @@ Optional catalog snapshot overrides (sensible defaults, normally unset):
  > Note: app update policies and their auto-update history are stored locally in
  > SQLite. Manual package links and app claims also stay in SQLite and are
  > reflected when refreshing unmanaged apps for the signed in tenant.
@@ -619,7 +619,7 @@ index 728d2a802..290fc89de 100644
  including its migrations, and configure the server environment variables
  `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
  `SUPABASE_SERVICE_ROLE_KEY`. Keep the service role key on the server.
-@@ -406,7 +420,8 @@ twice a day, matching the catalog sync.
+@@ -421,7 +435,8 @@ twice a day, matching the catalog sync.
  
  Differences from the hosted service: the self-hosted check uses the catalog
  only (no live Intune query), and it does not run hosted QA, send
