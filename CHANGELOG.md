@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retain per-item manual retry authorization and authenticated run identity in integration fixtures; fix case-collision test portability without weakening Linux coverage. Upgrade the local packager MSAL Node dependency to7.1.2 to resolve GHSA-xcx6-jx8p-x3h5.
+
 - Integrate upstream serverv0.8.6 with current detection refresh, authenticated callback/retry fencing and updated runtime/dependencies while preserving reviewed HRM navigation and scope. Keep existing HRM migrations9–27 and relocate upstream callback ownership to28, with fresh and legacy upgrade coverage. Current Curated security eligibility remains fail-closed when the required trusted hold reader is unavailable on SQLite; review that production availability impact before deployment. Private packaging workflow and opt-in capabilities remain separate and off.
 
 - Compose the app workspace around app identity, Edit next rollout, current and next settings,

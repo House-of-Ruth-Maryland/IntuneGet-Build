@@ -21,7 +21,10 @@ discovery reconciliation and replacement workflow. Upstream refreshes current au
 rules, fences callbacks by authenticated run/revision and retries unconfirmed dispatches with a
 pinned payload. HRM's successful-deployment reconciliation runs only after an accepted write or
 an authoritative completed-state read. Security dependency updates already present upstream are
-not downgraded; HRM's remaining dependency overrides stay in place.
+not downgraded; HRM's remaining dependency overrides stay in place. The local packager's direct
+MSAL Node5.4.0 dependency is upgraded to7.1.2 for
+[GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5);
+this does not change the private workflow generator or adopt the separate packager release.
 
 ## Current Curated security eligibility
 

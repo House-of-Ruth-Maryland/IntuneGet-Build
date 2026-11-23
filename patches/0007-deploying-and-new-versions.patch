@@ -1135,7 +1135,7 @@ index 124c4d9ed..690f8b0ae 100644
      // Check if this job belongs to a batch deployment item.
 diff --git a/app/api/package/callback/route.webhooks.test.ts b/app/api/package/callback/route.webhooks.test.ts
 new file mode 100644
-index 000000000..caf29b288
+index 000000000..b8b7619d3
 --- /dev/null
 +++ b/app/api/package/callback/route.webhooks.test.ts
 @@ -0,0 +1,124 @@
@@ -1157,7 +1157,7 @@ index 000000000..caf29b288
 +
 +const JOB_ID = '6f1b4f0e-2c1a-4b7e-9f4a-0d3c2b1a0e9f';
 +const callback = (body: Record<string, unknown>) =>
-+  new NextRequest('http://localhost/api/package/callback', { method: 'POST', body: JSON.stringify({ jobId: JOB_ID, ...body }), headers: { 'X-Signature': 'fixture' } });
++  new NextRequest('http://localhost/api/package/callback', { method: 'POST', body: JSON.stringify({ jobId: JOB_ID, runId:'43',attemptId:'43-1', ...body }), headers: { 'X-Signature': 'fixture' } });
 +
 +beforeEach(() => {
 +  vi.clearAllMocks();
@@ -1340,7 +1340,7 @@ index d29f428c0..dac880c43 100644
  export async function POST(request: NextRequest) {
    try {
 diff --git a/app/api/package/route.test.ts b/app/api/package/route.test.ts
-index b68952f05..f1bd496e2 100644
+index b68952f05..78a59ed01 100644
 --- a/app/api/package/route.test.ts
 +++ b/app/api/package/route.test.ts
 @@ -178,7 +178,7 @@ describe('GET /api/package (userId listing)', () => {
@@ -1409,6 +1409,29 @@ index b68952f05..f1bd496e2 100644
    it('returns an actionable conflict for removed versions before creating or dispatching jobs', async () => {
      getLiveInstallersMock.mockResolvedValueOnce([]);
      const response = await POST(new NextRequest('http://localhost:3000/api/package', {
+@@ -979,7 +1020,7 @@ describe('POST /api/package (workflow dispatch)', () => {
+     expect(updateMock).toHaveBeenCalledOnce();
+     expect(updateMock.mock.calls[0][1].status).toBe('awaiting_qa');
+   });
+-  it('persists request forceCreate only with a pinned unconfirmed hold', async () => {
++  it('does not broaden an ordinary unconfirmed retry with request-wide forceCreate', async () => {
+     const item = { ...makeWin32Item(), forceCreate: false };
+     triggerPackagingWorkflowMock.mockRejectedValueOnce(new WorkflowDispatchUnconfirmedError(503, Date.now(), 'A'.repeat(64)));
+     const response = await POST(new NextRequest('http://localhost:3000/api/package', {
+@@ -988,11 +1029,11 @@ describe('POST /api/package (workflow dispatch)', () => {
+     }));
+     expect(await response.json()).toMatchObject({ jobs: [{ status: 'awaiting_qa' }] });
+     expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ package_config: expect.objectContaining({ forceCreate: false }) }));
+-    expect(triggerPackagingWorkflowMock.mock.calls[0][0].forceCreate).toBe(true);
++    expect(triggerPackagingWorkflowMock.mock.calls[0][0].forceCreate).not.toBe(true);
+     expect(updateMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+-      package_config: expect.objectContaining({ forceCreate: true }),
+       error_details: expect.objectContaining({ workflow_dispatch_unconfirmed_identity: 'A'.repeat(64) }),
+     }), expect.objectContaining({ callback_run_id: null }));
++    expect(updateMock.mock.calls[0][1]).not.toHaveProperty('package_config');
+   });
+   it('still reports other dispatched jobs when saving a capacity hold fails', async () => {
+     triggerPackagingWorkflowMock.mockRejectedValueOnce(new WorkflowDispatchRateLimitError(429,
 @@ -2417,7 +2458,7 @@ describe('POST /api/package (curated licence attestation)', () => {
      acrobatItem = cart(0);
      chromeItem = cart(1, CURATED_APPS[0]);
@@ -1419,7 +1442,7 @@ index b68952f05..f1bd496e2 100644
          get: vi.fn(async (tenantId: string, id: string, version: string) => acceptances.has(`${tenantId}|${id}|${version}`)
            ? { id: 'acceptance', tenant_id: tenantId, app_id: acrobat.id, attestation_id: id, attestation_version: version,
 diff --git a/app/api/package/route.ts b/app/api/package/route.ts
-index 6137d71cc..0ea5699e9 100644
+index 6137d71cc..57177be03 100644
 --- a/app/api/package/route.ts
 +++ b/app/api/package/route.ts
 @@ -1,4 +1,8 @@
@@ -1541,7 +1564,19 @@ index 6137d71cc..0ea5699e9 100644
                qaOverride: item.sourceType === 'curated' ? false : isQaMaintenanceMode() || item.qaOverride,
                sourceType: item.sourceType,
                curatedReleaseId: item.curatedReleaseId,
-@@ -950,9 +1022,10 @@ export async function POST(request: NextRequest) {
+@@ -917,9 +989,8 @@ export async function POST(request: NextRequest) {
+               let retryWriteFailed = false;
+               const held = await db.jobs.update(dispatch.jobId, {
+                 ...rateHold,
+-                ...(rateLimit instanceof WorkflowDispatchUnconfirmedError && forceCreate && !dispatch.item.forceCreate
+-                  ? { package_config: { ...dispatch.item, forceCreate: true } as unknown as import('@/types/database').Json }
+-                  : {}),
++                // Keep the tenant-bound per-item acknowledgement already saved
++                // on the job. A request-wide flag must not broaden a retry.
+               }, {
+                 status: 'queued', github_run_id: null, callback_run_id: null, cancelled_at: null, archived_at: null,
+               }).catch(() => {
+@@ -950,9 +1021,10 @@ export async function POST(request: NextRequest) {
                  status: reputationHold ? 'awaiting_qa' : 'failed',
                  status_message: reputationHold ? dispatchError : null,
                  progress_percent: 0,
@@ -1555,7 +1590,7 @@ index 6137d71cc..0ea5699e9 100644
                  error_message: dispatchError,
                  completed_at: reputationHold ? null : new Date().toISOString(),
                };
-@@ -1137,12 +1210,16 @@ export async function GET(request: NextRequest) {
+@@ -1137,12 +1209,16 @@ export async function GET(request: NextRequest) {
      const scope = searchParams.get('scope');
      if (scope === 'tenant') {
        const mspTenantId = request.headers.get('X-MSP-Tenant-Id');

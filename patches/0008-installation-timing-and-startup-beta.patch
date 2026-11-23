@@ -3027,6 +3027,22 @@ index 892c4ea63..0e7d5a1bb 100644
 +    expect(body.installCommandLine.includes('-DeployMode Silent')).toBe(!allowDefer);
 +  }
 +});
+diff --git a/packager/tests/intunewin-writer.test.ts b/packager/tests/intunewin-writer.test.ts
+index acbae2fd6..d7029fdf6 100644
+--- a/packager/tests/intunewin-writer.test.ts
++++ b/packager/tests/intunewin-writer.test.ts
+@@ -203,9 +203,10 @@ describe('standalone native intunewin format', () => {
+     expect(contents.get('Files/caf\u00e9.bin')!.equals(content)).toBe(true);
+   });
+ 
+-  it.skipIf(process.platform === 'win32')('rejects case collisions on a case-sensitive host', async () => {
++  it('rejects case collisions on a case-sensitive host', async context => {
+     const { input, output } = await fixture();
+     await fs.writeFile(path.join(input, 'SAME.txt'), 'first');
++    if(await fs.stat(path.join(input,'same.txt')).then(()=>true,()=>false))return context.skip();
+     await fs.writeFile(path.join(input, 'same.txt'), 'second');
+     await expect(writeIntunewinPackage(input, 'Invoke-AppDeployToolkit.exe', output)).rejects.toThrow('collision');
+   });
 diff --git a/packager/tests/psadt-nested-portable.test.ts b/packager/tests/psadt-nested-portable.test.ts
 index d17cf5b2c..6126c00d7 100644
 --- a/packager/tests/psadt-nested-portable.test.ts
