@@ -863,10 +863,16 @@ index 648e311ff..a5489fbdb 100644
        </motion.div>
      </div>
 diff --git a/app/(app)/dashboard/settings/page.tsx b/app/(app)/dashboard/settings/page.tsx
-index fa4896636..9c79fbe37 100644
+index fa4896636..0345f70c6 100644
 --- a/app/(app)/dashboard/settings/page.tsx
 +++ b/app/(app)/dashboard/settings/page.tsx
-@@ -28,6 +28,8 @@ import { useUserSettings } from '@/components/providers/UserSettingsProvider';
+@@ -1,4 +1,5 @@
+ 'use client';
++import { VersionDiscoverySettings } from '@/components/hrm/VersionDiscovery';
+ 
+ import { useState, useCallback, type ReactNode } from 'react';
+ import { motion, useReducedMotion, AnimatePresence } from 'framer-motion';
+@@ -28,6 +29,8 @@ import { useUserSettings } from '@/components/providers/UserSettingsProvider';
  import { cn } from '@/lib/utils';
  import { useCartStore } from '@/stores/cart-store';
  import { clearConsentPending, isConsentPending } from '@/components/AdminConsentBanner';
@@ -875,7 +881,7 @@ index fa4896636..9c79fbe37 100644
  
  type SettingsTab = 'general' | 'permissions' | 'notifications' | 'exports' | 'data';
  type PreferenceKey = 'cart' | 'assignments' | 'supersedence';
-@@ -64,13 +66,19 @@ const SETTINGS_TABS: Array<{
+@@ -64,13 +67,19 @@ const SETTINGS_TABS: Array<{
    { id: 'general', label: <T>General</T>, icon: User, description: <T>Account and connection</T> },
    { id: 'permissions', label: <T>Permissions</T>, icon: Shield, description: <T>API access control</T> },
    { id: 'notifications', label: <T>Notifications</T>, icon: Bell, description: <T>Email and webhooks</T> },
@@ -897,7 +903,7 @@ index fa4896636..9c79fbe37 100644
    const [activeTab, setActiveTab] = useState<SettingsTab>('general');
    const [isChecking, setIsChecking] = useState(false);
    const [permissionStatus, setPermissionStatus] = useState<PermissionStatusState | null>(null);
-@@ -305,7 +313,9 @@ export default function SettingsPage() {
+@@ -305,7 +314,9 @@ export default function SettingsPage() {
                          {tab.label}
                        </p>
                        <p className="text-xs text-text-muted hidden lg:block truncate">
@@ -908,7 +914,7 @@ index fa4896636..9c79fbe37 100644
                        </p>
                      </div>
                    </button>
-@@ -351,7 +361,7 @@ export default function SettingsPage() {
+@@ -351,7 +362,7 @@ export default function SettingsPage() {
                        <SettingRow label={<T>Name</T>} value={user?.name || 'Not provided'} />
                        <SettingRow label={<T>Email</T>} value={user?.email || 'Not provided'} />
                        <SettingRow
@@ -917,7 +923,7 @@ index fa4896636..9c79fbe37 100644
                          value="Microsoft Entra ID"
                          noBorder
                        />
-@@ -368,7 +378,7 @@ export default function SettingsPage() {
+@@ -368,7 +379,7 @@ export default function SettingsPage() {
                          <Building2 className="w-5 h-5 text-accent-violet" />
                        </div>
                        <div>
@@ -926,7 +932,7 @@ index fa4896636..9c79fbe37 100644
                          <p className="text-sm text-text-muted"><T>Tenant configuration and status</T></p>
                        </div>
                      </div>
-@@ -395,7 +405,7 @@ export default function SettingsPage() {
+@@ -395,7 +406,7 @@ export default function SettingsPage() {
                            <button
                              onClick={() => copyToClipboard(user.tenantId!, 'tenantId')}
                              className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-overlay/5 transition-colors"
@@ -935,7 +941,7 @@ index fa4896636..9c79fbe37 100644
                            >
                              {copiedField === 'tenantId' ? (
                                <Check className="w-4 h-4 text-status-success" />
-@@ -408,14 +418,14 @@ export default function SettingsPage() {
+@@ -408,14 +419,14 @@ export default function SettingsPage() {
  
                        <div className="flex items-center justify-between py-3">
                          <div>
@@ -952,7 +958,7 @@ index fa4896636..9c79fbe37 100644
                              <ExternalLink className="w-3.5 h-3.5" />
                            </a>
                          </div>
-@@ -423,16 +433,16 @@ export default function SettingsPage() {
+@@ -423,16 +434,16 @@ export default function SettingsPage() {
                      </div>
                    </motion.section>
  
@@ -972,16 +978,16 @@ index fa4896636..9c79fbe37 100644
                          </p>
                        </div>
                        <div className="flex min-w-28 flex-col items-end gap-1">
-@@ -451,6 +461,8 @@ export default function SettingsPage() {
+@@ -451,6 +462,8 @@ export default function SettingsPage() {
                      </div>
                    </motion.section>
  
 +                  {/* HRM patch 0051: these two switches only take effect in Supabase mode. */}
-+                  <UpdateBehaviorSettings>
++                  <VersionDiscoverySettings /><UpdateBehaviorSettings>
                    {/* Carry over assignments card */}
                    <motion.section
                      variants={itemVariants}
-@@ -458,7 +470,7 @@ export default function SettingsPage() {
+@@ -458,7 +471,7 @@ export default function SettingsPage() {
                    >
                      <div className="flex items-center justify-between">
                        <div>
@@ -990,7 +996,7 @@ index fa4896636..9c79fbe37 100644
                          <p className="text-sm text-text-muted">
                            <T>When enabled, assignments from the previous app version are copied to the new version and removed from the old app. When disabled, new app versions are created without assignments.</T>
                          </p>
-@@ -506,6 +518,7 @@ export default function SettingsPage() {
+@@ -506,6 +519,7 @@ export default function SettingsPage() {
                        </div>
                      </div>
                    </motion.section>
@@ -998,7 +1004,7 @@ index fa4896636..9c79fbe37 100644
                  </motion.div>
                </motion.div>
              )}
-@@ -534,7 +547,7 @@ export default function SettingsPage() {
+@@ -534,7 +548,7 @@ export default function SettingsPage() {
                            <Shield className="w-5 h-5 text-accent-cyan" />
                          </div>
                          <div>
@@ -1007,7 +1013,7 @@ index fa4896636..9c79fbe37 100644
                            <p className="text-sm text-text-muted"><T>Required Microsoft Graph permissions</T></p>
                          </div>
                        </div>
-@@ -550,7 +563,7 @@ export default function SettingsPage() {
+@@ -550,7 +564,7 @@ export default function SettingsPage() {
                          ) : (
                            <Shield className="w-4 h-4 mr-2" />
                          )}
@@ -1016,7 +1022,7 @@ index fa4896636..9c79fbe37 100644
                        </Button>
                      </div>
  
-@@ -607,7 +620,7 @@ export default function SettingsPage() {
+@@ -607,7 +621,7 @@ export default function SettingsPage() {
                        <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
                          <Loader2 className="w-4 h-4 text-blue-400 animate-spin mt-0.5 flex-shrink-0" />
                          <p className="text-sm text-blue-400">
@@ -1025,7 +1031,7 @@ index fa4896636..9c79fbe37 100644
                          </p>
                        </div>
                      )}
-@@ -623,7 +636,7 @@ export default function SettingsPage() {
+@@ -623,7 +637,7 @@ export default function SettingsPage() {
                            size="sm"
                            className="bg-status-warning hover:bg-status-warning/90 text-white"
                          >
@@ -1034,7 +1040,7 @@ index fa4896636..9c79fbe37 100644
                          </Button>
                        </div>
                      )}
-@@ -632,14 +645,14 @@ export default function SettingsPage() {
+@@ -632,14 +646,14 @@ export default function SettingsPage() {
                        permissionStatus?.permissions.deviceManagementManagedDevices === false && (
                        <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
                          <p className="text-sm text-status-warning mb-2">
@@ -1051,7 +1057,7 @@ index fa4896636..9c79fbe37 100644
                          </Button>
                        </div>
                      )}
-@@ -655,7 +668,7 @@ export default function SettingsPage() {
+@@ -655,7 +669,7 @@ export default function SettingsPage() {
                            size="sm"
                            className="bg-status-warning hover:bg-status-warning/90 text-white"
                          >
@@ -1060,7 +1066,7 @@ index fa4896636..9c79fbe37 100644
                          </Button>
                        </div>
                      )}
-@@ -689,9 +702,12 @@ export default function SettingsPage() {
+@@ -689,9 +703,12 @@ export default function SettingsPage() {
                    animate="visible"
                    className="space-y-6"
                  >
@@ -1076,7 +1082,7 @@ index fa4896636..9c79fbe37 100644
                    <motion.div variants={itemVariants}>
                      <WebhookManager />
                    </motion.div>
-@@ -722,7 +738,7 @@ export default function SettingsPage() {
+@@ -722,7 +739,7 @@ export default function SettingsPage() {
                          <FileDown className="w-5 h-5 text-accent-cyan" />
                        </div>
                        <div>
@@ -1085,7 +1091,7 @@ index fa4896636..9c79fbe37 100644
                          <p className="text-sm text-text-muted"><T>Configure default export settings</T></p>
                        </div>
                      </div>
-@@ -756,7 +772,7 @@ export default function SettingsPage() {
+@@ -756,7 +773,7 @@ export default function SettingsPage() {
                          <Database className="w-5 h-5 text-accent-violet" />
                        </div>
                        <div>
@@ -1650,18 +1656,21 @@ index 27c710577..776a9b69c 100644
        />
      </>
 diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
-index 33d0890cc..d4f1c62ba 100644
+index 33d0890cc..6078bb807 100644
 --- a/components/dashboard/CommandPalette.tsx
 +++ b/components/dashboard/CommandPalette.tsx
-@@ -4,6 +4,7 @@ import { T } from 'gt-next';
+@@ -2,8 +2,9 @@
+ 
+ import { T } from 'gt-next';
  import { useState, useEffect, useCallback } from 'react';
- import { useRouter } from 'next/navigation';
+-import { useRouter } from 'next/navigation';
++import { useRouter, usePathname } from 'next/navigation';
  import { Command } from 'cmdk';
 +import { Title as DialogTitle } from '@radix-ui/react-dialog';
  import {
    LayoutDashboard,
    Package,
-@@ -13,24 +14,24 @@ import {
+@@ -13,24 +14,27 @@ import {
    ArrowUpCircle,
    BarChart3,
    Settings,
@@ -1681,25 +1690,36 @@ index 33d0890cc..d4f1c62ba 100644
 -  { name: 'App Catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget' },
 -  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'uploads deploy jobs status' },
 -  { name: 'Discovered Apps', href: '/dashboard/unmanaged', icon: Radar, keywords: 'unmanaged discovered scan' },
-+  { name: 'Home', href: '/dashboard', icon: LayoutDashboard, keywords: 'home dashboard overview' },
-+  { name: 'App catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget deploy' },
-   { name: 'Inventory', href: '/dashboard/inventory', icon: Server, keywords: 'deployed inventory intune' },
+-  { name: 'Inventory', href: '/dashboard/inventory', icon: Server, keywords: 'deployed inventory intune' },
 -  { name: 'App Updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions' },
 -  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts' },
 -  { name: 'SCCM Migration', href: '/dashboard/sccm', icon: FolderSync, keywords: 'sccm migration configmgr' },
 -  { name: 'App Requests', href: '/dashboard/app-requests', icon: Lightbulb, keywords: 'suggestions requests vote' },
++  { name: 'Home', href: '/dashboard', icon: LayoutDashboard, keywords: 'home dashboard overview' },
++  { name: 'App catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget deploy' },
++  { name: 'Inventory', href: '/dashboard/inventory', icon: Server, keywords: 'deployed inventory intune app workspace current copy install dates availability deadline' },
 +  { name: 'Discovered apps', href: '/dashboard/unmanaged', icon: Radar, keywords: 'unmanaged discovered scan devices' },
-+  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions automatic schedule' },
++  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions automatic schedule publish delivery blackout pilot next rollout' },
 +  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'uploads deploy jobs status history' },
 +  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts my deployments' },
++  { name: 'Check for new app versions', href: '/dashboard/settings#app-updates', icon: Settings, keywords: 'catalog discovery cadence check schedule 3:30 new versions' },
++  { name: 'Automatic update delivery', href: '/dashboard/updates#automatic-updates', icon: ArrowUpCircle, keywords: 'when can intuneget send automatic updates to intune update schedule publishing window blackout pause' },
++  { name: 'Installation timing guide', href: '/dashboard/help#automatic-installation-policy', icon: LifeBuoy, keywords: 'installation behavior behaviour employee choice postpone startup restart schedule next rollout' },
    { name: 'Settings', href: '/dashboard/settings', icon: Settings, keywords: 'settings preferences permissions' },
 +  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy, keywords: 'help support how' },
  ];
  
  interface CommandPaletteProps {
-@@ -41,22 +42,11 @@ interface CommandPaletteProps {
+@@ -40,23 +44,18 @@ interface CommandPaletteProps {
+ 
  export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
    const router = useRouter();
++  const pathname = usePathname();
++  const scopedApp = /^\/dashboard\/inventory\/([0-9a-f-]{36})$/i.exec(pathname ?? '')?.[1];
++  const items = [...NAVIGATION_ITEMS, ...(scopedApp ? [
++    { name: 'Review next rollout', href: `${pathname}#next-rollout`, icon: ArrowUpCircle, keywords: 'edit next rollout app exception shared installation timing policy employee postpone' },
++    { name: 'Review current copy and install dates', href: `${pathname}#current-copy`, icon: Server, keywords: 'availability deadline restart grace saved current groups assignment' },
++  ] : [])];
    const [search, setSearch] = useState('');
 +  const modifierKey = useModifierKeyLabel();
  
@@ -1723,7 +1743,7 @@ index 33d0890cc..d4f1c62ba 100644
  
    const handleSelect = useCallback(
      (href: string) => {
-@@ -66,26 +56,27 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -66,26 +65,27 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
      [onOpenChange, router]
    );
  
@@ -1766,7 +1786,16 @@ index 33d0890cc..d4f1c62ba 100644
                value={search}
                onValueChange={setSearch}
                placeholder="Type a command or search..."
-@@ -122,7 +113,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -106,7 +106,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+               heading={<T>Navigation</T>}
+               className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
+             >
+-              {NAVIGATION_ITEMS.map((item) => (
++              {items.map((item) => (
+                 <Command.Item
+                   key={item.href}
+                   value={`${item.name} ${item.keywords}`}
+@@ -122,7 +122,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
              {/* Keyboard shortcuts group */}
              {!search && (
                <Command.Group
@@ -1775,7 +1804,7 @@ index 33d0890cc..d4f1c62ba 100644
                  className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:mt-2"
                >
                  {SHORTCUT_HINTS.map((hint) => (
-@@ -142,7 +133,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -142,7 +142,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                            key={key}
                            className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5"
                          >
@@ -1784,7 +1813,7 @@ index 33d0890cc..d4f1c62ba 100644
                          </kbd>
                        ))}
                      </div>
-@@ -151,8 +142,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -151,8 +151,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                </Command.Group>
              )}
            </Command.List>
@@ -2011,17 +2040,18 @@ index d834efe1b..6a84253d2 100644
              <T>Sign out</T>
 diff --git a/components/dashboard/__tests__/CommandPalette.test.ts b/components/dashboard/__tests__/CommandPalette.test.ts
 new file mode 100644
-index 000000000..680dffc33
+index 000000000..f67ec4149
 --- /dev/null
 +++ b/components/dashboard/__tests__/CommandPalette.test.ts
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,85 @@
 +// @vitest-environment happy-dom
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
 +
 +const push = vi.fn();
-+vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
++const state = vi.hoisted(() => ({ path: '/dashboard' }));
++vi.mock('next/navigation', () => ({ useRouter: () => ({ push }), usePathname: () => state.path }));
 +vi.mock('gt-next', () => ({ T: ({ children }: { children: unknown }) => children }));
 +
 +import { CommandPalette } from '../CommandPalette';
@@ -2036,6 +2066,7 @@ index 000000000..680dffc33
 +    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 +    Element.prototype.scrollIntoView = vi.fn();
 +    push.mockReset();
++    state.path = '/dashboard';
 +    onOpenChange.mockReset();
 +    container = document.createElement('div');
 +    document.body.appendChild(container);
@@ -2078,9 +2109,19 @@ index 000000000..680dffc33
 +  // HRM patch 0053: pages in the sidebar's order, and the new G shortcuts listed.
 +  it('lists pages in sidebar order and shows the new G shortcuts', () => {
 +    const pages = [...document.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])')].map((el) => el.textContent);
-+    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Settings', 'Help']);
++    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Check for new app versions', 'Automatic update delivery', 'Installation timing guide', 'Settings', 'Help']);
 +    const text = document.querySelector('[role="dialog"]')!.textContent;
 +    for (const hint of ['Go to App updates', 'Go to Discovered apps', 'Go to Help']) expect(text).toContain(hint);
++  });
++
++  it('offers scoped review links only for a concrete app workspace', async () => {
++    expect(document.body.textContent).not.toContain('Review next rollout');
++    state.path = '/dashboard/inventory/11111111-1111-4111-8111-111111111111';
++    await act(async () => root.render(createElement(CommandPalette, { open: true, onOpenChange })));
++    const next = [...document.querySelectorAll<HTMLElement>('[cmdk-item]')].find(el => el.textContent === 'Review next rollout')!;
++    expect(next.getAttribute('data-value')).toContain('edit next rollout');
++    await act(async () => next.click());
++    expect(push).toHaveBeenCalledWith(state.path + '#next-rollout');
 +  });
 +
 +  it('closes with Escape', async () => {

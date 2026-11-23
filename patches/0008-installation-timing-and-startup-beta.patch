@@ -140,6 +140,20 @@ index 9dba05d19..1172a39a4 100644
                @{ returnCode = 60012; type = "retry" }  # No user logged in - retry later for per-user installs
              )
              rules = $graphRules
+diff --git a/app/(app)/dashboard/inventory/[appId]/page.tsx b/app/(app)/dashboard/inventory/[appId]/page.tsx
+new file mode 100644
+index 000000000..4a8c8f4d9
+--- /dev/null
++++ b/app/(app)/dashboard/inventory/[appId]/page.tsx
+@@ -0,0 +1,8 @@
++'use client';
++import { useParams } from 'next/navigation';
++import { AppWorkspace } from '@/components/hrm/AppWorkspace';
++
++export default function AppWorkspacePage() {
++  const { appId } = useParams<{ appId: string }>();
++  return <AppWorkspace appId={appId} />;
++}
 diff --git a/app/api/cron/collect-startup-installations/route.ts b/app/api/cron/collect-startup-installations/route.ts
 new file mode 100644
 index 000000000..32080a7c0
@@ -661,7 +675,7 @@ index 000000000..21ba82497
 +});
 diff --git a/components/hrm/AppTimingPanel.tsx b/components/hrm/AppTimingPanel.tsx
 new file mode 100644
-index 000000000..cecfae0bf
+index 000000000..50bdd42af
 --- /dev/null
 +++ b/components/hrm/AppTimingPanel.tsx
 @@ -0,0 +1,208 @@
@@ -863,7 +877,7 @@ index 000000000..cecfae0bf
 +      <p className="font-semibold text-text-primary">What changing dates does</p>
 +      <ul className="mt-1 list-disc space-y-0.5 pl-5">
 +        <li>Computers that already have this version are not affected.</li>
-+        <li>Offline computers install when they reconnect.</li>
++        <li>Offline computers can install after they reconnect and Intune processes the assignment.</li>
 +        <li>It sets dates once. It does not install at restart or sign-in.</li>
 +        <li>Check the dates again after deploying a new version.</li>
 +      </ul>
@@ -873,12 +887,134 @@ index 000000000..cecfae0bf
 +    {error && <p role="alert" className="text-sm font-medium text-status-error">{error}</p>}
 +  </section>;
 +}
+diff --git a/components/hrm/AppWorkspace.test.ts b/components/hrm/AppWorkspace.test.ts
+new file mode 100644
+index 000000000..1ce21f6e8
+--- /dev/null
++++ b/components/hrm/AppWorkspace.test.ts
+@@ -0,0 +1,42 @@
++// @vitest-environment happy-dom
++import { act, createElement } from 'react';
++import { createRoot } from 'react-dom/client';
++import { afterEach, expect, it, vi } from 'vitest';
++const state = vi.hoisted(() => ({ otherTenant: false }));
++vi.mock('@/hooks/use-inventory', () => ({ useAppDetails: () => ({ data: { app: { id: 'one', displayName: 'Fixture app', displayVersion: '1', installExperience: { deviceRestartBehavior: 'suppress' } } } }) }));
++vi.mock('@/hooks/useAppInsights', () => ({ useAppInsights: () => ({ data: { snapshot: { appId: 'one', wingetId: 'Vendor.App' } } }) }));
++vi.mock('@/hooks/use-deployed-config', () => ({ useDeployedConfig: () => ({ deployedConfig: { psadtConfig: { deployMode: 'Silent' } } }) }));
++vi.mock('@/hooks/use-updates', () => ({ useUpdatePolicies: () => ({ data: { policies: [{ id: 'policy', winget_id: 'Vendor.App', policy_type: 'auto_update' }] } }) }));
++vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { shared: { mode: 'prompt', days: 3 }, exceptions: [] } }) }));
++vi.mock('@/hooks/useMspOptional', () => ({ useMspOptional: () => ({ isMspUser: true, selectedTenantId: state.otherTenant ? 'other' : 'own' }) }));
++vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ account: { tenantId: 'own' } }) }));
++vi.mock('./InstallationPolicyPanel', () => ({ InstallationPolicyPanel: () => createElement('button', null, 'Edit next rollout') }));
++vi.mock('./AppTimingPanel', () => ({ AppTimingPanel: () => createElement('div', null, 'Install dates') }));
++vi.mock('./AppGroupsLine', () => ({ AppGroupsLine: () => createElement('div', null, 'Groups') }));
++vi.mock('./InstallStatusBar', () => ({ InstallStatusBar: () => createElement('div', null, 'Install results') }));
++vi.mock('./PreviousCopy', () => ({ PreviousCopyNote: () => null }));
++vi.mock('./AppInsights', () => ({ AppActivityTimeline: () => null }));
++vi.mock('@/hooks/usePilots', () => ({ usePilots: () => ({ data: { supported: true, pilots: [] } }) }));
++import { AppWorkspace } from './AppWorkspace';
++(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++afterEach(() => { document.body.innerHTML = ''; state.otherTenant = false; });
++it('shows saved versus next scope, actual rule source and gates every proposed employee action', async () => {
++  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
++  await act(async () => root.render(createElement(AppWorkspace, { appId: 'one' })));
++  expect(node.textContent).toContain('Current copy · 1');
++  expect(node.textContent).toContain('Shared policy:');
++  expect(node.textContent).toContain('3 days');
++  expect([...node.querySelectorAll('fieldset button')]).toHaveLength(4);
++  expect(node.querySelector('fieldset')?.disabled).toBe(true);
++  expect(node.textContent).toContain('They are not enabled');
++  await act(async () => root.unmount());
++});
++it('does not mix another tenant’s current copy with signed-in tenant automatic policy editing', async () => {
++  state.otherTenant = true;
++  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
++  await act(async () => root.render(createElement(AppWorkspace, { appId: 'one' })));
++  expect(node.textContent).toContain('only for your signed-in tenant');
++  expect(node.textContent).not.toContain('Edit next rollout');
++  expect(node.textContent).not.toContain('Shared policy:');
++  await act(async () => root.unmount());
++});
+diff --git a/components/hrm/AppWorkspace.tsx b/components/hrm/AppWorkspace.tsx
+new file mode 100644
+index 000000000..1d97e22f6
+--- /dev/null
++++ b/components/hrm/AppWorkspace.tsx
+@@ -0,0 +1,68 @@
++'use client';
++import Link from 'next/link';
++import { usePilots } from '@/hooks/usePilots';
++import { useAppDetails } from '@/hooks/use-inventory';
++import { useAppInsights } from '@/hooks/useAppInsights';
++import { useDeployedConfig } from '@/hooks/use-deployed-config';
++import { useUpdatePolicies } from '@/hooks/use-updates';
++import { useInstallationPolicy } from '@/hooks/useInstallationPolicy';
++import { useMspOptional } from '@/hooks/useMspOptional';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++import { installationPolicySummary } from '@/lib/hrm/installation-policy';
++import { effectiveInstallationRule, savedInstallationSummary } from '@/lib/hrm/rollout-workspace';
++import type { AppUpdatePolicy } from '@/types/update-policies';
++import { AppTimingPanel } from './AppTimingPanel';
++import { AppGroupsLine } from './AppGroupsLine';
++import { InstallStatusBar } from './InstallStatusBar';
++import { PreviousCopyNote } from './PreviousCopy';
++import { AppActivityTimeline } from './AppInsights';
++import { InstallationPolicyPanel } from './InstallationPolicyPanel';
++import { Button } from '@/components/ui/button';
++
++const section = 'rounded-xl border border-overlay/10 bg-bg-surface p-5 sm:p-6 space-y-4';
++export function AppWorkspace({ appId }: { appId: string }) {
++  const details = useAppDetails(appId);
++  const insights = useAppInsights(appId);
++  const { account } = useMicrosoftAuth();
++  const { isMspUser, selectedTenantId } = useMspOptional();
++  const ownTenant = !isMspUser || !selectedTenantId || selectedTenantId === account?.tenantId;
++  const app = details.data?.app;
++  const family = ownTenant && insights.data?.snapshot?.appId === appId ? insights.data.snapshot.wingetId : null;
++  const current = useDeployedConfig(family, appId);
++  const policies = useUpdatePolicies();
++  const rules = useInstallationPolicy();
++  const pilots = usePilots();
++  const appPilots = ownTenant ? (pilots.data?.pilots ?? []).filter(row => row.previous_app_id === appId || row.new_app_id === appId) : [];
++  const policy = ((policies.data?.policies ?? []) as AppUpdatePolicy[]).find(row => family && row.winget_id.toLowerCase() === family.toLowerCase());
++  const automatic = policy?.policy_type === 'auto_update';
++  const effective = family && rules.data?.shared ? effectiveInstallationRule(rules.data.shared, rules.data.exceptions ?? [], family) : null;
++  const config = current.deployedConfig && 'psadtConfig' in current.deployedConfig ? current.deployedConfig.psadtConfig : null;
++  if (details.isLoading) return <p role="status" className="p-6 text-text-secondary">Loading app workspace…</p>;
++  if (!app) return <section className={section}><h1 className="text-xl font-semibold text-text-primary">App workspace unavailable</h1><p role="alert" className="text-text-secondary">{details.error?.message || 'This copy could not be found.'}</p><Button variant="outline" onClick={() => void details.refetch()}>Try again</Button><Link className="block text-accent-cyan" href="/dashboard/inventory">Back to Inventory</Link></section>;
++  return <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
++    <nav aria-label="Breadcrumb" className="text-sm text-text-secondary"><Link href="/dashboard/inventory" className="text-accent-cyan hover:underline">Inventory</Link><span aria-hidden="true"> / </span>{app.displayName}</nav>
++    <header className="space-y-2"><h1 className="text-2xl font-semibold text-text-primary">{app.displayName}</h1><p className="text-sm text-text-secondary">App workspace · current copy and next automatic rollout</p><Link href="/dashboard/updates#automatic-updates" className="inline-block text-sm text-accent-cyan hover:underline">When can IntuneGet send automatic updates to Intune?</Link></header>
++    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
++      <div className="min-w-0 space-y-6">
++        <section className={section} aria-labelledby="current-copy"><div className="flex flex-wrap justify-between gap-2"><h2 id="current-copy" className="text-lg font-semibold text-text-primary">Current copy · {app.displayVersion || 'Version unavailable'}</h2><span className="text-sm text-text-muted">Saved in Intune</span></div><PreviousCopyNote appId={appId} />
++          <p className="text-sm text-text-secondary">{current.isLoading ? 'Loading saved installer settings…' : savedInstallationSummary(config)}</p>
++          {current.error && <p role="alert" className="text-sm text-status-warning">Could not load this copy’s saved installer settings.</p>}
++          <p className="text-sm text-text-secondary">Restart after installation: {({ suppress: 'suppressed', allow: 'installer may restart', force: 'Intune forces restart', basedOnReturnCode: 'based on installer result' } as Record<string, string>)[app.installExperience?.deviceRestartBehavior ?? ''] || 'not reported'}. This is separate from installing after startup.</p>
++          <AppGroupsLine intuneAppId={appId} /><AppTimingPanel appId={appId} groupNames={app.assignmentGroupNames} />
++        </section>
++        <section className={section} aria-labelledby="next-rollout"><h2 id="next-rollout" className="text-lg font-semibold text-text-primary">Next automatic rollout · saved settings</h2>
++          {!ownTenant ? <p className="text-sm text-text-secondary">Automatic installation policies are available only for your signed-in tenant.</p> : policies.isLoading || insights.isLoading ? <p role="status">Loading next rollout settings…</p> : !family ? <p className="text-sm text-text-secondary">This copy has no verified IntuneGet app mapping. Next rollout settings are unavailable.</p> : !automatic ? <p className="text-sm text-text-secondary">Automatic updates are not configured for this app. Review its update preference in App updates.</p> : effective ? <><p className="text-sm text-text-secondary"><strong>{effective.source}:</strong> {installationPolicySummary(effective.policy)}.</p>{effective.policy.mode === 'existing' && <p className="text-sm text-text-secondary">Source: the update policy’s saved deployment configuration. {savedInstallationSummary(policy?.deployment_config?.psadtConfig)}</p>}<p className="text-sm text-text-secondary">Automatic updates: {policy?.is_enabled ? 'enabled' : 'turned off'}. This saved installation rule does not enable updates.</p><InstallationPolicyPanel apps={policy ? [policy] : []} appId={family} /></> : <p className="text-sm text-text-secondary">Installation policy is unavailable. Current copy settings remain in effect.</p>}
++          {(policies.error || rules.error || insights.error) && <p role="alert" className="text-sm text-status-warning">Some saved rollout data could not be loaded. Review App updates before making a change.</p>}
++          <p className="text-sm text-text-muted">Changes apply to future automatic packages. Queued packages, this current copy, manual Update, Update all and pilots keep their own settings.</p>
++          <section aria-label="Pilot status" className="space-y-2 text-sm"><h3 className="font-medium text-text-primary">Pilot status</h3>{pilots.isLoading ? <p>Loading pilot status…</p> : pilots.error ? <p role="alert">Pilot status unavailable.</p> : appPilots.length ? appPilots.map(row => <p key={row.id} className="text-text-secondary">{row.group_name} · {row.phase} · package {row.job_status || 'not reported'}</p>) : <p className="text-text-muted">No pilot reported for this copy.</p>}</section><Link href="/dashboard/updates" className="inline-block text-sm text-accent-cyan hover:underline">Open App updates for update preferences and pilot status</Link>
++        </section>
++        <section className={section}><InstallStatusBar appId={appId} /></section>
++        <section className={section}><AppActivityTimeline appId={appId} /></section>
++      </div>
++      <aside className={section} aria-labelledby="employee-preview"><h2 id="employee-preview" className="text-lg font-semibold text-text-primary">Employee preview</h2><p className="text-sm text-text-secondary">Read-only explanation of saved settings, not a device prompt or a confirmed installation time.</p><p className="text-sm text-text-secondary">{effective?.policy.mode === 'prompt' ? `The installer may offer postponement for ${effective.policy.days} days from each computer’s first attempt. A signed-in user and matching running app may be needed. Reminders follow Intune retries.` : effective?.policy.mode === 'restart' ? 'Startup Beta waits for a later Windows startup. It does not force restart, block sign-in or enforce a postponement cutoff.' : effective?.policy.mode === 'silent' ? 'The Required assignment installs without a postponement prompt when Intune runs it.' : 'The saved app configuration determines whether the installer runs silently or offers postponement.'}</p>
++        <fieldset disabled className="space-y-2"><legend className="text-sm font-medium text-text-primary">Proposed employee choices · unavailable</legend>{['Install now', 'Choose a time', 'Postpone with an earlier IT cutoff', 'After next restart with a cutoff fallback'].map(label => <Button key={label} variant="outline" className="h-auto min-h-10 w-full justify-start whitespace-normal text-left">{label}</Button>)}</fieldset>
++        <p className="text-sm text-text-muted">A 72-hour allowance capped by an earlier IT cutoff, time selection and bounded startup fallback need a validated pilot capability. They are not enabled on this server.</p><p className="text-sm text-text-secondary">Offline devices wait until they can process the assignment. No exact installation time is guaranteed. Available groups use optional Company Portal installation, without a Required deadline.</p>
++      </aside>
++    </div>
++  </div>;
++}
 diff --git a/components/hrm/InstallationPolicyPanel.test.ts b/components/hrm/InstallationPolicyPanel.test.ts
 new file mode 100644
-index 000000000..6046b19bb
+index 000000000..041e89255
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.test.ts
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,82 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -893,13 +1029,17 @@ index 000000000..6046b19bb
 +const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.textContent === label)!;
 +beforeEach(async () => { state.mutate.mockReset(); state.exceptionMode = 'silent'; state.eligibility = undefined; apps[0].deployment_config = { displayName: 'Vendor App', installScope: 'machine', installerType: 'msi' } as DeploymentConfig; const node = document.createElement('div'); document.body.append(node); root = createRoot(node); await act(async () => root.render(createElement(InstallationPolicyPanel, { apps }))); });
 +afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
-+it('opens a labeled right-side panel with a three-day draft without activating it until Save', async () => {
++it('opens a labeled right-side panel with the actual saved rule without activating a replacement', async () => {
 +  expect(document.querySelector('[role="dialog"]')).toBeNull();
 +  await act(async () => button('Edit shared policy').click());
 +  const panel = document.querySelector('[role="dialog"]')!;
 +  expect(panel.className).toContain('right-0'); expect(panel.getAttribute('aria-labelledby')).toBeTruthy();
-+  expect(document.querySelector<HTMLSelectElement>('[aria-label="Days users can postpone"]')!.value).toBe('3');
++  expect(document.querySelector<HTMLInputElement>('input[value="existing"]')!.checked).toBe(true);
++  expect(document.querySelector('[aria-label="Days users can postpone"]')).toBeNull();
 +  expect(state.mutate).not.toHaveBeenCalled();
++  expect(button('Save shared policy').disabled).toBe(true);
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="prompt"]')!.click());
++  expect(document.body.textContent).toContain('Unsaved changes');
 +  await act(async () => button('Save shared policy').click());
 +  expect(state.mutate.mock.calls[0][0]).toEqual({ action: 'save', appId: '', policy: { mode: 'prompt', days: 3 } });
 +  expect(document.body.textContent).toContain('may run silently');
@@ -948,12 +1088,21 @@ index 000000000..6046b19bb
 +  await act(async () => button('Save app exception').click());
 +  expect(state.mutate.mock.calls[0][0]).toMatchObject({ policy: { mode: 'restart' } });
 +});
++
++it('shows the effective app exception in the app-scoped row and opens that saved rule', async () => {
++  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps, appId: 'Vendor.App' })));
++  expect(document.body.textContent).toContain('Install without postponement');
++  expect(document.body.textContent).not.toContain('Review app exceptions');
++  await act(async () => button('Edit next rollout').click());
++  expect(document.querySelector<HTMLInputElement>('input[value="silent"]')!.checked).toBe(true);
++  expect(button('Save app exception').disabled).toBe(true);
++});
 diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
 new file mode 100644
-index 000000000..687829856
+index 000000000..7afd07876
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.tsx
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,94 @@
 +'use client';
 +import { useState } from 'react';
 +import Link from 'next/link';
@@ -965,12 +1114,12 @@ index 000000000..687829856
 +import type { AppUpdatePolicy } from '@/types/update-policies';
 +import { StatusStripRow } from './StatusStripRow';
 +
-+export function InstallationPolicyPanel({ apps }: { apps: AppUpdatePolicy[] }) {
++export function InstallationPolicyPanel({ apps, appId }: { apps: AppUpdatePolicy[]; appId?: string }) {
 +  const { data, isLoading, error, action } = useInstallationPolicy();
 +  const [open, setOpen] = useState(false);
 +  const [selected, setSelected] = useState('');
 +  const [inherit, setInherit] = useState(false);
-+  const [draft, setDraft] = useState<InstallationPolicy>({ mode: 'prompt', days: 3 });
++  const [draft, setDraft] = useState<InstallationPolicy>({ mode: 'existing', days: 3 });
 +  const [saved, setSaved] = useState(false);
 +  if (data?.supported === false) return null;
 +  const exceptions = data?.exceptions ?? [];
@@ -978,36 +1127,40 @@ index 000000000..687829856
 +  const restartProblem = data?.restartEligibility?.find(app => app.appId === selected.toLowerCase())?.problem
 +    ?? startupInstallationProblem({ ...selectedConfig, customDetection: selectedConfig?.psadtConfig?.customDetection });
 +  const invalidRestart = !!selected && !inherit && draft.mode === 'restart' && !!restartProblem;
++  const savedException = exceptions.find(p => p.appId.toLowerCase() === selected.toLowerCase());
++  const stored = savedException ?? data?.shared;
++  const dirty = !!stored && (inherit !== (!!selected && !savedException) || (!inherit && (draft.mode !== stored.mode || draft.days !== stored.days)));
 +  const effectiveMode = selected && inherit && data?.shared ? data.shared.mode : draft.mode;
 +  const choose = (appId: string) => {
 +    setSelected(appId); setSaved(false); action.reset();
 +    const exception = exceptions.find(p => p.appId.toLowerCase() === appId.toLowerCase());
 +    setInherit(!!appId && !exception);
-+    setDraft(exception ?? (data?.shared?.mode === 'existing' && !appId ? { mode: 'prompt', days: 3 } : data?.shared) ?? { mode: 'prompt', days: 3 });
++    setDraft(exception ?? data?.shared ?? { mode: 'existing', days: 3 });
 +  };
 +  // HRM patch 0058 (choice 4B): one strip row; the rule's details and links are in the dialog.
-+  const sharedSummary = !data?.shared ? null : data.shared.mode === 'existing' ? 'Use each app’s saved settings' : data.shared.mode === 'prompt' ? `Users can postpone · ${data.shared.days} days` : 'Install without postponement';
++  const summaryPolicy = (appId ? exceptions.find(p => p.appId.toLowerCase() === appId.toLowerCase()) : undefined) ?? data?.shared;
++  const sharedSummary = !summaryPolicy ? null : summaryPolicy.mode === 'existing' ? 'Use each app’s saved settings' : summaryPolicy.mode === 'prompt' ? `Users can postpone · ${summaryPolicy.days} days` : summaryPolicy.mode === 'restart' ? 'Install after next restart · Beta' : 'Install without postponement';
 +  return <StatusStripRow
 +    label="Installation timing"
-+    summary={isLoading ? 'Loading installation timing…' : sharedSummary && <>{sharedSummary}{exceptions.length > 0 && ` · ${exceptions.length === 1 ? '1 app exception' : `${exceptions.length} app exceptions`}`}</>}
-+    action={<Dialog open={open} onOpenChange={value => { if (!action.isPending) { setOpen(value); if (value) choose(''); } }}>
-+        <DialogTrigger asChild><Button variant="ghost" size="sm" disabled={!data?.shared}>Edit shared policy</Button></DialogTrigger>
++    summary={isLoading ? 'Loading installation timing…' : sharedSummary && <>{sharedSummary}{!appId && exceptions.length > 0 && ` · ${exceptions.length === 1 ? '1 app exception' : `${exceptions.length} app exceptions`}`}</>}
++    action={<Dialog open={open} onOpenChange={value => { if (!action.isPending) { setOpen(value); if (value) choose(appId ?? ''); } }}>
++        <DialogTrigger asChild><Button variant="ghost" size="sm" disabled={!data?.shared}>{appId ? 'Edit next rollout' : 'Edit shared policy'}</Button></DialogTrigger>
 +        <DialogContent side="right" onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }} hideCloseButton={action.isPending}>
-+          <DialogHeader className="pr-12"><DialogTitle>{selected ? 'Edit app exception' : 'Edit shared policy'}</DialogTitle><DialogDescription>Applies to future automatic update packages. Versions already deployed keep the settings they were built with.</DialogDescription></DialogHeader>
++          <DialogHeader className="pr-12"><DialogTitle>{appId ? 'Edit next rollout' : selected ? 'Edit app exception' : 'Edit shared policy'}</DialogTitle><DialogDescription>Applies to future automatic update packages. Versions already deployed keep the settings they were built with.</DialogDescription></DialogHeader>
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
-+            <label className="block text-sm text-text-secondary">Apply to
++            <div className="rounded-lg border border-overlay/10 p-3 text-sm"><h3 className="font-medium text-text-primary">1. Scope</h3><p className="mt-1 text-text-secondary">Future automatic packages only. Current and queued copies keep their saved settings.</p><p role="status" className="mt-2 text-text-muted">{dirty && !saved ? 'Unsaved changes' : 'Saved settings'}</p></div><label className="block text-sm text-text-secondary">Apply to
 +              <select className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={selected} disabled={action.isPending} onChange={e => choose(e.target.value)}>
-+                <option value="">All apps with Automatic updates on · Shared policy</option>
++                {!appId && <option value="">All apps with Automatic updates on · Shared policy</option>}
 +                {apps.map(app => <option key={app.id} value={app.winget_id}>{app.deployment_config?.displayName || app.winget_id}{exceptions.some(p => p.appId.toLowerCase() === app.winget_id.toLowerCase()) ? ' · App exception' : ' · Uses shared policy'}</option>)}
 +              </select>
 +            </label>
 +            {selected && <label className="flex items-center gap-2 text-sm text-text-primary"><input type="checkbox" checked={inherit} disabled={action.isPending} onChange={e => { setInherit(e.target.checked); setSaved(false); action.reset(); }} />Use shared policy</label>}
 +            <fieldset disabled={action.isPending || (!!selected && inherit)} className="space-y-4 disabled:opacity-50">
-+              <legend className="mb-2 text-sm font-medium text-text-primary">When computers install</legend>
++              <legend className="mb-2 text-sm font-medium text-text-primary">2. Installation timing</legend>
 +              {([
 +                ['prompt', 'Let users install now or postpone', 'Postponement starts at each computer’s first install attempt.'],
-+                ['silent', 'Install automatically', 'Install when Intune runs the required assignment, without a postponement prompt.'],
-+                ['existing', 'Use each app’s saved settings', 'Use the settings from the original deployment.'],
++                ['silent', 'Install automatically', 'Install when Intune runs the Required assignment, without a postponement prompt.'],
++                ['existing', 'Use each app’s saved settings', 'Use the update policy’s saved installation settings.'],
 +              ] as const).map(([mode, label, hint]) => <label key={mode} className="flex items-start gap-3 rounded-lg border border-overlay/10 p-3 text-sm"><input className="mt-1" name="installation-behavior" type="radio" value={mode} checked={draft.mode === mode} onChange={() => { setDraft({ ...draft, mode }); setSaved(false); action.reset(); }} /><span><span className="block text-text-primary font-medium">{label}</span><span className="block text-xs text-text-muted mt-1">{hint}</span></span></label>)}
 +              {selected && <label className="flex items-start gap-3 rounded-lg border border-status-warning/25 p-3 text-sm"><input type="radio" className="mt-1" name="installation-behavior" value="restart" checked={draft.mode === 'restart'} disabled={!!restartProblem} aria-describedby={restartProblem ? 'restart-installation-restriction' : undefined} onChange={() => { setDraft({ ...draft, mode: 'restart' }); setSaved(false); action.reset(); }} /><span><span className="block font-medium text-text-primary">Install after next restart · Beta</span><span className="block text-xs text-text-muted mt-1">Beta: Windows pilot testing required. Machine-wide MSI/EXE apps only. Use a Required assignment to pilot devices. Does not force a restart; no three-day deadline.</span></span></label>}
 +              {selected && restartProblem && <p id="restart-installation-restriction" role={invalidRestart ? 'alert' : undefined} className="text-xs text-status-warning">{restartProblem} Review the app’s saved deployment configuration before choosing this Beta.</p>}
@@ -1015,10 +1168,10 @@ index 000000000..687829856
 +                <select aria-label="Days users can postpone" className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={draft.days} onChange={e => { setDraft({ ...draft, days: Number(e.target.value) }); setSaved(false); action.reset(); }}>{Array.from({ length: 14 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n} {n === 1 ? 'day' : 'days'}</option>)}</select>
 +              </label>}
 +            </fieldset>
-+            <div className="rounded-lg bg-overlay/5 p-4 text-sm text-text-secondary space-y-2"><h3 className="font-medium text-text-primary">What happens on computers</h3>
++            <div className="rounded-lg bg-overlay/5 p-4 text-sm text-text-secondary space-y-2"><h3 className="font-medium text-text-primary">3. Employee preview</h3>
 +              <p>{selected && inherit && data?.shared ? installationPolicySummary(data.shared) : installationPolicySummary(draft)}.</p>
 +              {effectiveMode === 'restart' ? <p>Beta: waits for a later Windows startup, without forcing a restart or applying a three-day deadline. Intune may report retry or failure while waiting. Startup install results shows what computers report, once set up.</p> : effectiveMode === 'prompt' ? <p>Prompts use the app’s installer toolkit. If no user is signed in, or the app does not need to close, installation may run silently. After the choice period, the next Intune attempt installs the update. Reminders follow Intune retry checks.</p> : effectiveMode === 'silent' ? <p>Installs when Intune runs the Required assignment, without a postponement prompt.</p> : <p>Uses the app’s saved installation behavior. Review its deployment configuration to see whether it installs silently, offers postponement or uses the startup Beta.</p>}
-+              <p>No exact install time is guaranteed. Startup installation may continue after sign-in.</p>
++              <p>No exact install time is guaranteed. Startup installation may continue after sign-in.</p><p>Choose a time, an earlier IT cutoff and bounded startup fallback are unavailable pending a validated pilot. This preview does not enable them.</p>
 +            </div>
 +            <p className="text-xs text-text-muted">Update, Update all and pilots keep their own settings. Packages already queued or deployed don’t change.</p>
 +            {data?.shared && <dl className="divide-y divide-overlay/10 text-sm">
@@ -1028,12 +1181,12 @@ index 000000000..687829856
 +            {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
 +            {saved && <p role="status" className="text-sm text-status-success">Installation policy saved for future automatic updates.</p>}
 +          </div>
-+          <DialogFooter><Button variant="ghost" disabled={action.isPending} onClick={() => setOpen(false)}>Close</Button><Button disabled={action.isPending || saved || invalidRestart} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save app exception' : 'Save shared policy'}</Button></DialogFooter>
++          <DialogFooter><Button variant="ghost" disabled={action.isPending} onClick={() => setOpen(false)}>Close</Button><Button disabled={action.isPending || saved || invalidRestart || !dirty} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save app exception' : 'Save shared policy'}</Button></DialogFooter>
 +        </DialogContent>
 +      </Dialog>}
 +  >
 +    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
-+    {exceptions.length > 0 && <details className="text-sm"><summary className="cursor-pointer text-accent-cyan">Review app exceptions</summary><ul className="mt-2 divide-y divide-overlay/10">{exceptions.map(exception => <li key={exception.appId} className="flex flex-wrap justify-between gap-2 py-2 text-sm"><div><span className="text-text-primary">{apps.find(a => a.winget_id.toLowerCase() === exception.appId.toLowerCase())?.deployment_config?.displayName || exception.appId}</span><p className="text-xs text-text-muted">{installationPolicySummary(exception)}</p></div><button className="text-xs text-accent-cyan hover:underline" onClick={() => { choose(exception.appId); setOpen(true); }}>Edit app exception</button></li>)}</ul></details>}
++    {!appId && exceptions.length > 0 && <details className="text-sm"><summary className="cursor-pointer text-accent-cyan">Review app exceptions</summary><ul className="mt-2 divide-y divide-overlay/10">{exceptions.map(exception => <li key={exception.appId} className="flex flex-wrap justify-between gap-2 py-2 text-sm"><div><span className="text-text-primary">{apps.find(a => a.winget_id.toLowerCase() === exception.appId.toLowerCase())?.deployment_config?.displayName || exception.appId}</span><p className="text-xs text-text-muted">{installationPolicySummary(exception)}</p></div><button className="text-xs text-accent-cyan hover:underline" onClick={() => { choose(exception.appId); setOpen(true); }}>Edit app exception</button></li>)}</ul></details>}
 +  </StatusStripRow>;
 +}
 +
@@ -1178,6 +1331,35 @@ index 0bfadb0c2..935d3eb56 100644
          className
        )}
        {...props}
+diff --git a/hooks/use-deployed-config.ts b/hooks/use-deployed-config.ts
+index 49764be9a..937343f74 100644
+--- a/hooks/use-deployed-config.ts
++++ b/hooks/use-deployed-config.ts
+@@ -11,13 +11,13 @@ interface DeployedConfigResponse {
+   intuneAppId: string | null;
+ }
+ 
+-export function useDeployedConfig(wingetId: string | null) {
++export function useDeployedConfig(wingetId: string | null, appId?: string) {
+   const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
+   const { isMspUser, selectedTenantId } = useMspOptional();
+   const tenantKey = isMspUser ? selectedTenantId || 'primary' : 'self';
+ 
+   const query = useQuery<DeployedConfigResponse>({
+-    queryKey: ['catalog', 'deployed-config', wingetId, tenantKey],
++    queryKey: ['catalog', 'deployed-config', wingetId, tenantKey, appId ?? null],
+     queryFn: async () => {
+       const token = await getAccessToken();
+       if (!token) {
+@@ -25,7 +25,7 @@ export function useDeployedConfig(wingetId: string | null) {
+       }
+ 
+       const response = await fetch(
+-        `/api/intune/apps/deployed/config?wingetId=${encodeURIComponent(wingetId!)}`,
++        `/api/intune/apps/deployed/config?wingetId=${encodeURIComponent(wingetId!)}${appId ? `&intuneAppId=${encodeURIComponent(appId)}` : ''}`,
+         {
+           headers: {
+             Authorization: `Bearer ${token}`,
 diff --git a/hooks/useInstallationPolicy.ts b/hooks/useInstallationPolicy.ts
 new file mode 100644
 index 000000000..d9a648764
@@ -1429,6 +1611,33 @@ index 000000000..b7854799d
 +  it.each([null, [], {}, { mode: 'prompt', days: 0 }, { mode: 'prompt', days: 1.5 }, { mode: 'prompt', days: 15 }, { mode: 'login', days: 3 }])('rejects invalid policy %j', value => {
 +    expect(installationPolicyError(value)).not.toBeNull();
 +  });
++});
+diff --git a/lib/hrm/__tests__/rollout-workspace.test.ts b/lib/hrm/__tests__/rollout-workspace.test.ts
+new file mode 100644
+index 000000000..deeffc8fa
+--- /dev/null
++++ b/lib/hrm/__tests__/rollout-workspace.test.ts
+@@ -0,0 +1,21 @@
++import { expect, it } from 'vitest';
++import { appWorkspaceUrl, effectiveInstallationRule, savedInstallationSummary } from '../rollout-workspace';
++import { nextVersionCheck } from '../version-check';
++it('preserves the source distinction and matches app exceptions without case dependence', () => {
++  const shared = { mode: 'existing', days: 3 } as const;
++  expect(effectiveInstallationRule(shared, [], 'Vendor.App')).toEqual({ source: 'Shared policy', policy: shared });
++  const exception = { appId: 'vendor.app', mode: 'silent', days: 3 } as const;
++  expect(effectiveInstallationRule(shared, [exception], 'Vendor.App')).toEqual({ source: 'App exception', policy: exception });
++});
++it('does not infer missing settings or claim startup has a bounded deadline', () => {
++  expect(savedInstallationSummary(null)).toContain('unavailable');
++  expect(savedInstallationSummary({ installAfterRestartBeta: true })).toContain('No enforced startup deadline');
++  expect(savedInstallationSummary({ deployMode: 'Silent', allowDefer: false })).toContain('silently');
++  expect(savedInstallationSummary({ allowDefer: true, deferDays: 3, deferTimes: 1000, deferByDaysOnly: true })).not.toContain('1000');
++  expect(appWorkspaceUrl('app/value')).toBe('/dashboard/inventory/app%2Fvalue');
++});
++it('uses Eastern wall-clock cadence across daylight saving and advances past the current slot', () => {
++  expect(nextVersionCheck(new Date('2026-11-23T20:30:00Z'))).toBe('2026-11-24T08:30:00.000Z');
++  expect(nextVersionCheck(new Date('2026-03-08T06:00:00Z'))).toBe('2026-03-08T07:30:00.000Z');
++  expect(nextVersionCheck(new Date('2026-11-01T05:00:00Z'))).toBe('2026-11-01T08:30:00.000Z');
 +});
 diff --git a/lib/hrm/__tests__/startup-installation.test.ts b/lib/hrm/__tests__/startup-installation.test.ts
 new file mode 100644
@@ -1705,6 +1914,30 @@ index 000000000..b676fc470
 +  if (policy.mode === 'silent') return { ...result, allowDefer: false, deferByDaysOnly: false, deferDays: undefined, deployMode: 'Silent' };
 +  return { ...result, allowDefer: true, deferByDaysOnly: true, deferDays: policy.days, deferTimes: 1000, deployMode: 'Auto',
 +    closeCountdown: Math.max(saved?.closeCountdown ?? 60, 300), showClosePrompt: true, promptToSave: true, persistPrompt: false, minimizeWindows: false };
++}
+diff --git a/lib/hrm/rollout-workspace.ts b/lib/hrm/rollout-workspace.ts
+new file mode 100644
+index 000000000..d5b72ee05
+--- /dev/null
++++ b/lib/hrm/rollout-workspace.ts
+@@ -0,0 +1,18 @@
++import type { PSADTConfig } from '@/types/psadt';
++import type { InstallationPolicy } from './installation-policy';
++
++export function savedInstallationSummary(config?: Partial<PSADTConfig> | null): string {
++  if (!config) return 'Saved installer settings are unavailable for this copy.';
++  if (config.installAfterRestartBeta) return 'Install after next restart · Beta. No enforced startup deadline.';
++  if (config.allowDefer) return `Installer postponement${config.deferDays ? ` · ${config.deferDays} days` : ''}${!config.deferByDaysOnly && config.deferTimes ? ` · up to ${config.deferTimes} postponements` : ''}.`;
++  return config.deployMode === 'Silent' ? 'Install silently, without a postponement prompt.' : 'Use the saved installer behavior, without postponement.';
++}
++
++export function effectiveInstallationRule(shared: InstallationPolicy, exceptions: (InstallationPolicy & { appId: string })[], appId: string) {
++  const exception = exceptions.find(item => item.appId.toLowerCase() === appId.toLowerCase());
++  return { source: exception ? 'App exception' : 'Shared policy', policy: exception ?? shared };
++}
++
++export function appWorkspaceUrl(appId: string) {
++  return `/dashboard/inventory/${encodeURIComponent(appId)}`;
 +}
 diff --git a/lib/hrm/startup-installation.ts b/lib/hrm/startup-installation.ts
 new file mode 100644

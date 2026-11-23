@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add a per-app workspace linked from Inventory, App updates and Deployments, with the selected
+  copy's saved settings, groups, install dates, reported outcomes and pilot status. Edit next rollout
+  uses persisted shared/app installation rules, identifies unsaved changes and keeps unsupported
+  employee scheduling and bounded startup behavior disabled. Separate automatic delivery from
+  installation timing, move discovery cadence information to Settings, show recorded check outcomes
+  separately from expected timer times, and update Help, illustrations, hints and Search links.
+
 - Discovered apps keeps inventory visible after deployment and separates this browser's
   Deployment list, queued tenant deployments, previous deployments, unconfirmed upload outcomes
   and copies verified to exist in Intune (patches 0003, 0005, 0007 and 0013). None of these labels
