@@ -1689,15 +1689,16 @@ index 267d2600e..096e82ec4 100644
  
            {/* Metadata */}
 diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
-index 5e9631f0e..e36d664a1 100644
+index 5e9631f0e..3dea1f77a 100644
 --- a/components/inventory/InventoryAppDetails.tsx
 +++ b/components/inventory/InventoryAppDetails.tsx
-@@ -1,7 +1,16 @@
+@@ -1,7 +1,17 @@
  'use client';
  
 -import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users } from 'lucide-react';
 +import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users, FilePlus2 } from 'lucide-react';
 +import Link from 'next/link';
++import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
 +import { useNewVersionPrefill } from '@/hooks/useNewVersionPrefill';
 +import { jobIdFromNotes } from '@/lib/hrm/new-version';
  import { CopyableCommand } from './CopyableCommand';
@@ -1710,7 +1711,7 @@ index 5e9631f0e..e36d664a1 100644
  import { Button } from '@/components/ui/button';
  import { SlidePanel } from '@/components/dashboard/animations/SlidePanel';
  import { useAppDetails } from '@/hooks/use-inventory';
-@@ -17,6 +26,8 @@ interface InventoryAppDetailsProps {
+@@ -17,6 +27,8 @@ interface InventoryAppDetailsProps {
  export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDetailsProps) {
    const { data, isLoading, error, refetch } = useAppDetails(appId);
    const app = data?.app;
@@ -1719,7 +1720,7 @@ index 5e9631f0e..e36d664a1 100644
  
    const formatDate = (dateString: string) => {
      return new Date(dateString).toLocaleDateString('en-US', {
-@@ -38,10 +49,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -38,10 +50,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
  
    const getAssignmentIntent = (intent: IntuneAppAssignment['intent']) => {
      const intents: Record<string, { label: string; className: string }> = {
@@ -1734,7 +1735,7 @@ index 5e9631f0e..e36d664a1 100644
      };
      return intents[intent] || { label: intent, className: 'bg-overlay/5 text-text-muted' };
    };
-@@ -61,7 +72,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -61,7 +73,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        </div>
        <div className="flex-1 min-w-0">
          <h3 className="text-xl font-semibold text-text-primary truncate">{app.displayName}</h3>
@@ -1743,7 +1744,7 @@ index 5e9631f0e..e36d664a1 100644
          {app.displayVersion && (
            <span className="inline-block mt-1 text-xs bg-accent-cyan/10 text-accent-cyan px-2 py-0.5 rounded-full">
              v{app.displayVersion}
-@@ -73,20 +84,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -73,20 +85,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
          size="sm"
          onClick={() => refetch()}
          disabled={isLoading}
@@ -1782,7 +1783,7 @@ index 5e9631f0e..e36d664a1 100644
      </Button>
    ) : undefined;
  
-@@ -96,8 +122,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -96,8 +123,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        onClose={onClose}
        width="lg"
        direction="right"
@@ -1793,7 +1794,7 @@ index 5e9631f0e..e36d664a1 100644
      >
        {/* Loading State */}
        {isLoading && (
-@@ -110,25 +137,43 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -110,25 +138,43 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        {error && (
          <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
            <AlertCircle className="w-12 h-12 text-status-error mb-4" />
@@ -1825,7 +1826,7 @@ index 5e9631f0e..e36d664a1 100644
 +              Find in App catalog (0014), Go back to previous version (0037), Retire app (0038). */}
 +          {appId && (
 +            <section aria-labelledby="inventory-app-actions" className="space-y-3" data-testid="inventory-app-actions">
-+              <h4 id="inventory-app-actions" className="text-sm font-semibold text-text-secondary">Actions</h4>
++              <Link href={appWorkspaceUrl(appId)} className="inline-block text-sm text-accent-cyan hover:underline">Open app workspace</Link><h4 id="inventory-app-actions" className="text-sm font-semibold text-text-secondary">Actions</h4>
 +              <div data-action="timing" className="empty:hidden"><AppTimingPanel appId={appId} groupNames={app.assignmentGroupNames} /></div>
 +              {versionAction && <div data-action="version" className="empty:hidden">{versionAction}</div>}
 +              <div data-action="rollback" className="empty:hidden"><RollbackPanel appId={appId} /></div>
@@ -1841,7 +1842,7 @@ index 5e9631f0e..e36d664a1 100644
                  Description
                </h4>
                <p className="text-sm text-text-secondary leading-relaxed">{app.description}</p>
-@@ -138,19 +183,31 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -138,19 +184,31 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
            {/* Commands */}
            <div className="space-y-4">
              {app.installCommandLine && (
@@ -1878,7 +1879,7 @@ index 5e9631f0e..e36d664a1 100644
                </h4>
                <div className="space-y-2">
                  {app.assignments.map((assignment) => {
-@@ -189,7 +246,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -189,7 +247,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
  
            {/* Metadata Grid */}
            <div>
@@ -1887,7 +1888,7 @@ index 5e9631f0e..e36d664a1 100644
                Details
              </h4>
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-@@ -210,12 +267,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -210,12 +268,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                />
                <MetadataItem
                  icon={User}

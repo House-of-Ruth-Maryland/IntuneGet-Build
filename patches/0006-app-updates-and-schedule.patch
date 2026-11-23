@@ -16,11 +16,12 @@ index 7987a53b6..5b0d405c9 100644
    );
  }
 diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
-index b5d2996a2..8efedc9dd 100644
+index b5d2996a2..4bfa2843e 100644
 --- a/app/(app)/dashboard/updates/page.tsx
 +++ b/app/(app)/dashboard/updates/page.tsx
-@@ -1,6 +1,8 @@
+@@ -1,6 +1,9 @@
  'use client';
++import { VersionCheckStatus } from '@/components/hrm/VersionDiscovery';
 +import { StartupInstallations } from '@/components/hrm/StartupInstallations';
  
  import type { AutoUpdateScope } from '@/types/update-policies';
@@ -28,7 +29,7 @@ index b5d2996a2..8efedc9dd 100644
  
  import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
  import { T, Var } from "gt-next";
-@@ -22,6 +24,7 @@ import {
+@@ -22,6 +25,7 @@ import {
    ArrowRight,
    Info,
    ShieldOff,
@@ -36,7 +37,7 @@ index b5d2996a2..8efedc9dd 100644
  } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import { Input } from '@/components/ui/input';
-@@ -41,7 +44,10 @@ import {
+@@ -41,7 +45,10 @@ import {
    DropdownMenuSeparator,
    DropdownMenuLabel,
  } from '@/components/ui/dropdown-menu';
@@ -48,7 +49,7 @@ index b5d2996a2..8efedc9dd 100644
  import { UpdateCard, UpdateCardSkeleton, AutoUpdateHistory } from '@/components/updates';
  import { AutoUpdateAppsModal } from '@/components/updates/AutoUpdateAppsModal';
  import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-@@ -54,10 +60,11 @@ import {
+@@ -54,10 +61,11 @@ import {
    useUpdatePolicies,
  } from '@/hooks/use-updates';
  import { useMspOptional } from '@/hooks/useMspOptional';
@@ -61,7 +62,7 @@ index b5d2996a2..8efedc9dd 100644
  import type { AppUpdatePolicy, AvailableUpdate, TriggerUpdateResponse, UpdatePolicyType, UpdateType } from '@/types/update-policies';
  
  type SortOption = 'name' | 'severity' | 'type' | 'detected';
-@@ -69,6 +76,9 @@ const sortLabels: Record<SortOption, string> = {
+@@ -69,6 +77,9 @@ const sortLabels: Record<SortOption, string> = {
    detected: 'Oldest first',
  };
  
@@ -71,7 +72,7 @@ index b5d2996a2..8efedc9dd 100644
  export default function UpdatesPage() {
    const router = useRouter();
    const [search, setSearch] = useState('');
-@@ -80,6 +90,7 @@ export default function UpdatesPage() {
+@@ -80,6 +91,7 @@ export default function UpdatesPage() {
    const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
    const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
    const [autoUpdateModalOpen, setAutoUpdateModalOpen] = useState(false);
@@ -79,7 +80,7 @@ index b5d2996a2..8efedc9dd 100644
    const [newAppDialogOpen, setNewAppDialogOpen] = useState(false);
    const [pendingNewAppUpdate, setPendingNewAppUpdate] = useState<AvailableUpdate | null>(null);
    const [bulkProgress, setBulkProgress] = useState<{
-@@ -97,6 +108,12 @@ export default function UpdatesPage() {
+@@ -97,6 +109,12 @@ export default function UpdatesPage() {
      (tenant) => tenant.is_active && tenant.consent_status === 'granted' && Boolean(tenant.tenant_id)
    );
    const mspTenantSelectionRequired = isMspUser && hasGrantedManagedTenants && !selectedTenantId;
@@ -92,7 +93,7 @@ index b5d2996a2..8efedc9dd 100644
  
    // Data hooks
    const {
-@@ -107,8 +124,8 @@ export default function UpdatesPage() {
+@@ -107,8 +125,8 @@ export default function UpdatesPage() {
      isFetching: isFetchingUpdates,
    } = useAvailableUpdates({
      tenantId,
@@ -103,7 +104,7 @@ index b5d2996a2..8efedc9dd 100644
    });
  
    const {
-@@ -150,7 +167,7 @@ export default function UpdatesPage() {
+@@ -150,7 +168,7 @@ export default function UpdatesPage() {
  
      // Sort
      result = [...result].sort((a, b) => {
@@ -112,7 +113,7 @@ index b5d2996a2..8efedc9dd 100644
          case 'name':
            return a.display_name.localeCompare(b.display_name);
          case 'severity': {
-@@ -174,24 +191,20 @@ export default function UpdatesPage() {
+@@ -174,24 +192,20 @@ export default function UpdatesPage() {
      });
  
      return result;
@@ -148,7 +149,7 @@ index b5d2996a2..8efedc9dd 100644
  
    // Eligible updates for bulk action (exclude ignore and pinned).
    // "Update All" never includes unmanaged (fuzzy-matched) apps -- even when the
-@@ -199,6 +212,8 @@ export default function UpdatesPage() {
+@@ -199,6 +213,8 @@ export default function UpdatesPage() {
    const eligibleForBulkUpdate = filteredUpdates.filter(
      (u) =>
        u.is_managed &&
@@ -157,7 +158,7 @@ index b5d2996a2..8efedc9dd 100644
        u.policy?.policy_type !== 'ignore' &&
        u.policy?.policy_type !== 'pin_version'
    );
-@@ -215,7 +230,7 @@ export default function UpdatesPage() {
+@@ -215,7 +231,7 @@ export default function UpdatesPage() {
  
    // Oldest critical update age
    const oldestCriticalAge = (() => {
@@ -166,7 +167,7 @@ index b5d2996a2..8efedc9dd 100644
      if (criticals.length === 0) return null;
      const oldest = criticals.reduce((prev, curr) =>
        new Date(prev.detected_at) < new Date(curr.detected_at) ? prev : curr
-@@ -280,18 +295,20 @@ export default function UpdatesPage() {
+@@ -280,18 +296,20 @@ export default function UpdatesPage() {
    // pending update is for an app IntuneGet did not deploy/claim/map.
    const pendingIsUnmanaged = !!pendingNewAppUpdate && !pendingNewAppUpdate.is_managed;
  
@@ -193,7 +194,7 @@ index b5d2996a2..8efedc9dd 100644
          policy_type: policyType,
        });
        refetchUpdates();
-@@ -304,6 +321,18 @@ export default function UpdatesPage() {
+@@ -304,6 +322,18 @@ export default function UpdatesPage() {
      }
    }, [updatePolicy, refetchUpdates]);
  
@@ -212,7 +213,7 @@ index b5d2996a2..8efedc9dd 100644
    const handleBulkUpdate = useCallback(async () => {
      const total = eligibleForBulkUpdate.length;
      setBulkProgress({ phase: 'updating', completed: 0, failed: 0, total, errors: [] });
-@@ -370,7 +399,7 @@ export default function UpdatesPage() {
+@@ -370,7 +400,7 @@ export default function UpdatesPage() {
    }, [isLoadingUpdates, isRefreshing, mspTenantSelectionRequired, updates.length, handleRefresh]);
  
    // Check if any filters are active
@@ -221,7 +222,7 @@ index b5d2996a2..8efedc9dd 100644
  
    const clearAllFilters = () => {
      setSearch('');
-@@ -382,8 +411,8 @@ export default function UpdatesPage() {
+@@ -382,8 +412,8 @@ export default function UpdatesPage() {
      <div className="space-y-6">
        {/* Header */}
        <PageHeader
@@ -232,7 +233,7 @@ index b5d2996a2..8efedc9dd 100644
          gradient
          gradientColors="cyan"
          actions={
-@@ -413,7 +442,7 @@ export default function UpdatesPage() {
+@@ -413,7 +443,7 @@ export default function UpdatesPage() {
                    }}
                    className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
                  >
@@ -241,7 +242,7 @@ index b5d2996a2..8efedc9dd 100644
                  </Button>
                  <Dialog
                    open={bulkDialogOpen}
-@@ -443,11 +472,11 @@ export default function UpdatesPage() {
+@@ -443,11 +473,11 @@ export default function UpdatesPage() {
                                {eligibleForBulkUpdate.some(u => classifyUpdateType(u.current_version, u.latest_version) === 'major') && (
                                  <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-status-warning/10 border border-status-warning/20 rounded-lg text-sm text-status-warning">
                                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -255,7 +256,7 @@ index b5d2996a2..8efedc9dd 100644
                                  if (newAppsCount === 0) return null;
                                  return (
                                    <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-500">
-@@ -470,7 +499,7 @@ export default function UpdatesPage() {
+@@ -470,7 +500,7 @@ export default function UpdatesPage() {
                                          {type}
                                        </span>
                                        {u.display_name} ({u.current_version} &rarr; {u.latest_version})
@@ -264,7 +265,7 @@ index b5d2996a2..8efedc9dd 100644
                                          <span className="text-[10px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border text-violet-500 bg-violet-500/10 border-violet-500/20">
                                            NEW
                                          </span>
-@@ -494,7 +523,7 @@ export default function UpdatesPage() {
+@@ -494,7 +524,7 @@ export default function UpdatesPage() {
                              onClick={() => void handleBulkUpdate()}
                              className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
                            >
@@ -273,7 +274,7 @@ index b5d2996a2..8efedc9dd 100644
                            </Button>
                          </DialogFooter>
                        </>
-@@ -582,7 +611,7 @@ export default function UpdatesPage() {
+@@ -582,7 +612,7 @@ export default function UpdatesPage() {
                                }}
                                className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
                              >
@@ -282,7 +283,7 @@ index b5d2996a2..8efedc9dd 100644
                                <ArrowRight className="w-4 h-4 ml-1.5" />
                              </Button>
                            )}
-@@ -620,7 +649,7 @@ export default function UpdatesPage() {
+@@ -620,7 +650,7 @@ export default function UpdatesPage() {
                    <>
                      <p>
                        <T><Var><span className="font-medium text-text-primary">{pendingNewAppUpdate?.display_name}</span></Var> was matched
@@ -291,7 +292,7 @@ index b5d2996a2..8efedc9dd 100644
                      </p>
                      <ul className="space-y-1.5 text-sm">
                        <li className="flex items-start gap-2">
-@@ -698,7 +727,7 @@ export default function UpdatesPage() {
+@@ -698,7 +728,7 @@ export default function UpdatesPage() {
                    : 'bg-violet-600 hover:bg-violet-700'
                )}
              >
@@ -300,7 +301,7 @@ index b5d2996a2..8efedc9dd 100644
              </Button>
            </DialogFooter>
          </DialogContent>
-@@ -732,61 +761,25 @@ export default function UpdatesPage() {
+@@ -732,61 +762,25 @@ export default function UpdatesPage() {
                  onClick={() => setShowCriticalOnly(true)}
                  className="text-status-warning hover:text-status-warning hover:bg-status-warning/10 text-xs font-medium flex-shrink-0"
                >
@@ -364,7 +365,7 @@ index b5d2996a2..8efedc9dd 100644
 +          cards. Counts are on the tabs; the apps with Automatic updates on are in the schedule row. */}
 +      {!mspTenantSelectionRequired && (
 +        <section aria-label="Automatic updates" className="divide-y divide-overlay/10 rounded-2xl border border-overlay/10 bg-bg-surface">
-+          <UpdateSchedule appsOn={isLoadingPolicies ? undefined : autoUpdateCount} onShowApps={() => setAutoUpdateModalOpen(true)} />
++          <VersionCheckStatus /><div id="automatic-updates" className="scroll-mt-6"><UpdateSchedule appsOn={isLoadingPolicies ? undefined : autoUpdateCount} onShowApps={() => setAutoUpdateModalOpen(true)} /></div>
 +          <InstallationPolicyPanel key={tenantId || 'current'} apps={autoUpdatePolicies} />
 +          <StartupInstallations key={`startup:${tenantId || 'current'}`} />
 +        </section>
@@ -375,7 +376,7 @@ index b5d2996a2..8efedc9dd 100644
  
        {/* Tabs */}
        <Tabs
-@@ -797,7 +790,7 @@ export default function UpdatesPage() {
+@@ -797,7 +791,7 @@ export default function UpdatesPage() {
            <TabsList className="glass-light border border-overlay/5">
              <TabsTrigger value="available" className="data-[state=active]:bg-overlay/10">
                <Package className="w-4 h-4 mr-2" />
@@ -384,7 +385,7 @@ index b5d2996a2..8efedc9dd 100644
                {!isLoadingUpdates && availableCount > 0 && (
                  <span className="ml-1.5 text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
                    {availableCount}
-@@ -806,7 +799,7 @@ export default function UpdatesPage() {
+@@ -806,7 +800,7 @@ export default function UpdatesPage() {
              </TabsTrigger>
              <TabsTrigger value="history" className="data-[state=active]:bg-overlay/10">
                <History className="w-4 h-4 mr-2" />
@@ -393,7 +394,7 @@ index b5d2996a2..8efedc9dd 100644
                {!isLoadingHistory && history.length > 0 && (
                  <span className="ml-1.5 text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
                    {history.length}
-@@ -834,7 +827,7 @@ export default function UpdatesPage() {
+@@ -834,7 +828,7 @@ export default function UpdatesPage() {
  
                <div className="flex items-center gap-2 flex-wrap">
                  {/* Critical filter */}
@@ -402,7 +403,7 @@ index b5d2996a2..8efedc9dd 100644
                    variant={showCriticalOnly ? 'default' : 'ghost'}
                    size="sm"
                    onClick={() => setShowCriticalOnly(!showCriticalOnly)}
-@@ -850,15 +843,15 @@ export default function UpdatesPage() {
+@@ -850,15 +844,15 @@ export default function UpdatesPage() {
                    {criticalCount > 0 && (
                      <span className="ml-1 tabular-nums">{criticalCount}</span>
                    )}
@@ -421,7 +422,7 @@ index b5d2996a2..8efedc9dd 100644
                    className={cn(
                      'h-8 text-xs',
                      showUnmanaged
-@@ -868,7 +861,20 @@ export default function UpdatesPage() {
+@@ -868,7 +862,20 @@ export default function UpdatesPage() {
                  >
                    <ShieldOff className="w-3.5 h-3.5 mr-1.5" />
                    <T>Unmanaged</T>
@@ -443,7 +444,7 @@ index b5d2996a2..8efedc9dd 100644
  
                  {/* Update type filter */}
                  <DropdownMenu>
-@@ -888,7 +894,7 @@ export default function UpdatesPage() {
+@@ -888,7 +895,7 @@ export default function UpdatesPage() {
                      </Button>
                    </DropdownMenuTrigger>
                    <DropdownMenuContent align="end" className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
@@ -452,7 +453,7 @@ index b5d2996a2..8efedc9dd 100644
                      <DropdownMenuSeparator className="bg-overlay/[0.06]" />
                      <DropdownMenuItem
                        onClick={() => setUpdateTypeFilter(null)}
-@@ -926,20 +932,20 @@ export default function UpdatesPage() {
+@@ -926,20 +933,20 @@ export default function UpdatesPage() {
                    <DropdownMenuTrigger asChild>
                      <Button variant="ghost" size="sm" className="h-8 text-xs text-text-secondary hover:text-text-primary">
                        <ArrowUpDown className="w-3.5 h-3.5 mr-1.5" />
@@ -478,7 +479,7 @@ index b5d2996a2..8efedc9dd 100644
                        </DropdownMenuItem>
                      ))}
                    </DropdownMenuContent>
-@@ -988,7 +994,7 @@ export default function UpdatesPage() {
+@@ -988,7 +995,7 @@ export default function UpdatesPage() {
                description={updatesError.message}
                color="neutral"
                action={{
@@ -487,7 +488,7 @@ index b5d2996a2..8efedc9dd 100644
                  onClick: () => refetchUpdates(),
                  variant: 'secondary',
                }}
-@@ -1018,7 +1024,7 @@ export default function UpdatesPage() {
+@@ -1018,7 +1025,7 @@ export default function UpdatesPage() {
                color="neutral"
                showOrbs={false}
                action={{
@@ -496,7 +497,7 @@ index b5d2996a2..8efedc9dd 100644
                  onClick: clearAllFilters,
                  variant: 'secondary',
                }}
-@@ -1035,11 +1041,12 @@ export default function UpdatesPage() {
+@@ -1035,11 +1042,12 @@ export default function UpdatesPage() {
  
          {/* History Tab */}
          <TabsContent value="history" className="mt-0">
@@ -510,7 +511,7 @@ index b5d2996a2..8efedc9dd 100644
                color="neutral"
                showOrbs={false}
              />
-@@ -1054,30 +1061,20 @@ export default function UpdatesPage() {
+@@ -1054,30 +1062,20 @@ export default function UpdatesPage() {
          </TabsContent>
        </Tabs>
  
@@ -896,6 +897,55 @@ index 000000000..f9a323f7f
 +  }
 +  return reply({ error: 'Invalid action' }, 400);
 +}
+diff --git a/app/api/hrm/version-check-status/route.test.ts b/app/api/hrm/version-check-status/route.test.ts
+new file mode 100644
+index 000000000..076131967
+--- /dev/null
++++ b/app/api/hrm/version-check-status/route.test.ts
+@@ -0,0 +1,23 @@
++import { NextRequest } from 'next/server';
++import { beforeEach, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), sqlite: vi.fn(), status: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/db', () => ({ isSqliteMode: mocks.sqlite }));
++vi.mock('@/lib/hrm/home', () => ({ readServerStatus: mocks.status }));
++import { GET } from './route';
++beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ tenantId: 'own' }); mocks.sqlite.mockReturnValue(true); });
++it('requires authentication before reading server evidence', async () => {
++  mocks.auth.mockResolvedValue(null);
++  expect((await GET(new NextRequest('http://localhost/api/hrm/version-check-status'))).status).toBe(401);
++  expect(mocks.status).not.toHaveBeenCalled();
++});
++it('does not turn missing or stale evidence into a successful check', async () => {
++  mocks.status.mockResolvedValue({ reported: false, reason: 'stale' });
++  const response = await GET(new NextRequest('http://localhost/api/hrm/version-check-status'));
++  expect(await response.json()).toMatchObject({ reported: false, lastAttemptAt: null, result: null });
++  expect(response.headers.get('cache-control')).toBe('private, no-store');
++});
++it('reports the actual last attempt outcome independently from the expected timer', async () => {
++  mocks.status.mockResolvedValue({ reported: true, updateCheck: { at: '2026-11-23T20:31:00Z', result: 'exit-code' } });
++  expect(await (await GET(new NextRequest('http://localhost/api/hrm/version-check-status'))).json()).toMatchObject({ lastAttemptAt: '2026-11-23T20:31:00Z', result: 'exit-code' });
++});
+diff --git a/app/api/hrm/version-check-status/route.ts b/app/api/hrm/version-check-status/route.ts
+new file mode 100644
+index 000000000..52c806b20
+--- /dev/null
++++ b/app/api/hrm/version-check-status/route.ts
+@@ -0,0 +1,14 @@
++import { NextRequest, NextResponse } from 'next/server';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { isSqliteMode } from '@/lib/db';
++import { readServerStatus } from '@/lib/hrm/home';
++import { nextVersionCheck } from '@/lib/hrm/version-check';
++export async function GET(request: NextRequest) {
++  if (!await parseAccessToken(request.headers.get('Authorization'))) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
++  const headers = { 'Cache-Control': 'private, no-store' };
++  if (!isSqliteMode()) return NextResponse.json({ supported: false }, { headers });
++  const status = await readServerStatus();
++  return NextResponse.json({ supported: true, lastAttemptAt: status.reported ? status.updateCheck?.at ?? null : null,
++    result: status.reported ? status.updateCheck?.result ?? null : null,
++    reported: status.reported, nextExpectedAt: nextVersionCheck() }, { headers });
++}
 diff --git a/app/api/update-policies/route.sqlite.test.ts b/app/api/update-policies/route.sqlite.test.ts
 index 3dfe6ca1f..12f01260e 100644
 --- a/app/api/update-policies/route.sqlite.test.ts
@@ -1212,7 +1262,7 @@ index 000000000..78d6cd35e
 +}
 diff --git a/components/hrm/UpdateSchedule.render.test.ts b/components/hrm/UpdateSchedule.render.test.ts
 new file mode 100644
-index 000000000..7ed2f6723
+index 000000000..5be11cc7d
 --- /dev/null
 +++ b/components/hrm/UpdateSchedule.render.test.ts
 @@ -0,0 +1,52 @@
@@ -1232,7 +1282,7 @@ index 000000000..7ed2f6723
 +afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
 +// HRM patch 0058 (choice 4B): one strip row with the state and next action; details in the dialog.
 +it('shows the schedule as one strip row with the apps that have Automatic updates on', async () => {
-+  const row = document.querySelector('section[aria-label="Update schedule"]')!;
++  const row = document.querySelector('section[aria-label="When can IntuneGet send automatic updates to Intune?"]')!;
 +  expect(row.textContent).toContain('Deploys to Intune when a new version is found');
 +  expect(row.textContent).toContain('On');
 +  await act(async () => button('12 apps with Automatic updates on').click());
@@ -1244,15 +1294,15 @@ index 000000000..7ed2f6723
 +});
 +it('explains server checks and offers a distinct global pause action in the dialog', async () => {
 +  await act(async () => button('Edit schedule').click());
-+  expect(document.body.textContent).toContain('3:30 AM & 3:30 PM');
-+  expect(document.body.textContent).toContain('Check for new versions');
++  expect(document.body.textContent).not.toContain('3:30 AM & 3:30 PM');
++  expect(document.body.textContent).toContain('Check for new app versions in Settings');
 +  await act(async () => button('Pause automatic updates').click());
 +  expect(state.mutate.mock.calls[0][0]).toEqual({ action: 'setPaused', paused: true });
 +});
 +it('keeps Resume on the row while paused', async () => {
 +  state.paused = true;
 +  await render();
-+  const row = document.querySelector('section[aria-label="Update schedule"]')!;
++  const row = document.querySelector('section[aria-label="When can IntuneGet send automatic updates to Intune?"]')!;
 +  expect(row.textContent).toContain('Paused for all apps');
 +  expect(row.textContent).toContain('Paused');
 +  await act(async () => button('Resume automatic updates').click());
@@ -1290,7 +1340,7 @@ index 000000000..99c8ffb1f
 +});
 diff --git a/components/hrm/UpdateSchedule.tsx b/components/hrm/UpdateSchedule.tsx
 new file mode 100644
-index 000000000..447e9b175
+index 000000000..d6823fd99
 --- /dev/null
 +++ b/components/hrm/UpdateSchedule.tsx
 @@ -0,0 +1,110 @@
@@ -1371,7 +1421,7 @@ index 000000000..447e9b175
 +  </>;
 +  const state = schedule && (schedule.paused ? <StripPill tone="warn">Paused</StripPill> : w && !w.open ? <StripPill tone="warn">Waiting</StripPill> : <StripPill tone="ok">On</StripPill>);
 +  return <StatusStripRow
-+    label="Update schedule"
++    label="When can IntuneGet send automatic updates to Intune?"
 +    summary={summary}
 +    status={state}
 +    action={schedule && <div className="flex flex-wrap gap-2">
@@ -1379,7 +1429,7 @@ index 000000000..447e9b175
 +      <Dialog open={editing} onOpenChange={value => { if (!action.isPending) { if (value) { action.reset(); setDraft(schedule); } setEditing(value); } }}>
 +        <DialogTrigger asChild><Button variant="ghost" size="sm">Edit schedule</Button></DialogTrigger>
 +        <DialogContent side="right" hideCloseButton={action.isPending} onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }}>
-+          <DialogHeader className="pr-12"><DialogTitle>Edit update schedule</DialogTitle><DialogDescription>One shared schedule for when automatic updates and pilots can deploy to Intune. When computers install is set in Installation timing.</DialogDescription></DialogHeader>
++          <DialogHeader className="pr-12"><DialogTitle>When can IntuneGet send automatic updates to Intune?</DialogTitle><DialogDescription>Controls when new automatic update packages and pilots can deploy to Intune. Installation timing controls package prompts and postponement.</DialogDescription></DialogHeader>
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
 +            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-overlay/10 p-3">
 +              <p className={`text-sm font-semibold ${schedule.paused ? 'text-status-warning' : 'text-status-success'}`}>{schedule.paused ? 'Paused for all apps' : w && !w.open ? 'Waiting to deploy' : 'Automatic updates are on'}</p>
@@ -1387,7 +1437,7 @@ index 000000000..447e9b175
 +            </div>
 +            <details className="text-xs text-text-muted"><summary className="cursor-pointer text-text-secondary">What does pausing change?</summary><p className="mt-2 leading-relaxed">Holds new automatic updates, pilot starts and wider rollouts. Checks continue. Queued work and installations on computers can continue; manual Update and Update all still work. For one app, choose Notify only instead of Auto-update.</p></details>
 +            <dl className="divide-y divide-overlay/10 text-sm">
-+              <div className="flex flex-wrap justify-between gap-3 py-3"><dt className="text-text-muted">Check for new versions</dt><dd className="text-right font-medium text-text-primary">3:30 AM &amp; 3:30 PM<span className="block text-xs font-normal text-text-muted">Maryland time · continues while paused</span></dd></div>
++              <div className="py-3"><Link href="/dashboard/settings#app-updates" className="text-accent-cyan hover:underline">Check for new app versions in Settings</Link></div>
 +              {schedule.enabled && <div className="flex flex-wrap justify-between gap-3 py-3"><dt className="text-text-muted">Held updates</dt><dd className="text-right text-text-primary">Rechecked hourly</dd></div>}
 +            </dl>
 +            {editor}{blackouts}
@@ -1403,6 +1453,36 @@ index 000000000..447e9b175
 +    {schedule && !!data?.blackouts?.length && <p className="text-xs text-text-muted">{data.blackouts.length === 1 ? '1 blackout' : `${data.blackouts.length} blackouts`} current or upcoming.</p>}
 +    {action.error && !editing && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
 +  </StatusStripRow>;
++}
+diff --git a/components/hrm/VersionDiscovery.tsx b/components/hrm/VersionDiscovery.tsx
+new file mode 100644
+index 000000000..aaa5eaf03
+--- /dev/null
++++ b/components/hrm/VersionDiscovery.tsx
+@@ -0,0 +1,24 @@
++'use client';
++import Link from 'next/link';
++import { useQuery } from '@tanstack/react-query';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++
++export function VersionDiscoverySettings() {
++  return <section id="app-updates" className="glass-light rounded-xl border border-overlay/5 p-6 space-y-3 scroll-mt-6"><h2 className="font-medium text-text-primary">App updates</h2><h3 className="text-sm font-medium text-text-primary">Check for new app versions</h3><p className="text-sm text-text-secondary">IntuneGet checks the app catalog daily at 3:30 a.m. and 3:30 p.m. Eastern.</p><p className="text-sm text-text-muted">This is informational. The server timer controls these checks. Automatic update delivery and computer installation timing are separate.</p><Link href="/dashboard/updates#automatic-updates" className="inline-block text-sm text-accent-cyan hover:underline">When can IntuneGet send automatic updates to Intune?</Link></section>;
++}
++interface CheckStatus { supported: boolean; reported: boolean; lastAttemptAt: string | null; result: string | null; nextExpectedAt: string }
++const clock = (value: string) => new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
++export function VersionCheckStatus() {
++  const { getAccessToken, isAuthenticated, account } = useMicrosoftAuth();
++  const query = useQuery<CheckStatus>({ queryKey: ['hrm', 'version-check-status', account?.tenantId, account?.localAccountId], enabled: isAuthenticated, staleTime: 60000,
++    queryFn: async () => {
++      const token = await getAccessToken();
++      if (!token) throw new Error('Sign in to view version check status.');
++      const response = await fetch('/api/hrm/version-check-status', { headers: { Authorization: `Bearer ${token}` } });
++      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Version check status unavailable.');
++      return response.json();
++    } });
++  if (query.data?.supported === false) return null;
++  const status = query.data;
++  return <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-text-secondary" aria-label="New version checks"><span className="font-medium text-text-primary">New versions</span><span>{query.isLoading ? 'Loading check status…' : query.error ? 'Check status unavailable' : status?.lastAttemptAt ? `Last check attempt: ${clock(status.lastAttemptAt)} Eastern · ${status.result === 'success' ? 'completed' : status.result || 'outcome unknown'}` : 'Last check not reported'}</span>{status?.nextExpectedAt && <span>Next expected timer check: {clock(status.nextExpectedAt)} Eastern</span>}<Link href="/dashboard/settings#app-updates" className="text-accent-cyan hover:underline">Check for new app versions</Link><span className="text-xs text-text-muted">Expected timer cadence, not a confirmed job or device installation time.</span></div>;
 +}
 diff --git a/components/updates/AutoUpdateAppsModal.test.ts b/components/updates/AutoUpdateAppsModal.test.ts
 new file mode 100644
@@ -2021,10 +2101,10 @@ index 000000000..01b2ee741
 +  });
 +});
 diff --git a/components/updates/UpdateCard.tsx b/components/updates/UpdateCard.tsx
-index 479225ee5..39b72e9b7 100644
+index 479225ee5..96d2d2619 100644
 --- a/components/updates/UpdateCard.tsx
 +++ b/components/updates/UpdateCard.tsx
-@@ -14,15 +14,21 @@ import {
+@@ -14,15 +14,22 @@ import {
    BellOff,
    Pin,
    ChevronRight,
@@ -2033,6 +2113,7 @@ index 479225ee5..39b72e9b7 100644
    ShieldOff,
  } from 'lucide-react';
 +import Link from 'next/link';
++import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
  import { Button } from '@/components/ui/button';
 +import { isCustomAppId } from '@/lib/hrm/new-version';
 +import { StartPilot } from '@/components/hrm/PilotRollouts';
@@ -2048,7 +2129,7 @@ index 479225ee5..39b72e9b7 100644
  import { fadeUp, springPresets } from '@/lib/animations/variants';
  import type { AvailableUpdate, UpdatePolicyType } from '@/types/update-policies';
  
-@@ -42,10 +48,9 @@ const policyIcons: Record<string, typeof RefreshCw> = {
+@@ -42,10 +49,9 @@ const policyIcons: Record<string, typeof RefreshCw> = {
    pin_version: Pin,
  };
  
@@ -2061,7 +2142,7 @@ index 479225ee5..39b72e9b7 100644
    pin_version: 'Pinned',
  };
  
-@@ -89,19 +94,26 @@ export function UpdateCard({
+@@ -89,19 +95,26 @@ export function UpdateCard({
    index = 0,
  }: UpdateCardProps) {
    const shouldReduceMotion = useReducedMotion();
@@ -2090,7 +2171,7 @@ index 479225ee5..39b72e9b7 100644
  
    // Calculate how old the detected update is
    const detectedDaysAgo = Math.floor(
-@@ -117,9 +129,9 @@ export function UpdateCard({
+@@ -117,9 +130,9 @@ export function UpdateCard({
        whileHover={shouldReduceMotion ? undefined : { y: -2, transition: springPresets.snappy }}
        className={cn(
          'glass-light rounded-xl border transition-all duration-200 relative group overflow-hidden',
@@ -2102,7 +2183,7 @@ index 479225ee5..39b72e9b7 100644
              ? 'border-l-[3px] border-l-violet-500 border-t-violet-500/15 border-r-violet-500/15 border-b-violet-500/15'
              : 'border-black/[0.08] hover:border-accent-cyan/20 hover:shadow-soft-md'
        )}
-@@ -128,9 +140,9 @@ export function UpdateCard({
+@@ -128,9 +141,9 @@ export function UpdateCard({
        {/* Subtle gradient overlay on hover */}
        <div className={cn(
          'absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none',
@@ -2114,7 +2195,7 @@ index 479225ee5..39b72e9b7 100644
              ? 'bg-gradient-to-br from-violet-500/[0.03] via-transparent to-transparent'
              : 'bg-gradient-to-br from-accent-cyan/[0.03] via-transparent to-transparent'
        )} />
-@@ -158,16 +170,16 @@ export function UpdateCard({
+@@ -158,16 +171,16 @@ export function UpdateCard({
                <h3 className="text-sm font-semibold text-text-primary truncate">
                  {update.display_name}
                </h3>
@@ -2136,7 +2217,7 @@ index 479225ee5..39b72e9b7 100644
                  >
                    <ShieldOff className="w-2.5 h-2.5" />
                    <T>Unmanaged</T>
-@@ -182,11 +194,14 @@ export function UpdateCard({
+@@ -182,11 +195,14 @@ export function UpdateCard({
              <span
                className={cn(
                  'flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg border flex-shrink-0',
@@ -2153,7 +2234,7 @@ index 479225ee5..39b72e9b7 100644
              </span>
            )}
          </div>
-@@ -203,7 +218,7 @@ export function UpdateCard({
+@@ -203,7 +219,7 @@ export function UpdateCard({
              <div className="flex items-center gap-1.5 flex-shrink-0">
                <div className={cn('h-px w-3', typeConfig.dotColor, 'opacity-40')} />
                <span className={cn(
@@ -2162,7 +2243,7 @@ index 479225ee5..39b72e9b7 100644
                  typeConfig.color, typeConfig.bgColor, typeConfig.borderColor
                )}>
                  <ChevronRight className="w-2.5 h-2.5" />
-@@ -222,26 +237,28 @@ export function UpdateCard({
+@@ -222,26 +238,28 @@ export function UpdateCard({
            </div>
          </div>
  
@@ -2199,14 +2280,14 @@ index 479225ee5..39b72e9b7 100644
            {policyStatus?.last_auto_update_at && (
              <span className="flex items-center gap-1 text-[11px] text-text-muted">
                <Clock className="w-3 h-3" />
-@@ -256,54 +273,78 @@ export function UpdateCard({
+@@ -256,54 +274,78 @@ export function UpdateCard({
            )}
          </div>
  
 +        {/* HRM patch 0023: where this update lands, read live from Intune */}
 +        {update.is_managed !== false && (
 +          <div className="pb-3">
-+            <AppGroupsLine intuneAppId={update.intune_app_id} />
++            <AppGroupsLine intuneAppId={update.intune_app_id} />{update.intune_app_id && <Link className="mt-2 inline-block text-sm text-accent-cyan hover:underline" href={appWorkspaceUrl(update.intune_app_id)}>Open app workspace</Link>}
 +            {isAutoUpdateEnabled && <AutoUpdateTimingSummary appId={update.winget_id} />}
 +            {update.intune_app_id && <div className="mt-2"><AppTimingPanel appId={update.intune_app_id} /></div>}
 +        {!isCustomAppId(update.winget_id) && <StartPilot update={update} />}
@@ -2549,7 +2630,7 @@ index f7d7e132e..de89d2717 100644
      const params = buildAvailableUpdatesQueryParams({
        tenantId: 'tenant-123',
 diff --git a/hooks/use-updates.ts b/hooks/use-updates.ts
-index 8a64365b0..ad1634c3b 100644
+index 8a64365b0..4ac41cf94 100644
 --- a/hooks/use-updates.ts
 +++ b/hooks/use-updates.ts
 @@ -2,6 +2,7 @@
@@ -2594,6 +2675,19 @@ index 8a64365b0..ad1634c3b 100644
    });
  }
  
+@@ -401,10 +415,10 @@ export function useDismissUpdates() {
+  * Hook to fetch all policies
+  */
+ export function useUpdatePolicies(tenantId?: string) {
+-  const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
++  const { getAccessToken, isAuthenticated, account } = useMicrosoftAuth();
+ 
+   return useQuery({
+-    queryKey: ['updatePolicies', tenantId],
++    queryKey: ['updatePolicies', tenantId, account?.tenantId, account?.localAccountId],
+     queryFn: async () => {
+       const token = await getAccessToken();
+       if (!token) {
 diff --git a/hooks/useUpdateSchedule.ts b/hooks/useUpdateSchedule.ts
 new file mode 100644
 index 000000000..e9171e045
@@ -5017,6 +5111,22 @@ index 000000000..07ef0273e
 +    ? `Updates are paused for the blackout "${blackout.label}"${until}.`
 +    : `Updates are outside the update schedule${until}.`;
 +  return { open: false, reason, blackout, nextOpen };
++}
+diff --git a/lib/hrm/version-check.ts b/lib/hrm/version-check.ts
+new file mode 100644
+index 000000000..82730b326
+--- /dev/null
++++ b/lib/hrm/version-check.ts
+@@ -0,0 +1,10 @@
++/** Expected timer cadence, not a guarantee that the server timer is enabled or healthy. */
++export function nextVersionCheck(now = new Date()): string {
++  const clock = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
++  for (let i = 1; i <= 24 * 60 + 1; i++) {
++    const candidate = new Date(Math.floor(now.getTime() / 60000) * 60000 + i * 60000);
++    const time = clock.format(candidate);
++    if (time === '03:30' || time === '15:30') return candidate.toISOString();
++  }
++  throw new Error('Could not determine the expected version check.');
 +}
 diff --git a/lib/hrm/version-sync-health.ts b/lib/hrm/version-sync-health.ts
 new file mode 100644

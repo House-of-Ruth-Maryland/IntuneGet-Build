@@ -119,11 +119,12 @@ index 000000000..5fae8f243
 + expect(state.invalidate).not.toHaveBeenCalled();
 +});
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index 28bebf581..f37635700 100644
+index 28bebf581..766e2e052 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
-@@ -1,5 +1,9 @@
+@@ -1,5 +1,10 @@
  'use client';
++import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
  
 +import { DEPLOYMENT_FILTERS, deploymentFilter, deploymentCounts, clearableDeploymentStatuses, matchesDeploymentFilter, isActiveDeployment, isTerminalDeployment, hasNewlyFinishedDeployment, DEPLOYMENT_FINISHED_QUERY_KEYS, type DeploymentFilter } from '@/lib/hrm/deployment-status';
 +import { useQueryClient } from '@tanstack/react-query';
@@ -132,7 +133,7 @@ index 28bebf581..f37635700 100644
  import { useState, useEffect, useCallback, useRef } from 'react';
  import { isIntuneApprovalFailure } from '@/lib/intune-approval';
  import { T, Var } from "gt-next";
-@@ -125,17 +129,15 @@ export default function UploadsPage() {
+@@ -125,17 +130,15 @@ export default function UploadsPage() {
    // Get job IDs and status filter from URL params
    const highlightedJobIds = searchParams.get('jobs')?.split(',') || [];
    const urlStatus = searchParams.get('status');
@@ -154,7 +155,7 @@ index 28bebf581..f37635700 100644
    useEffect(() => () => { jobsRequest.current?.abort(); jobsRequest.current = null; }, [viewScope, isMspUser, selectedTenantId, user?.id, user?.tenantId]);
  
    const fetchJobs = useCallback(async (showRefreshing = false) => {
-@@ -184,7 +186,12 @@ export default function UploadsPage() {
+@@ -184,7 +187,12 @@ export default function UploadsPage() {
  
        const data = await response.json();
        if (controller.signal.aborted) return;
@@ -168,7 +169,7 @@ index 28bebf581..f37635700 100644
        setError(null);
        setSessionExpired(false);
      } catch (err) {
-@@ -198,7 +205,7 @@ export default function UploadsPage() {
+@@ -198,7 +206,7 @@ export default function UploadsPage() {
          setIsRefreshing(false);
        }
      }
@@ -177,7 +178,7 @@ index 28bebf581..f37635700 100644
  
    // Initial load
    useEffect(() => {
-@@ -209,7 +216,7 @@ export default function UploadsPage() {
+@@ -209,7 +217,7 @@ export default function UploadsPage() {
    // background poll less often and a manual refresh remains available.
    useEffect(() => {
      const hasActiveJobs = jobs.some((job) =>
@@ -186,7 +187,7 @@ index 28bebf581..f37635700 100644
      );
  
      if (!hasActiveJobs || sessionExpired) return;
-@@ -238,25 +245,21 @@ export default function UploadsPage() {
+@@ -238,25 +246,21 @@ export default function UploadsPage() {
      fetchJobs(true);
    };
  
@@ -223,7 +224,7 @@ index 28bebf581..f37635700 100644
  
      // Fire the API call in the background
      try {
-@@ -278,13 +281,15 @@ export default function UploadsPage() {
+@@ -278,13 +282,15 @@ export default function UploadsPage() {
          throw new Error(`Failed to cancel job (${response.status})`);
        }
  
@@ -243,7 +244,7 @@ index 28bebf581..f37635700 100644
      }
    };
  
-@@ -300,7 +305,7 @@ export default function UploadsPage() {
+@@ -300,7 +306,7 @@ export default function UploadsPage() {
            'Content-Type': 'application/json',
            Authorization: `Bearer ${accessToken}`,
          },
@@ -252,7 +253,7 @@ index 28bebf581..f37635700 100644
        });
  
        if (!response.ok) {
-@@ -312,6 +317,7 @@ export default function UploadsPage() {
+@@ -312,6 +318,7 @@ export default function UploadsPage() {
          throw new Error(`Failed to clear history (${response.status})`);
        }
  
@@ -260,7 +261,7 @@ index 28bebf581..f37635700 100644
        await fetchJobs();
      } catch (err) {
        console.error('Failed to clear history:', err);
-@@ -363,35 +369,18 @@ export default function UploadsPage() {
+@@ -363,35 +370,18 @@ export default function UploadsPage() {
      }
    };
  
@@ -303,7 +304,7 @@ index 28bebf581..f37635700 100644
            description={<T>Monitor your package deployments to Intune</T>}
          />
          <SkeletonGrid count={4} columns={4} variant="stat" />
-@@ -408,14 +397,14 @@ export default function UploadsPage() {
+@@ -408,14 +398,14 @@ export default function UploadsPage() {
      <div className="space-y-6">
        {/* Header */}
        <PageHeader
@@ -321,7 +322,7 @@ index 28bebf581..f37635700 100644
                <AlertDialog>
                  <AlertDialogTrigger asChild>
                    <Button
-@@ -428,20 +417,20 @@ export default function UploadsPage() {
+@@ -428,20 +418,20 @@ export default function UploadsPage() {
                      ) : (
                        <Trash2 className="w-4 h-4 mr-2" />
                      )}
@@ -347,7 +348,7 @@ index 28bebf581..f37635700 100644
                      </AlertDialogAction>
                    </AlertDialogFooter>
                  </AlertDialogContent>
-@@ -485,7 +474,7 @@ export default function UploadsPage() {
+@@ -485,7 +475,7 @@ export default function UploadsPage() {
                variant="outline"
                className="border-status-warning/30 text-status-warning hover:bg-status-warning/10 flex-shrink-0"
              >
@@ -356,7 +357,7 @@ index 28bebf581..f37635700 100644
              </Button>
            </motion.div>
          )}
-@@ -583,15 +572,13 @@ export default function UploadsPage() {
+@@ -583,15 +573,13 @@ export default function UploadsPage() {
          animate={{ opacity: 1 }}
          transition={{ delay: 0.2 }}
          className="flex flex-wrap gap-2"
@@ -375,7 +376,7 @@ index 28bebf581..f37635700 100644
              onClick={() => setFilter(f)}
              className={cn(
                'px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:outline-none',
-@@ -600,7 +587,7 @@ export default function UploadsPage() {
+@@ -600,7 +588,7 @@ export default function UploadsPage() {
                  : 'bg-overlay/5 text-text-secondary hover:text-text-primary hover:bg-overlay/10 border border-overlay/5'
              )}
            >
@@ -384,7 +385,7 @@ index 28bebf581..f37635700 100644
            </button>
          ))}
        </motion.div>
-@@ -609,18 +596,18 @@ export default function UploadsPage() {
+@@ -609,18 +597,18 @@ export default function UploadsPage() {
        {filteredJobs.length === 0 ? (
          <AnimatedEmptyState
            icon={Upload}
@@ -407,7 +408,7 @@ index 28bebf581..f37635700 100644
                    onClick: () => router.push('/dashboard/apps'),
                  }
                : undefined
-@@ -653,6 +640,7 @@ export default function UploadsPage() {
+@@ -653,6 +641,7 @@ export default function UploadsPage() {
                  onRedeploy={handleRedeploy}
                  isRedeploying={redeployingJobId === job.id}
                  showOwner={viewScope === 'tenant'}
@@ -415,7 +416,7 @@ index 28bebf581..f37635700 100644
                />
              ))}
            </AnimatePresence>
-@@ -671,6 +659,7 @@ function UploadJobCard({
+@@ -671,6 +660,7 @@ function UploadJobCard({
    onRedeploy,
    isRedeploying,
    showOwner,
@@ -423,7 +424,7 @@ index 28bebf581..f37635700 100644
  }: {
    job: PackagingJob;
    index: number;
-@@ -680,6 +669,7 @@ function UploadJobCard({
+@@ -680,6 +670,7 @@ function UploadJobCard({
    onRedeploy: (job: PackagingJob, forceCreate?: boolean) => void;
    isRedeploying?: boolean;
    showOwner?: boolean;
@@ -431,7 +432,7 @@ index 28bebf581..f37635700 100644
  }) {
    const prefersReducedMotion = useReducedMotion();
  
-@@ -718,7 +708,8 @@ function UploadJobCard({
+@@ -718,7 +709,8 @@ function UploadJobCard({
      },
      uploading: {
        icon: Upload,
@@ -441,7 +442,7 @@ index 28bebf581..f37635700 100644
        color: 'text-accent-violet',
        bg: 'bg-accent-violet/10',
        border: 'border-l-accent-violet',
-@@ -753,7 +744,7 @@ function UploadJobCard({
+@@ -753,7 +745,7 @@ function UploadJobCard({
      },
      duplicate_skipped: {
        icon: AlertCircle,
@@ -450,7 +451,7 @@ index 28bebf581..f37635700 100644
        color: 'text-status-warning',
        bg: 'bg-status-warning/10',
        border: 'border-l-status-warning',
-@@ -762,12 +753,12 @@ function UploadJobCard({
+@@ -762,12 +754,12 @@ function UploadJobCard({
  
    const config = statusConfig[job.status] || statusConfig.queued;
    const StatusIcon = config.icon;
@@ -467,7 +468,7 @@ index 28bebf581..f37635700 100644
  
    const itemVariants = {
      hidden: { opacity: 0, y: prefersReducedMotion ? 0 : 20 },
-@@ -812,9 +803,9 @@ function UploadJobCard({
+@@ -812,9 +804,9 @@ function UploadJobCard({
                className="absolute inset-0 rounded-xl"
                animate={{
                  boxShadow: [
@@ -480,7 +481,7 @@ index 28bebf581..f37635700 100644
                  ],
                }}
                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-@@ -857,10 +848,8 @@ function UploadJobCard({
+@@ -857,10 +849,8 @@ function UploadJobCard({
                        {assignment.type === 'allUsers' && <Users className="w-3 h-3" />}
                        {assignment.type === 'allDevices' && <Monitor className="w-3 h-3" />}
                        {assignment.type === 'group' && <UserCircle className="w-3 h-3" />}
@@ -493,7 +494,7 @@ index 28bebf581..f37635700 100644
                      </span>
                    ))}
                  </div>
-@@ -893,21 +882,21 @@ function UploadJobCard({
+@@ -893,21 +883,21 @@ function UploadJobCard({
                    <AlertDialogContent>
                      <AlertDialogHeader>
                        <AlertDialogTitle>
@@ -519,7 +520,7 @@ index 28bebf581..f37635700 100644
                        </AlertDialogAction>
                      </AlertDialogFooter>
                    </AlertDialogContent>
-@@ -1036,6 +1025,48 @@ function UploadJobCard({
+@@ -1036,6 +1026,48 @@ function UploadJobCard({
            {job.status === 'duplicate_skipped' && (() => {
              const details = job.error_details as Record<string, unknown> | undefined;
              const existingVersion = details?.existingVersion ? String(details.existingVersion) : null;
@@ -568,7 +569,7 @@ index 28bebf581..f37635700 100644
              return (
              <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
                <div className="flex items-start gap-2">
-@@ -1045,7 +1076,7 @@ function UploadJobCard({
+@@ -1045,7 +1077,7 @@ function UploadJobCard({
                      <T>Duplicate app already exists in Intune</T>
                    </p>
                    <p className="text-status-warning/70 text-xs mt-1">
@@ -577,7 +578,15 @@ index 28bebf581..f37635700 100644
                      {existingVersion && (
                        <span> <T>Existing version: <Var>{existingVersion}</Var></T></span>
                      )}
-@@ -1110,7 +1141,7 @@ function UploadJobCard({
+@@ -1100,6 +1132,7 @@ function UploadJobCard({
+             ) : null;
+           })()}
+ 
++          {job.intune_app_id && <Link href={appWorkspaceUrl(job.intune_app_id)} className="mt-3 inline-block text-sm text-accent-cyan hover:underline">Open app workspace</Link>}
+           {/* Success - deployed to Intune */}
+           {job.intune_app_url && job.status !== 'duplicate_skipped' && (
+             <div className="mt-4 p-3 bg-status-success/[0.05] border border-status-success/10 rounded-lg">
+@@ -1110,7 +1143,7 @@ function UploadJobCard({
                  className="inline-flex items-center gap-2 text-accent-cyan hover:text-accent-cyan-bright text-sm font-medium transition-colors"
                >
                  <ExternalLink className="w-4 h-4" />
