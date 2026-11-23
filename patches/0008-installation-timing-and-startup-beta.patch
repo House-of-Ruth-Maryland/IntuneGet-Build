@@ -1,5 +1,5 @@
 diff --git a/.github/scripts/Create-PSADTPackage.ps1 b/.github/scripts/Create-PSADTPackage.ps1
-index 3add9f986..25cbf6a39 100644
+index 870d8381d..6acd97f4a 100644
 --- a/.github/scripts/Create-PSADTPackage.ps1
 +++ b/.github/scripts/Create-PSADTPackage.ps1
 @@ -1916,6 +1916,7 @@ if ($psadtConfig.ContainsKey('closeCountdown') -and $null -ne $psadtConfig.close
@@ -1640,10 +1640,10 @@ index 000000000..d1027869a
 +  return { ...query, refresh, cancellation };
 +}
 diff --git a/lib/github-actions.test.ts b/lib/github-actions.test.ts
-index a715cc9f9..f09685f1c 100644
+index b19ddfdf4..4d2ea263e 100644
 --- a/lib/github-actions.test.ts
 +++ b/lib/github-actions.test.ts
-@@ -41,6 +41,9 @@ vi.mock('./winget-dependencies', async (importOriginal) => {
+@@ -48,6 +48,9 @@ vi.mock('./winget-dependencies', async (importOriginal) => {
    };
  });
  
@@ -1653,8 +1653,8 @@ index a715cc9f9..f09685f1c 100644
  const config: GitHubActionsConfig = {
    token: 'test-token',
    owner: 'example',
-@@ -1182,3 +1185,22 @@ describe('cancelWorkflowRun', () => {
-     expect(fetchMock).toHaveBeenCalledTimes(1);
+@@ -1401,3 +1404,22 @@ describe('bounded runner evidence reads', () => {
+     await expect(getWorkflowRun(42, config)).rejects.toThrow('GitHub workflow evidence unavailable (HTTP 500)');
    });
  });
 +
@@ -1677,18 +1677,18 @@ index a715cc9f9..f09685f1c 100644
 +  });
 +});
 diff --git a/lib/github-actions.ts b/lib/github-actions.ts
-index 94c93b194..539f0f8f4 100644
+index a53fd5a91..6d27d4381 100644
 --- a/lib/github-actions.ts
 +++ b/lib/github-actions.ts
-@@ -4,6 +4,7 @@
-  * Uses repository_dispatch to a private workflows repository
-  */
+@@ -8,6 +8,7 @@ import { isExactPackagingRun } from './runner-loss';
  
+ import { createHash, createHmac } from 'node:crypto';
+ import { dispatchRateLimitError, WorkflowDispatchUnconfirmedError } from './workflow-dispatch-rate-limit';
 +import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
- import { createHmac } from 'node:crypto';
  import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
  import { authorizeCuratedWorkflow } from '@/lib/curated-catalog/server';
-@@ -52,6 +53,8 @@ export interface WorkflowInputs {
+ import { assertCuratedLicenceAccepted } from '@/lib/curated-catalog/licence';
+@@ -56,6 +57,8 @@ export interface WorkflowInputs {
    detectionRules?: string; // JSON-serialized DetectionRule[]
    requirementRules?: string; // JSON-serialized RequirementRule[]
    assignments?: string; // JSON-serialized PackageAssignment[]
@@ -1697,7 +1697,7 @@ index 94c93b194..539f0f8f4 100644
    categories?: string; // JSON-serialized IntuneAppCategorySelection[]
    espProfiles?: string; // JSON-serialized EspProfileSelection[]
    relationships?: string; // JSON-serialized AppRelationship[]
-@@ -243,6 +246,19 @@ export async function triggerPackagingWorkflow(
+@@ -248,6 +251,19 @@ export async function triggerPackagingWorkflow(
            effectiveInputs.installerSuccessCodes
          ),
        };
@@ -1717,7 +1717,7 @@ index 94c93b194..539f0f8f4 100644
    // Final dispatch boundary: custom callers bypass catalog reconciliation, so
    // they must still prove an unattended install contract before GitHub sees
    // the installer URL or any tenant-scoped packaging request.
-@@ -324,6 +340,7 @@ export async function triggerPackagingWorkflow(
+@@ -321,6 +337,7 @@ export async function triggerPackagingWorkflow(
        client_payload: {
          job: {
            jobId: inputs.jobId,
@@ -1725,7 +1725,7 @@ index 94c93b194..539f0f8f4 100644
            tenantId: inputs.tenantId,
            callbackUrl: inputs.callbackUrl,
          },
-@@ -354,6 +371,8 @@ export async function triggerPackagingWorkflow(
+@@ -351,6 +368,8 @@ export async function triggerPackagingWorkflow(
              normalizedPackageInput?.detectionRulesJson || inputs.detectionRules || '[]',
            requirementRules: inputs.requirementRules || '[]',
            assignments: inputs.assignments || '[]',
@@ -2861,7 +2861,7 @@ index fd6905bc2..7fffa460d 100644
  
    private async assignApp(
 diff --git a/packager/src/job-processor.ts b/packager/src/job-processor.ts
-index 60accaedc..4680e5ccb 100644
+index 9f405cf5b..b680cf291 100644
 --- a/packager/src/job-processor.ts
 +++ b/packager/src/job-processor.ts
 @@ -2,6 +2,7 @@
@@ -2872,7 +2872,7 @@ index 60accaedc..4680e5ccb 100644
  import * as fs from 'fs';
  import * as path from 'path';
  import * as crypto from 'crypto';
-@@ -413,6 +414,7 @@ export class JobProcessor {
+@@ -493,6 +494,7 @@ export class JobProcessor {
        'utf8'
      );
  
@@ -2880,7 +2880,7 @@ index 60accaedc..4680e5ccb 100644
      this.logger.debug('PSADT package created', { packageDir });
      return packageDir;
    }
-@@ -684,6 +686,7 @@ catch
+@@ -764,6 +766,7 @@ catch
        86_400
      );
      const allowDefer = strictBoolean('allowDefer');
@@ -2888,7 +2888,7 @@ index 60accaedc..4680e5ccb 100644
      const deferTimes = boundedInteger(config?.deferTimes, 'deferTimes', 3, 1_000)!;
      const blockExecution = strictBoolean('blockExecution');
      const promptToSave = strictBoolean('promptToSave');
-@@ -709,6 +712,7 @@ catch
+@@ -789,6 +792,7 @@ catch
        // v4.1 rejects an explicitly supplied -DeferDays 0 value.
        if (deferDays === 0) deferDays = null;
      }
@@ -2896,7 +2896,7 @@ index 60accaedc..4680e5ccb 100644
      let deferDeadline: string | null = null;
      if (config?.deferDeadline !== undefined && config.deferDeadline !== null) {
        if (typeof config.deferDeadline !== 'string') {
-@@ -749,7 +753,7 @@ catch
+@@ -829,7 +833,7 @@ catch
          installParameters.push(forceCloseCountdown !== null
            ? `-ForceCloseProcessesCountdown ${forceCloseCountdown}`
            : `-CloseProcessesCountdown ${closeCountdown}`);
@@ -2905,7 +2905,7 @@ index 60accaedc..4680e5ccb 100644
          if (deferDeadline) installParameters.push(`-DeferDeadline '${psSingleQuotedContent(deferDeadline)}'`);
          if (deferDays !== null) installParameters.push(`-DeferDays ${deferDays}`);
        } else if (showClosePrompt) {
-@@ -761,7 +765,8 @@ catch
+@@ -841,7 +845,8 @@ catch
        }
        if (blockExecution) installParameters.push('-BlockExecution');
      } else if (allowDefer) {
@@ -3028,10 +3028,10 @@ index 892c4ea63..0e7d5a1bb 100644
 +  }
 +});
 diff --git a/packager/tests/psadt-nested-portable.test.ts b/packager/tests/psadt-nested-portable.test.ts
-index 363c383f5..d7646c8e5 100644
+index d17cf5b2c..6126c00d7 100644
 --- a/packager/tests/psadt-nested-portable.test.ts
 +++ b/packager/tests/psadt-nested-portable.test.ts
-@@ -1228,3 +1228,14 @@ describe('self-hosted MSIX PSADT generation', () => {
+@@ -1256,3 +1256,14 @@ describe('self-hosted MSIX PSADT generation', () => {
      ).toContain('refusing an ambiguous removal');
    });
  });

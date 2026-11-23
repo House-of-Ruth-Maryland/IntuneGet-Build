@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Integrate upstream serverv0.8.6 with current detection refresh, authenticated callback/retry fencing and updated runtime/dependencies while preserving reviewed HRM navigation and scope. Keep existing HRM migrations9–27 and relocate upstream callback ownership to28, with fresh and legacy upgrade coverage. Current Curated security eligibility remains fail-closed when the required trusted hold reader is unavailable on SQLite; review that production availability impact before deployment. Private packaging workflow and opt-in capabilities remain separate and off.
+
 - Compose the app workspace around app identity, Edit next rollout, current and next settings,
   group intent and prominent installation outcomes. Connect Home, Apps, Updates, Activity and
   Settings, preserve existing destinations and aliases, and clarify publishing versus installation.

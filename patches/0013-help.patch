@@ -401,10 +401,10 @@ index 000000000..9ac6c1c4e
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 000000000..c212cc484
+index 000000000..a3a1e6a48
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,221 @@
 +import { describe, expect, it } from 'vitest';
 +import { HELP_SECTIONS } from '../help-content';
 +
@@ -620,6 +620,12 @@ index 000000000..c212cc484
 +  expect(schedule.uiLabels).toContain('Automatic publishing window');
 +  expect(schedule.uiLabels).not.toContain('Edit schedule');
 +});
++
++it('distinguishes Curated current security holds from unavailable verification', () => {
++  const text = HELP_SECTIONS.find(section => section.id === 'deploying')!.points.join(' ');
++  for (const fact of ['exact installer hash', 'Allowed means', 'Held means', 'Unavailable means', 'not evidence that the installer is malicious', 'cached public QA results do not replace', 'v0.8.6 integration is not deployed']) expect(text).toContain(fact);
++  expect(HELP_SECTIONS.find(section => section.id === 'updating')!.points.join(' ')).toContain('Retry safely cannot supply missing verification or clear a hold');
++});
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 new file mode 100644
 index 000000000..27b05fff1
@@ -751,10 +757,10 @@ index 000000000..27b05fff1
 +});
 diff --git a/lib/hrm/__tests__/help-navigation.test.ts b/lib/hrm/__tests__/help-navigation.test.ts
 new file mode 100644
-index 000000000..4a59e2d48
+index 000000000..3328aa1a6
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-navigation.test.ts
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,68 @@
 +import { expect, it } from 'vitest';
 +import { helpGuideFromHash, searchHelpGuides } from '../help-navigation';
 +it('finds tasks from questions, synonyms and detailed setup rules', () => {
@@ -818,12 +824,17 @@ index 000000000..4a59e2d48
 +  expect(searchHelpGuides('Refresh pilot status').some(guide => guide.id === 'pilot-rollouts')).toBe(true);
 +  for (const query of ['Edit schedule', 'Automatic update delivery', 'Automatic publishing window', 'Edit publishing window']) expect(searchHelpGuides(query).some(guide => guide.id === 'update-schedule')).toBe(true);
 +});
++
++it('finds current Curated eligibility guidance without changing deployment bookmarks', () => {
++  for (const query of ['security hold', 'eligibility unavailable', 'installer hash']) expect(searchHelpGuides(query).some(guide => guide.id === 'deploying')).toBe(true);
++  expect(helpGuideFromHash('#deploying')).toBe('deploying');
++});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..82fc7bcec
+index 000000000..845fbfa4c
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,558 @@
+@@ -0,0 +1,564 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -865,6 +876,10 @@ index 000000000..82fc7bcec
 +      'Assign to a device group when every computer in the group needs the app, including shared computers and before anyone signs in.',
 +      'Assign to a user group when the app follows the person to any computer they use, or when it is offered as Available.',
 +      'Follow HRM\'s Entra group naming convention, and make it clear in the name whether a group holds computers or users.',
++      'Curated deployment requires a current security-hold check for the exact installer hash. Allowed means that check found no active hold; it does not prove installation or bypass other deployment checks.',
++      'Held means an active security hold prevents packaging. Unavailable means the current check could not be completed; packaging still stops. An unavailable check is not evidence that the installer is malicious.',
++      'Signed catalog approval or withdrawal and cached public QA results do not replace the current hold check. A previous clean result cannot override a new hold or an unreadable current check.',
++      'The v0.8.6 integration is not deployed. Its required current-hold service is not configured for this server; Curated publishing remains unavailable in that integration. Ask HRM Support to restore supported verification before retrying.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
 +  },
@@ -962,6 +977,7 @@ index 000000000..82fc7bcec
 +      'Send update to Intune starts one reviewed update; Update all starts the reviewed batch. Neither proves installation. If settings, version or assignments change after review, review again; packaging checks the assignment snapshot again.',
 +      'If reading or an app review fails, use Retry review. Empty current assignments show no targets; each date is paired with its group and intent. For missing settings or custom detection, review Inventory or App catalog.',
 +      'Effective update settings shows versions, Saved app settings or Curated, install behavior, restart, assignment groups and dates. Reviewing starts nothing.',
++      'Curated updates also require the current exact-installer security check. If it is held or unavailable, read the deployment reason. Retry safely cannot supply missing verification or clear a hold; ask HRM Support before another attempt.',
 +    ],
 +    links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
 +  },
@@ -1378,13 +1394,14 @@ index 000000000..82fc7bcec
 +      'Failed and stuck deployments show under Needs attention on Home. Press Open Deployments, then open one to see the stage it failed at, the error and, when shown, Details with the recorded reason.',
 +      'If you open a ticket about a deployment, include the Support ID from its card.',
 +      'For anything else, open a ticket with HRM Support.',
++      'For Curated packaging, the message may say Packaging remains paused until current installer security eligibility can be verified. Send HRM Support that reason and Support ID. A paused status alone does not distinguish a hold from unavailable verification.',
 +    ],
 +    links: [{ label: 'HRM Support', href: HRM_SUPPORT_URL }],
 +  },
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..2c26572a0
+index 000000000..4c7f0b7e3
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,383 @@
@@ -1420,7 +1437,7 @@ index 000000000..2c26572a0
 +export const HELP_GUIDES: HelpGuide[] = [
 +  {
 +    id: 'deploying', category: 'deploy', title: 'Deploy an app',
-+    summary: 'Choose who gets an app, review the deployment and deploy it to Intune.', keywords: ['catalog', 'Required', 'Available', 'groups', 'deployment list', 'new app'],
++    summary: 'Choose who gets an app, review the deployment and deploy it to Intune.', keywords: ['catalog', 'Required', 'Available', 'groups', 'deployment list', 'new app', 'Curated', 'security hold', 'eligibility unavailable', 'installer hash'],
 +    start: catalog, before: ['Know which device or user group should receive the app.', 'Use Available only with a user group.'],
 +    steps: [
 +      step('Choose the app', 'Find the app in App catalog and open its deployment configuration.', 'catalog', 'App catalog', 'The app’s configuration opens on the right.'),
@@ -1433,7 +1450,7 @@ index 000000000..2c26572a0
 +    caution: 'No groups means no installations. Deployed to Intune does not mean computers have installed the app.',
 +    related: ['install-results', 'esp', 'discovered'],
 +    troubleshoot: [{ problem: 'The package has deployment history', action: 'Review Inventory and Deployments before choosing a deployment path. Add a second copy anyway acknowledges this item in this tenant. Review again after changing tenant or package; active deployments still block it.', guide: 'updating' }, { problem: 'Several copies remain', action: 'Review the newest copy in Inventory before moving groups or deleting old copies. IntuneGet never removes a second copy you added on purpose.', guide: 'old-copies' }],
-+    referenceGroups: [reference('Choose and review a deployment', [0, 1, 2, 3, 4, 8]), reference('Existing apps and duplicate copies', [5, 6, 7, 10, 11, 12, 13]), reference('Change a deployed app', [9, 14, 15]), reference('Choose the right groups', [16, 17, 18, 19])],
++    referenceGroups: [reference('Choose and review a deployment', [0, 1, 2, 3, 4, 8]), reference('Existing apps and duplicate copies', [5, 6, 7, 10, 11, 12, 13]), reference('Change a deployed app', [9, 14, 15]), reference('Choose the right groups', [16, 17, 18, 19]), reference('Curated security checks and unavailable verification', [20, 21, 22, 23])],
 +  },
 +  {
 +    id: 'installation-timing', category: 'updates', title: 'Set install dates',
@@ -1495,7 +1512,7 @@ index 000000000..2c26572a0
 +    success: 'The new version is deployed to the intended groups and computers report install results.', caution: 'A checksum mismatch needs a corrected catalog entry or installer. Repeating Retry safely does not fix the mismatch.',
 +    related: ['pilot-rollouts', 'install-results', 'old-copies', 'rollback'],
 +    troubleshoot: [{ problem: 'Auto-update turned itself off', action: 'Read the failures in Deployments. After fixing the cause, use Turn auto-update back on.' }, { problem: 'Notification settings changed after an update', action: 'Reviewed manual updates carry supported assignment settings. Check current Intune settings and the reviewed snapshot before retrying.' }, { problem: 'Dates or restart grace are gone after an update', action: 'Check whether the review kept dates or reset them to ASAP. Inspect Install dates in Inventory on the new copy.', guide: 'installation-timing' }, { problem: 'The catalog has not synced', action: 'Wait for a newer catalog, or choose the new version in App catalog and use Deploy again.' }, { problem: 'The app has no groups', action: 'Choose groups before deploying; otherwise it installs nowhere.', guide: 'deploying' }],
-+    referenceGroups: [reference('Availability and what an update changes', [0, 1, 2, 3, 30, 4, 5, 6, 35]), reference('Groups carried to the new copy', [31, 32, 33, 34]), reference('Validation and safe retries', [7, 8, 9, 10, 11]), reference('Automatic updates stopped or catalog delayed', [12, 13, 14, 15, 16]), reference('Custom app versions', [17, 18, 19, 20, 21, 22, 23, 24]), reference('Review groups and replacement behavior', [25, 26, 27, 28, 29])],
++    referenceGroups: [reference('Availability and what an update changes', [0, 1, 2, 3, 30, 4, 5, 6, 35]), reference('Groups carried to the new copy', [31, 32, 33, 34]), reference('Validation and safe retries', [7, 8, 9, 10, 11, 36]), reference('Automatic updates stopped or catalog delayed', [12, 13, 14, 15, 16]), reference('Custom app versions', [17, 18, 19, 20, 21, 22, 23, 24]), reference('Review groups and replacement behavior', [25, 26, 27, 28, 29])],
 +  },
 +  {
 +    id: 'old-copies', category: 'devices', title: 'Clean up old Intune copies',
@@ -1758,7 +1775,7 @@ index 000000000..2c26572a0
 +  },
 +  {
 +    id: 'support', category: 'troubleshoot', title: 'Investigate a failed deployment',
-+    summary: 'Read the recorded failure and send the Support ID with a clear support request.', keywords: ['error', 'failure', 'support ID', 'details', 'ticket', 'help'],
++    summary: 'Read the recorded failure and send the Support ID with a clear support request.', keywords: ['error', 'failure', 'support ID', 'details', 'ticket', 'help', 'current installer security eligibility', 'Curated paused', 'security hold'],
 +    start: deployments, before: ['Have the affected app and approximate deployment time ready.'],
 +    steps: [
 +      step('Read the failure', 'On Home, press Open Deployments under Needs attention, or open Deployments. Open the failed job and check its stage, error and Details.', 'deployments', 'Details', 'You have the recorded reason rather than an assumed diagnosis.'),
@@ -1768,7 +1785,7 @@ index 000000000..2c26572a0
 +    success: 'The failure is understood or a support request includes the exact deployment identifier and evidence.',
 +    related: ['updating', 'install-results', 'server'],
 +    troubleshoot: [{ problem: 'The package deployed but computers failed', action: 'Investigate install results on computers instead of retrying packaging.', guide: 'install-results' }, { problem: 'There is no deployment involved', action: 'Open HRM Support and describe the page, time and visible problem.' }],
-+    referenceGroups: [reference('Failure details and support requests', [0, 1, 2])],
++    referenceGroups: [reference('Failure details and support requests', [0, 1, 2, 3])],
 +  },
 +];
 diff --git a/lib/hrm/help-navigation.ts b/lib/hrm/help-navigation.ts

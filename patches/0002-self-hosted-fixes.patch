@@ -275,7 +275,7 @@ index fda5dc4c9..ebdc02eef 100644
 +  });
 +});
 diff --git a/lib/qa/gate.ts b/lib/qa/gate.ts
-index a29661a41..9d865b528 100644
+index 1d02d8b3a..889e66c0d 100644
 --- a/lib/qa/gate.ts
 +++ b/lib/qa/gate.ts
 @@ -5,7 +5,7 @@ import { getCatalogSource } from '@/lib/catalog';
@@ -284,10 +284,10 @@ index a29661a41..9d865b528 100644
  import { classifyQaFailure } from '@/lib/qa/classify';
 -import { createServerClient } from '@/lib/supabase';
 +import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase';
+ import { loadInstallerSecurityHolds } from '@/lib/qa/installer-security-holds';
  import {
    getPackageCompatibilityBlock,
-   type PackageCompatibilityBlockCode,
-@@ -198,6 +198,15 @@ export async function enforceQaGate(input: {
+@@ -219,6 +219,15 @@ export async function enforceQaGate(input: {
    }
    if (input.sourceType === 'custom') return;
  
@@ -303,7 +303,7 @@ index a29661a41..9d865b528 100644
    const architecture = (input.architecture || 'x64').toLowerCase();
    const installerSha256 = input.installerSha256?.trim().toUpperCase() || '';
    const packageProfileSha256 = input.packageProfileSha256?.trim().toUpperCase() || '';
-@@ -314,6 +323,17 @@ export async function enforceQaGate(input: {
+@@ -335,6 +344,17 @@ export async function enforceQaGate(input: {
      });
    }
  
@@ -321,7 +321,7 @@ index a29661a41..9d865b528 100644
    const row = await getCatalogSource().getQaResult(input.wingetId);
  
    if (
-@@ -335,7 +355,7 @@ export async function enforceQaGate(input: {
+@@ -356,7 +376,7 @@ export async function enforceQaGate(input: {
      });
    }
  
