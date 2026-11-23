@@ -1,4 +1,4 @@
-# MCP read API (patch 0055)
+# MCP read API (patch 0011)
 
 The IntuneGet server serves a small, read-only API for HRM's MCP server (the `hrm-intuneget-mcp`
 Cloudflare Worker). The Worker turns it into tools that Claude can call. This page is the contract
@@ -381,3 +381,31 @@ The Worker's `src/intuneget/contract.ts` was written before this API. These answ
 | `/update-schedule` | `paused` required | without SQLite, `supported: false` and `paused: false` | HRM's server always runs SQLite; this only covers a future move. |
 | all | extra fields | `statusFile`, `diskPercentUsed`, `newestAppId`, `previousVersion`, `checkedAt`, `detectedAt`, `errorCategory`, `automatic`, `total`, `pilotId`, `wingetId`, `previousAppId`, `newAppId`, `jobStatus`, `enabled`, `supported` | Safe to drop. Add them to the Worker's schema to show them. |
 | all | four settings on the server | five: the tenant too (`HRM_TENANT_ID`) | The Access service token carries no Intune tenant, and the server can serve more than one, so the tenant is set on purpose. |
+
+
+## App workspace and discovery contract extension
+
+`GET /version-checks` is read-only. It returns `supported`, `reported`, `timeZone`
+(`America/New_York`), `dailyTimes` (`03:30`, `15:30`), `lastAttemptAt`, `result`
+(`success`, `failed` or null), `nextExpectedAt` and `purpose` (`catalog_version_discovery`).
+The next expected check is informational; a missing or stale report has no claimed last result.
+This cadence is separate from automatic publishing windows and per-device installation.
+
+`GET /apps/{id}` additionally returns a relative `workspacePath`, `currentInstaller` when a
+recorded deployment configuration exists (otherwise null), and `nextInstallRule` for a known
+app family. Current behavior is `silent`, `postponement`, `restart_beta` or `installer_default`;
+only recorded postponement days and known restart behavior are exposed. Next mode is
+`existing`, `silent`, `prompt` or `restart`, source is `shared` or `app_override`, and scope is
+`future_automatic_packages`. The rule describes saved settings, never an editor draft.
+Restart mode exposes a sanitized pilot group label, `explicitPilotRequired` and
+`broadAutomaticUpdatesHeld`; it does not start or validate a pilot.
+
+Each assignment can include `notifications`, `installTiming` (availability/deadline and
+`useLocalTime`) and `restartGraceMinutes`. Device-local dates must be interpreted as local
+wall time, not as a single fleet UTC instant. `availableWithoutEnrollment` intent is preserved.
+The pilots response includes `startupBeta`. No person, device, tenant or group identifier is
+added to these fields. Existing text, size, authentication and timeout limits still apply.
+
+The dedicated Worker must adopt the matching schemas before these fields appear in MCP output.
+Its `version_checks` tool requires this app extension and returns not found on older servers.
+No new deployment, assignment, rollout editing or employee scheduling write tool is authorized.

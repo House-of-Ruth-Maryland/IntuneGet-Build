@@ -472,11 +472,45 @@ index 6f70c2f5d..049955bc4 100644
  });
  it('refuses a foreign tenant header before Graph access', async () => {
    expect((await GET(new NextRequest('http://localhost/api/intune/unmanaged-apps', { headers: { Authorization: 'Bearer fixture', 'X-MSP-Tenant-Id': 'other-scan-tenant' } }))).status).toBe(403);
+diff --git a/components/CuratedBadge.tsx b/components/CuratedBadge.tsx
+new file mode 100644
+index 000000000..e38e48f96
+--- /dev/null
++++ b/components/CuratedBadge.tsx
+@@ -0,0 +1,11 @@
++'use client';
++import { useState } from 'react';
++import { ShieldCheck } from 'lucide-react';
++import { cn } from '@/lib/utils';
++import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
++export const CURATED_HINT = 'Installation settings are provided by the IntuneGet catalog.';
++/** Same label on every surface; the existing tooltip also opens on tap or Enter. */
++export function CuratedBadge({ className }: { className?: string }) {
++  const [open, setOpen] = useState(false);
++  return <TooltipProvider delayDuration={150}><Tooltip open={open} onOpenChange={setOpen}><TooltipTrigger asChild><button type="button" onClick={event => { event.stopPropagation(); setOpen(true); }} className={cn('inline-flex items-center gap-1 rounded-full border border-status-success/20 bg-status-success/10 px-2 py-0.5 text-xs font-medium text-status-success focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan', className)}><ShieldCheck className="h-3 w-3" aria-hidden="true" />Curated</button></TooltipTrigger><TooltipContent className="max-w-64">{CURATED_HINT}</TooltipContent></Tooltip></TooltipProvider>;
++}
 diff --git a/components/CuratedCatalog.tsx b/components/CuratedCatalog.tsx
-index 9a1d66d2e..d8648add0 100644
+index 9a1d66d2e..086a40c2f 100644
 --- a/components/CuratedCatalog.tsx
 +++ b/components/CuratedCatalog.tsx
-@@ -289,7 +289,7 @@ export function CuratedCatalog() {
+@@ -1,4 +1,5 @@
+ 'use client';
++import { CuratedBadge } from './CuratedBadge';
+ 
+ import { useEffect, useRef, useState } from 'react';
+ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+@@ -190,9 +191,7 @@ function CuratedAppCard({ entry, inCart, expired, licenceStatus, licenceLoading,
+ 
+           <div className="flex items-center flex-wrap gap-1.5 mt-3">
+             {status === 'approved' ? (
+-              <span className="inline-flex items-center gap-1 text-xs font-medium text-status-success bg-status-success/10 px-2 py-0.5 rounded-full border border-status-success/20">
+-                <ShieldCheck className="h-3 w-3" /><T>Curated</T>
+-              </span>
++              <CuratedBadge />
+             ) : (
+               <span className="inline-flex items-center gap-1 text-xs text-text-secondary bg-bg-surface px-2 py-0.5 rounded-full border border-overlay/10">
+                 <Clock className="h-3 w-3" />
+@@ -289,7 +288,7 @@ export function CuratedCatalog() {
          <div className="absolute right-0 top-0 h-28 w-28 md:h-40 md:w-40 bg-gradient-to-bl from-accent-violet/10 via-accent-cyan/5 to-transparent blur-2xl" />
  
          <div className="relative">

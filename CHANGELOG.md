@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Compose the app workspace around app identity, Edit next rollout, current and next settings,
+  group intent and prominent installation outcomes. Connect Home, Apps, Updates, Activity and
+  Settings, preserve existing destinations and aliases, and clarify publishing versus installation.
+  Remove speculative employee controls; retain Curated with its accessible catalog hint.
+- Add capability-gated manual/bulk settings review with group-paired assignment dates, explicit
+  keep/reset decisions and stale-review rejection. Preserve supported replacement assignment
+  settings in the local packager and paired private-workflow reference. Existing behavior stays
+  available when the matching workflow capability is off; no capability is enabled by this change.
+- Add app-scoped restart Beta pilot targeting with separate save/start, server eligibility and
+  validated-workflow gates. Correct the startup helper boot trigger/readiness/cleanup behavior;
+  local harmless Windows proof does not claim end-to-end Intune validation.
+- Extend the MCP read contract with catalog discovery, current versus saved next rollout settings,
+  assignment timing and restart pilot status. Update Help, illustrations, search and accessible
+  action names. No new MCP deployment or group-changing authority is added.
+
 - Add a per-app workspace linked from Inventory, App updates and Deployments, with the selected
   copy's saved settings, groups, install dates, reported outcomes and pilot status. Edit next rollout
   uses persisted shared/app installation rules, identifies unsaved changes and keeps unsupported

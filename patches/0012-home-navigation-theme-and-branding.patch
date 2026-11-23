@@ -144,10 +144,10 @@ index f818738c1..19b49e19f 100644
              )}
            </button>
 diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
-index bade6e949..7f377c333 100644
+index bade6e949..4ae2d3a75 100644
 --- a/app/(app)/dashboard/layout.tsx
 +++ b/app/(app)/dashboard/layout.tsx
-@@ -12,28 +12,32 @@ import {
+@@ -12,28 +12,33 @@ import {
  import { T } from 'gt-next';
  import { Button } from '@/components/ui/button';
  import { Toaster } from 'sonner';
@@ -170,6 +170,7 @@ index bade6e949..7f377c333 100644
  import { getClientFeatureFlags } from '@/lib/features';
 +// HRM patch 0056: staff outside the IT admins group see a "no access" page instead of the dashboard.
 +import { useAppAccess } from '@/hooks/useAppAccess';
++import { SectionNavigation } from '@/components/hrm/SectionNavigation';
 +import { AccessDenied } from '@/components/hrm/AccessDenied';
  
  export default function DashboardLayout({
@@ -183,7 +184,7 @@ index bade6e949..7f377c333 100644
    const {
      isOnboardingComplete,
      isChecking: isCheckingOnboarding,
-@@ -60,6 +64,8 @@ export default function DashboardLayout({
+@@ -60,6 +65,8 @@ export default function DashboardLayout({
      setCommandPaletteOpen(true);
    }, []);
  
@@ -192,7 +193,7 @@ index bade6e949..7f377c333 100644
    useKeyboardShortcuts({
      onCommandPalette: handleOpenCommandPalette,
      onToggleCart: toggleCart,
-@@ -69,6 +75,8 @@ export default function DashboardLayout({
+@@ -69,6 +76,8 @@ export default function DashboardLayout({
      setIsLoading(false);
    }, []);
  
@@ -201,7 +202,7 @@ index bade6e949..7f377c333 100644
    useEffect(() => {
      if (!isLoading && !isInitializing && !isAuthenticated && !isSigningOut) {
        router.push('/auth/signin?callbackUrl=/dashboard');
-@@ -77,6 +85,8 @@ export default function DashboardLayout({
+@@ -77,6 +86,8 @@ export default function DashboardLayout({
  
    useEffect(() => {
      if (isLoading || !isAuthenticated || isCheckingOnboarding) return;
@@ -210,7 +211,7 @@ index bade6e949..7f377c333 100644
  
      if (isOnboardingComplete) {
        setShowRetryBanner(false);
-@@ -102,7 +112,7 @@ export default function DashboardLayout({
+@@ -102,7 +113,7 @@ export default function DashboardLayout({
  
      // consent_not_granted or insufficient_intune_permissions: real consent gap.
      router.push('/onboarding');
@@ -219,7 +220,7 @@ index bade6e949..7f377c333 100644
  
    useEffect(() => {
      if (isAuthenticated && !isLoading) {
-@@ -124,7 +134,11 @@ export default function DashboardLayout({
+@@ -124,7 +135,11 @@ export default function DashboardLayout({
      await signOut();
    };
  
@@ -232,7 +233,7 @@ index bade6e949..7f377c333 100644
      return (
        <div className="min-h-screen flex items-center justify-center bg-bg-deepest">
          <div className="relative">
-@@ -162,14 +176,15 @@ export default function DashboardLayout({
+@@ -162,14 +177,15 @@ export default function DashboardLayout({
          {/* Top bar */}
          <header className="sticky top-0 z-30 h-16 glass-light">
            <div className="flex items-center justify-between h-full pl-14 pr-3 sm:pr-4 lg:px-6">
@@ -251,7 +252,7 @@ index bade6e949..7f377c333 100644
                </kbd>
              </button>
              <div className="flex-1 lg:hidden" />
-@@ -177,7 +192,7 @@ export default function DashboardLayout({
+@@ -177,7 +193,7 @@ export default function DashboardLayout({
              <div className="flex min-w-0 items-center gap-1 sm:gap-3">
                <TenantSwitcher />
                <DeploymentStatusIndicator />
@@ -260,7 +261,7 @@ index bade6e949..7f377c333 100644
                {hostedServices && <NotificationBell />}
                <Button
                  variant="ghost"
-@@ -239,12 +254,13 @@ export default function DashboardLayout({
+@@ -239,12 +255,13 @@ export default function DashboardLayout({
                <div className="flex items-start sm:items-center gap-3 min-w-0">
                  <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5 sm:mt-0" />
                  <div className="min-w-0">
@@ -277,7 +278,15 @@ index bade6e949..7f377c333 100644
                        : <T>Please check your connection and try again.</T>}
                    </p>
                  </div>
-@@ -285,7 +301,7 @@ export default function DashboardLayout({
+@@ -273,6 +290,7 @@ export default function DashboardLayout({
+ 
+         {/* Page content */}
+         <main className="p-4 lg:p-6 relative">
++          <SectionNavigation />
+           {children}
+         </main>
+       </motion.div>
+@@ -285,7 +303,7 @@ export default function DashboardLayout({
  
        {/* Toast notifications */}
        <Toaster
@@ -287,7 +296,7 @@ index bade6e949..7f377c333 100644
          toastOptions={{
            className: 'bg-bg-surface border border-overlay/10 text-text-primary',
 diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
-index 24e1de8db..9cbc04a29 100644
+index 24e1de8db..aa04ffa82 100644
 --- a/app/(app)/dashboard/page.tsx
 +++ b/app/(app)/dashboard/page.tsx
 @@ -10,11 +10,9 @@ import {
@@ -740,10 +749,11 @@ index 24e1de8db..9cbc04a29 100644
      </div>
    );
  }
-@@ -448,32 +419,3 @@ function StatCard({
+@@ -447,33 +418,3 @@ function StatCard({
+ 
    return content;
  }
- 
+-
 -function QuickStartStep({
 -  number,
 -  title,
@@ -1656,7 +1666,7 @@ index 27c710577..776a9b69c 100644
        />
      </>
 diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
-index 33d0890cc..6078bb807 100644
+index 33d0890cc..a7734ef08 100644
 --- a/components/dashboard/CommandPalette.tsx
 +++ b/components/dashboard/CommandPalette.tsx
 @@ -2,8 +2,9 @@
@@ -1697,13 +1707,13 @@ index 33d0890cc..6078bb807 100644
 -  { name: 'App Requests', href: '/dashboard/app-requests', icon: Lightbulb, keywords: 'suggestions requests vote' },
 +  { name: 'Home', href: '/dashboard', icon: LayoutDashboard, keywords: 'home dashboard overview' },
 +  { name: 'App catalog', href: '/dashboard/apps', icon: Package, keywords: 'apps packages browse search winget deploy' },
-+  { name: 'Inventory', href: '/dashboard/inventory', icon: Server, keywords: 'deployed inventory intune app workspace current copy install dates availability deadline' },
++  { name: 'Inventory', href: '/dashboard/inventory', icon: Server, keywords: 'apps deployed inventory intune app workspace current copy install dates availability deadline' },
 +  { name: 'Discovered apps', href: '/dashboard/unmanaged', icon: Radar, keywords: 'unmanaged discovered scan devices' },
 +  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions automatic schedule publish delivery blackout pilot next rollout' },
-+  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'uploads deploy jobs status history' },
++  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'activity uploads deploy jobs status history' },
 +  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts my deployments' },
 +  { name: 'Check for new app versions', href: '/dashboard/settings#app-updates', icon: Settings, keywords: 'catalog discovery cadence check schedule 3:30 new versions' },
-+  { name: 'Automatic update delivery', href: '/dashboard/updates#automatic-updates', icon: ArrowUpCircle, keywords: 'when can intuneget send automatic updates to intune update schedule publishing window blackout pause' },
++  { name: 'Automatic publishing window', href: '/dashboard/updates#automatic-updates', icon: ArrowUpCircle, keywords: 'automatic update delivery edit schedule refresh check for app updates when can intuneget send automatic updates to intune update schedule publishing window blackout pause' },
 +  { name: 'Installation timing guide', href: '/dashboard/help#automatic-installation-policy', icon: LifeBuoy, keywords: 'installation behavior behaviour employee choice postpone startup restart schedule next rollout' },
    { name: 'Settings', href: '/dashboard/settings', icon: Settings, keywords: 'settings preferences permissions' },
 +  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy, keywords: 'help support how' },
@@ -1743,7 +1753,7 @@ index 33d0890cc..6078bb807 100644
  
    const handleSelect = useCallback(
      (href: string) => {
-@@ -66,26 +65,27 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -66,29 +65,31 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
      [onOpenChange, router]
    );
  
@@ -1786,7 +1796,11 @@ index 33d0890cc..6078bb807 100644
                value={search}
                onValueChange={setSearch}
                placeholder="Type a command or search..."
-@@ -106,7 +106,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
++              aria-label="Search apps and commands"
+               className="flex-1 py-3 text-sm bg-transparent text-text-primary placeholder:text-text-muted outline-none"
+             />
+             <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-text-muted bg-overlay/10 rounded border border-overlay/5">
+@@ -106,7 +107,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                heading={<T>Navigation</T>}
                className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
              >
@@ -1795,7 +1809,7 @@ index 33d0890cc..6078bb807 100644
                  <Command.Item
                    key={item.href}
                    value={`${item.name} ${item.keywords}`}
-@@ -122,7 +122,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -122,7 +123,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
              {/* Keyboard shortcuts group */}
              {!search && (
                <Command.Group
@@ -1804,7 +1818,7 @@ index 33d0890cc..6078bb807 100644
                  className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:mt-2"
                >
                  {SHORTCUT_HINTS.map((hint) => (
-@@ -142,7 +142,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -142,7 +143,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                            key={key}
                            className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5"
                          >
@@ -1813,7 +1827,7 @@ index 33d0890cc..6078bb807 100644
                          </kbd>
                        ))}
                      </div>
-@@ -151,8 +151,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -151,8 +152,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                </Command.Group>
              )}
            </Command.List>
@@ -1824,10 +1838,18 @@ index 33d0890cc..6078bb807 100644
    );
  }
 diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
-index e941306a7..92c974146 100644
+index e941306a7..14d77f88f 100644
 --- a/components/dashboard/Sidebar.tsx
 +++ b/components/dashboard/Sidebar.tsx
-@@ -21,6 +21,7 @@ import {
+@@ -11,6 +11,7 @@ import {
+   Menu,
+   X,
+   Server,
++  Settings,
+   BarChart3,
+   Building2,
+   ArrowUpCircle,
+@@ -21,6 +22,7 @@ import {
    Layers,
    Webhook,
    Lightbulb,
@@ -1835,7 +1857,7 @@ index e941306a7..92c974146 100644
    PanelLeftClose,
    PanelLeftOpen,
  } from 'lucide-react';
-@@ -35,6 +36,7 @@ import { UpdateBadge } from '@/components/inventory';
+@@ -35,6 +37,7 @@ import { UpdateBadge } from '@/components/inventory';
  import { TooltipProvider } from '@/components/ui/tooltip';
  import { SidebarNavItem } from './SidebarNavItem';
  import { SidebarUserSection } from './SidebarUserSection';
@@ -1843,7 +1865,7 @@ index e941306a7..92c974146 100644
  import type { LucideIcon } from 'lucide-react';
  
  type NavItem = {
-@@ -50,23 +52,30 @@ type NavGroup = {
+@@ -50,23 +53,31 @@ type NavGroup = {
  };
  
  const coreNav: NavItem[] = [
@@ -1873,6 +1895,7 @@ index e941306a7..92c974146 100644
 +// HRM patch: help for HRM IT, and no SCCM, MSP or public app-request items
 +// (SCCM doesn't work on a SQLite server; HRM is one organization).
 +const helpNav: NavItem[] = [
++  { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 +  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy },
 +];
 +const HRM_HIDDEN_HREFS = new Set(['/dashboard/sccm', '/dashboard/app-requests']);
@@ -1880,7 +1903,7 @@ index e941306a7..92c974146 100644
  const mspNav: NavItem[] = [
    { name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 },
    { name: 'Batch Deploy', href: '/dashboard/msp/batch', icon: Layers },
-@@ -110,13 +119,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -110,13 +121,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
    const managementItems = sccmEnabled
      ? managementNav
      : managementNav.filter((item) => item.href !== '/dashboard/sccm');
@@ -1897,7 +1920,7 @@ index e941306a7..92c974146 100644
      {
        label: 'Analytics',
        items: hostedServices
-@@ -127,6 +134,16 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -127,6 +136,16 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
        ? [{ label: 'MSP', items: mspNav }]
        : [{ label: 'MSP', items: [{ name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 }] }]),
    ];
@@ -1914,7 +1937,7 @@ index e941306a7..92c974146 100644
  
    const sidebarContent = (
      <div className="flex flex-col h-full">
-@@ -153,9 +170,10 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -153,9 +172,10 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
                  animate={{ opacity: 1, width: 'auto' }}
                  exit={{ opacity: 0, width: 0 }}
                  transition={{ duration: 0.15 }}
@@ -1927,7 +1950,7 @@ index e941306a7..92c974146 100644
                </motion.span>
              )}
            </AnimatePresence>
-@@ -180,7 +198,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -180,7 +200,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
            className="space-y-1"
          >
            {navGroups.map((group, groupIndex) => (
@@ -1942,7 +1965,7 @@ index e941306a7..92c974146 100644
                {/* Section divider/label */}
                {group.label && (
                  <div className={cn('pt-4 pb-2', isCollapsed ? 'px-0' : 'px-3')}>
-@@ -194,7 +218,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -194,7 +220,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
                          animate={{ opacity: 1 }}
                          exit={{ opacity: 0 }}
                          transition={{ duration: 0.15 }}
@@ -1951,7 +1974,7 @@ index e941306a7..92c974146 100644
                        >
                          <T>{group.label}</T>
                        </motion.span>
-@@ -252,10 +276,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -252,10 +278,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
  
    return (
      <TooltipProvider delayDuration={0}>
@@ -2040,7 +2063,7 @@ index d834efe1b..6a84253d2 100644
              <T>Sign out</T>
 diff --git a/components/dashboard/__tests__/CommandPalette.test.ts b/components/dashboard/__tests__/CommandPalette.test.ts
 new file mode 100644
-index 000000000..f67ec4149
+index 000000000..604a6b853
 --- /dev/null
 +++ b/components/dashboard/__tests__/CommandPalette.test.ts
 @@ -0,0 +1,85 @@
@@ -2109,7 +2132,7 @@ index 000000000..f67ec4149
 +  // HRM patch 0053: pages in the sidebar's order, and the new G shortcuts listed.
 +  it('lists pages in sidebar order and shows the new G shortcuts', () => {
 +    const pages = [...document.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])')].map((el) => el.textContent);
-+    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Check for new app versions', 'Automatic update delivery', 'Installation timing guide', 'Settings', 'Help']);
++    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Check for new app versions', 'Automatic publishing window', 'Installation timing guide', 'Settings', 'Help']);
 +    const text = document.querySelector('[role="dialog"]')!.textContent;
 +    for (const hint of ['Go to App updates', 'Go to Discovered apps', 'Go to Help']) expect(text).toContain(hint);
 +  });
@@ -2159,6 +2182,31 @@ index 000000000..bec4f6545
 +    expect(panel).toBeGreaterThan(backdrop);
 +  });
 +});
+diff --git a/components/hrm/SectionNavigation.tsx b/components/hrm/SectionNavigation.tsx
+new file mode 100644
+index 000000000..dc061c667
+--- /dev/null
++++ b/components/hrm/SectionNavigation.tsx
+@@ -0,0 +1,19 @@
++'use client';
++import Link from 'next/link';
++import { usePathname } from 'next/navigation';
++import { motion, useReducedMotion } from 'framer-motion';
++import { sectionPages } from '@/lib/hrm/navigation';
++
++/** Section routes remain ordinary links, preserving bookmarks and browser history. */
++export function SectionNavigation() {
++  const path = usePathname();
++  const pages = sectionPages(path);
++  const reduced = useReducedMotion();
++  if (!pages.length) return null;
++  return <nav aria-label={pages[0].name === 'Inventory' ? 'Apps pages' : 'Activity pages'} className="mb-5 flex flex-wrap gap-1 border-b border-overlay/10 pb-3">{pages.map(page => {
++    const active = path === page.href || path.startsWith(page.href + '/');
++    return <Link key={page.href} href={page.href} aria-current={active ? path === page.href ? 'page' : 'location' : undefined} className={`relative rounded-lg px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan ${active ? 'text-accent-cyan' : 'text-text-secondary hover:bg-overlay/5 hover:text-text-primary'}`}>
++      {active && <motion.span layoutId={reduced ? undefined : 'section-page'} transition={reduced ? { duration: 0 } : { duration: 0.15 }} className="absolute inset-0 rounded-lg bg-accent-cyan/10" aria-hidden="true" />}<span className="relative">{page.name}</span>
++    </Link>;
++  })}</nav>;
++}
 diff --git a/components/hrm/ServerStatusCard.test.ts b/components/hrm/ServerStatusCard.test.ts
 new file mode 100644
 index 000000000..94b3f252f
@@ -3029,15 +3077,15 @@ index 000000000..0c2f46c2f
 +});
 diff --git a/lib/hrm/__tests__/navigation.test.ts b/lib/hrm/__tests__/navigation.test.ts
 new file mode 100644
-index 000000000..1f1d6c8b3
+index 000000000..b69ba250e
 --- /dev/null
 +++ b/lib/hrm/__tests__/navigation.test.ts
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,83 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
 +import { afterEach, describe, expect, it, vi } from 'vitest';
-+import { GO_TO_SHORTCUTS, goToShortcutHref, hrmNavGroups, HRM_NAV_LAYOUT } from '../navigation';
++import { GO_TO_SHORTCUTS, goToShortcutHref, hrmNavGroups, HRM_NAV_LAYOUT, sectionPages, primaryNavActive } from '../navigation';
 +
 +const push = vi.hoisted(() => vi.fn());
 +vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
@@ -3049,27 +3097,25 @@ index 000000000..1f1d6c8b3
 +const SIDEBAR_ITEMS = ['/dashboard', '/dashboard/apps', '/dashboard/uploads', '/dashboard/unmanaged', '/dashboard/inventory', '/dashboard/updates', '/dashboard/reports'].map(item);
 +
 +describe('sidebar groups', () => {
-+  it('groups the same pages as Apps and Activity, with Help unlabelled at the bottom (patch 0058)', () => {
-+    const groups = hrmNavGroups(SIDEBAR_ITEMS, [item('/dashboard/help')]);
-+    expect(groups.map((g) => [g.label ?? null, g.items.map((i) => i.href)])).toEqual([
-+      [null, ['/dashboard']],
-+      ['Apps', ['/dashboard/apps', '/dashboard/inventory', '/dashboard/unmanaged', '/dashboard/updates']],
-+      ['Activity', ['/dashboard/uploads', '/dashboard/reports']],
-+      [null, ['/dashboard/help']],
++  it('provides five primary destinations and a Help utility without changing routes', () => {
++    const groups = hrmNavGroups(SIDEBAR_ITEMS, [item('/dashboard/settings'), item('/dashboard/help')]);
++    expect(groups.map(g => g.items.map(i => i.href))).toEqual([
++      ['/dashboard', '/dashboard/inventory', '/dashboard/updates', '/dashboard/uploads', '/dashboard/settings'], ['/dashboard/help'],
 +    ]);
-+    // Every label groups more than one page.
-+    for (const group of HRM_NAV_LAYOUT) if (group.label) expect(group.hrefs.length).toBeGreaterThan(1);
-+  });
-+
-+  it('keeps every page exactly once and drops empty groups', () => {
-+    const hrefs = HRM_NAV_LAYOUT.flatMap((g) => g.hrefs);
++    expect(groups[0].items.map(i => i.name)).toEqual(['/dashboard', 'Apps', 'Updates', 'Activity', 'Settings']);
++    const hrefs = HRM_NAV_LAYOUT.flatMap(g => g.hrefs);
 +    expect(new Set(hrefs).size).toBe(hrefs.length);
-+    expect(hrmNavGroups([item('/dashboard')], []).map((g) => g.label ?? null)).toEqual([null]);
 +  });
-+
-+  it('never shows hidden pages it was not given', () => {
-+    const groups = hrmNavGroups(SIDEBAR_ITEMS.filter((i) => i.href !== '/dashboard/reports'), []);
-+    expect(groups.find((g) => g.label === 'Activity')?.items.map((i) => i.href)).toEqual(['/dashboard/uploads']);
++  it('keeps every former Apps and Activity route reachable through section navigation', () => {
++    expect(sectionPages('/dashboard/inventory/app-id').map(i => i.href)).toEqual(['/dashboard/inventory', '/dashboard/apps', '/dashboard/unmanaged']);
++    expect(sectionPages('/dashboard/reports').map(i => i.href)).toEqual(['/dashboard/uploads', '/dashboard/reports']);
++    expect(primaryNavActive('/dashboard/inventory', '/dashboard/apps')).toBe(true);
++    expect(primaryNavActive('/dashboard/inventory', '/dashboard/updates')).toBe(false);
++    expect(primaryNavActive('/dashboard/uploads', '/dashboard/reports')).toBe(true);
++    expect(sectionPages('/dashboard/settings')).toEqual([]);
++  });
++  it('does not invent a missing primary destination', () => {
++    expect(hrmNavGroups([item('/dashboard')], [])[0].items.map(i => i.href)).toEqual(['/dashboard']);
 +  });
 +});
 +
@@ -3373,27 +3419,33 @@ index 000000000..c9fc01031
 +}
 diff --git a/lib/hrm/navigation.ts b/lib/hrm/navigation.ts
 new file mode 100644
-index 000000000..d87a54f98
+index 000000000..23d48dae8
 --- /dev/null
 +++ b/lib/hrm/navigation.ts
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,42 @@
 +// HRM patch 0053: the sidebar's groups. Routes are unchanged; only the grouping and order are HRM's.
 +// Home on its own, then the pages grouped by job. Items not listed here (none
 +// today) are dropped rather than shown in a random place.
 +// HRM patch 0058 (David's choice 2B): every label groups more than one page. App updates sits with
 +// the apps it updates, and Help is unlabelled at the bottom, next to Settings.
 +export const HRM_NAV_LAYOUT: { label?: string; hrefs: string[] }[] = [
-+  { hrefs: ['/dashboard'] },
-+  { label: 'Apps', hrefs: ['/dashboard/apps', '/dashboard/inventory', '/dashboard/unmanaged', '/dashboard/updates'] },
-+  { label: 'Activity', hrefs: ['/dashboard/uploads', '/dashboard/reports'] },
++  { hrefs: ['/dashboard', '/dashboard/inventory', '/dashboard/updates', '/dashboard/uploads', '/dashboard/settings'] },
 +  { hrefs: ['/dashboard/help'] },
 +];
-+
++const PRIMARY_NAMES: Record<string, string> = { '/dashboard/inventory': 'Apps', '/dashboard/updates': 'Updates', '/dashboard/uploads': 'Activity', '/dashboard/settings': 'Settings' };
++export const APP_PAGES = [{ href: '/dashboard/inventory', name: 'Inventory' }, { href: '/dashboard/apps', name: 'App catalog' }, { href: '/dashboard/unmanaged', name: 'Discovered apps' }];
++export const ACTIVITY_PAGES = [{ href: '/dashboard/uploads', name: 'Deployments' }, { href: '/dashboard/reports', name: 'Reports' }];
++export function sectionPages(path: string) {
++  return APP_PAGES.some(page => path === page.href || path.startsWith(page.href + '/')) ? APP_PAGES : ACTIVITY_PAGES.some(page => path === page.href || path.startsWith(page.href + '/')) ? ACTIVITY_PAGES : [];
++}
++export function primaryNavActive(href: string, path: string) {
++  if (href === '/dashboard/inventory') return sectionPages(path) === APP_PAGES;
++  if (href === '/dashboard/uploads') return sectionPages(path) === ACTIVITY_PAGES;
++  return path === href || (href !== '/dashboard' && href !== '/dashboard/msp' && path.startsWith(href + '/'));
++}
 +export function hrmNavGroups<T extends { href: string }>(items: T[], support: T[]): { label?: string; items: T[] }[] {
-+  const byHref = new Map([...items, ...support].map((item) => [item.href, item]));
-+  return HRM_NAV_LAYOUT
-+    .map((group) => ({ label: group.label, items: group.hrefs.flatMap((href) => byHref.get(href) ?? []) }))
-+    .filter((group) => group.items.length > 0);
++  const byHref = new Map([...items, ...support].map(item => [item.href, item]));
++  return HRM_NAV_LAYOUT.map(group => ({ label: group.label, items: group.hrefs.flatMap(href => { const item = byHref.get(href); return item ? [{ ...item, ...(PRIMARY_NAMES[href] ? { name: PRIMARY_NAMES[href] } : {}) }] : []; }) })).filter(group => group.items.length > 0);
 +}
 +
 +// Press G, then the key, to open a page. Listed in sidebar order; upstream's D, A, U, I, R and S

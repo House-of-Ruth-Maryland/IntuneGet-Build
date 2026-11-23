@@ -1,5 +1,5 @@
 diff --git a/app/(app)/dashboard/inventory/page.tsx b/app/(app)/dashboard/inventory/page.tsx
-index d4fb43f0f..461f16347 100644
+index d4fb43f0f..e10dbe537 100644
 --- a/app/(app)/dashboard/inventory/page.tsx
 +++ b/app/(app)/dashboard/inventory/page.tsx
 @@ -1,12 +1,14 @@
@@ -106,6 +106,15 @@ index d4fb43f0f..461f16347 100644
              onClick: () => refetch(),
              variant: 'secondary'
            }}
+@@ -208,7 +233,7 @@ export default function InventoryPage() {
+         actions={
+           <Button
+             variant="ghost"
+-            onClick={() => refetch()}
++            aria-label="Refresh Inventory from Intune" onClick={() => refetch()}
+             disabled={isFetching}
+             className="text-text-secondary hover:text-text-primary"
+           >
 @@ -222,7 +247,7 @@ export default function InventoryPage() {
        {apps.length > 0 && (
          <StatCardGrid columns={4}>
@@ -1428,98 +1437,42 @@ index 000000000..37f25026e
 +}
 diff --git a/components/hrm/InstallStatusBar.test.ts b/components/hrm/InstallStatusBar.test.ts
 new file mode 100644
-index 000000000..b13cc0191
+index 000000000..435bb6ad3
 --- /dev/null
 +++ b/components/hrm/InstallStatusBar.test.ts
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,19 @@
 +// @vitest-environment happy-dom
-+// HRM patch 0054: Check installs now in Inventory's Install results.
-+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-+import { act, createElement } from 'react';
-+import { createRoot, type Root } from 'react-dom/client';
-+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-+
-+vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ getAccessToken: async () => 'token', isAuthenticated: true }) }));
-+import { InstallStatusBar } from './InstallStatusBar';
-+
-+const A = '00000000-0000-0000-0000-00000000000a';
-+const counts = { installed: 2, failed: 0, pending: 1, notApplicable: 0, other: 0, topErrors: [], checkedAt: '2026-11-11T20:00:00.000Z' };
-+let root: Root;
-+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-+const fetchMock = vi.fn();
-+const text = () => document.body.textContent ?? '';
-+const button = () => [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Check installs now');
-+const settle = async () => { for (let i = 0; i < 5; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); };
-+
-+async function render() {
-+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-+  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(InstallStatusBar, { appId: A }))));
-+  await settle();
-+}
-+
-+beforeEach(() => {
-+  root = createRoot(document.body.appendChild(document.createElement('div')));
-+  fetchMock.mockReset();
-+  vi.stubGlobal('fetch', fetchMock);
-+});
-+afterEach(async () => {
-+  await act(async () => root.unmount());
-+  document.body.innerHTML = '';
-+  vi.unstubAllGlobals();
-+});
-+
-+describe('InstallStatusBar Check installs now', () => {
-+  it('fills in results for a new copy with none yet', async () => {
-+    fetchMock.mockResolvedValueOnce(Response.json({ status: null, canCheck: true }));
-+    await render();
-+    expect(text()).toContain('No install results for this version yet.');
-+    fetchMock.mockResolvedValueOnce(Response.json({ status: counts }));
-+    await act(async () => button()!.click());
-+    await settle();
-+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ appId: A }) });
-+    expect(text()).toContain('Install results updated.');
-+    expect(text()).toContain('Installed2');
-+  });
-+
-+  it('says when to try again after a recent check', async () => {
-+    fetchMock.mockResolvedValueOnce(Response.json({ status: counts, canCheck: true }));
-+    await render();
-+    fetchMock.mockResolvedValueOnce(Response.json({ error: 'Install results were checked in the last 5 minutes. Try again later.', retryAt: '2026-11-11T20:05:00.000Z' }, { status: 429 }));
-+    await act(async () => button()!.click());
-+    await settle();
-+    expect(document.querySelector('[role="alert"]')?.textContent).toMatch(/^Install results were checked in the last 5 minutes\. Try again after \d{1,2}:05 (AM|PM)\.$/);
-+  });
-+
-+  it('has no button for older copies or outside SQLite', async () => {
-+    fetchMock.mockResolvedValueOnce(Response.json({ status: counts, canCheck: false }));
-+    await render();
-+    expect(button()).toBeUndefined();
-+  });
-+
-+  it('leads with the installed count and gives each failure reason its own card', async () => {
-+    fetchMock.mockResolvedValueOnce(Response.json({ status: { installed: 49, failed: 2, pending: 3, notApplicable: 0, other: 0, notInstalled: 0, checkedAt: '2026-11-11T20:00:00.000Z', topErrors: [{ code: '0x80070644', description: '', count: 1 }, { code: '0x8007EA61', description: '', count: 1 }] }, canCheck: true }));
-+    await render();
-+    expect(text()).toContain('49 of 54computers installed (91%)');
-+    expect(text()).toContain('Failed2');
-+    expect(text()).toContain('0 not installed, 0 not applicable, 0 unknown.');
-+    expect(text()).toContain('Why installs failed');
-+    expect([...document.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['0x80070644', '0x8007EA61']);
-+    expect(text()).toContain('Intune gave no description.');
-+    expect(text()).not.toContain('No description from Intune');
-+  });
++import {act,createElement} from 'react';
++import {createRoot} from 'react-dom/client';
++import {expect,it,vi} from 'vitest';
++vi.mock('@/hooks/useInstallStatus',()=>({useInstallStatus:()=>({data:{installed:108,failed:2,pending:10,notInstalled:0,notApplicable:0,other:0,checkedAt:'2026-11-23T03:00:00Z',topErrors:[{code:'0x80070652',description:'Another installation is running',count:2}]}}),useCheckInstallsNow:()=>({canCheck:false,check:{}})}));
++import {InstallStatusBar} from './InstallStatusBar';
++(globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
++it('lets the failed count disclose actual failure guidance without sending an endpoint request',async()=>{
++ const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
++ await act(async()=>root.render(createElement(InstallStatusBar,{appId:'fixture',compact:true})));
++ expect(node.textContent).not.toContain('Why installs failed');
++ const button=node.querySelector<HTMLButtonElement>('[aria-label="Review 2 failed installs"]')!;
++ await act(async()=>button.click());
++ expect(node.textContent).toContain('Why installs failed');expect(node.textContent).toContain('0x80070652');
++ const toggle=[...node.querySelectorAll('button')].find(b=>b.textContent==='Hide detailed results')!;
++ expect(toggle.getAttribute('aria-expanded')).toBe('true');
++ await act(async()=>toggle.click());expect(node.textContent).not.toContain('Why installs failed');
++ await act(async()=>root.unmount());node.remove();
 +});
 diff --git a/components/hrm/InstallStatusBar.tsx b/components/hrm/InstallStatusBar.tsx
 new file mode 100644
-index 000000000..558ef6e72
+index 000000000..a11a20108
 --- /dev/null
 +++ b/components/hrm/InstallStatusBar.tsx
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,149 @@
 +'use client';
 +
 +// HRM patch 0019: install results for an IntuneGet-deployed app. Counts only, never device or user names.
 +// HRM patch 0054: Check installs now refreshes this one app's results from Intune (newest copy, SQLite mode).
 +// November 2026 readability pass: a headline count, tiles for the main states, one card per failure reason.
 +
++import { useId, useRef, useState } from 'react';
 +import { installErrorGuidance } from '@/lib/hrm/install-error-guidance';
 +import { ExternalLink } from 'lucide-react';
 +import { useCheckInstallsNow, useInstallStatus } from '@/hooks/useInstallStatus';
@@ -1554,7 +1507,10 @@ index 000000000..558ef6e72
 +  );
 +}
 +
-+export function InstallStatusBar({ appId }: { appId: string }) {
++export function InstallStatusBar({ appId, compact = false }: { appId: string; compact?: boolean }) {
++  const detailId = useId();
++  const [expanded, setExpanded] = useState(false);
++  const detail = useRef<HTMLDivElement>(null);
 +  const { data: status, isLoading, error } = useInstallStatus(appId);
 +  const checkNow = useCheckInstallsNow(appId);
 +  if (!status) {
@@ -1577,6 +1533,11 @@ index 000000000..558ef6e72
 +  // HRM patch 0036: shared helper; the ID is now URL-encoded like the other Intune links.
 +  const intuneUrl = intuneAppUrl(appId);
 +
++  if (compact) return <section aria-label="Install results" className="space-y-3">
++    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className={heading}>Install results</h2><p className="mt-1 text-sm text-text-secondary">{total ? `${applicable} applicable computers` : 'No computers have reported yet.'}</p></div><div className="flex flex-wrap gap-2"><CheckNow {...checkNow} /><a className={secondaryButton} href={intuneUrl} target="_blank" rel="noopener noreferrer">{OPEN_IN_INTUNE}<span className="sr-only"> (opens in a new tab)</span></a></div></div>
++    <ul className="grid grid-cols-3 gap-2">{SEGMENTS.filter(s => MAIN.has(s.key)).map(s => <li key={s.key} className="flex flex-wrap items-center justify-between gap-1 rounded-lg border border-overlay/10 bg-bg-elevated px-3 py-2"><span className="text-sm text-text-secondary">{s.label}</span><strong className={`text-xl ${s.key === 'failed' && count(s.key) ? 'text-status-error' : 'text-text-primary'}`}>{s.key === 'failed' && count(s.key) ? <button type="button" aria-label={`Review ${count(s.key)} failed installs`} className="rounded text-status-error underline decoration-dotted underline-offset-4 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan" onClick={() => { setExpanded(true); requestAnimationFrame(() => detail.current?.scrollIntoView({ block: 'nearest' })); }}>{count(s.key)}</button> : count(s.key)}</strong></li>)}</ul>
++    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted"><span>Last checked {checked}</span><button type="button" aria-expanded={expanded} aria-controls={detailId} className="rounded text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan" onClick={() => setExpanded(value => !value)}>{expanded ? 'Hide detailed results' : 'Detailed install results'}</button></div>{expanded && <div id={detailId} ref={detail} className="scroll-mt-24 border-t border-overlay/10 pt-4"><InstallStatusBar appId={appId} /></div>}
++  </section>;
 +  return (
 +    <section aria-label="Install results" className="space-y-5">
 +      <div>
@@ -1668,10 +1629,17 @@ index 3d41c1b63..51ce2e5e5 100644
          {label}
        </h4>
 diff --git a/components/inventory/InventoryAppCard.tsx b/components/inventory/InventoryAppCard.tsx
-index 267d2600e..096e82ec4 100644
+index 267d2600e..d702001b5 100644
 --- a/components/inventory/InventoryAppCard.tsx
 +++ b/components/inventory/InventoryAppCard.tsx
-@@ -6,6 +6,7 @@ import { Package } from 'lucide-react';
+@@ -1,4 +1,6 @@
+ 'use client';
++import Link from 'next/link';
++import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
+ 
+ import { memo, useState } from 'react';
+ import { motion, useReducedMotion } from 'framer-motion';
+@@ -6,6 +8,7 @@ import { Package } from 'lucide-react';
  import { cn } from '@/lib/utils';
  import { useInventoryIcon } from '@/hooks/use-inventory';
  import type { InventoryListApp } from '@/types/inventory';
@@ -1679,7 +1647,44 @@ index 267d2600e..096e82ec4 100644
  
  interface InventoryAppCardProps {
    app: InventoryListApp;
-@@ -93,6 +94,8 @@ export const InventoryAppCard = memo(function InventoryAppCard({
+@@ -38,25 +41,12 @@ export const InventoryAppCard = memo(function InventoryAppCard({
+     return `${mb.toFixed(1)} MB`;
+   };
+ 
+-  const handleKeyDown = (e: React.KeyboardEvent) => {
+-    if (e.key === 'Enter' || e.key === ' ') {
+-      e.preventDefault();
+-      onClick();
+-    }
+-  };
+-
+   return (
+-    <motion.div
+-      onClick={onClick}
+-      onKeyDown={handleKeyDown}
+-      role="button"
+-      tabIndex={0}
+-      aria-label={`View details for ${app.displayName}`}
++    <motion.article
+       whileHover={prefersReducedMotion ? {} : { scale: 1.015, y: -2 }}
+-      whileTap={prefersReducedMotion ? {} : { scale: 0.98 }}
+       transition={{ duration: 0.2 }}
+       className={cn(
+-        'bg-bg-elevated rounded-xl border p-5 cursor-pointer transition-all shadow-soft',
++        'bg-bg-elevated rounded-xl border p-5 transition-all shadow-soft',
+         isSelected
+           ? 'border-accent-cyan/40 shadow-glow-cyan bg-accent-cyan/[0.02]'
+           : 'border-overlay/5 hover:border-overlay/10 hover:shadow-soft-md'
+@@ -80,7 +70,7 @@ export const InventoryAppCard = memo(function InventoryAppCard({
+         {/* App Info */}
+         <div className="flex-1 min-w-0">
+           <h3 className="text-text-primary font-semibold text-[15px] leading-snug truncate">
+-            {app.displayName}
++            <Link href={appWorkspaceUrl(app.id)} className="hover:text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{app.displayName}</Link>
+           </h3>
+           <div className="flex items-center gap-2 mt-1">
+             {app.publisher && (
+@@ -93,6 +83,8 @@ export const InventoryAppCard = memo(function InventoryAppCard({
                  v{app.displayVersion}
                </span>
              )}
@@ -1688,6 +1693,15 @@ index 267d2600e..096e82ec4 100644
            </div>
  
            {/* Metadata */}
+@@ -120,6 +112,7 @@ export const InventoryAppCard = memo(function InventoryAppCard({
+           {app.description}
+         </p>
+       )}
+-    </motion.div>
++    <button type="button" onClick={onClick} aria-label={`View details for ${app.displayName}`} className="mt-2 rounded-lg border border-overlay/15 px-3 py-2 text-sm text-text-secondary hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">Details</button>
++    </motion.article>
+   );
+ });
 diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
 index 5e9631f0e..3dea1f77a 100644
 --- a/components/inventory/InventoryAppDetails.tsx
@@ -1905,10 +1919,17 @@ index 5e9631f0e..3dea1f77a 100644
            {(app.developer || app.owner || app.notes) && (
              <div className="space-y-3 pt-4 border-t border-overlay/5">
 diff --git a/components/inventory/InventoryListRow.tsx b/components/inventory/InventoryListRow.tsx
-index eba518fc0..194c2dbf2 100644
+index eba518fc0..ab871da75 100644
 --- a/components/inventory/InventoryListRow.tsx
 +++ b/components/inventory/InventoryListRow.tsx
-@@ -6,6 +6,7 @@ import { Package, ChevronRight } from 'lucide-react';
+@@ -1,4 +1,6 @@
+ 'use client';
++import Link from 'next/link';
++import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
+ 
+ import { memo, useState } from 'react';
+ import { motion, useReducedMotion } from 'framer-motion';
+@@ -6,6 +8,7 @@ import { Package, ChevronRight } from 'lucide-react';
  import { cn } from '@/lib/utils';
  import { useInventoryIcon } from '@/hooks/use-inventory';
  import type { InventoryListApp } from '@/types/inventory';
@@ -1916,7 +1937,42 @@ index eba518fc0..194c2dbf2 100644
  
  interface InventoryListRowProps {
    app: InventoryListApp;
-@@ -84,6 +85,9 @@ export const InventoryListRow = memo(function InventoryListRow({
+@@ -38,25 +41,12 @@ export const InventoryListRow = memo(function InventoryListRow({
+     return `${mb.toFixed(1)} MB`;
+   };
+ 
+-  const handleKeyDown = (e: React.KeyboardEvent) => {
+-    if (e.key === 'Enter' || e.key === ' ') {
+-      e.preventDefault();
+-      onClick();
+-    }
+-  };
+-
+   return (
+-    <motion.div
+-      onClick={onClick}
+-      onKeyDown={handleKeyDown}
+-      role="button"
+-      tabIndex={0}
+-      aria-label={`View details for ${app.displayName}`}
++    <motion.article
+       whileHover={prefersReducedMotion ? {} : { scale: 1.005, y: -1 }}
+-      whileTap={prefersReducedMotion ? {} : { scale: 0.995 }}
+       transition={{ duration: 0.15 }}
+       className={cn(
+-        'bg-bg-elevated rounded-lg border px-4 py-3 flex items-center gap-4 cursor-pointer transition-all group',
++        'bg-bg-elevated rounded-lg border px-4 py-3 flex items-center gap-4 transition-all group',
+         isSelected
+           ? 'border-accent-cyan/40 shadow-glow-cyan bg-accent-cyan/[0.02]'
+           : 'border-overlay/5 hover:bg-bg-surface/50 hover:border-overlay/10'
+@@ -78,12 +68,15 @@ export const InventoryListRow = memo(function InventoryListRow({
+ 
+       {/* Name + Publisher */}
+       <div className="flex-1 min-w-0">
+-        <p className="text-sm font-semibold text-text-primary truncate">{app.displayName}</p>
++        <p className="text-sm font-semibold text-text-primary truncate"><Link href={appWorkspaceUrl(app.id)} className="hover:text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{app.displayName}</Link></p>
+         {app.publisher && (
+           <p className="text-xs text-text-muted truncate">{app.publisher}</p>
          )}
        </div>
  
@@ -1926,6 +1982,15 @@ index eba518fc0..194c2dbf2 100644
        {/* Version */}
        {app.displayVersion ? (
          <span className="text-xs bg-overlay/5 text-text-muted px-1.5 py-0.5 rounded flex-shrink-0">
+@@ -105,6 +98,7 @@ export const InventoryListRow = memo(function InventoryListRow({
+ 
+       {/* Chevron */}
+       <ChevronRight className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+-    </motion.div>
++    <button type="button" onClick={onClick} aria-label={`View details for ${app.displayName}`} className="mt-2 rounded-lg border border-overlay/15 px-3 py-2 text-sm text-text-secondary hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">Details</button>
++    </motion.article>
+   );
+ });
 diff --git a/components/inventory/assignment-group-labels.test.ts b/components/inventory/assignment-group-labels.test.ts
 index b19c39912..ad36b4c35 100644
 --- a/components/inventory/assignment-group-labels.test.ts
