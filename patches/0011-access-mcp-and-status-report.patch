@@ -1362,10 +1362,10 @@ index 000000000..16d191f93
 +});
 diff --git a/lib/hrm/__tests__/mcp-api.test.ts b/lib/hrm/__tests__/mcp-api.test.ts
 new file mode 100644
-index 000000000..0b28bb65a
+index 000000000..de60c1050
 --- /dev/null
 +++ b/lib/hrm/__tests__/mcp-api.test.ts
-@@ -0,0 +1,313 @@
+@@ -0,0 +1,323 @@
 +import { beforeEach, describe, expect, it, vi } from 'vitest';
 +const mocks = vi.hoisted(() => ({
 +  sqlite: false, jobs: vi.fn(), history: vi.fn(), updates: vi.fn(), policies: vi.fn(), status: vi.fn(),
@@ -1386,6 +1386,7 @@ index 000000000..0b28bb65a
 +  sqliteRetirements: { active: mocks.retiring },
 +  sqlitePilotRollouts: { list: mocks.pilots },
 +  sqliteUpdateSchedule: { get: mocks.schedule, blackouts: mocks.blackouts },
++  sqliteInstallationPolicies:{exceptions:()=>[],shared:()=>({mode:'existing',days:3})},
 +}));
 +vi.mock('@/lib/hrm/home', async (original) => ({ ...(await original<typeof import('@/lib/hrm/home')>()), readServerStatus: mocks.status }));
 +import {
@@ -1562,6 +1563,15 @@ index 000000000..0b28bb65a
 +});
 +
 +describe('Intune apps', () => {
++  it('reports catalog discovery separately from publishing without leaking status details', async () => {
++    mocks.sqlite=true;
++    mocks.status.mockResolvedValue({reported:true,updateCheck:{at:'2026-11-03T08:30:00Z',result:'success',error:'FORBIDDEN'}});
++    const view=await handleMcpRequest(['version-checks'],q(),ctx());
++    expect(view).toMatchObject({purpose:'catalog_version_discovery',dailyTimes:['03:30','15:30'],timeZone:'America/New_York',lastAttemptAt:'2026-11-03T08:30:00.000Z',nextExpectedAt:'2026-11-03T20:30:00.000Z'});
++    noForbidden(view);
++    mocks.status.mockResolvedValue({reported:false,reason:'stale'});
++    expect(await handleMcpRequest(['version-checks'],q(),ctx())).toMatchObject({reported:false,lastAttemptAt:null,result:null});
++  });
 +  const graphApp = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
 +    '@odata.type': '#microsoft.graph.win32LobApp', id, displayName: name, displayVersion: '1.0', publisher: 'Example Publisher',
 +    description: 'FORBIDDEN description', notes: 'FORBIDDEN notes', owner: 'staff@example.test', developer: 'FORBIDDEN',
@@ -1635,7 +1645,7 @@ index 000000000..0b28bb65a
 +        intuneAppId: APP, displayName: 'Alpha App',
 +        assignments: [
 +          { groupLabel: 'Pilot computers', intent: 'required' },
-+          { groupLabel: 'All users', intent: 'available' },
++          { groupLabel: 'All users', intent: 'availableWithoutEnrollment' },
 +          { groupLabel: 'Excluded: Group name not available', intent: 'required' },
 +        ],
 +        installCounts: { installed: 10, failed: 4, pending: 1, notApplicable: 0 },
@@ -1676,7 +1686,7 @@ index 000000000..0b28bb65a
 +    const view = await listPilots(ctx());
 +    expect(mocks.pilots).toHaveBeenCalledWith(TENANT);
 +    noForbidden(view);
-+    expect(view.pilots[0]).toEqual({ pilotId: 'p1', appName: 'Example App', wingetId: 'Example.App', phase: 'testing', fromVersion: '1.0', toVersion: '1.1', pilotGroupLabel: 'Pilot computers', previousAppId: APP, newAppId: APP2, jobStatus: 'deployed', startedAt: '2026-11-02T00:00:00.000Z', updatedAt: null });
++    expect(view.pilots[0]).toEqual({ pilotId: 'p1', appName: 'Example App', wingetId: 'Example.App', phase: 'testing', fromVersion: '1.0', toVersion: '1.1', pilotGroupLabel: 'Pilot computers', previousAppId: APP, newAppId: APP2, jobStatus: 'deployed', startupBeta:false, startedAt: '2026-11-02T00:00:00.000Z', updatedAt: null });
 +  });
 +});
 diff --git a/lib/hrm/__tests__/mcp-auth.test.ts b/lib/hrm/__tests__/mcp-auth.test.ts
@@ -2454,10 +2464,10 @@ index 000000000..ec771efcc
 +}
 diff --git a/lib/hrm/mcp-api.ts b/lib/hrm/mcp-api.ts
 new file mode 100644
-index 000000000..92a458d52
+index 000000000..3bb2b277c
 --- /dev/null
 +++ b/lib/hrm/mcp-api.ts
-@@ -0,0 +1,474 @@
+@@ -0,0 +1,511 @@
 +/**
 + * HRM patch 0055: the read-only API behind HRM's MCP server (contract: IntuneGet-Build docs/mcp-api.md).
 + *
@@ -2481,6 +2491,7 @@ index 000000000..92a458d52
 +import type { InstallError, InstallStatusRecord } from './install-status';
 +import { safeVersion } from './status-report';
 +import { DAY_NAMES, UPDATE_TIME_ZONE, updateWindowState } from './update-window';
++import { nextVersionCheck } from './version-check';
 +
 +/** A request the API answers with an empty body and this status. */
 +export class McpError extends Error {
@@ -2713,16 +2724,22 @@ index 000000000..92a458d52
 +  return { apps: page, total: apps.length, nextCursor: offset + limit < apps.length ? String(offset + limit) : null };
 +}
 +
-+const INTENTS = new Set(['required', 'available', 'uninstall']);
++const INTENTS = new Set(['required', 'available', 'availableWithoutEnrollment', 'uninstall']);
 +function assignmentView(assignment: IntuneAppAssignment, names: Record<string, string>) {
 +  const type = assignment.target?.['@odata.type'] ?? '';
 +  const group = typeof assignment.target?.groupId === 'string' ? names[assignment.target.groupId.toLowerCase()] : undefined;
 +  const label = type === '#microsoft.graph.allDevicesAssignmentTarget' ? 'All devices'
 +    : type === '#microsoft.graph.allLicensedUsersAssignmentTarget' ? 'All users'
 +      : clean(group) ?? 'Group name not available';
-+  const intent = assignment.intent === 'availableWithoutEnrollment' ? 'available' : INTENTS.has(assignment.intent) ? assignment.intent : 'unknown';
++  const intent = INTENTS.has(assignment.intent) ? assignment.intent : 'unknown';
++  const timing=assignment.settings?.installTimeSettings;
++  const settings=assignment.settings;
 +  // An exclusion is said in the label so no reader takes it for an included group.
-+  return { groupLabel: type === '#microsoft.graph.exclusionGroupAssignmentTarget' ? `Excluded: ${label}` : label, intent };
++  return { groupLabel: type === '#microsoft.graph.exclusionGroupAssignmentTarget' ? `Excluded: ${label}` : label, intent,
++    ...(settings?{notifications:['showAll','showReboot','hideAll'].includes(String(settings.notifications))?settings.notifications:null,
++      installTiming:timing?{useLocalTime:timing.useLocalTime===true,availabilityAt:isoTime(timing.startDateTime),deadlineAt:isoTime(timing.deadlineDateTime)}:null,
++      restartGraceMinutes:typeof settings.restartSettings?.gracePeriodInMinutes==='number'?settings.restartSettings.gracePeriodInMinutes:null}:{}),
++  };
 +}
 +
 +export async function getApp(ctx: McpContext, id: string) {
@@ -2757,6 +2774,24 @@ index 000000000..92a458d52
 +  };
 +  if (isSqliteMode()) {
 +    const sqlite = await import('@/lib/db/sqlite');
++    const recorded = history.find(row => row.intune_app_id?.toLowerCase() === key);
++    const job = recorded?.packaging_job_id ? await getDatabase().jobs.getById(recorded.packaging_job_id) : null;
++    const config = job?.tenant_id === ctx.tenantId && job.package_config && typeof job.package_config === 'object' && !Array.isArray(job.package_config) ? job.package_config : null;
++    const psadt = config?.psadtConfig && typeof config.psadtConfig === 'object' && !Array.isArray(config.psadtConfig) ? config.psadtConfig as Record<string, unknown> : null;
++    detail.workspacePath = `/dashboard/inventory/${id.toLowerCase()}`;
++    detail.currentInstaller = psadt ? {
++      behavior: psadt.installAfterRestartBeta === true ? 'restart_beta' : psadt.allowDefer === true ? 'postponement' : psadt.deployMode === 'Silent' ? 'silent' : 'installer_default',
++      deferDays: typeof psadt.deferDays === 'number' ? psadt.deferDays : null,
++      restartBehavior: ['Suppress','Prompt','Force'].includes(String(psadt.restartBehavior)) ? psadt.restartBehavior : null,
++    } : null;
++    const wingetId = wingetIds(history).get(key);
++    if (wingetId) {
++      const exception = sqlite.sqliteInstallationPolicies.exceptions(ctx.tenantId).find(row => row.appId.toLowerCase() === wingetId.toLowerCase());
++      const rule = exception ?? sqlite.sqliteInstallationPolicies.shared(ctx.tenantId);
++      detail.nextInstallRule = { source: exception ? 'app_override' : 'shared', mode: rule.mode, days: rule.days,
++        pilotGroupLabel: clean(rule.restartPilot?.groupName), explicitPilotRequired: rule.mode === 'restart',
++        broadAutomaticUpdatesHeld: rule.mode === 'restart', scope: 'future_automatic_packages' };
++    }
 +    const install = (await sqlite.sqliteInstallStatus.listForTenant(ctx.tenantId).catch(() => [] as InstallStatusRecord[]))
 +      .find((r) => r.intune_app_id.toLowerCase() === key);
 +    if (install) {
@@ -2839,6 +2874,16 @@ index 000000000..92a458d52
 +  };
 +}
 +
++/** Expected catalog discovery cadence, separate from publishing and device installation. */
++export async function versionChecksView(ctx: McpContext) {
++  const status=await readServerStatus(ctx.now);
++  return { supported:isSqliteMode(), reported:status.reported,
++    timeZone:'America/New_York', dailyTimes:['03:30','15:30'],
++    lastAttemptAt:status.reported?isoTime(status.updateCheck?.at):null,
++    result:status.reported&&['success','failed'].includes(String(status.updateCheck?.result))?status.updateCheck?.result:null,
++    nextExpectedAt:nextVersionCheck(ctx.now), purpose:'catalog_version_discovery' };
++}
++
 +// ---------- GET /jobs ----------
 +
 +const JOB_CURSOR = /^(\d{1,15})~([0-9A-Za-z-]{1,64})$/;
@@ -2898,6 +2943,7 @@ index 000000000..92a458d52
 +      previousAppId: p.previous_app_id,
 +      newAppId: p.new_app_id ?? null,
 +      jobStatus: p.job_status ? jobStatus(p.job_status) : null,
++      startupBeta: p.startup_beta === true,
 +      startedAt: isoTime(p.created_at),
 +      updatedAt: null,
 +    })),
@@ -2912,7 +2958,7 @@ index 000000000..92a458d52
 +  if (rest.length > 0) return null;
 +  if (first === 'apps' && second !== undefined) return 'apps/{id}';
 +  if (second !== undefined) return null;
-+  return ['status', 'attention', 'apps', 'updates', 'update-schedule', 'jobs', 'install-failures', 'pilots'].includes(first) ? first : null;
++  return ['status', 'attention', 'apps', 'updates', 'update-schedule', 'version-checks', 'jobs', 'install-failures', 'pilots'].includes(first) ? first : null;
 +}
 +
 +export async function handleMcpRequest(path: string[], query: URLSearchParams, ctx: McpContext): Promise<unknown> {
@@ -2923,6 +2969,7 @@ index 000000000..92a458d52
 +    case 'apps/{id}': return getApp(ctx, path[1]);
 +    case 'updates': return listUpdates(ctx, query);
 +    case 'update-schedule': return updateScheduleView(ctx);
++    case 'version-checks': return versionChecksView(ctx);
 +    case 'jobs': return listJobs(ctx, query);
 +    case 'install-failures': {
 +      const limit = intParam(query, 'limit', 25, 1, 100);

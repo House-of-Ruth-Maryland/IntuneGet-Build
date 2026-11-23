@@ -447,10 +447,10 @@ index f4f2dbc07..96ef71f3a 100644
      );
      db.close();
 diff --git a/lib/db/sqlite-migrations.ts b/lib/db/sqlite-migrations.ts
-index 228492fe3..f4e938690 100644
+index 228492fe3..92284e7ee 100644
 --- a/lib/db/sqlite-migrations.ts
 +++ b/lib/db/sqlite-migrations.ts
-@@ -306,6 +306,253 @@ export const MIGRATIONS: SqliteMigration[] = [
+@@ -306,6 +306,257 @@ export const MIGRATIONS: SqliteMigration[] = [
        db.exec("ALTER TABLE app_update_policies ADD COLUMN auto_update_scope TEXT NOT NULL DEFAULT 'all' CHECK (auto_update_scope IN ('all', 'minor', 'major'));");
      },
    },
@@ -699,6 +699,10 @@ index 228492fe3..f4e938690 100644
 +          AND (j.status NOT IN ('deployed','completed','failed','cancelled','duplicate_skipped','qa_failed')
 +            OR ((j.status = 'deployed' OR (j.status IN ('failed','cancelled') AND (j.intune_app_id IS NOT NULL OR j.upload_started_at IS NOT NULL OR j.error_stage = 'upload' OR j.error_message LIKE 'Job timed out after %'))) AND COALESCE(json_extract(NEW.package_config,'$.forceCreate'),0) != 1)));
 +      END;`);
++  } },
++
++  { version: 27, name: 'app-scoped restart Beta pilot target', up: db => {
++    if (!(db.pragma('table_info(hrm_installation_policies)') as Array<{name:string}>).some(column => column.name === 'restart_pilot_target')) db.exec('ALTER TABLE hrm_installation_policies ADD COLUMN restart_pilot_target TEXT');
 +  } },
 +
  ];

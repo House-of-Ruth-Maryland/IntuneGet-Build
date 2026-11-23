@@ -119,7 +119,7 @@ index 000000000..5fae8f243
 + expect(state.invalidate).not.toHaveBeenCalled();
 +});
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index 28bebf581..766e2e052 100644
+index 28bebf581..c7aa233bd 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
 @@ -1,5 +1,10 @@
@@ -481,6 +481,15 @@ index 28bebf581..766e2e052 100644
                  ],
                }}
                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+@@ -826,7 +818,7 @@ function UploadJobCard({
+         <div className="flex-1 min-w-0">
+           <div className="flex items-start justify-between gap-4">
+             <div>
+-              <h3 className="text-text-primary text-[15px] font-semibold">{job.display_name}</h3>
++              <h3 className="text-text-primary text-[15px] font-semibold">{job.intune_app_id ? <Link href={appWorkspaceUrl(job.intune_app_id)} aria-label={`${job.display_name} · Open app workspace`} className="rounded hover:text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{job.display_name}</Link> : job.display_name}</h3>
+               <p className="text-text-secondary text-sm mt-0.5">
+                 {job.publisher}
+                 {job.app_source !== 'store' && job.installer_type && (
 @@ -857,10 +849,8 @@ function UploadJobCard({
                        {assignment.type === 'allUsers' && <Users className="w-3 h-3" />}
                        {assignment.type === 'allDevices' && <Monitor className="w-3 h-3" />}
@@ -4787,18 +4796,18 @@ index 7a6edf5c0..15baee731 100644
      expect(button('Deploy to Intune').disabled).toBe(true);
      expect(button('Review current version')).toBeDefined();
 diff --git a/components/UploadCart.tsx b/components/UploadCart.tsx
-index 91ecf4da8..84c2fbb11 100644
+index 91ecf4da8..4ec087650 100644
 --- a/components/UploadCart.tsx
 +++ b/components/UploadCart.tsx
-@@ -1,5 +1,7 @@
+@@ -1,4 +1,7 @@
  'use client';
- 
-+import { packageKey, reviewAcknowledged, type PackageManagementState } from '@/lib/discovery-state';
++import { CuratedBadge } from './CuratedBadge';
 +
++import { packageKey, reviewAcknowledged, type PackageManagementState } from '@/lib/discovery-state';
+ 
  import { useState, useEffect } from 'react';
  import { useRouter } from 'next/navigation';
- import {
-@@ -20,6 +22,7 @@ import { Button } from '@/components/ui/button';
+@@ -20,6 +23,7 @@ import { Button } from '@/components/ui/button';
  import { AppIcon } from '@/components/AppIcon';
  import { useCartStore } from '@/stores/cart-store';
  import { describeDeploymentFailure } from '@/lib/deployment-failure-message';
@@ -4806,7 +4815,7 @@ index 91ecf4da8..84c2fbb11 100644
  import dynamic from 'next/dynamic';
  const CartItemConfig = dynamic(() => import('@/components/CartItemConfig').then(m => m.CartItemConfig));
  const PackageConfig = dynamic(() => import('@/components/PackageConfig').then(m => m.PackageConfig));
-@@ -43,6 +46,7 @@ import {
+@@ -43,6 +47,7 @@ import {
    AlertDialogCancel,
  } from '@/components/ui/alert-dialog';
  import { toast } from 'sonner';
@@ -4814,7 +4823,7 @@ index 91ecf4da8..84c2fbb11 100644
  import { useQaStatuses } from '@/hooks/use-qa';
  const QaDetailsDialog = dynamic(() => import('@/components/qa/QaDetailsDialog').then(m => m.QaDetailsDialog));
  import type { QaStatus } from '@/types/qa';
-@@ -55,6 +59,8 @@ interface PackagingJob {
+@@ -55,6 +60,8 @@ interface PackagingJob {
    display_name: string;
    status: string;
    github_run_url?: string;
@@ -4823,7 +4832,7 @@ index 91ecf4da8..84c2fbb11 100644
  }
  
  interface PackageApiResponse {
-@@ -107,7 +113,9 @@ export function UploadCart() {
+@@ -107,7 +114,9 @@ export function UploadCart() {
    const updateItem = useCartStore((state) => state.updateItem);
    const clearCart = useCartStore((state) => state.clearCart);
    const [isDeploying, setIsDeploying] = useState(false);
@@ -4834,7 +4843,7 @@ index 91ecf4da8..84c2fbb11 100644
    const [error, setError] = useState<DeploymentError | null>(null);
    const [editingItem, setEditingItem] = useState<CartItem | null>(null);
    const [isRefreshing, setIsRefreshing] = useState(false);
-@@ -124,6 +132,8 @@ export function UploadCart() {
+@@ -124,6 +133,8 @@ export function UploadCart() {
    // winget id -> email of whoever already deployed it in this tenant, so we can
    // warn before a teammate's app is deployed a second time.
    const [tenantDeployedBy, setTenantDeployedBy] = useState<Map<string, string | null>>(new Map());
@@ -4843,7 +4852,7 @@ index 91ecf4da8..84c2fbb11 100644
  
    const { isAuthenticated, getAccessToken, signIn, requestAdminConsent } = useMicrosoftAuth();
    const { isMspUser, selectedTenantId } = useMspOptional();
-@@ -138,17 +148,22 @@ export function UploadCart() {
+@@ -138,17 +149,22 @@ export function UploadCart() {
      canDeploy,
    } = usePermissionStatus();
    const needsPermissions = isAuthenticated && !canDeploy && permissionStatus !== 'checking';
@@ -4867,7 +4876,7 @@ index 91ecf4da8..84c2fbb11 100644
            headers: {
              Authorization: `Bearer ${accessToken}`,
              ...(isMspUser && selectedTenantId ? { 'X-MSP-Tenant-Id': selectedTenantId } : {}),
-@@ -157,10 +172,12 @@ export function UploadCart() {
+@@ -157,10 +173,12 @@ export function UploadCart() {
          if (!response.ok || cancelled) return;
          const data = await response.json();
          const map = new Map<string, string | null>();
@@ -4883,7 +4892,7 @@ index 91ecf4da8..84c2fbb11 100644
        } catch {
          // Non-fatal: no warnings shown
        }
-@@ -175,13 +192,13 @@ export function UploadCart() {
+@@ -175,13 +193,13 @@ export function UploadCart() {
    // (item config, large-deploy confirm) is open - Escape should dismiss that
    // layer, not the whole cart.
    useEffect(() => {
@@ -4899,7 +4908,7 @@ index 91ecf4da8..84c2fbb11 100644
  
    const handleReviewCurrentVersion = async () => {
      if (!blockedItem || !isWin32CartItem(blockedItem) || isRefreshing) return;
-@@ -301,11 +318,17 @@ export function UploadCart() {
+@@ -301,11 +319,17 @@ export function UploadCart() {
  
        const jobCount = data.jobs.length;
        const jobIds = data.jobs.map((job) => job.id).join(',');
@@ -4920,7 +4929,7 @@ index 91ecf4da8..84c2fbb11 100644
            onClick: () => router.push(`/dashboard/uploads?jobs=${jobIds}`),
          },
        });
-@@ -326,15 +349,7 @@ export function UploadCart() {
+@@ -326,15 +350,7 @@ export function UploadCart() {
      clearCart();
    };
  
@@ -4937,7 +4946,7 @@ index 91ecf4da8..84c2fbb11 100644
  
    return (
      <>
-@@ -342,7 +357,7 @@ export function UploadCart() {
+@@ -342,7 +358,7 @@ export function UploadCart() {
        {!isOpen && items.length > 0 && (
          <button
            onClick={toggleCart}
@@ -4946,7 +4955,7 @@ index 91ecf4da8..84c2fbb11 100644
            className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-accent-cyan hover:bg-accent-cyan-dim text-white shadow-lg transition-all hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base"
          >
            <ShoppingCart className="w-5 h-5" />
-@@ -367,7 +382,7 @@ export function UploadCart() {
+@@ -367,7 +383,7 @@ export function UploadCart() {
                <div className="flex items-center gap-3">
                  <ShoppingCart className="w-5 h-5 text-accent-cyan" />
                  <h2 id="cart-title" className="text-lg font-semibold text-text-primary">
@@ -4955,7 +4964,7 @@ index 91ecf4da8..84c2fbb11 100644
                  </h2>
                  <span className="px-2 py-0.5 bg-gradient-to-r from-accent-cyan/20 to-accent-violet/20 text-accent-cyan text-sm font-medium rounded border border-accent-cyan/20">
                    {items.length}
-@@ -375,7 +390,7 @@ export function UploadCart() {
+@@ -375,7 +391,7 @@ export function UploadCart() {
                </div>
                <button
                  onClick={closeCart}
@@ -4964,7 +4973,7 @@ index 91ecf4da8..84c2fbb11 100644
                  className="text-text-secondary hover:text-text-primary transition-colors"
                >
                  <X className="w-6 h-6" />
-@@ -389,9 +404,9 @@ export function UploadCart() {
+@@ -389,9 +405,9 @@ export function UploadCart() {
                    <div className="w-16 h-16 rounded-full bg-bg-elevated flex items-center justify-center mb-4 animate-float-slow">
                      <ShoppingCart className="w-8 h-8 text-text-muted" />
                    </div>
@@ -4976,7 +4985,7 @@ index 91ecf4da8..84c2fbb11 100644
                    </p>
                  </div>
                ) : (
-@@ -431,7 +446,7 @@ export function UploadCart() {
+@@ -431,7 +447,7 @@ export function UploadCart() {
                              onClick={() => removeItem(item.id)}
                              className="text-text-muted hover:text-status-error transition-colors p-1"
                              disabled={isDeploying}
@@ -4985,7 +4994,15 @@ index 91ecf4da8..84c2fbb11 100644
                            >
                              <Trash2 className="w-4 h-4" />
                            </button>
-@@ -477,7 +492,8 @@ export function UploadCart() {
+@@ -470,14 +486,15 @@ export function UploadCart() {
+                               </span>
+                             )}
+                             {item.sourceType === 'curated' && (
+-                              <span className="px-2 py-1 bg-accent-cyan/10 rounded text-accent-cyan text-xs font-medium border border-accent-cyan/20">Curated</span>
++                              <CuratedBadge className="rounded px-2 py-1 border-accent-cyan/20 bg-accent-cyan/10 text-accent-cyan" />
+                             )}
+                           </>
+                         ) : null}
                          {item.forceCreate && (
                            <span className="px-2 py-1 bg-accent-cyan/10 rounded text-accent-cyan text-xs font-medium border border-accent-cyan/20 inline-flex items-center gap-1">
                              <RefreshCw className="w-3 h-3" />
@@ -4995,7 +5012,7 @@ index 91ecf4da8..84c2fbb11 100644
                            </span>
                          )}
                          {item.qaOverride && (
-@@ -486,8 +502,31 @@ export function UploadCart() {
+@@ -486,8 +503,31 @@ export function UploadCart() {
                              Test override
                            </span>
                          )}
@@ -5027,7 +5044,7 @@ index 91ecf4da8..84c2fbb11 100644
                        {hasFailedQaForItem(item, qaStatusesData?.statuses[item.wingetId]) && !item.qaOverride && (
                          <div className="mt-3 flex items-start gap-2 rounded-lg border border-status-error/20 bg-status-error/10 p-2.5">
                            <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-status-error" />
-@@ -520,22 +559,20 @@ export function UploadCart() {
+@@ -520,22 +560,20 @@ export function UploadCart() {
                        {/* Teammate-duplicate warning: this app was already
                            deployed to the tenant by someone. Deploying again
                            would create a second Intune app unless forced. */}
@@ -5056,7 +5073,7 @@ index 91ecf4da8..84c2fbb11 100644
                              </button>
                            </div>
                          </div>
-@@ -606,7 +643,7 @@ export function UploadCart() {
+@@ -606,7 +644,7 @@ export function UploadCart() {
                        )}
                        {!error.retryable && !needsVersionReview && (
                          <p className="text-text-muted mt-1">
@@ -5065,7 +5082,7 @@ index 91ecf4da8..84c2fbb11 100644
                          </p>
                        )}
                      </div>
-@@ -637,27 +674,27 @@ export function UploadCart() {
+@@ -637,27 +675,27 @@ export function UploadCart() {
                          disabled={isDeploying}
                          className="flex-1 border-overlay/10 text-text-secondary hover:bg-overlay/5 hover:border-black/20"
                        >
@@ -5099,7 +5116,7 @@ index 91ecf4da8..84c2fbb11 100644
                      className={`flex-1 text-white border-0 disabled:opacity-50 ${
                        isAuthenticated && !canDeploy && permissionStatus !== 'checking'
                          ? 'bg-status-error hover:bg-status-error/90'
-@@ -677,7 +714,7 @@ export function UploadCart() {
+@@ -677,7 +715,7 @@ export function UploadCart() {
                      ) : isAuthenticated && !canDeploy ? (
                        <>
                          <Shield className="w-4 h-4 mr-2" />
@@ -5108,7 +5125,7 @@ index 91ecf4da8..84c2fbb11 100644
                        </>
                      ) : awaitingCuratedSettings ? (
                        <>
-@@ -723,30 +760,20 @@ export function UploadCart() {
+@@ -723,30 +761,20 @@ export function UploadCart() {
              />
            )}
  
