@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Clarify saving next-rollout settings with Save for this app, the selected app and future
+  automatic package scope, and explicit success beside Done. Preserve shared policy,
+  inheritance and restart pilot behavior, and update the matching Help labels.
+
 - Pause replacement packaging for explicit IT confirmation of expired required deadlines,
   preserving availability and unrelated assignment settings across legacy, manual, bulk,
   automatic and local-packager paths. Requires the paired workflow update; no pilot activation.

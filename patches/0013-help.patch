@@ -11,7 +11,7 @@ index 000000000..ceaaa2f16
 +}
 diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
 new file mode 100644
-index 000000000..b62067990
+index 000000000..b2a1cb300
 --- /dev/null
 +++ b/components/hrm/help/HelpVisual.tsx
 @@ -0,0 +1,87 @@
@@ -85,7 +85,7 @@ index 000000000..b62067990
 +            {['catalog', 'inventory', 'discovered', 'deployments', 'deployment-list', 'updates'].includes(step.screen) && <div className="mb-3 flex items-center gap-3"><span className="rounded-xl bg-accent-cyan/10 p-2.5 text-accent-cyan"><Package size={20}/></span><div className="min-w-0"><p className="text-sm font-medium text-text-primary">Example app</p><p className="mt-1 text-xs text-text-muted">{step.screen === 'deployments' ? 'Deployment history' : 'Deployment configuration'}</p></div></div>}
 +            {['catalog', 'deployment-list'].includes(step.screen) && <>{row('Who gets it', 'Pilot device group')}{row('When a new version comes out', 'Notify only')}{guideId === 'deploying' && <ExampleRow label="Curated" value="Installation settings are provided by the IntuneGet catalog."/>}</>}
 +            {step.screen === 'updates' && (manualReview ? <>{row('Effective update settings', 'Example app · version 1 to 2')}{row('Saved app settings', 'Saved installer behavior · restart suppressed')}{row('Groups', 'Example pilot group · Required')}{row('Confirm replacement deadlines', 'Paused for IT')}{row('Retain the existing deadlines', 'Availability and other settings stay unchanged')}{row('Choose a new deadline', 'Future date for affected required assignments')}{row('Send update to Intune', 'Single app; bulk uses Update all')}<p className="mt-3 text-xs text-text-muted">Expired required deadlines need explicit IT confirmation. Single app uses Send update to Intune; bulk uses Update all. Reviewing starts nothing. Device installation follows assignments and check-in.</p></> : <>{row('When can IntuneGet send automatic updates to Intune?', 'Review pause, hours and blackouts')}{row('Installation timing', 'Users can postpone · 3 days')}{row('Startup install results', 'No reports yet · Beta')}{guideId === 'updates' && step.focus !== 'Check for app updates' && <ExampleRow label="Check for app updates" value="May start enabled automatic updates"/>}{guideId === 'pilot-rollouts' && <ExampleRow label="Refresh pilot status" value="Read pilot status only"/>}</>)}
-+            {step.screen === 'inventory' && (restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save app exception', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{step.focus === 'Edit next rollout' && target}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{row('Install behavior', 'Saved installer settings')}{row('What employees see', 'Saved installer experience')}{row('Next automatic update', 'Future automatic packages only')}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
++            {step.screen === 'inventory' && (restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save for this app', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{step.focus === 'Edit next rollout' && target}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{row('Install behavior', 'Saved installer settings')}{row('What employees see', 'Saved installer experience')}{row('Next automatic update', 'Future automatic packages only')}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
 +            {step.screen === 'discovered' && row('App found on computers', 'Review match and eligibility')}
 +            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">Deployment outcome</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Installing on computers is a separate result.</p></div>}
 +            {step.screen === 'settings' && <>{row('Appearance', 'Your preference')}{row('Notifications', 'Review configuration')}</>}
@@ -401,7 +401,7 @@ index 000000000..9ac6c1c4e
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 000000000..5174b6e00
+index 000000000..5af8fd0b0
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -0,0 +1,222 @@
@@ -593,7 +593,7 @@ index 000000000..5174b6e00
 +
 +it('documents saved restart target, held automatic updates and exact Curated hint', () => {
 +  const text = HELP_SECTIONS.find(section => section.id === 'startup-beta')!.points.join(' ');
-+  for (const fact of ['Save app exception saves the rule and target without deploying', 'Start restart Beta pilot', 'previous wider assignments remain intact', 'Broad automatic updates are held', 'not shipped', 'Intune delivery is unverified']) expect(text).toContain(fact);
++  for (const fact of ['Save for this app saves the rule and target without deploying', 'Start restart Beta pilot', 'previous wider assignments remain intact', 'Broad automatic updates are held', 'not shipped', 'Intune delivery is unverified']) expect(text).toContain(fact);
 +  expect(HELP_SECTIONS.find(section => section.id === 'deploying')!.points.join(' ')).toContain('Installation settings are provided by the IntuneGet catalog.');
 +});
 +
@@ -629,7 +629,7 @@ index 000000000..5174b6e00
 +});
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 new file mode 100644
-index 000000000..e2f0e41a3
+index 000000000..03c665a00
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-guides.test.ts
 @@ -0,0 +1,123 @@
@@ -745,8 +745,8 @@ index 000000000..e2f0e41a3
 +it('separates saving a restart pilot target from starting deployment', () => {
 +  const guide = HELP_GUIDES.find(item => item.id === 'startup-beta')!;
 +  const text = JSON.stringify(guide);
-+  for (const label of ['Find a pilot group', 'Save app exception', 'Start restart Beta pilot', 'Required', 'existing wider assignments', 'Broad automatic updates are held', 'real Intune delivery remains unverified']) expect(text).toContain(label);
-+  expect(guide.steps.findIndex(step => step.focus === 'Save app exception')).toBeLessThan(guide.steps.findIndex(step => step.focus === 'Start restart Beta pilot'));
++  for (const label of ['Find a pilot group', 'Save for this app', 'Start restart Beta pilot', 'Required', 'existing wider assignments', 'Broad automatic updates are held', 'real Intune delivery remains unverified']) expect(text).toContain(label);
++  expect(guide.steps.findIndex(step => step.focus === 'Save for this app')).toBeLessThan(guide.steps.findIndex(step => step.focus === 'Start restart Beta pilot'));
 +});
 +
 +it('places manual settings review before the distinct start control', () => {
@@ -832,7 +832,7 @@ index 000000000..3328aa1a6
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..0f42a60b9
+index 000000000..b9a9b5d45
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
 @@ -0,0 +1,564 @@
@@ -1058,13 +1058,13 @@ index 000000000..0f42a60b9
 +  {
 +    id: 'startup-beta',
 +    title: 'Startup installation beta',
-+    uiLabels: ['Installation timing', 'Install dates', 'Install after next restart · Beta', 'Startup install results', 'Beta', 'Check startup reports', 'Set up startup reporting', 'Open app workspace', 'Edit next rollout', 'Apply to', 'Use shared policy', 'Save app exception', 'Not set up', 'Cancel before installation', 'Download cancellation script', 'Reports need review', 'Find a pilot group', 'Start restart Beta pilot', 'Saved target', 'Rule saved. No deployment started.'],
-+    flow: ['Open Edit next rollout', 'Choose restart Beta', 'Select pilot group', 'Save app exception', 'Start restart Beta pilot', 'Verify later startup'],
++    uiLabels: ['Installation timing', 'Install dates', 'Install after next restart · Beta', 'Startup install results', 'Beta', 'Check startup reports', 'Set up startup reporting', 'Open app workspace', 'Edit next rollout', 'Apply to', 'Use shared policy', 'Save for this app', 'Not set up', 'Cancel before installation', 'Download cancellation script', 'Reports need review', 'Find a pilot group', 'Start restart Beta pilot', 'Saved target', 'Rule saved. No deployment started.'],
++    flow: ['Open Edit next rollout', 'Choose restart Beta', 'Select pilot group', 'Save for this app', 'Start restart Beta pilot', 'Verify later startup'],
 +    points: [
 +      "Beta: local natural-startup testing passed one installation, detection and cleanup. The correction is not shipped; real Intune delivery is unverified. Save and start require an administrator-enabled validated startup workflow; production is not enabled.",
 +      "Install after next restart · Beta is opt-in for one app and off by default. Set it in the Installation timing section of the deploy panel or the Deployment list editor. Install dates in Inventory only sets dates.",
 +      "The deploy panel sets one deployment. In Edit next rollout, restart Beta instead requires a saved app exception and pilot target, followed by a separate start. Broad automatic updates are held while the saved rule is restart Beta.",
-+      "Open app workspace, then Edit next rollout. In Apply to choose the app and clear Use shared policy. Choose Install after next restart · Beta and Find a pilot group. Save app exception saves the rule and target without deploying.",
++      "Open app workspace, then Edit next rollout. In Apply to choose the app and clear Use shared policy. Choose Install after next restart · Beta and Find a pilot group. Save for this app saves the rule and target without deploying.",
 +      "Confirm Rule saved. No deployment started. Check Saved target, then Start restart Beta pilot. The server verifies the saved group and app eligibility. Only that group receives Required; previous wider assignments remain intact.",
 +      "Store apps, per-user apps, ZIP/portable installers, custom detection, New computer setup and replacement of the previous version are excluded. The app explains restrictions before saving; the server also checks the saved and current deployment configuration.",
 +      "The packaging workflow adds a startup coordinator to the selected package. GitHub Actions builds it and deploys it to Intune; installation runs on the computer. Deploy the matching workflow and its startup scripts before using the Beta.",
@@ -1093,14 +1093,14 @@ index 000000000..0f42a60b9
 +  {
 +    id: 'automatic-installation-policy',
 +    title: 'Installation timing for automatic updates',
-+    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Next automatic update', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Installation timing', 'Edit shared policy', 'Edit next rollout', 'Review next rollout', 'Review current copy and install dates', 'Search', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save app exception', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot'],
-+    flow: ['Open app workspace', 'Review current saved version', 'Edit next rollout', 'Review saved rule', 'Save app exception'],
++    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Next automatic update', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Installation timing', 'Edit shared policy', 'Edit next rollout', 'Review next rollout', 'Review current copy and install dates', 'Search', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot'],
++    flow: ['Open app workspace', 'Review current saved version', 'Edit next rollout', 'Review saved rule', 'Save for this app'],
 +    points: [
 +      'In App updates or Deployments, press Open app workspace. Inventory opens the selected app, with Install results above Current release and Next automatic update. The app title on an App updates card also opens this workspace.',
 +      'Installation timing controls prompts and postponement in packages. Next automatic update and its Saved settings describe future automatic updates; they do not describe what the current installed copy will do.',
 +      'For a verified app with Automatic updates configured in your signed-in tenant, press Edit next rollout. Search offers Review next rollout and Review current copy and install dates; both jump within this app.',
 +      'Edit next rollout is scoped to this app. Clear Use shared policy to edit an exception. For the shared rule, open App updates, then Edit shared policy and select All apps with Automatic updates on in Apply to.',
-+      'Under Installation timing, choose Let users install now or postpone and Days users can postpone. Save app exception saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
++      'Under Installation timing, choose Let users install now or postpone and Days users can postpone. Save for this app saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
 +      'Use each app’s saved settings preserves existing configurations and is the default; restart Beta is off by default. It does not mean silent installation. Install automatically is separate. Current and queued packages keep their settings.',
 +      'Postponement starts at each computer’s first install attempt, not when the server finds or deploys a version. Offline computers start later. After expiry, the next Intune attempt enforces installation, without an exact appointment.',
 +      'Postponement uses the installer toolkit. Prompts may be skipped when nobody is signed in or no app needs closing. Retry and reminder times follow Intune attempts, not an employee-selected time.',
@@ -1402,7 +1402,7 @@ index 000000000..0f42a60b9
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..ed75e7501
+index 000000000..c36aadcf0
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,383 @@
@@ -1553,7 +1553,7 @@ index 000000000..ed75e7501
 +    steps: [
 +      step('Open this app’s rule', 'In Apps, open the Inventory app name, then Edit next rollout. Clear Use shared policy to edit this app’s exception.', 'inventory', 'Edit next rollout', 'The editor applies to this app, not every app.'),
 +      step('Choose the Beta target', 'Choose Install after next restart · Beta. In Find a pilot group, type at least 2 characters and select the intended security group.', 'inventory', 'Find a pilot group', 'The selected group is explicit; eligibility restrictions must be resolved.'),
-+      step('Save without deploying', 'Press Save app exception. Confirm Rule saved. No deployment started. Broad automatic updates are held while this app’s saved rule is restart Beta.', 'inventory', 'Save app exception', 'The rule and pilot target are saved; no package has started.'),
++      step('Save without deploying', 'Press Save for this app. Confirm Rule saved. No deployment started. Broad automatic updates are held while this app’s saved rule is restart Beta.', 'inventory', 'Save for this app', 'The rule and pilot target are saved; no package has started.'),
 +      step('Start the saved pilot', 'Check Saved target, then press Start restart Beta pilot. Only that group receives the package as Required; existing wider assignments stay on the previous version.', 'inventory', 'Start restart Beta pilot', 'The server checks the saved target and eligibility before requesting the pilot.'),
 +      step('Verify a later startup', 'Open Activity, then Deployments. Confirm staging without installation on a pilot computer. Use Windows Restart; verify one installation, version detection and task cleanup.', 'deployments', 'Deployments', 'Real pilot evidence is still required; sign-in is not blocked.'),
 +      step('Check reporting and cancellation', 'In Updates, press Open on Startup install results. Use Set up startup reporting, then Check startup reports. Follow the cancellation reference to test Cancel before installation separately.', 'updates', 'Check startup reports', 'Received reports and cancellation evidence remain separate from deployment success.'),
@@ -1572,7 +1572,7 @@ index 000000000..ed75e7501
 +      step('Open the policy', 'In App updates or Deployments, press Open app workspace. Read Install results above Current release and Next automatic update before editing future settings.', 'updates', 'Open app workspace', 'Inventory opens the selected app workspace.'),
 +      step('Choose the scope', 'In the workspace, press Edit next rollout. Clear Use shared policy to edit this app’s exception. For the shared rule, open App updates, then Edit shared policy.', 'inventory', 'Edit next rollout', 'You are editing either the shared policy or one app exception.'),
 +      step('Choose when computers install', 'For an ordinary automatic rule, choose Let users install now or postpone and set Days users can postpone. Alternatively, choose Install automatically or Use each app’s saved settings.', 'inventory', 'Days users can postpone', 'The form shows the chosen behavior; 3 days is the suggested choice period.'),
-+      step('Save the intended rule', 'Press Save app exception. To remove an exception, select Use shared policy and press Use shared policy. Save shared policy applies when editing the shared rule from App updates.', 'inventory', 'Save app exception', 'The rule is saved without starting a deployment; restart Beta also needs an explicit pilot start.'),
++      step('Save the intended rule', 'Press Save for this app. To remove an exception, select Use shared policy and press Use shared policy. Save shared policy applies when editing the shared rule from App updates.', 'inventory', 'Save for this app', 'The rule is saved without starting a deployment; restart Beta also needs an explicit pilot start.'),
 +      step('Check a deployed release', 'In Update history, expand the deployed version and read Installation policy for this release. Its install results show there and in Inventory.', 'updates', 'Installation policy for this release', 'You can separate a package’s saved rule from install results on computers.'),
 +    ],
 +    success: 'Next automatic update reflects the saved policy; the current copy and its live results remain separately visible.',

@@ -1253,10 +1253,10 @@ index 000000000..ae5c0af45
 +}
 diff --git a/components/hrm/InstallationPolicyPanel.test.ts b/components/hrm/InstallationPolicyPanel.test.ts
 new file mode 100644
-index 000000000..cf209f5ba
+index 000000000..d57bf6d09
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.test.ts
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,125 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -1307,12 +1307,12 @@ index 000000000..cf209f5ba
 +  await act(async () => button('Edit app exception').click());
 +  expect(document.querySelector<HTMLInputElement>('input[value="restart"]')!.disabled).toBe(true);
 +  expect(document.body.textContent).toContain(message);
-+  expect(button('Save app exception').disabled).toBe(true);
-+  await act(async () => button('Save app exception').click());
++  expect(button('Save for this app').disabled).toBe(true);
++  await act(async () => button('Save for this app').click());
 +  expect(state.mutate).not.toHaveBeenCalled();
 +  const automatic = document.querySelector<HTMLInputElement>('input[value="silent"]')!;
 +  await act(async () => automatic.click());
-+  expect(button('Save app exception').disabled).toBe(false);
++  expect(button('Save for this app').disabled).toBe(false);
 +});
 +it('shows restrictions found in the current package by the server', async () => {
 +  state.eligibility = [{ appId: 'vendor.app', problem: 'The startup installer Beta cannot be used for New computer setup.' }];
@@ -1328,10 +1328,10 @@ index 000000000..cf209f5ba
 +  const restart = document.querySelector<HTMLInputElement>('input[value="restart"]')!;
 +  expect(restart.disabled).toBe(false);
 +  await act(async () => restart.click());
-+  expect(button('Save app exception').disabled).toBe(true);
++  expect(button('Save for this app').disabled).toBe(true);
 +  expect(state.mutate).not.toHaveBeenCalled();
 +  await act(async () => button('Select fixture pilot').click());
-+  await act(async () => button('Save app exception').click());
++  await act(async () => button('Save for this app').click());
 +  expect(state.mutate.mock.calls[0][0]).toMatchObject({ policy: { mode: 'restart', restartPilot: { groupId: '33333333-3333-4333-8333-333333333333' } } });
 +});
 +
@@ -1341,14 +1341,53 @@ index 000000000..cf209f5ba
 +  expect(document.body.textContent).not.toContain('Review app exceptions');
 +  await act(async () => button('Edit next rollout').click());
 +  expect(document.querySelector<HTMLInputElement>('input[value="silent"]')!.checked).toBe(true);
-+  expect(button('Save app exception').disabled).toBe(true);
++  expect(button('Save for this app').disabled).toBe(true);
++});
++
++it('confirms an app save only after success, offers Done, and allows further edits', async () => {
++  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps, appId: 'Vendor.App' })));
++  await act(async () => button('Edit next rollout').click());
++  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('Settings for Vendor App. Applies to future automatic packages.');
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="prompt"]')!.click());
++  await act(async () => button('Save for this app').click());
++  expect(state.mutate.mock.calls[0][0]).toMatchObject({ action: 'save', appId: 'Vendor.App', policy: { mode: 'prompt', days: 3 } });
++  expect(button('Done')).toBeUndefined();
++  await act(async () => state.mutate.mock.calls[0][1].onSuccess());
++  expect(document.body.textContent).toContain('Saved for Vendor App. Future automatic packages for this app will use these settings.');
++  expect(button('Save for this app')).toBeUndefined();
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="silent"]')!.click());
++  expect(button('Done')).toBeUndefined();
++  expect(document.body.textContent).not.toContain('Saved for Vendor App.');
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="prompt"]')!.click());
++  await act(async () => button('Save for this app').click());
++  await act(async () => state.mutate.mock.calls[1][1].onSuccess());
++  await act(async () => button('Done').click());
++  expect(document.querySelector('[role="dialog"]')).toBeNull();
++  await act(async () => button('Edit next rollout').click());
++  expect(button('Done')).toBeUndefined();
++});
++
++it('keeps shared save and inheritance success distinct', async () => {
++  await act(async () => button('Edit shared policy').click());
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="prompt"]')!.click());
++  await act(async () => button('Save shared policy').click());
++  await act(async () => state.mutate.mock.calls[0][1].onSuccess());
++  expect(document.body.textContent).toContain('Shared policy saved for future automatic packages. Apps with their own exceptions keep their settings.');
++  await act(async () => button('Done').click());
++  await act(async () => button('Edit app exception').click());
++  await act(async () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
++  await act(async () => button('Use shared policy').click());
++  expect(state.mutate.mock.calls[1][0]).toMatchObject({ action: 'inherit', appId: 'vendor.app' });
++  await act(async () => state.mutate.mock.calls[1][1].onSuccess());
++  expect(document.body.textContent).toContain('Vendor App now uses the shared policy for future automatic packages.');
++  expect(button('Done')).toBeDefined();
 +});
 diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
 new file mode 100644
-index 000000000..278c31ea5
+index 000000000..7322da70c
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.tsx
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,108 @@
 +'use client';
 +import { useState } from 'react';
 +import Link from 'next/link';
@@ -1371,6 +1410,10 @@ index 000000000..278c31ea5
 +  const [saved, setSaved] = useState(false);
 +  if (data?.supported === false) return null;
 +  const exceptions = data?.exceptions ?? [];
++  const selectedName = apps.find(app => app.winget_id.toLowerCase() === selected.toLowerCase())?.deployment_config?.displayName || selected;
++  const saveMessage = selected && !inherit && draft.mode === 'restart' ? 'Rule saved. No deployment started.'
++    : selected ? inherit ? `${selectedName} now uses the shared policy for future automatic packages.` : `Saved for ${selectedName}. Future automatic packages for this app will use these settings.`
++    : 'Shared policy saved for future automatic packages. Apps with their own exceptions keep their settings.';
 +  const selectedConfig = apps.find(app => app.winget_id.toLowerCase() === selected.toLowerCase())?.deployment_config;
 +  const restartProblem = data?.restartPilotSupported === false ? 'Restart Beta requires a validated startup workflow on this server.' : data?.restartEligibility?.find(app => app.appId === selected.toLowerCase())?.problem
 +    ?? startupInstallationProblem({ ...selectedConfig, customDetection: selectedConfig?.psadtConfig?.customDetection });
@@ -1391,7 +1434,7 @@ index 000000000..278c31ea5
 +  const editor = <Dialog open={open} onOpenChange={value => { if (!action.isPending) { setOpen(value); if (value) choose(appId ?? ''); } }}>
 +        <DialogTrigger asChild><Button variant={compact ? 'default' : 'ghost'} size="sm" disabled={!data?.shared}>{appId ? 'Edit next rollout' : 'Edit shared policy'}</Button></DialogTrigger>
 +        <DialogContent side="right" onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }} hideCloseButton={action.isPending}>
-+          <DialogHeader className="pr-12"><DialogTitle>{appId ? 'Edit next rollout' : selected ? 'Edit app exception' : 'Edit shared policy'}</DialogTitle><DialogDescription>Save settings for the next package. Deployed copies stay unchanged.</DialogDescription></DialogHeader>
++          <DialogHeader className="pr-12"><DialogTitle>{appId ? 'Edit next rollout' : selected ? 'Edit app exception' : 'Edit shared policy'}</DialogTitle><DialogDescription>{selected ? `Settings for ${selectedName}. ` : 'Shared settings for apps with Automatic updates on. '}{effectiveMode === 'restart' ? 'Applies only to an explicitly started restart Beta pilot.' : 'Applies to future automatic packages.'} Current and queued packages stay unchanged.</DialogDescription></DialogHeader>
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
 +            <div className="rounded-lg border border-overlay/10 p-3 text-sm"><h3 className="font-medium text-text-primary">1. Scope</h3><p className="mt-1 text-text-secondary">{draft.mode === 'restart' ? 'App-scoped restart Beta pilot only. Save the rule, then explicitly start its selected pilot.' : 'Future automatic packages for the selected scope.'}</p><p role="status" className="mt-2 text-text-muted">{dirty && !saved ? 'Unsaved changes' : 'Saved settings'}</p></div>{appId ? <div className="text-sm"><span className="text-text-muted">Applies to</span><p className="mt-1 font-medium text-text-primary">{apps.find(app => app.winget_id.toLowerCase() === appId.toLowerCase())?.deployment_config?.displayName || appId}</p></div> : <label className="block text-sm text-text-secondary">Apply to
 +              <select className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={selected} disabled={action.isPending} onChange={e => choose(e.target.value)}>
@@ -1425,9 +1468,11 @@ index 000000000..278c31ea5
 +            <div className="flex flex-wrap gap-4 text-xs"><Link href="/dashboard/inventory" className="text-accent-cyan hover:underline">Open Inventory for install results</Link><Link href="/dashboard/help#automatic-installation-policy" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline">Automatic installation guide<span className="sr-only"> (opens in a new tab)</span></Link></div>
 +            {appId && draft.mode === 'restart' && !inherit && !dirty && stored?.mode === 'restart' && stored.restartPilot && (intuneAppId ? <RestartPilotStart wingetId={appId} appId={intuneAppId} groupId={stored.restartPilot.groupId} groupName={stored.restartPilot.groupName} /> : <p className="text-sm text-text-muted">Open the app workspace to start the saved restart Beta pilot.</p>)}
 +            {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
-+            {saved && <p role="status" className="text-sm text-status-success">{effectiveMode === 'restart' ? 'Rule saved. No deployment started.' : 'Saved for future automatic updates.'}</p>}
 +          </div>
-+          <DialogFooter><Button variant="ghost" disabled={action.isPending} onClick={() => setOpen(false)}>Close</Button><Button disabled={action.isPending || saved || invalidRestart || !dirty} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save app exception' : 'Save shared policy'}</Button></DialogFooter>
++          <DialogFooter className="flex-col items-stretch">
++            {saved && <p role="status" className="text-sm text-status-success">{saveMessage}</p>}
++            <div className="flex justify-end gap-3"><Button variant={saved ? 'default' : 'ghost'} disabled={action.isPending} onClick={() => setOpen(false)}>{saved ? 'Done' : 'Close'}</Button>{!saved && <Button disabled={action.isPending || invalidRestart || !dirty} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save for this app' : 'Save shared policy'}</Button>}</div>
++          </DialogFooter>
 +        </DialogContent>
 +      </Dialog>;
 +  if (compact) return editor;
