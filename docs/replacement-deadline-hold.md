@@ -27,7 +27,7 @@ after the final read remains an ordinary Graph concurrency limitation.
 
 ## Release path
 
-Nothing in this effort is pushed, merged, deployed or enabled in production. The production
+These paired review branches are published, but nothing is merged, deployed or enabled in production. The production
 pin remains hrm33. This review branch is reconstructed from current main (merged but undeployed v0.8.6) plus item80 only; item91 remains in its original local workspace. Do not release this tree as an implicit version upgrade.
 An authorized release must first select an hrm33 backport or approve the integration separately,
 then publish the matching private `IntuneGet-Workflows` admission/helper changes, deploy the
@@ -38,3 +38,5 @@ Local validation covers real application functions and extracted hosted steps wi
 fixtures and mocked Graph; it does not prove Intune delivery or device installation. The
 full app suite has an unchanged VirusTotal-hold test failure also reproduced on the exact
 pre-item-80 source. Resolve or separately accept that test failure before any release decision.
+
+Paired review: [app PR97](https://github.com/House-of-Ruth-Maryland/IntuneGet-Build/pull/97) and [workflow PR4](https://github.com/House-of-Ruth-Maryland/IntuneGet-Workflows/pull/4).
