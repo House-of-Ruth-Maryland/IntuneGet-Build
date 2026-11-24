@@ -2,6 +2,9 @@
 
 ## Decision locations and boundaries
 
+The inventory below is source-traced. Interactive verification concentrates on changed
+editors and their transitions; it is not a claim of live execution for every menu.
+
 | Decision | Location and persistence | Effect and boundary |
 | --- | --- | --- |
 | Installer and execution defaults | App catalog, Custom app, Deployment list; cart draft then job snapshot | Vendor switches and toolkit mode are separate. Store and curated execution paths retain their restrictions. |
@@ -12,6 +15,30 @@
 | Automatic update window | Settings and App updates | Governs sending versions to Intune, not device installation. Catalog discovery cadence is informational and separate. |
 | Outcomes | Activity → Deployments; workspace → Install results | My deployments is owner history. All in tenant includes authorized owners within the newest 50 unarchived records. Installation results are separate endpoint evidence. |
 | Failure recovery | Error details, support ID, review and safe retry | Assignment review is not file validation. Legacy deadline codes can also mean unsupported or unreadable assignments. Preserve the reason; do not infer expiry or accept unknown fields. |
+
+### Other application decisions kept intact
+
+| Surface | Decision, default and storage | Backend/visibility boundary |
+| --- | --- | --- |
+| Home | Read current health, attention counts and activity; follow scoped links | Reads server/database status, not an installation command or endpoint success claim. |
+| Apps → Inventory | Search/publisher filters and pages; select a current copy | Win32 Graph inventory is shared through the configured tenant identity after app admission. It is not owner-only deployment history. |
+| App workspace | Current release, next automatic update, actual results and activity | Current-copy edits, future saved policy and observed outcomes remain separate; unknown/read errors are not treated as empty successful results. |
+| App catalog / Custom app | Installer identity, architecture, scope, commands, detection, dependencies, enrollment setup and category | Draft selection becomes a persisted cart entry, then a packaging-job snapshot. Tested curated execution defaults retain their restrictions; Store packages bypass the Win32 toolkit. |
+| Discovered apps | Match/claim or hide a discovered entry | Claim prepares a deployment draft; it is not proof of a new installation. Existing deployment/history checks prevent duplicate claims. |
+| Updates | Notify only, Auto-update or Ignore per app; saved deployment configuration | Automatic publishing resolves shared/app installation policy. Manual/bulk review and assignment carryover retain their separate admission and capability checks. |
+| Activity | Personal/tenant scope, status filter, dismiss or clear finished history | Default personal scope; owner-only archive controls. No new permission follows from tenant-wide read visibility. |
+| Settings → General | Account/connection, catalog checks and update behavior | Account/tenant identity comes from authentication. Discovery times are informational; SQLite/Supabase-specific update settings retain their existing visibility. |
+| Settings → Permissions | Inspect Graph permission/consent status | Displaying a check does not grant permission. This PR changes no identity, consent or access configuration. |
+| Settings → Notifications | Email where supported, webhook configuration | SQLite hides unsupported email controls. These administrative alerts differ from toolkit balloons and Intune employee notifications. |
+| Settings hidden panels | Export/data mock panels remain unreachable | No newly actionable fake export or data deletion control. |
+| Help and Search | Stable task IDs, route links, old/new search terms and current control labels | Navigation and explanation only. Search does not bypass the destination's server authorization. |
+
+Source locations: `app/(app)/dashboard/{page.tsx,inventory,apps,unmanaged,updates,uploads,settings}`,
+`components/{CartItemConfig,PackageConfig}.tsx`, `components/hrm/{AppWorkspace,InstallationPolicyPanel,EditAssignments}.tsx`,
+`lib/hrm/{navigation,manual-update-review,installation-policy,install-experience,settings-summary}.ts`,
+`lib/github-actions.ts`, `lib/auto-update/sqlite.ts`, `packager/src/{assignment-settings,job-processor}.ts`
+and the corresponding authenticated API routes. Defaults and effective values are tested separately
+from saved inactive values; visibility alone is never treated as authorization.
 
 Application admission, tenant resolution and deployment permissions remain server-enforced. Tenant history does not grant another owner's mutation rights. Assignment saves recheck app/group identity, retirement/pilot holds and conflicts. An uncertain save must be rereviewed rather than automatically posted again. Readback uncertainty remains an error.
 
