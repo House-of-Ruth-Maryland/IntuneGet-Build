@@ -11,7 +11,7 @@ index 000000000..ceaaa2f16
 +}
 diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
 new file mode 100644
-index 000000000..d8c7185a1
+index 000000000..b62067990
 --- /dev/null
 +++ b/components/hrm/help/HelpVisual.tsx
 @@ -0,0 +1,87 @@
@@ -68,7 +68,7 @@ index 000000000..d8c7185a1
 +  const row = (label: string, value: string) => step.focus === label ? target : <ExampleRow label={label} value={value}/>;
 +  // App updates: publishing controls and Installation timing are separate; discovery is in Settings.
 +  const scheduleDialog = ['Pause automatic updates', 'Edit publishing window', 'Restrict deploying to selected days and hours', 'Add blackout'].includes(step.focus);
-+  const location = step.focus === 'Check for app updates' ? 'Updates · header · may start enabled automatic updates' : manualReview ? 'Updates · Review update or Update all · read-only review · requires enabled validated workflow' : restartEditor ? 'Apps · App workspace · Edit next rollout · app exception · requires enabled validated startup workflow' : step.screen === 'catalog' && !focusAtHeading ? 'App configuration · panel on the right' : needsAttention ? 'Home · Needs attention' : guideId === 'installation-timing' && step.screen === 'inventory' ? 'App workspace · Current release · Install dates' : step.focus === 'Check installs now' ? 'App details · Install results' : actionsPanel ? `Inventory · Details · Actions · ${actionsPanel}` : step.focus === 'Installation policy for this release' ? 'Update history · expanded version' : guideId === 'automatic-installation-policy' ? (step.screen === 'inventory' ? 'App workspace · Edit next rollout' : 'App updates · Open app workspace') : scheduleDialog ? 'App updates · When can IntuneGet send automatic updates to Intune? · Edit publishing window' : step.screen === 'updates' && ['Auto-update', 'Update', 'Test with a pilot group'].includes(step.focus) ? 'Available updates · app card' : guideId === 'startup-beta' && step.screen === 'updates' ? 'Status strip · Startup install results · Beta' : step.screen === 'updates' && step.focus === 'Update schedule' ? 'App updates · status strip' : null;
++  const location = step.focus === 'Check for app updates' ? 'Updates · header · may start enabled automatic updates' : manualReview ? 'Updates · Review update or Update all · read-only assignment review' : restartEditor ? 'Apps · App workspace · Edit next rollout · app exception · requires enabled validated startup workflow' : step.screen === 'catalog' && !focusAtHeading ? 'App configuration · panel on the right' : needsAttention ? 'Home · Needs attention' : guideId === 'installation-timing' && step.screen === 'inventory' ? 'App workspace · Current release · Install dates' : step.focus === 'Check installs now' ? 'App details · Install results' : actionsPanel ? `Inventory · Details · Actions · ${actionsPanel}` : step.focus === 'Installation policy for this release' ? 'Update history · expanded version' : guideId === 'automatic-installation-policy' ? (step.screen === 'inventory' ? 'App workspace · Edit next rollout' : 'App updates · Open app workspace') : scheduleDialog ? 'App updates · When can IntuneGet send automatic updates to Intune? · Edit publishing window' : step.screen === 'updates' && ['Auto-update', 'Update', 'Test with a pilot group'].includes(step.focus) ? 'Available updates · app card' : guideId === 'startup-beta' && step.screen === 'updates' ? 'Status strip · Startup install results · Beta' : step.screen === 'updates' && step.focus === 'Update schedule' ? 'App updates · status strip' : null;
 +  return <figure className="min-w-0 overflow-hidden rounded-2xl border border-overlay/10 bg-bg-elevated" aria-label={`Visual reference: ${screen.label}, ${step.focus}`}>
 +    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-overlay/10 px-4 py-3"><span className="text-xs font-medium text-text-secondary">Where to look</span><span className="rounded-full bg-overlay/5 px-2 py-1 text-[11px] text-text-muted">Illustration · example data</span></div>
 +    <div className="p-4 sm:p-6">
@@ -84,7 +84,7 @@ index 000000000..d8c7185a1
 +            {['catalog', 'discovered'].includes(step.screen) && <div className="mb-4 flex items-center gap-2 rounded-lg border border-overlay/10 bg-overlay/[0.02] px-3 py-2 text-xs text-text-muted"><Search size={13}/>Search apps</div>}
 +            {['catalog', 'inventory', 'discovered', 'deployments', 'deployment-list', 'updates'].includes(step.screen) && <div className="mb-3 flex items-center gap-3"><span className="rounded-xl bg-accent-cyan/10 p-2.5 text-accent-cyan"><Package size={20}/></span><div className="min-w-0"><p className="text-sm font-medium text-text-primary">Example app</p><p className="mt-1 text-xs text-text-muted">{step.screen === 'deployments' ? 'Deployment history' : 'Deployment configuration'}</p></div></div>}
 +            {['catalog', 'deployment-list'].includes(step.screen) && <>{row('Who gets it', 'Pilot device group')}{row('When a new version comes out', 'Notify only')}{guideId === 'deploying' && <ExampleRow label="Curated" value="Installation settings are provided by the IntuneGet catalog."/>}</>}
-+            {step.screen === 'updates' && (manualReview ? <>{row('Effective update settings', 'Example app · version 1 to 2')}{row('Saved app settings', 'Saved installer behavior · restart suppressed')}{row('Groups', 'Example pilot group · Required')}{row('Review past or device-local dates', 'Choose explicitly before starting')}{row('Keep the current assignment dates', 'Retain dates')}{row('Reset availability and deadline to ASAP', 'Clear both dates')}{row('Send update to Intune', 'Single app; bulk uses Update all')}<p className="mt-3 text-xs text-text-muted">Review is not enabled in production; existing flow remains. When enabled: single app uses Send update to Intune; bulk uses Update all. Reviewing starts nothing. Device installation follows assignments and check-in.</p></> : <>{row('When can IntuneGet send automatic updates to Intune?', 'Review pause, hours and blackouts')}{row('Installation timing', 'Users can postpone · 3 days')}{row('Startup install results', 'No reports yet · Beta')}{guideId === 'updates' && step.focus !== 'Check for app updates' && <ExampleRow label="Check for app updates" value="May start enabled automatic updates"/>}{guideId === 'pilot-rollouts' && <ExampleRow label="Refresh pilot status" value="Read pilot status only"/>}</>)}
++            {step.screen === 'updates' && (manualReview ? <>{row('Effective update settings', 'Example app · version 1 to 2')}{row('Saved app settings', 'Saved installer behavior · restart suppressed')}{row('Groups', 'Example pilot group · Required')}{row('Confirm replacement deadlines', 'Paused for IT')}{row('Retain the existing deadlines', 'Availability and other settings stay unchanged')}{row('Choose a new deadline', 'Future date for affected required assignments')}{row('Send update to Intune', 'Single app; bulk uses Update all')}<p className="mt-3 text-xs text-text-muted">Expired required deadlines need explicit IT confirmation. Single app uses Send update to Intune; bulk uses Update all. Reviewing starts nothing. Device installation follows assignments and check-in.</p></> : <>{row('When can IntuneGet send automatic updates to Intune?', 'Review pause, hours and blackouts')}{row('Installation timing', 'Users can postpone · 3 days')}{row('Startup install results', 'No reports yet · Beta')}{guideId === 'updates' && step.focus !== 'Check for app updates' && <ExampleRow label="Check for app updates" value="May start enabled automatic updates"/>}{guideId === 'pilot-rollouts' && <ExampleRow label="Refresh pilot status" value="Read pilot status only"/>}</>)}
 +            {step.screen === 'inventory' && (restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save app exception', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{step.focus === 'Edit next rollout' && target}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{row('Install behavior', 'Saved installer settings')}{row('What employees see', 'Saved installer experience')}{row('Next automatic update', 'Future automatic packages only')}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
 +            {step.screen === 'discovered' && row('App found on computers', 'Review match and eligibility')}
 +            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">Deployment outcome</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Installing on computers is a separate result.</p></div>}
@@ -104,7 +104,7 @@ index 000000000..d8c7185a1
 +}
 diff --git a/components/hrm/help/HelpWorkspace.test.ts b/components/hrm/help/HelpWorkspace.test.ts
 new file mode 100644
-index 000000000..4c7d372a3
+index 000000000..64581ff7d
 --- /dev/null
 +++ b/components/hrm/help/HelpWorkspace.test.ts
 @@ -0,0 +1,166 @@
@@ -267,8 +267,8 @@ index 000000000..4c7d372a3
 +  let visual = document.querySelector('[aria-label^="Visual reference:"]')!;
 +  expect(visual.getAttribute('aria-label')).toContain('Effective update settings');
 +  expect(visual.textContent).toContain('Reviewing starts nothing');
-+  expect(visual.textContent).toContain('Keep the current assignment dates');
-+  expect(visual.textContent).toContain('Reset availability and deadline to ASAP');
++  expect(visual.textContent).toContain('Retain the existing deadlines');
++  expect(visual.textContent).toContain('Choose a new deadline');
 +  await act(async () => button('Next step').click());
 +  visual = document.querySelector('[aria-label^="Visual reference:"]')!;
 +  expect(visual.getAttribute('aria-label')).toContain('Send update to Intune');
@@ -401,10 +401,10 @@ index 000000000..9ac6c1c4e
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 000000000..a3a1e6a48
+index 000000000..5174b6e00
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,222 @@
 +import { describe, expect, it } from 'vitest';
 +import { HELP_SECTIONS } from '../help-content';
 +
@@ -603,9 +603,10 @@ index 000000000..a3a1e6a48
 +  expect(text).not.toContain('default assignment settings');
 +});
 +
-+it('keeps manual review and restart pilot conditional on validated operator-enabled workflows', () => {
-+  for (const id of ['updating', 'startup-beta']) expect(HELP_SECTIONS.find(section => section.id === id)!.points.join(' ')).toMatch(/[Pp]roduction is not enabled/);
++it('keeps restart pilots gated and requires explicit IT deadline confirmation', () => {
++  for (const id of ['startup-beta']) expect(HELP_SECTIONS.find(section => section.id === id)!.points.join(' ')).toMatch(/[Pp]roduction is not enabled/);
 +  expect(HELP_SECTIONS.find(section => section.id === 'updating')!.points.join(' ')).toContain('each date is paired with its group and intent');
++  expect(HELP_SECTIONS.find(section => section.id === 'updating')!.points.join(' ')).toContain('automatic updates cannot confirm on IT');
 +});
 +
 +it('distinguishes update discovery from reading pilot status with exact current labels', () => {
@@ -628,7 +629,7 @@ index 000000000..a3a1e6a48
 +});
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 new file mode 100644
-index 000000000..27b05fff1
+index 000000000..e2f0e41a3
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-guides.test.ts
 @@ -0,0 +1,123 @@
@@ -715,7 +716,7 @@ index 000000000..27b05fff1
 +    expect(prose('deploying')).toContain('Deployed to Intune does not mean computers have installed');
 +    expect(prose('pilot-rollouts')).toContain('no wider rollout happens without your approval');
 +    expect(guide('remove-discovered').title).toBe('Remove an app found on computers');
-+    expect(prose('updating')).toContain('review kept dates or reset them to ASAP');
++    expect(prose('updating')).toContain('preserves availability and unrelated settings');
 +    expect(prose('pilot-rollouts')).toContain('not verified pilot-group members');
 +    expect(prose('startup-beta')).toContain('Windows pilot testing required');
 +    expect(prose('startup-beta')).toContain('No forced restart, login trigger or 3-day deadline');
@@ -752,7 +753,7 @@ index 000000000..27b05fff1
 +  const guide = HELP_GUIDES.find(item => item.id === 'updating')!;
 +  expect(guide.steps[1].focus).toBe('Effective update settings');
 +  expect(guide.steps[2].focus).toBe('Send update to Intune');
-+  expect(guide.steps[2].instruction).toContain('Update all starts the batch');
++  expect(guide.steps[2].instruction).toContain('Update all starts the reviewed batch');
 +  expect(guide.steps[2].result).toContain('computers install according to assignments and check-in');
 +});
 diff --git a/lib/hrm/__tests__/help-navigation.test.ts b/lib/hrm/__tests__/help-navigation.test.ts
@@ -831,7 +832,7 @@ index 000000000..3328aa1a6
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..845fbfa4c
+index 000000000..0f42a60b9
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
 @@ -0,0 +1,564 @@
@@ -900,7 +901,7 @@ index 000000000..845fbfa4c
 +      'If the app or a group changed after you opened the panel, saving stops. Press Refresh dates and check the dates again before saving.',
 +      'Dates apply to this copy already in Intune, not to future versions. Installation timing in App updates and in the deploy panel sets prompts and postponement inside a package instead.',
 +      'The What changing dates does note in the panel lists the limits. Computers that already have this version are not changed. Offline computers may install after the chosen time, when they reconnect.',
-+      'When review is enabled, manual updates can keep current dates or explicitly reset them to ASAP. Without it, the existing update flow remains. Check dates on the new copy. They cannot be changed during a pilot or retirement. Saving group changes in the app’s main Save to Intune form keeps the live dates for groups whose assignment type stays the same.',
++      'Replacement updates pause for IT when required deadlines have expired. Explicitly retain those deadlines or choose new future deadlines; availability and other settings stay unchanged. Check dates on the new copy. They cannot be changed during a pilot or retirement. Saving group changes in the app’s main Save to Intune form keeps the live dates for groups whose assignment type stays the same.',
 +      'Uninstall groups, exclusions and policy set assignments cannot be edited in this panel. A copy with no Required or Available groups needs one first; add it, then press Refresh dates.',
 +      'The refresh icon at the top of app details, named Reload from Intune, reloads the whole app from Intune. The panel\'s Refresh dates button reloads only its groups and dates.',
 +    ],
@@ -933,15 +934,15 @@ index 000000000..845fbfa4c
 +      'App updates reads its list again when you come back to the browser tab, and every 45 seconds while one of your deployments is running.',
 +      'Press Check for app updates in Updates to check now. It may start your enabled automatic updates. It clears out-of-date entries for everyone in your tenant. Any automatic updates it starts are for your own Auto-update apps only.',
 +      'If App updates still shows the old version after a deploy, the next update check at 3:30 AM or 3:30 PM (Maryland time) corrects it.',
-+      'When this happens after 2 or more deploys in 24 hours, Version sync after deploy shows Failing in Server status on Home. That update check clears it.',
++      'When this happens after 2 or more deploys in 14 hours, Version sync after deploy shows Failing in Server status on Home. That update check clears it.',
 +    ],
 +  },
 +  {
 +    id: 'updating',
 +    title: 'Updating an app',
-+    uiLabels: ['App updates', 'Update all', 'Auto-update on', 'Auto-update off', 'Update schedule', 'Deployments', 'Failed at:', 'Validation', 'Details', 'Retry safely', 'Inventory', 'App catalog', 'Deploy again', 'Deploy new version', 'Custom app', 'Find in App catalog', 'Actions', 'is already in Intune', 'Supersedes', "Doesn't supersede", 'and replace', 'alongside', 'Save to Intune', 'Turn auto-update back on', 'Deployment list', 'Replaces current copy', 'Previous copy', 'Check installs now', 'Review update', 'Effective update settings', 'Saved app settings', 'Curated', 'Review past or device-local dates', 'Keep the current assignment dates', 'Reset availability and deadline to ASAP', 'Send update to Intune', 'Retry review'],
++    uiLabels: ['App updates', 'Update all', 'Auto-update on', 'Auto-update off', 'Update schedule', 'Deployments', 'Failed at:', 'Validation', 'Details', 'Retry safely', 'Inventory', 'App catalog', 'Deploy again', 'Deploy new version', 'Custom app', 'Find in App catalog', 'Actions', 'is already in Intune', 'Supersedes', "Doesn't supersede", 'and replace', 'alongside', 'Save to Intune', 'Turn auto-update back on', 'Deployment list', 'Replaces current copy', 'Previous copy', 'Check installs now', 'Review update', 'Effective update settings', 'Saved app settings', 'Curated', 'Review past or device-local dates', 'Keep the current assignment dates', 'Reset availability and deadline to ASAP', 'Send update to Intune', 'Retry review', 'Confirm replacement deadlines', 'Retain the existing deadlines', 'Choose a new deadline', 'Review deadlines', 'Confirm and resume packaging', 'Cancel review'],
 +    points: [
-+      'When the server administrator enables the matching validated packaging workflow, Update opens Review update and Update all includes bulk review. Production is not enabled; its existing update flow remains.',
++      'Update opens Review update and Update all includes bulk review. Replacements with expired required deadlines pause for explicit IT confirmation before packaging; automatic updates cannot confirm on IT’s behalf.',
 +      'As soon as the deployment finishes, App updates and Home show the new version. Inventory still lists the previous copy, tagged Previous copy, until it is removed.',
 +      'The previous copy stays in Intune until IntuneGet removes it, at least 7 days after the update (see How old copies are removed).',
 +      'Install results for the new copy arrive at the next update check, at 3:30 AM or 3:30 PM Maryland time. To see them sooner, press Check installs now in Inventory.',
@@ -972,10 +973,10 @@ index 000000000..845fbfa4c
 +      'Deployed alongside, both versions stay in Intune, and IntuneGet never removes the old one. Use duplicate cleanup in Inventory if you want only one.',
 +      'For WinGet and curated apps, press Details in Inventory, then Find in App catalog under Actions. The App catalog opens already searching for the app, so you can deploy a newer version.',
 +      'Inventory reads Intune again when you come back to the tab and its list is over a minute old.',
-+      'When review is enabled, reviewed manual updates carry supported current assignment settings, including targets, exclusions, filters, intent, notifications, restart grace and delivery optimization. The read-only review shows group intents and dates, not every carried setting; inspect details in Intune when needed.',
-+      'If Review past or device-local dates appears, explicitly choose Keep the current assignment dates or Reset availability and deadline to ASAP. Reset clears availability and deadline; past deadlines may make installation due on Intune’s next assignment processing.',
++      'Reviewed manual updates carry supported current assignment settings, including targets, exclusions, filters, intent, notifications, restart grace and delivery optimization. The read-only review shows group intents and dates, not every carried setting; inspect details in Intune when needed.',
++      'Expired required deadlines pause replacement packaging for IT, including automatic updates, legacy deployments and retries. Confirm replacement deadlines offers Retain the existing deadlines or Choose a new deadline. Retaining may make installation due at the next Intune attempt. New deadlines change only affected required deadlines, keeping availability, groups, filters, notifications and restart grace. Device-local deadlines that may already be due also need confirmation and a new date needs 14 hours of lead time. For other past dates, Review past or device-local dates still offers Keep the current assignment dates or Reset availability and deadline to ASAP; reset clears both dates only when no required deadline needs confirmation.',
 +      'Send update to Intune starts one reviewed update; Update all starts the reviewed batch. Neither proves installation. If settings, version or assignments change after review, review again; packaging checks the assignment snapshot again.',
-+      'If reading or an app review fails, use Retry review. Empty current assignments show no targets; each date is paired with its group and intent. For missing settings or custom detection, review Inventory or App catalog.',
++      'If reading or an app review fails, use Retry review. A deployment paused before its hosted run starts offers Review deadlines in Deployments, then Confirm and resume packaging. Cancel review changes nothing. A changed assignment or newly expired deadline requires a fresh confirmation; late workflow holds use Retry safely for a fresh job. Empty current assignments show no targets; each date is paired with its group and intent. For missing settings or custom detection, review Inventory or App catalog.',
 +      'Effective update settings shows versions, Saved app settings or Curated, install behavior, restart, assignment groups and dates. Reviewing starts nothing.',
 +      'Curated updates also require the current exact-installer security check. If it is held or unavailable, read the deployment reason. Retry safely cannot supply missing verification or clear a hold; ask HRM Support before another attempt.',
 +    ],
@@ -1401,7 +1402,7 @@ index 000000000..845fbfa4c
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..4c7f0b7e3
+index 000000000..ed75e7501
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,383 @@
@@ -1499,19 +1500,19 @@ index 000000000..4c7f0b7e3
 +  },
 +  {
 +    id: 'updating', category: 'updates', title: 'Deploy a new version',
-+    summary: 'Update a managed app while checking its groups, replacement behavior and deployment outcome.', keywords: ['Update all', 'custom app', 'new version', 'checksum', 'validation', 'retry', 'Review update', 'Effective update settings', 'past dates', 'device-local dates', 'ASAP', 'keep dates', 'reset dates', 'bulk review'],
-+    start: updates, before: ['The new manual review requires a matching validated packaging workflow enabled by the server administrator. It is not enabled in production; the existing update flow remains.', 'For a custom app, have the new version and its HTTPS installer link ready.'],
++    summary: 'Update a managed app while checking its groups, replacement behavior and deployment outcome.', keywords: ['Update all', 'custom app', 'new version', 'checksum', 'validation', 'retry', 'Review update', 'Effective update settings', 'past dates', 'device-local dates', 'ASAP', 'keep dates', 'reset dates', 'bulk review', 'expired deadline', 'Paused for IT', 'Review deadlines'],
++    start: updates, before: ['Replacements with expired required deadlines pause for IT confirmation before packaging. Keep the current deadlines explicitly or choose new future deadlines.', 'For a custom app, have the new version and its HTTPS installer link ready.'],
 +    steps: [
 +      step('Choose the new version', 'For WinGet or curated apps, press Update in App updates. For a custom app, press Details on its newest Inventory copy, then Deploy new version under Actions.', 'updates', 'Update', 'The new version uses the appropriate update path.'),
-+      step('Review settings and assignments', 'When review is enabled, read Effective update settings: version, Saved app settings or Curated, install behavior, restart, groups and dates. This review does not edit package settings.', 'updates', 'Effective update settings', 'You know which saved settings and current Intune assignments are being reviewed.'),
-+      step('Choose dates and start', 'If Review past or device-local dates appears, choose Keep the current assignment dates or Reset availability and deadline to ASAP. Press Send update to Intune for one app; Update all starts the batch.', 'updates', 'Send update to Intune', 'Sending starts deployment; computers install according to assignments and check-in.'),
++      step('Review settings and assignments', 'Read Effective update settings: version, Saved app settings or Curated, install behavior, restart, groups and dates. This review does not edit package settings.', 'updates', 'Effective update settings', 'You know which saved settings and current Intune assignments are being reviewed.'),
++      step('Choose dates and start', 'Read Confirm replacement deadlines when shown. Choose Retain the existing deadlines or Choose a new deadline. Send update to Intune starts one app; Update all starts the reviewed batch.', 'updates', 'Send update to Intune', 'Sending starts deployment; computers install according to assignments and check-in.'),
 +      step('Review a custom version', 'For a custom app, check version, link and checksum, then add it to the Deployment list. Review groups and Replaces current copy before deploying.', 'deployment-list', 'Replaces current copy', 'The custom version follows its own deployment review.'),
 +      step('Follow the deployment', 'Open Deployments to check packaging and deployment. If it fails, read Failed at: and Details before using Retry safely.', 'deployments', 'Failed at:', 'Once deployed, App updates and Home show the new version. A failure shows its stage.'),
 +      step('Check installations', 'Open the new copy in Inventory and press Check installs now, or wait for the 3:30 AM or 3:30 PM check. The old copy shows Previous copy.', 'inventory', 'Check installs now', 'You have install results, not just a finished deployment.'),
 +    ],
 +    success: 'The new version is deployed to the intended groups and computers report install results.', caution: 'A checksum mismatch needs a corrected catalog entry or installer. Repeating Retry safely does not fix the mismatch.',
 +    related: ['pilot-rollouts', 'install-results', 'old-copies', 'rollback'],
-+    troubleshoot: [{ problem: 'Auto-update turned itself off', action: 'Read the failures in Deployments. After fixing the cause, use Turn auto-update back on.' }, { problem: 'Notification settings changed after an update', action: 'Reviewed manual updates carry supported assignment settings. Check current Intune settings and the reviewed snapshot before retrying.' }, { problem: 'Dates or restart grace are gone after an update', action: 'Check whether the review kept dates or reset them to ASAP. Inspect Install dates in Inventory on the new copy.', guide: 'installation-timing' }, { problem: 'The catalog has not synced', action: 'Wait for a newer catalog, or choose the new version in App catalog and use Deploy again.' }, { problem: 'The app has no groups', action: 'Choose groups before deploying; otherwise it installs nowhere.', guide: 'deploying' }],
++    troubleshoot: [{ problem: 'Auto-update turned itself off', action: 'Read the failures in Deployments. After fixing the cause, use Turn auto-update back on.' }, { problem: 'Notification settings changed after an update', action: 'Reviewed manual updates carry supported assignment settings. Check current Intune settings and the reviewed snapshot before retrying.' }, { problem: 'Dates or restart grace are gone after an update', action: 'Confirm replacement deadlines preserves availability and unrelated settings. Inspect Install dates in Inventory on the new copy.', guide: 'installation-timing' }, { problem: 'The catalog has not synced', action: 'Wait for a newer catalog, or choose the new version in App catalog and use Deploy again.' }, { problem: 'The app has no groups', action: 'Choose groups before deploying; otherwise it installs nowhere.', guide: 'deploying' }],
 +    referenceGroups: [reference('Availability and what an update changes', [0, 1, 2, 3, 30, 4, 5, 6, 35]), reference('Groups carried to the new copy', [31, 32, 33, 34]), reference('Validation and safe retries', [7, 8, 9, 10, 11, 36]), reference('Automatic updates stopped or catalog delayed', [12, 13, 14, 15, 16]), reference('Custom app versions', [17, 18, 19, 20, 21, 22, 23, 24]), reference('Review groups and replacement behavior', [25, 26, 27, 28, 29])],
 +  },
 +  {

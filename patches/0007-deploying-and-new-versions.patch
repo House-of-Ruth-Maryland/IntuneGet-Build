@@ -119,12 +119,13 @@ index 000000000..5fae8f243
 + expect(state.invalidate).not.toHaveBeenCalled();
 +});
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index 93f7400e8..41735589a 100644
+index 93f7400e8..200232928 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
-@@ -1,5 +1,10 @@
+@@ -1,5 +1,11 @@
  'use client';
 +import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
++import {ReplacementDeadlineReview} from '@/components/hrm/ReplacementDeadlineReview';
  
 +import { DEPLOYMENT_FILTERS, deploymentFilter, deploymentCounts, clearableDeploymentStatuses, matchesDeploymentFilter, isActiveDeployment, isTerminalDeployment, hasNewlyFinishedDeployment, DEPLOYMENT_FINISHED_QUERY_KEYS, type DeploymentFilter } from '@/lib/hrm/deployment-status';
 +import { useQueryClient } from '@tanstack/react-query';
@@ -133,7 +134,15 @@ index 93f7400e8..41735589a 100644
  import { useState, useEffect, useCallback, useRef } from 'react';
  import { isIntuneApprovalFailure } from '@/lib/intune-approval';
  import { T, Var } from "gt-next";
-@@ -125,17 +130,15 @@ export default function UploadsPage() {
+@@ -78,6 +84,7 @@ interface PackagingJob {
+   updated_at: string;
+   packaging_started_at?: string;
+   packaging_completed_at?: string;
++  upload_started_at?: string | null;
+   qa_candidate_id?: string | null;
+   qa_requested_at?: string | null;
+   qa_completed_at?: string | null;
+@@ -125,17 +132,15 @@ export default function UploadsPage() {
    // Get job IDs and status filter from URL params
    const highlightedJobIds = searchParams.get('jobs')?.split(',') || [];
    const urlStatus = searchParams.get('status');
@@ -155,7 +164,7 @@ index 93f7400e8..41735589a 100644
    useEffect(() => () => { jobsRequest.current?.abort(); jobsRequest.current = null; }, [viewScope, isMspUser, selectedTenantId, user?.id, user?.tenantId]);
  
    const fetchJobs = useCallback(async (showRefreshing = false) => {
-@@ -184,7 +187,12 @@ export default function UploadsPage() {
+@@ -184,7 +189,12 @@ export default function UploadsPage() {
  
        const data = await response.json();
        if (controller.signal.aborted) return;
@@ -169,7 +178,7 @@ index 93f7400e8..41735589a 100644
        setError(null);
        setSessionExpired(false);
      } catch (err) {
-@@ -198,7 +206,7 @@ export default function UploadsPage() {
+@@ -198,7 +208,7 @@ export default function UploadsPage() {
          setIsRefreshing(false);
        }
      }
@@ -178,7 +187,7 @@ index 93f7400e8..41735589a 100644
  
    // Initial load
    useEffect(() => {
-@@ -209,7 +217,7 @@ export default function UploadsPage() {
+@@ -209,7 +219,7 @@ export default function UploadsPage() {
    // background poll less often and a manual refresh remains available.
    useEffect(() => {
      const hasActiveJobs = jobs.some((job) =>
@@ -187,7 +196,7 @@ index 93f7400e8..41735589a 100644
      );
  
      if (!hasActiveJobs || sessionExpired) return;
-@@ -238,25 +246,21 @@ export default function UploadsPage() {
+@@ -238,25 +248,21 @@ export default function UploadsPage() {
      fetchJobs(true);
    };
  
@@ -224,7 +233,7 @@ index 93f7400e8..41735589a 100644
  
      // Fire the API call in the background
      try {
-@@ -278,13 +282,15 @@ export default function UploadsPage() {
+@@ -278,13 +284,15 @@ export default function UploadsPage() {
          throw new Error(`Failed to cancel job (${response.status})`);
        }
  
@@ -244,7 +253,7 @@ index 93f7400e8..41735589a 100644
      }
    };
  
-@@ -300,7 +306,7 @@ export default function UploadsPage() {
+@@ -300,7 +308,7 @@ export default function UploadsPage() {
            'Content-Type': 'application/json',
            Authorization: `Bearer ${accessToken}`,
          },
@@ -253,7 +262,7 @@ index 93f7400e8..41735589a 100644
        });
  
        if (!response.ok) {
-@@ -312,6 +318,7 @@ export default function UploadsPage() {
+@@ -312,6 +320,7 @@ export default function UploadsPage() {
          throw new Error(`Failed to clear history (${response.status})`);
        }
  
@@ -261,7 +270,7 @@ index 93f7400e8..41735589a 100644
        await fetchJobs();
      } catch (err) {
        console.error('Failed to clear history:', err);
-@@ -363,35 +370,18 @@ export default function UploadsPage() {
+@@ -363,35 +372,18 @@ export default function UploadsPage() {
      }
    };
  
@@ -304,7 +313,7 @@ index 93f7400e8..41735589a 100644
            description={<T>Monitor your package deployments to Intune</T>}
          />
          <SkeletonGrid count={4} columns={4} variant="stat" />
-@@ -408,14 +398,14 @@ export default function UploadsPage() {
+@@ -408,14 +400,14 @@ export default function UploadsPage() {
      <div className="space-y-6">
        {/* Header */}
        <PageHeader
@@ -322,7 +331,7 @@ index 93f7400e8..41735589a 100644
                <AlertDialog>
                  <AlertDialogTrigger asChild>
                    <Button
-@@ -428,20 +418,20 @@ export default function UploadsPage() {
+@@ -428,20 +420,20 @@ export default function UploadsPage() {
                      ) : (
                        <Trash2 className="w-4 h-4 mr-2" />
                      )}
@@ -348,7 +357,7 @@ index 93f7400e8..41735589a 100644
                      </AlertDialogAction>
                    </AlertDialogFooter>
                  </AlertDialogContent>
-@@ -485,7 +475,7 @@ export default function UploadsPage() {
+@@ -485,7 +477,7 @@ export default function UploadsPage() {
                variant="outline"
                className="border-status-warning/30 text-status-warning hover:bg-status-warning/10 flex-shrink-0"
              >
@@ -357,7 +366,7 @@ index 93f7400e8..41735589a 100644
              </Button>
            </motion.div>
          )}
-@@ -583,15 +573,13 @@ export default function UploadsPage() {
+@@ -583,15 +575,13 @@ export default function UploadsPage() {
          animate={{ opacity: 1 }}
          transition={{ delay: 0.2 }}
          className="flex flex-wrap gap-2"
@@ -376,7 +385,7 @@ index 93f7400e8..41735589a 100644
              onClick={() => setFilter(f)}
              className={cn(
                'px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:outline-none',
-@@ -600,7 +588,7 @@ export default function UploadsPage() {
+@@ -600,7 +590,7 @@ export default function UploadsPage() {
                  : 'bg-overlay/5 text-text-secondary hover:text-text-primary hover:bg-overlay/10 border border-overlay/5'
              )}
            >
@@ -385,7 +394,7 @@ index 93f7400e8..41735589a 100644
            </button>
          ))}
        </motion.div>
-@@ -609,18 +597,18 @@ export default function UploadsPage() {
+@@ -609,18 +599,18 @@ export default function UploadsPage() {
        {filteredJobs.length === 0 ? (
          <AnimatedEmptyState
            icon={Upload}
@@ -408,7 +417,7 @@ index 93f7400e8..41735589a 100644
                    onClick: () => router.push('/dashboard/apps'),
                  }
                : undefined
-@@ -653,6 +641,7 @@ export default function UploadsPage() {
+@@ -653,6 +643,7 @@ export default function UploadsPage() {
                  onRedeploy={handleRedeploy}
                  isRedeploying={redeployingJobId === job.id}
                  showOwner={viewScope === 'tenant'}
@@ -416,7 +425,7 @@ index 93f7400e8..41735589a 100644
                />
              ))}
            </AnimatePresence>
-@@ -671,6 +660,7 @@ function UploadJobCard({
+@@ -671,6 +662,7 @@ function UploadJobCard({
    onRedeploy,
    isRedeploying,
    showOwner,
@@ -424,7 +433,7 @@ index 93f7400e8..41735589a 100644
  }: {
    job: PackagingJob;
    index: number;
-@@ -680,6 +670,7 @@ function UploadJobCard({
+@@ -680,6 +672,7 @@ function UploadJobCard({
    onRedeploy: (job: PackagingJob, forceCreate?: boolean) => void;
    isRedeploying?: boolean;
    showOwner?: boolean;
@@ -432,7 +441,7 @@ index 93f7400e8..41735589a 100644
  }) {
    const prefersReducedMotion = useReducedMotion();
  
-@@ -725,7 +716,8 @@ function UploadJobCard({
+@@ -725,7 +718,8 @@ function UploadJobCard({
      },
      uploading: {
        icon: Upload,
@@ -442,7 +451,7 @@ index 93f7400e8..41735589a 100644
        color: 'text-accent-violet',
        bg: 'bg-accent-violet/10',
        border: 'border-l-accent-violet',
-@@ -760,7 +752,7 @@ function UploadJobCard({
+@@ -760,21 +754,21 @@ function UploadJobCard({
      },
      duplicate_skipped: {
        icon: AlertCircle,
@@ -451,9 +460,11 @@ index 93f7400e8..41735589a 100644
        color: 'text-status-warning',
        bg: 'bg-status-warning/10',
        border: 'border-l-status-warning',
-@@ -769,12 +761,12 @@ function UploadJobCard({
+     },
+   };
  
-   const config = statusConfig[job.status] || statusConfig.queued;
+-  const config = statusConfig[job.status] || statusConfig.queued;
++  const config = job.error_code==='EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED' ? {...statusConfig.queued,label:'Paused for IT',color:'text-status-warning',bg:'bg-status-warning/10',border:'border-l-status-warning'} : statusConfig[job.status] || statusConfig.queued;
    const StatusIcon = config.icon;
 -  const isActive = ['blocked_upstream', 'awaiting_qa', 'queued', 'packaging', 'uploading'].includes(job.status);
 +  const isActive = isActiveDeployment(job.status);
@@ -468,7 +479,7 @@ index 93f7400e8..41735589a 100644
  
    const itemVariants = {
      hidden: { opacity: 0, y: prefersReducedMotion ? 0 : 20 },
-@@ -819,9 +811,9 @@ function UploadJobCard({
+@@ -819,9 +813,9 @@ function UploadJobCard({
                className="absolute inset-0 rounded-xl"
                animate={{
                  boxShadow: [
@@ -481,7 +492,7 @@ index 93f7400e8..41735589a 100644
                  ],
                }}
                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-@@ -833,7 +825,7 @@ function UploadJobCard({
+@@ -833,7 +827,7 @@ function UploadJobCard({
          <div className="flex-1 min-w-0">
            <div className="flex items-start justify-between gap-4">
              <div>
@@ -490,7 +501,7 @@ index 93f7400e8..41735589a 100644
                <p className="text-text-secondary text-sm mt-0.5">
                  {job.publisher}
                  {job.app_source !== 'store' && job.installer_type && (
-@@ -864,10 +856,8 @@ function UploadJobCard({
+@@ -864,10 +858,8 @@ function UploadJobCard({
                        {assignment.type === 'allUsers' && <Users className="w-3 h-3" />}
                        {assignment.type === 'allDevices' && <Monitor className="w-3 h-3" />}
                        {assignment.type === 'group' && <UserCircle className="w-3 h-3" />}
@@ -503,7 +514,7 @@ index 93f7400e8..41735589a 100644
                      </span>
                    ))}
                  </div>
-@@ -900,21 +890,21 @@ function UploadJobCard({
+@@ -900,21 +892,21 @@ function UploadJobCard({
                    <AlertDialogContent>
                      <AlertDialogHeader>
                        <AlertDialogTitle>
@@ -529,7 +540,17 @@ index 93f7400e8..41735589a 100644
                        </AlertDialogAction>
                      </AlertDialogFooter>
                    </AlertDialogContent>
-@@ -1044,6 +1034,48 @@ function UploadJobCard({
+@@ -1004,7 +996,9 @@ function UploadJobCard({
+           )}
+ 
+           {/* Retry button for failures */}
++          {canManage && job.error_code==='EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED' && !job.github_run_id && !job.upload_started_at && !job.intunewin_url && <ReplacementDeadlineReview jobId={job.id}/>}
+             {['failed', 'qa_failed'].includes(job.status) &&
++              !(job.error_code==='EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED' && !job.github_run_id && !job.upload_started_at && !job.intunewin_url) &&
+               !isIntuneApprovalFailure(job) && (
+             <div className="mt-3">
+               <Button
+@@ -1044,6 +1038,48 @@ function UploadJobCard({
            {job.status === 'duplicate_skipped' && (() => {
              const details = job.error_details as Record<string, unknown> | undefined;
              const existingVersion = details?.existingVersion ? String(details.existingVersion) : null;
@@ -578,7 +599,7 @@ index 93f7400e8..41735589a 100644
              return (
              <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
                <div className="flex items-start gap-2">
-@@ -1053,7 +1085,7 @@ function UploadJobCard({
+@@ -1053,7 +1089,7 @@ function UploadJobCard({
                      <T>Duplicate app already exists in Intune</T>
                    </p>
                    <p className="text-status-warning/70 text-xs mt-1">
@@ -587,7 +608,7 @@ index 93f7400e8..41735589a 100644
                      {existingVersion && (
                        <span> <T>Existing version: <Var>{existingVersion}</Var></T></span>
                      )}
-@@ -1108,6 +1140,7 @@ function UploadJobCard({
+@@ -1108,6 +1144,7 @@ function UploadJobCard({
              ) : null;
            })()}
  
@@ -595,7 +616,7 @@ index 93f7400e8..41735589a 100644
            {/* Success - deployed to Intune */}
            {job.intune_app_url && job.status !== 'duplicate_skipped' && (
              <div className="mt-4 p-3 bg-status-success/[0.05] border border-status-success/10 rounded-lg">
-@@ -1118,7 +1151,7 @@ function UploadJobCard({
+@@ -1118,7 +1155,7 @@ function UploadJobCard({
                  className="inline-flex items-center gap-2 text-accent-cyan hover:text-accent-cyan-bright text-sm font-medium transition-colors"
                >
                  <ExternalLink className="w-4 h-4" />
@@ -988,6 +1009,95 @@ index 000000000..092115fb3
 +  // listAll is newest first; history from before upload records existed counts as newest.
 +  const newest = history.find((h) => h.intune_tenant_id === tenantId && h.winget_id === wingetId);
 +  return !newest || newest.intune_app_id === intuneAppId;
++}
+diff --git a/app/api/hrm/replacement-deadline-review/route.test.ts b/app/api/hrm/replacement-deadline-review/route.test.ts
+new file mode 100644
+index 000000000..8b2b2635f
+--- /dev/null
++++ b/app/api/hrm/replacement-deadline-review/route.test.ts
+@@ -0,0 +1,40 @@
++import {beforeEach,expect,it,vi} from 'vitest';
++import {NextRequest} from 'next/server';
++const state=vi.hoisted(()=>({job:{} as any,rows:[] as unknown[],cas:true,dispatch:vi.fn(),update:vi.fn(),reads:0}));
++vi.mock('@/lib/auth-utils',()=>({parseAccessToken:async()=>({userId:'owner',tenantId:'tenant'})}));
++vi.mock('@/lib/db',()=>({isSqliteMode:()=>true,getDatabase:()=>({jobs:{getById:async()=>state.job,update:state.update}})}));
++vi.mock('@/lib/intune/graph-client',()=>({getServicePrincipalToken:async()=>'token'}));
++vi.mock('@/lib/hrm/pilot-graph',()=>({pilotGraph:()=>({assignments:async()=>{state.reads++;return state.rows}})}));
++vi.mock('@/lib/hrm/update-dispatch',()=>({dispatchUpdateJob:state.dispatch}));
++import {POST} from './route';
++const request=(body:unknown)=>POST(new NextRequest('https://example.test/api/hrm/replacement-deadline-review',{method:'POST',body:JSON.stringify(body),headers:{Authorization:'Bearer fixture'}}));
++beforeEach(()=>{
++ state.job={id:'job',user_id:'owner',tenant_id:'tenant',status:'failed',error_code:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',github_run_id:null,intune_app_id:null,updated_at:'one',package_config:{replacesIntuneAppId:'source',psadtConfig:{deployMode:'Silent'}}};
++ state.rows=[{id:'a',intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:'g'},settings:{notifications:'hideAll',installTimeSettings:{useLocalTime:false,deadlineDateTime:'2020-01-01T00:00:00Z'}}}];state.cas=true;state.reads=0;state.update.mockReset().mockImplementation(async(_id,data)=>{if(!state.cas)return null;state.job={...state.job,...data};return state.job});state.dispatch.mockReset().mockResolvedValue({dispatched:true});
++});
++it('reads without writes, confirms the live timing, and resumes through the normal dispatch path',async()=>{
++ const preview=await (await request({jobId:'job'})).json();expect(state.update).not.toHaveBeenCalled();expect(state.dispatch).not.toHaveBeenCalled();
++ const response=await request({jobId:'job',action:'confirm',token:preview.token,decision:'retain'});expect(response.status).toBe(200);expect(state.reads).toBe(2);
++ expect(state.update).toHaveBeenCalledWith('job',expect.objectContaining({package_config:expect.objectContaining({psadtConfig:{deployMode:'Silent'},assignmentReview:expect.objectContaining({deadlineConfirmation:{decision:'retain',assignmentIds:['a']}})})}),{status:'failed',error_code:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',updated_at:'one'});expect(state.dispatch).toHaveBeenCalledTimes(1);
++ expect((await request({jobId:'job',action:'confirm',token:preview.token,decision:'retain'})).status).toBe(409);expect(state.dispatch).toHaveBeenCalledTimes(1);
++});
++it('rejects changed assignments and failed compare-and-swap without dispatching',async()=>{
++ const preview=await (await request({jobId:'job'})).json();state.rows=[];
++ expect((await request({jobId:'job',action:'confirm',token:preview.token,decision:'retain'})).status).toBe(409);expect(state.update).not.toHaveBeenCalled();
++ const fresh=await (await request({jobId:'job'})).json();state.cas=false;
++ expect((await request({jobId:'job',action:'confirm',token:fresh.token,decision:'retain'})).status).toBe(409);expect(state.dispatch).not.toHaveBeenCalled();
++});
++it('refuses another owner or an existing hosted run before reading or writing Intune',async()=>{
++ state.job.user_id='someone-else';expect((await request({jobId:'job'})).status).toBe(404);state.job.user_id='owner';state.job.github_run_id='already-started';expect((await request({jobId:'job'})).status).toBe(409);expect(state.reads).toBe(0);expect(state.update).not.toHaveBeenCalled();
++});
++it('requires a fresh review if another deadline expires without a Graph edit',async()=>{
++ vi.useFakeTimers();
++ try{
++  vi.setSystemTime(new Date('2026-11-24T12:00:00Z'));
++  state.rows.push({id:'later',intent:'required',target:{'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'},settings:{installTimeSettings:{useLocalTime:false,deadlineDateTime:'2026-11-24T12:01:00Z'}}});
++  const preview=await (await request({jobId:'job'})).json();
++  vi.setSystemTime(new Date('2026-11-24T12:02:00Z'));
++  expect((await request({jobId:'job',action:'confirm',token:preview.token,decision:'retain'})).status).toBe(409);
++  expect(state.update).not.toHaveBeenCalled();expect(state.dispatch).not.toHaveBeenCalled();
++ }finally{vi.useRealTimers()}
++});
+diff --git a/app/api/hrm/replacement-deadline-review/route.ts b/app/api/hrm/replacement-deadline-review/route.ts
+new file mode 100644
+index 000000000..843c6d59f
+--- /dev/null
++++ b/app/api/hrm/replacement-deadline-review/route.ts
+@@ -0,0 +1,37 @@
++import {createHash} from 'node:crypto';
++import {NextRequest,NextResponse} from 'next/server';
++import {parseAccessToken} from '@/lib/auth-utils';
++import {getDatabase,isSqliteMode} from '@/lib/db';
++import {getServicePrincipalToken} from '@/lib/intune/graph-client';
++import {pilotGraph} from '@/lib/hrm/pilot-graph';
++import {dispatchUpdateJob} from '@/lib/hrm/update-dispatch';
++import {assignmentSnapshot,deadlineAssignments,deadlineProblem,canonical,asObject,DEADLINE_HOLD_CODE,type AssignmentTimingReview} from '@/packager/src/assignment-settings';
++const reply=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'private, no-store'}});
++/** Resume only an owned replacement held before any hosted run started. */
++export async function POST(request:NextRequest){
++ const user=await parseAccessToken(request.headers.get('Authorization'));
++ if(!user)return reply({error:'Authentication required'},401);
++ if(!isSqliteMode())return reply({error:'This review requires SQLite packaging mode.'},409);
++ const body=await request.json().catch(()=>null);
++ if(typeof body?.jobId!=='string')return reply({error:'Choose a held deployment.'},400);
++ const db=getDatabase(),job=await db.jobs.getById(body.jobId);
++ if(!job||job.user_id!==user.userId||job.tenant_id!==user.tenantId)return reply({error:'Deployment not found.'},404);
++ if(job.status!=='failed'||job.error_code!==DEADLINE_HOLD_CODE||job.github_run_id||job.intune_app_id||job.upload_started_at||job.intunewin_url)return reply({error:'This deployment cannot resume here. Use Retry safely to create a fresh review.'},409);
++ const config=asObject(job.package_config),source=config.sourceIntuneAppId||config.replacesIntuneAppId;
++ if(typeof source!=='string'||!source)return reply({error:'The replacement source is missing. Use Retry safely.'},409);
++ try{
++  const token=await getServicePrincipalToken(user.tenantId);if(!token)throw Error('Could not read current Intune assignments.');
++  const snapshot=assignmentSnapshot(await pilotGraph(token).assignments(source));
++  const affected=deadlineAssignments(snapshot);
++  const reviewToken=createHash('sha256').update(canonical([job.id,job.updated_at,job.package_config,source,snapshot,affected.map(row=>row.id)])).digest('hex');
++  if(body.action!=='confirm')return reply({token:reviewToken,assignments:snapshot,affectedIds:affected.map(row=>row.id)});
++  if(body.token!==reviewToken)return reply({error:'Settings or assignments changed. Refresh the review.'},409);
++  const review:AssignmentTimingReview={sourceAppId:source,expected:snapshot,expiredDates:'keep',deadlineConfirmation:{decision:body.decision,assignmentIds:affected.map(row=>String(row.id)),...(body.decision==='reschedule'?{newDeadline:body.newDeadline}:{})}};
++  const problem=deadlineProblem(snapshot,source,review);if(problem)return reply({error:problem},400);
++  const updated=await db.jobs.update(job.id,{package_config:{...config,assignmentReview:review} as never,status:'queued',error_code:null,error_message:null,error_stage:null,error_category:null,completed_at:null,status_message:null,packager_id:null,packager_heartbeat_at:null,claimed_at:null,packaging_started_at:null},{status:'failed',error_code:DEADLINE_HOLD_CODE,updated_at:job.updated_at});
++  if(!updated)return reply({error:'This deployment changed. Refresh its status before continuing.'},409);
++  if(typeof config.autoUpdateHistoryId==='string')await db.autoUpdateHistory.update(config.autoUpdateHistoryId,{status:'pending',error_message:null,completed_at:null}).catch(()=>console.warn('Could not reopen replacement history; deployment status remains authoritative.'));
++  const result=await dispatchUpdateJob(db,job.id);
++  return reply({resumed:result.dispatched||result.reason==='local-packager',result});
++ }catch(error){return reply({error:error instanceof Error?error.message:'Could not review replacement deadlines.'},424);}
 +}
 diff --git a/app/api/package/callback/route.test.ts b/app/api/package/callback/route.test.ts
 index ab4fa8130..e12c1df4c 100644
@@ -1613,6 +1723,26 @@ index 6137d71cc..57177be03 100644
        if (errorResponse) {
          return errorResponse;
        }
+diff --git a/app/api/packager/jobs/deadline.test.ts b/app/api/packager/jobs/deadline.test.ts
+new file mode 100644
+index 000000000..b6b6ae887
+--- /dev/null
++++ b/app/api/packager/jobs/deadline.test.ts
+@@ -0,0 +1,14 @@
++import {beforeEach,expect,it,vi} from 'vitest';
++import {NextRequest} from 'next/server';
++const state=vi.hoisted(()=>({job:{} as any,updates:vi.fn()}));
++vi.mock('@/lib/db',()=>({verifyPackagerApiKey:(key:string)=>key==='fixture-key',getDatabase:()=>({jobs:{getById:async()=>state.job,update:state.updates}})}));
++vi.mock('@/lib/features',()=>({getFeatureFlags:()=>({localPackager:true})}));
++import {PATCH} from './route';
++beforeEach(()=>{state.job={id:'job',packager_id:'packager',status:'packaging',updated_at:new Date().toISOString(),winget_id:'Example.App',version:'1'};state.updates.mockReset().mockImplementation(async(_id,data)=>({...state.job,...data}))});
++const request=(packagerId='packager',errorCode='EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED')=>PATCH(new NextRequest('https://example.test/api/packager/jobs',{method:'PATCH',headers:{Authorization:'Bearer fixture-key'},body:JSON.stringify({jobId:'job',packagerId,status:'failed',error:'Paused for IT',errorCode})}));
++it('persists the owned local packager deadline hold for the same confirmation path',async()=>{
++ expect((await request()).status).toBe(200);expect(state.updates).toHaveBeenCalledWith('job',expect.objectContaining({status:'failed',error_code:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',error_stage:'validation',error_category:'validation'}),{packager_id:'packager',status:'packaging'});
++});
++it('rejects another packager and does not trust arbitrary error codes',async()=>{
++ expect((await request('other')).status).toBe(400);expect(state.updates).not.toHaveBeenCalled();expect((await request('packager','ARBITRARY')).status).toBe(200);expect(state.updates.mock.calls[0][1]).not.toHaveProperty('error_code');
++});
 diff --git a/app/api/packager/jobs/logging.test.ts b/app/api/packager/jobs/logging.test.ts
 index b2e79aca9..c21043bf1 100644
 --- a/app/api/packager/jobs/logging.test.ts
@@ -1626,7 +1756,7 @@ index b2e79aca9..c21043bf1 100644
    tenant_id: 'tenant-1',
    winget_id: 'Test.App',
 diff --git a/app/api/packager/jobs/route.ts b/app/api/packager/jobs/route.ts
-index 9452411cf..f911ec269 100644
+index 9452411cf..dc610e4c3 100644
 --- a/app/api/packager/jobs/route.ts
 +++ b/app/api/packager/jobs/route.ts
 @@ -1,3 +1,5 @@
@@ -1663,7 +1793,19 @@ index 9452411cf..f911ec269 100644
      const now = new Date().toISOString();
  
      // Build update object
-@@ -244,7 +260,7 @@ export async function PATCH(request: NextRequest) {
+@@ -233,6 +249,11 @@ export async function PATCH(request: NextRequest) {
+     } else if (status === 'failed') {
+       updateData.completed_at = now;
+       if (errorMessage) updateData.error_message = errorMessage;
++      if (body.errorCode === 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED') {
++        updateData.error_code = body.errorCode;
++        updateData.error_stage = 'validation';
++        updateData.error_category = 'validation';
++      }
+     } else if (status === 'duplicate_skipped') {
+       // Same handling as the hosted callback route: link the existing app and
+       // keep duplicateInfo in error_details for the uploads UI; no
+@@ -244,7 +265,7 @@ export async function PATCH(request: NextRequest) {
      }
  
      // Update the job (only if owned by this packager)
@@ -1672,7 +1814,7 @@ index 9452411cf..f911ec269 100644
  
      if (!job) {
        return NextResponse.json(
-@@ -253,6 +269,10 @@ export async function PATCH(request: NextRequest) {
+@@ -253,6 +274,10 @@ export async function PATCH(request: NextRequest) {
        );
      }
  
@@ -5697,6 +5839,30 @@ index 000000000..b7ac206c2
 +    </section>
 +  );
 +}
+diff --git a/components/hrm/ReplacementDeadlineReview.tsx b/components/hrm/ReplacementDeadlineReview.tsx
+new file mode 100644
+index 000000000..59ad29a06
+--- /dev/null
++++ b/components/hrm/ReplacementDeadlineReview.tsx
+@@ -0,0 +1,18 @@
++'use client';
++import {useState} from 'react';
++import {useMicrosoftAuth} from '@/hooks/useMicrosoftAuth';
++import {Button} from '@/components/ui/button';
++type Preview={token:string;assignments:{id:string;intent:string;target:Record<string,unknown>;settings?:{installTimeSettings?:{useLocalTime:boolean;startDateTime?:string;deadlineDateTime?:string}}}[];affectedIds:string[]};
++/** Confirmation resumes a held job; opening the review performs no writes. */
++export function ReplacementDeadlineReview({jobId}:{jobId:string}){
++ const {getAccessToken}=useMicrosoftAuth();
++ const [preview,setPreview]=useState<Preview|null>(null),[decision,setDecision]=useState<'retain'|'reschedule'|null>(null),[date,setDate]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[done,setDone]=useState(false);
++ async function request(confirm=false){setBusy(true);setError('');try{
++  const token=await getAccessToken();if(!token)throw Error('Sign in again to review this deployment.');
++  const response=await fetch('/api/hrm/replacement-deadline-review',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({jobId,action:confirm?'confirm':'review',token:preview?.token,decision,newDeadline:date?`${date}:00Z`:undefined})});
++  const body=await response.json();if(!response.ok)throw Error(body.error||'Could not review deadlines.');
++  if(confirm){if(!body.resumed)throw Error(body.result?.message||'The deployment is still held. Refresh the review.');setDone(true);}else{setPreview(body);setDecision(null);}
++ }catch(e){setError(e instanceof Error?e.message:'Could not review deadlines.');}finally{setBusy(false)}}
++ if(done)return <p role="status">Confirmation saved. Check the deployment for packaging progress.</p>;
++ return <div className="mt-3 space-y-3 text-sm"><p className="font-medium">Paused for IT · replacement deadlines</p><Button variant="outline" disabled={busy} onClick={()=>request()}>Review deadlines</Button>{preview&&<fieldset className="space-y-2"><legend className="font-medium">Current Intune assignment timing</legend>{preview.assignments.map(row=><p key={row.id} className="break-words">{row.intent} · {String(row.target.groupId||row.target['@odata.type'])} · Available {row.settings?.installTimeSettings?.startDateTime||'ASAP'} · Deadline {row.settings?.installTimeSettings?.deadlineDateTime||'ASAP'} · {row.settings?.installTimeSettings?.useLocalTime?'device local time':'UTC'}{preview.affectedIds.includes(row.id)?' · needs confirmation':''}</p>)}<p>Retaining an expired deadline can make installation due at the next Intune attempt. Other assignment settings stay unchanged.</p>{(['retain','reschedule'] as const).map(value=><label key={value} className="flex gap-2"><input type="radio" name={`deadline-${jobId}`} checked={decision===value} onChange={()=>setDecision(value)}/>{value==='retain'?'Retain the existing deadlines':'Choose a new deadline'}</label>)}{decision==='reschedule'&&<label className="block">New deadline (each assignment keeps its time zone)<input type="datetime-local" className="block rounded border bg-transparent p-2" value={date} onChange={event=>setDate(event.target.value)}/></label>}<p className="text-text-secondary">New deadlines must be in the future and after availability. Device-local deadlines need 14 hours of lead time. Assignments are checked again before packaging.</p><Button disabled={busy||!decision||(decision==='reschedule'&&!date)} onClick={()=>request(true)}>{busy?'Checking…':'Confirm and resume packaging'}</Button><Button variant="ghost" disabled={busy} onClick={()=>setPreview(null)}>Cancel review</Button></fieldset>}{error&&<p role="alert" className="text-status-error">{error}</p>}</div>;
++}
 diff --git a/components/msp/CrossTenantJobsTable.tsx b/components/msp/CrossTenantJobsTable.tsx
 index 5d02b3a3d..248c2c265 100644
 --- a/components/msp/CrossTenantJobsTable.tsx
@@ -6056,6 +6222,26 @@ index 000000000..d6ee8f0e8
 +    expect(newVersionReplacement(undefined)).toBeNull();
 +  });
 +});
+diff --git a/lib/hrm/__tests__/replacement-deadlines.test.ts b/lib/hrm/__tests__/replacement-deadlines.test.ts
+new file mode 100644
+index 000000000..4ec6d1345
+--- /dev/null
++++ b/lib/hrm/__tests__/replacement-deadlines.test.ts
+@@ -0,0 +1,14 @@
++import {beforeEach,expect,it,vi} from 'vitest';
++const state=vi.hoisted(()=>({token:'token' as string|null,rows:[] as unknown[],fail:false}));
++vi.mock('@/lib/intune/graph-client',()=>({getServicePrincipalToken:async()=>state.token}));
++vi.mock('@/lib/hrm/pilot-graph',()=>({pilotGraph:()=>({assignments:async()=>{if(state.fail)throw Error('read failed');return state.rows}})}));
++import {checkReplacementDeadlines,AssignmentDeadlineHold} from '../replacement-deadlines';
++import {assignmentSnapshot} from '@/packager/src/assignment-settings';
++beforeEach(()=>{state.token='token';state.fail=false;state.rows=[{id:'a',intent:'required',target:{'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'},settings:{installTimeSettings:{useLocalTime:false,deadlineDateTime:'2020-01-01T00:00:00Z'}}}]});
++it('fails closed without a fresh explicit decision and succeeds only for matching current timing',async()=>{
++ await expect(checkReplacementDeadlines('tenant','source')).rejects.toBeInstanceOf(AssignmentDeadlineHold);
++ await expect(checkReplacementDeadlines('tenant','source',{sourceAppId:'source',expected:assignmentSnapshot(state.rows),expiredDates:'keep',deadlineConfirmation:{decision:'retain',assignmentIds:['a']}})).resolves.toBeUndefined();
++});
++it('holds missing authority and read failures, while new apps need no replacement read',async()=>{
++ state.token=null;await expect(checkReplacementDeadlines('tenant','source')).rejects.toBeInstanceOf(AssignmentDeadlineHold);state.token='token';state.fail=true;await expect(checkReplacementDeadlines('tenant','source')).rejects.toBeInstanceOf(AssignmentDeadlineHold);await expect(checkReplacementDeadlines('tenant',null)).resolves.toBeUndefined();
++});
 diff --git a/lib/hrm/deploy-review.ts b/lib/hrm/deploy-review.ts
 new file mode 100644
 index 000000000..ed76e5448
@@ -6200,11 +6386,12 @@ index 000000000..c4ad1c9ab
 +}
 diff --git a/lib/hrm/dispatch-failure.ts b/lib/hrm/dispatch-failure.ts
 new file mode 100644
-index 000000000..57e9b3a8e
+index 000000000..0cc42fbf8
 --- /dev/null
 +++ b/lib/hrm/dispatch-failure.ts
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,16 @@
 +import { InstallerPreflightError } from '@/lib/installer-preflight';
++import { AssignmentDeadlineHold } from './replacement-deadlines';
 +
 +/**
 + * HRM patch 0031: how a job that never started is recorded. Upstream recorded every failure to start
@@ -6213,6 +6400,7 @@ index 000000000..57e9b3a8e
 + * card shows the real stage and reason.
 + */
 +export function dispatchFailureFields(error: unknown): { error_stage: string; error_category: string; error_code: string } {
++  if (error instanceof AssignmentDeadlineHold) return { error_stage: 'validation', error_category: 'validation', error_code: error.code };
 +  if (error instanceof InstallerPreflightError) {
 +    return { error_stage: 'validation', error_category: error.retryable ? 'network' : 'validation', error_code: error.code };
 +  }
@@ -6408,6 +6596,30 @@ index 000000000..818619504
 +export function isNewerVersion(existingVersion: string | null | undefined, version: string | null | undefined): boolean {
 +  if (!existingVersion || !version) return false;
 +  return compareVersions(version, existingVersion) > 0;
++}
+diff --git a/lib/hrm/replacement-deadlines.ts b/lib/hrm/replacement-deadlines.ts
+new file mode 100644
+index 000000000..634ec8c69
+--- /dev/null
++++ b/lib/hrm/replacement-deadlines.ts
+@@ -0,0 +1,18 @@
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++import { pilotGraph } from './pilot-graph';
++import { assertAssignmentDeadlines, AssignmentDeadlineHold, type AssignmentTimingReview } from '@/packager/src/assignment-settings';
++export { AssignmentDeadlineHold, DEADLINE_HOLD_CODE } from '@/packager/src/assignment-settings';
++
++/** Shared admission for every hosted request, including legacy and retry callers. */
++export async function checkReplacementDeadlines(tenantId: string, sourceAppId: string | null | undefined, review?: AssignmentTimingReview | null) {
++  if (!sourceAppId) return;
++  try {
++    const token = await getServicePrincipalToken(tenantId);
++    if (!token) throw new Error('No read authority');
++    const rows = await pilotGraph(token).assignments(sourceAppId);
++    assertAssignmentDeadlines(rows, sourceAppId, review);
++  } catch (error) {
++    if (error instanceof AssignmentDeadlineHold) throw error;
++    throw new AssignmentDeadlineHold('Paused for IT: current assignment deadlines could not be verified. Refresh the review before retrying.');
++  }
 +}
 diff --git a/lib/intune-description.ts b/lib/intune-description.ts
 index a02a73155..b63213afd 100644

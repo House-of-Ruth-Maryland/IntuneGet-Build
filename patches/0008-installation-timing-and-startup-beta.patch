@@ -82,11 +82,20 @@ index 000000000..10d83cc0a
 +[IO.File]::WriteAllText((Join-Path $PackageDirectory 'Uninstall-AfterRestart.cmd'),($uninstall -replace "`r?`n","`r`n"),[Text.Encoding]::ASCII)
 diff --git a/.github/scripts/Preserve-AssignmentSettings.ps1 b/.github/scripts/Preserve-AssignmentSettings.ps1
 new file mode 100644
-index 000000000..d861c957e
+index 000000000..a6312e1d0
 --- /dev/null
 +++ b/.github/scripts/Preserve-AssignmentSettings.ps1
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,120 @@
 +# Pure replacement-assignment contract. Dot-source only; no Graph writes or installation.
++function Copy-IntuneGetAssignmentValue($Value) {
++    if($Value -is [Collections.IDictionary] -or $Value -is [pscustomobject]){
++        $map=Get-IntuneGetAssignmentMap $Value;$copy=[ordered]@{}
++        foreach($key in $map.Keys){$copy[$key]=Copy-IntuneGetAssignmentValue $map[$key]}
++        return $copy
++    }
++    if($Value -is [Collections.IEnumerable] -and $Value -isnot [string]){return ,@(foreach($item in $Value){Copy-IntuneGetAssignmentValue $item})}
++    return $Value
++}
 +function Get-IntuneGetAssignmentMap($Value) {
 +    $result=@{}
 +    if ($Value -is [Collections.IDictionary]) { foreach($key in $Value.Keys){$result[[string]$key]=$Value[$key]} }
@@ -99,7 +108,7 @@ index 000000000..d861c957e
 +    foreach($key in $old.Keys){if($key -notin $keys){throw 'Unsupported assignment settings. Review this copy in Intune before replacing it.'}}
 +    if($old.ContainsKey('@odata.type') -and $old['@odata.type'] -ne '#microsoft.graph.win32LobAppAssignmentSettings'){throw 'Only Win32 assignment settings can be carried over.'}
 +    $result=[ordered]@{'@odata.type'='#microsoft.graph.win32LobAppAssignmentSettings';notifications='showAll';deliveryOptimizationPriority='notConfigured'}
-+    foreach($key in $keys[2..6]){if($old.ContainsKey($key)){$result[$key]=$old[$key]}}
++    foreach($key in $keys[2..6]){if($old.ContainsKey($key)){$result[$key]=Copy-IntuneGetAssignmentValue $old[$key]}}
 +    if($result.notifications -notin @('showAll','showReboot','hideAll')){throw 'Unsupported notification setting. Review it in Intune.'}
 +    if($result.deliveryOptimizationPriority -notin @('notConfigured','foreground')){throw 'Unsupported download priority. Review it in Intune.'}
 +    if($result.Contains('installTimeSettings') -and $null -ne $result.installTimeSettings){
@@ -151,9 +160,36 @@ index 000000000..d861c957e
 +    }
 +    return $false
 +}
++function Assert-IntuneGetReplacementDeadlines([object[]]$Snapshot,[string]$SourceAppId,$Review=$null,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow) {
++    $map=Get-IntuneGetAssignmentMap $Review
++    if($null -ne $Review -and ($map.sourceAppId -ne $SourceAppId -or (ConvertTo-IntuneGetAssignmentCanonical $Snapshot) -cne (ConvertTo-IntuneGetAssignmentCanonical $map.expected))){throw 'Assignments changed after review. Review the deadlines again.'}
++    $affected=@($Snapshot | Where-Object {
++        $t=Get-IntuneGetAssignmentMap $_.settings.installTimeSettings
++        $_.intent -eq 'required' -and $_.target['@odata.type'] -notlike '*exclusionGroup*' -and $null -ne $t.deadlineDateTime -and ([DateTimeOffset]::Parse([string]$t.deadlineDateTime) -le $(if($t.useLocalTime -eq $true){$Now.AddHours(14)}else{$Now}))
++    })
++    if(-not $affected.Count){return ,$affected}
++    $confirmation=Get-IntuneGetAssignmentMap $map.deadlineConfirmation
++    if($confirmation.decision -notin @('retain','reschedule') -or $map.expiredDates -ne 'keep'){throw 'Paused for IT: explicitly retain expired deadlines or choose a new future deadline before packaging.'}
++    $ids=@($affected | ForEach-Object {[string]$_.id} | Sort-Object)
++    if(@($ids | Where-Object {-not $_}).Count -or @($ids | Select-Object -Unique).Count -ne $ids.Count -or (ConvertTo-IntuneGetAssignmentCanonical $ids) -cne (ConvertTo-IntuneGetAssignmentCanonical @($confirmation.assignmentIds | Sort-Object))){throw 'The affected assignments changed or another deadline expired. Review again.'}
++    if($confirmation.decision -eq 'reschedule'){
++        $date=[DateTimeOffset]::MinValue
++        $text=if($confirmation.newDeadline -is [DateTime] -or $confirmation.newDeadline -is [DateTimeOffset]){([DateTimeOffset]$confirmation.newDeadline).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')}else{[string]$confirmation.newDeadline}
++        if($text -notmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{3})?Z$' -or -not [DateTimeOffset]::TryParse($text,[ref]$date) -or $date.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ss') -ne $text.Substring(0,19)){throw 'Enter a valid new deadline.'}
++        foreach($row in $affected){
++            $t=Get-IntuneGetAssignmentMap $row.settings.installTimeSettings
++            $cutoff=if($t.useLocalTime -eq $true){$Now.AddHours(14)}else{$Now}
++            if($date -le $cutoff){throw 'The new deadline must still be in the future; device-local deadlines need 14 hours of lead time.'}
++            if($t.startDateTime -and $date -lt [DateTimeOffset]::Parse([string]$t.startDateTime)){throw 'The new deadline must be at or after every affected availability date.'}
++        }
++    }
++    return ,$affected
++}
 +function Get-IntuneGetCarriedAssignments([object[]]$Rows,[string]$SourceAppId,$Review=$null,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow,[bool]$RequireDateReview=$true) {
 +    $snapshot=Get-IntuneGetAssignmentSnapshot $Rows
 +    $reviewMap=Get-IntuneGetAssignmentMap $Review
++    $affected=Assert-IntuneGetReplacementDeadlines $snapshot $SourceAppId $Review $Now
++    $affectedIds=@($affected | ForEach-Object {[string]$_.id})
 +    if($null -ne $Review){
 +        if(-not $reviewMap.ContainsKey('sourceAppId') -or -not $reviewMap.ContainsKey('expected') -or -not $reviewMap.ContainsKey('expiredDates')){throw 'Invalid assignment review. Review this update again.'}
 +        if($reviewMap.sourceAppId -ne $SourceAppId -or $reviewMap.expiredDates -notin @('keep','reset') -or (ConvertTo-IntuneGetAssignmentCanonical $snapshot) -cne (ConvertTo-IntuneGetAssignmentCanonical $reviewMap.expected)){throw 'Assignments changed after review. Refresh App updates and review again.'}
@@ -161,9 +197,11 @@ index 000000000..d861c957e
 +    if($RequireDateReview -and (Test-IntuneGetAssignmentDateReview $snapshot $Now) -and $null -eq $Review){throw 'Past or device-local assignment dates require review before replacement. Review this update before retrying.'}
 +    $result=@()
 +    foreach($row in $snapshot){
++        $id=$row.id
 +        $row.Remove('id');$row['@odata.type']='#microsoft.graph.mobileAppAssignment'
 +        if($null -eq $row.settings){$row.Remove('settings')}
 +        elseif($null -ne $Review -and $reviewMap.expiredDates -eq 'reset'){$row.settings['installTimeSettings']=$null}
++        elseif($id -in $affectedIds -and $reviewMap.deadlineConfirmation.decision -eq 'reschedule'){$row.settings.installTimeSettings.deadlineDateTime=$reviewMap.deadlineConfirmation.newDeadline}
 +        $result+=$row
 +    }
 +    return ,$result
@@ -578,12 +616,12 @@ index 000000000..02bdfd13d
 +});
 diff --git a/app/api/hrm/installation-policy/route.ts b/app/api/hrm/installation-policy/route.ts
 new file mode 100644
-index 000000000..57926e202
+index 000000000..a6a5cbbff
 --- /dev/null
 +++ b/app/api/hrm/installation-policy/route.ts
 @@ -0,0 +1,64 @@
 +import type { AppUpdatePolicy } from '@/types/update-policies';
-+import {assignmentReviewSupported,startupPilotValidated} from '@/lib/hrm/packaging-capabilities';
++import {startupPilotValidated} from '@/lib/hrm/packaging-capabilities';
 +import { restartPilotProblem } from '@/lib/hrm/startup-pilot';
 +import { getServicePrincipalToken } from '@/lib/intune/graph-client';
 +import { pilotGraph } from '@/lib/hrm/pilot-graph';
@@ -600,7 +638,7 @@ index 000000000..57926e202
 +  const { sqliteDb } = await import('@/lib/db/sqlite');
 +  const policies = (await sqliteDb.updatePolicies.list(userId, tenant)).filter(policy => policy.policy_type === 'auto_update');
 +  const restartEligibility = await Promise.all(policies.map(async policy => ({ appId: policy.winget_id.toLowerCase(), problem: await restartPilotProblem(policy) })));
-+  return { supported: true, manualReviewSupported:assignmentReviewSupported(), restartPilotSupported: startupPilotValidated() && !getFeatureFlags().localPackager && isGitHubActionsConfigured(), shared: store.shared(tenant), exceptions: store.exceptions(tenant), restartEligibility };
++  return { supported: true, manualReviewSupported:true, restartPilotSupported: startupPilotValidated() && !getFeatureFlags().localPackager && isGitHubActionsConfigured(), shared: store.shared(tenant), exceptions: store.exceptions(tenant), restartEligibility };
 +}
 +export async function GET(request: NextRequest) {
 +  const user = await parseAccessToken(request.headers.get('Authorization'));
@@ -1640,10 +1678,20 @@ index 000000000..d1027869a
 +  return { ...query, refresh, cancellation };
 +}
 diff --git a/lib/github-actions.test.ts b/lib/github-actions.test.ts
-index b19ddfdf4..4d2ea263e 100644
+index b19ddfdf4..af39f2d46 100644
 --- a/lib/github-actions.test.ts
 +++ b/lib/github-actions.test.ts
-@@ -48,6 +48,9 @@ vi.mock('./winget-dependencies', async (importOriginal) => {
+@@ -15,6 +15,9 @@ import { QaCompatibilityGateError } from './qa/gate';
+ import { generateUninstallCommand } from './detection-rules';
+ import { WorkflowDispatchRateLimitError, WorkflowDispatchUnconfirmedError, WorkflowDispatchRetryStopped } from './workflow-dispatch-rate-limit';
+ import { sanitizeAssignmentsForDispatch } from './assignment-intents';
++const deadlineGraph=vi.hoisted(()=>({rows:[] as unknown[],reads:vi.fn()}));
++vi.mock('./intune/graph-client',()=>({getServicePrincipalToken:async()=>'fixture-token'}));
++vi.mock('./hrm/pilot-graph',()=>({pilotGraph:()=>({assignments:async()=>{deadlineGraph.reads();return deadlineGraph.rows}})}));
+ 
+ const { enforceInstallerPreflightMock, enforceQaGateMock, reconcileCatalogInstallerMock, resolveDependenciesMock } = vi.hoisted(() => ({
+   enforceInstallerPreflightMock: vi.fn(),
+@@ -48,6 +51,9 @@ vi.mock('./winget-dependencies', async (importOriginal) => {
    };
  });
  
@@ -1653,7 +1701,22 @@ index b19ddfdf4..4d2ea263e 100644
  const config: GitHubActionsConfig = {
    token: 'test-token',
    owner: 'example',
-@@ -1401,3 +1404,22 @@ describe('bounded runner evidence reads', () => {
+@@ -78,6 +84,14 @@ function workflowInputs(overrides: Partial<WorkflowInputs> = {}): WorkflowInputs
+   };
+ }
+ 
++it('holds replacement admission and retries before reconciliation, QA or hosted writes',async()=>{
++ deadlineGraph.rows=[{id:'deadline',intent:'required',target:{'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'},settings:{installTimeSettings:{useLocalTime:false,deadlineDateTime:'2020-01-01T00:00:00Z'}}}];
++ const fetch=vi.fn();vi.stubGlobal('fetch',fetch);
++ for(let attempt=0;attempt<2;attempt++)await expect(triggerPackagingWorkflow(workflowInputs({sourceIntuneAppId:'source'}),config)).rejects.toThrow('Paused for IT');
++ expect(deadlineGraph.reads).toHaveBeenCalledTimes(2);expect(fetch).not.toHaveBeenCalled();expect(reconcileCatalogInstallerMock).not.toHaveBeenCalled();expect(enforceQaGateMock).not.toHaveBeenCalled();
++ deadlineGraph.rows=[];
++});
++
+ afterEach(() => {
+   vi.useRealTimers();
+   vi.unstubAllGlobals();
+@@ -1401,3 +1415,22 @@ describe('bounded runner evidence reads', () => {
      await expect(getWorkflowRun(42, config)).rejects.toThrow('GitHub workflow evidence unavailable (HTTP 500)');
    });
  });
@@ -1677,18 +1740,20 @@ index b19ddfdf4..4d2ea263e 100644
 +  });
 +});
 diff --git a/lib/github-actions.ts b/lib/github-actions.ts
-index a53fd5a91..6d27d4381 100644
+index a53fd5a91..81314ab22 100644
 --- a/lib/github-actions.ts
 +++ b/lib/github-actions.ts
-@@ -8,6 +8,7 @@ import { isExactPackagingRun } from './runner-loss';
+@@ -8,6 +8,9 @@ import { isExactPackagingRun } from './runner-loss';
  
  import { createHash, createHmac } from 'node:crypto';
  import { dispatchRateLimitError, WorkflowDispatchUnconfirmedError } from './workflow-dispatch-rate-limit';
++import {checkReplacementDeadlines} from '@/lib/hrm/replacement-deadlines';
++import type {AssignmentTimingReview} from '@/packager/src/assignment-settings';
 +import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
  import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
  import { authorizeCuratedWorkflow } from '@/lib/curated-catalog/server';
  import { assertCuratedLicenceAccepted } from '@/lib/curated-catalog/licence';
-@@ -56,6 +57,8 @@ export interface WorkflowInputs {
+@@ -56,6 +59,8 @@ export interface WorkflowInputs {
    detectionRules?: string; // JSON-serialized DetectionRule[]
    requirementRules?: string; // JSON-serialized RequirementRule[]
    assignments?: string; // JSON-serialized PackageAssignment[]
@@ -1697,7 +1762,21 @@ index a53fd5a91..6d27d4381 100644
    categories?: string; // JSON-serialized IntuneAppCategorySelection[]
    espProfiles?: string; // JSON-serialized EspProfileSelection[]
    relationships?: string; // JSON-serialized AppRelationship[]
-@@ -248,6 +251,19 @@ export async function triggerPackagingWorkflow(
+@@ -137,6 +142,13 @@ export async function triggerPackagingWorkflow(
+     newJobAdmission?: boolean; beforeDispatch?: (identity: string) => Promise<void> }
+ ): Promise<TriggerResult> {
+   const cfg = config || getGitHubActionsConfig();
++  let deadlineReview: AssignmentTimingReview | undefined;
++  if (inputs.assignmentReview) {
++    try { deadlineReview = JSON.parse(inputs.assignmentReview); }
++    catch { throw new Error("Invalid assignment deadline review. Review this update again."); }
++  }
++  await checkReplacementDeadlines(inputs.tenantId, inputs.sourceIntuneAppId, deadlineReview);
++
+ 
+   let effectiveInputs = inputs;
+   let trustedInstallers: NormalizedInstaller[] | undefined;
+@@ -248,6 +260,19 @@ export async function triggerPackagingWorkflow(
            effectiveInputs.installerSuccessCodes
          ),
        };
@@ -1717,7 +1796,7 @@ index a53fd5a91..6d27d4381 100644
    // Final dispatch boundary: custom callers bypass catalog reconciliation, so
    // they must still prove an unattended install contract before GitHub sees
    // the installer URL or any tenant-scoped packaging request.
-@@ -321,6 +337,7 @@ export async function triggerPackagingWorkflow(
+@@ -321,6 +346,7 @@ export async function triggerPackagingWorkflow(
        client_payload: {
          job: {
            jobId: inputs.jobId,
@@ -1725,7 +1804,7 @@ index a53fd5a91..6d27d4381 100644
            tenantId: inputs.tenantId,
            callbackUrl: inputs.callbackUrl,
          },
-@@ -351,6 +368,8 @@ export async function triggerPackagingWorkflow(
+@@ -351,6 +377,8 @@ export async function triggerPackagingWorkflow(
              normalizedPackageInput?.detectionRulesJson || inputs.detectionRules || '[]',
            requirementRules: inputs.requirementRules || '[]',
            assignments: inputs.assignments || '[]',
@@ -2644,15 +2723,41 @@ index 000000000..f0be6c1a3
 +    }
 +    try { exit (Invoke-IntuneGetStartup) } catch { [Console]::Error.WriteLine('IntuneGet startup installation Beta failed. Review the protected local state and installer logs.');exit 60010 }
 +}
+diff --git a/packager/src/api-client.ts b/packager/src/api-client.ts
+index b977e1ae3..9b941a4ab 100644
+--- a/packager/src/api-client.ts
++++ b/packager/src/api-client.ts
+@@ -163,6 +163,7 @@ export class ApiClient {
+       progressPercent?: number;
+       progressMessage?: string;
+       error?: string;
++      errorCode?: string;
+       intuneAppId?: string;
+       intuneAppUrl?: string;
+       duplicateInfo?: Record<string, unknown>;
+@@ -215,6 +216,7 @@ export class ApiClient {
+     status: string,
+     additionalData?: {
+       error?: string;
++      errorCode?: string;
+       intuneAppId?: string;
+       intuneAppUrl?: string;
+       duplicateInfo?: Record<string, unknown>;
 diff --git a/packager/src/assignment-settings.ts b/packager/src/assignment-settings.ts
 new file mode 100644
-index 000000000..e43348218
+index 000000000..a92fa2392
 --- /dev/null
 +++ b/packager/src/assignment-settings.ts
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,103 @@
 +/** Shared assignment review contract. Pure functions; never contacts Intune. */
 +export type PlainRecord = Record<string, unknown>;
-+export interface AssignmentTimingReview { sourceAppId: string; expected: unknown[]; expiredDates: 'keep' | 'reset' }
++export interface DeadlineConfirmation { decision: 'retain' | 'reschedule'; assignmentIds: string[]; newDeadline?: string }
++export interface AssignmentTimingReview { sourceAppId: string; expected: unknown[]; expiredDates: 'keep' | 'reset'; deadlineConfirmation?: DeadlineConfirmation }
++export const DEADLINE_HOLD_CODE = 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED';
++export class AssignmentDeadlineHold extends Error {
++  readonly code = DEADLINE_HOLD_CODE;
++  constructor(message = 'Paused for IT: review expired assignment deadlines before packaging.') { super(message); this.name = 'AssignmentDeadlineHold'; }
++}
 +export const asObject = (v: unknown): PlainRecord => v && typeof v === 'object' && !Array.isArray(v) ? v as PlainRecord : {};
 +const copy = <T>(value: T): T => value === undefined ? value : JSON.parse(JSON.stringify(value));
 +const SETTINGS = '#microsoft.graph.win32LobAppAssignmentSettings';
@@ -2697,25 +2802,62 @@ index 000000000..e43348218
 +    return ['startDateTime','deadlineDateTime'].some(key => typeof timing[key] === 'string' && (timing.useLocalTime === true || Date.parse(timing[key] as string) < now));
 +  });
 +}
-+export function carryoverAssignments(rows: unknown[], sourceAppId: string, review?: AssignmentTimingReview | null, now = Date.now(), requireDateReview = true): PlainRecord[] {
++/** A device-local wall time can already be due in UTC+14; later deadlines are unaffected. */
++export function deadlineAssignments(snapshot: unknown[], now = Date.now()): PlainRecord[] {
++  return snapshot.map(asObject).filter(row => {
++    if (row.intent !== 'required' || String(asObject(row.target)['@odata.type']).includes('exclusionGroup')) return false;
++    const t = asObject(asObject(row.settings).installTimeSettings);
++    return typeof t.deadlineDateTime === 'string' && Date.parse(t.deadlineDateTime) <= now + (t.useLocalTime === true ? 14 * 3600000 : 0);
++  });
++}
++export function deadlineProblem(snapshot: unknown[], sourceAppId: string, review?: AssignmentTimingReview | null, now = Date.now()): string | null {
++  if (review && (review.sourceAppId?.toLowerCase() !== sourceAppId.toLowerCase() || !Array.isArray(review.expected) || canonical(snapshot) !== canonical(review.expected))) return 'Assignments changed after review. Review the deadlines again.';
++  const affected = deadlineAssignments(snapshot, now);
++  if (!affected.length) return null;
++  const confirmation = review?.deadlineConfirmation;
++  if (!confirmation || !['retain','reschedule'].includes(confirmation.decision) || !Array.isArray(confirmation.assignmentIds) || review?.expiredDates !== 'keep') return 'Paused for IT: explicitly retain expired deadlines or choose a new future deadline before packaging.';
++  const ids = affected.map(row => String(row.id || '')).sort();
++  if (ids.some(id => !id) || new Set(ids).size !== ids.length || canonical(ids) !== canonical([...(confirmation.assignmentIds || [])].sort())) return 'The affected assignments changed or another deadline expired. Review again.';
++  if (confirmation.decision === 'reschedule') {
++    const value = confirmation.newDeadline;
++    if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0,19) !== value.slice(0,19)) return 'Enter a valid new deadline.';
++    for (const row of affected) {
++      const timing = asObject(asObject(row.settings).installTimeSettings);
++      // Cover the latest civil time zone without changing each assignment’s clock mode.
++      if (Date.parse(value) <= now + (timing.useLocalTime === true ? 14 * 3600000 : 0)) return timing.useLocalTime === true ? 'Device-local deadlines need at least 14 hours of lead time. Retain explicitly or choose a later deadline.' : 'The new deadline must still be in the future.';
++      const start = typeof timing.startDateTime === 'string' ? (timing.useLocalTime === true ? timing.startDateTime.slice(0,19)+'Z' : timing.startDateTime) : null;
++      if (start && Date.parse(value) < Date.parse(start)) return 'The new deadline must be at or after every affected availability date.';
++    }
++  }
++  return null;
++}
++export function assertAssignmentDeadlines(rows: unknown[], sourceAppId: string, review?: AssignmentTimingReview | null, now = Date.now()): unknown[] {
 +  const snapshot = assignmentSnapshot(rows);
++  const problem = deadlineProblem(snapshot, sourceAppId, review, now);
++  if (problem) throw new AssignmentDeadlineHold(problem);
++  return snapshot;
++}
++export function carryoverAssignments(rows: unknown[], sourceAppId: string, review?: AssignmentTimingReview | null, now = Date.now(), requireDateReview = true): PlainRecord[] {
++  const snapshot = assertAssignmentDeadlines(rows, sourceAppId, review, now);
 +  if (review && (typeof review.sourceAppId !== 'string' || !Array.isArray(review.expected))) throw new Error('Invalid assignment review. Review this update again.');
 +  if (review && (review.sourceAppId.toLowerCase() !== sourceAppId.toLowerCase() || !['keep','reset'].includes(review.expiredDates) || canonical(snapshot) !== canonical(review.expected))) throw new Error('Assignments changed after review. Refresh App updates and review again.');
 +  if (requireDateReview && needsDateReview(snapshot, now) && !review) throw new Error('Past or device-local assignment dates require review before replacement. Review this update before retrying.');
++  const affected = new Set(deadlineAssignments(snapshot, now).map(row => String(row.id)));
 +  return snapshot.map(value => {
 +    const row = copy(asObject(value)); delete row.id;
 +    row['@odata.type'] = '#microsoft.graph.mobileAppAssignment';
 +    if (row.settings === null) delete row.settings;
 +    else if (review?.expiredDates === 'reset') asObject(row.settings).installTimeSettings = null;
++    else if (affected.has(String(asObject(value).id)) && review?.deadlineConfirmation?.decision === 'reschedule') asObject(asObject(row.settings).installTimeSettings).deadlineDateTime = review.deadlineConfirmation.newDeadline;
 +    return row;
 +  });
 +}
 diff --git a/packager/src/intune-uploader.ts b/packager/src/intune-uploader.ts
-index fd6905bc2..7fffa460d 100644
+index fd6905bc2..755e7c968 100644
 --- a/packager/src/intune-uploader.ts
 +++ b/packager/src/intune-uploader.ts
 @@ -1,3 +1,5 @@
-+import { carryoverAssignments, type AssignmentTimingReview } from './assignment-settings.js';
++import { carryoverAssignments, AssignmentDeadlineHold, type AssignmentTimingReview } from './assignment-settings.js';
 +import { startupEnabled, startupPackageProblem } from './startup-install.js';
  /**
   * Intune Uploader - Uploads .intunewin packages to Microsoft Intune
@@ -2748,7 +2890,27 @@ index fd6905bc2..7fffa460d 100644
  
  export class IntuneUploader {
    private config: PackagerConfig;
-@@ -314,6 +306,8 @@ export class IntuneUploader {
+@@ -184,6 +176,19 @@ export class IntuneUploader {
+     this.logger = createLogger('IntuneUploader');
+   }
+ 
++  /** Fail closed before downloading or packaging any replacement. */
++  async checkReplacementDeadlines(job: PackagingJob): Promise<void> {
++    const config = this.asRecord(job.package_config);
++    const source = config?.sourceIntuneAppId || config?.replacesIntuneAppId;
++    if (typeof source !== 'string' || !source) return;
++    try {
++      await this.getGraphAssignmentsForApp(new GraphClient(this.config, job.tenant_id), source, config?.assignmentReview as AssignmentTimingReview | undefined);
++    } catch (error) {
++      if (error instanceof AssignmentDeadlineHold) throw error;
++      throw new AssignmentDeadlineHold('Paused for IT: current assignment deadlines could not be verified. Refresh the review before retrying.');
++    }
++  }
++
+   /**
+    * Upload .intunewin package to Intune
+    */
+@@ -314,6 +319,8 @@ export class IntuneUploader {
     * to Auto mode and show UI to logged-in users. Explicit 'Auto' adds no flag.
     */
    private buildCommandLines(job: PackagingJob): { install: string; uninstall: string } {
@@ -2757,7 +2919,7 @@ index fd6905bc2..7fffa460d 100644
      const packageConfig = this.asRecord(job.package_config);
      let deployModeFlag = ' -DeployMode Silent';
  
-@@ -377,6 +371,8 @@ export class IntuneUploader {
+@@ -377,6 +384,8 @@ export class IntuneUploader {
          { returnCode: 3010, type: 'softReboot' },
          { returnCode: 1641, type: 'hardReboot' },
          { returnCode: 1618, type: 'retry' },
@@ -2766,7 +2928,15 @@ index fd6905bc2..7fffa460d 100644
        ],
        rules: this.buildDetectionRules(job),
      };
-@@ -723,7 +719,9 @@ export class IntuneUploader {
+@@ -712,6 +721,7 @@ export class IntuneUploader {
+     newAppId: string,
+     job: PackagingJob
+   ): Promise<void> {
++    await this.checkReplacementDeadlines(job);
+     const explicitAssignments = this.extractExplicitAssignments(job);
+     const migrationConfig = this.extractAssignmentMigrationConfig(job);
+     let graphAssignments = this.toGraphAssignments(explicitAssignments);
+@@ -723,7 +733,9 @@ export class IntuneUploader {
      ) {
        graphAssignments = await this.getGraphAssignmentsForApp(
          graphClient,
@@ -2777,7 +2947,29 @@ index fd6905bc2..7fffa460d 100644
        );
        this.logger.info('Carried over assignments from previous app', {
          sourceAppId: migrationConfig.sourceIntuneAppId,
-@@ -1120,65 +1118,24 @@ export class IntuneUploader {
+@@ -1024,17 +1036,18 @@ export class IntuneUploader {
+     }
+ 
+     const nested = this.asRecord(packageConfig.assignmentMigration);
++    const legacyReplacement = typeof packageConfig.replacesIntuneAppId === 'string' && /^[0-9a-f-]{36}$/i.test(packageConfig.replacesIntuneAppId);
+     const sourceIntuneAppId = typeof packageConfig.sourceIntuneAppId === 'string'
+       ? packageConfig.sourceIntuneAppId
+-      : undefined;
++      : legacyReplacement ? packageConfig.replacesIntuneAppId as string : undefined;
+ 
+     const carryOverAssignments = Boolean(
+       (nested?.carryOverAssignments as boolean | undefined) ??
+-        packageConfig.carryOverAssignments
++        packageConfig.carryOverAssignments ?? (legacyReplacement && this.extractExplicitAssignments(job).length === 0)
+     );
+     const removeAssignmentsFromPreviousApp = Boolean(
+       (nested?.removeAssignmentsFromPreviousApp as boolean | undefined) ??
+-        packageConfig.removeAssignmentsFromPreviousApp
++        packageConfig.removeAssignmentsFromPreviousApp ?? legacyReplacement
+     );
+ 
+     return {
+@@ -1120,65 +1133,24 @@ export class IntuneUploader {
      return graphAssignments;
    }
  
@@ -2860,8 +3052,43 @@ index fd6905bc2..7fffa460d 100644
    }
  
    private async assignApp(
+diff --git a/packager/src/job-poller.ts b/packager/src/job-poller.ts
+index 000a8cc49..52c811422 100644
+--- a/packager/src/job-poller.ts
++++ b/packager/src/job-poller.ts
+@@ -144,9 +144,10 @@ export class JobPoller {
+           displayName: result.job.display_name,
+         });
+ 
++        let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
+         try {
+           // Start heartbeat
+-          const heartbeatInterval = this.startHeartbeat(result.job.id);
++          heartbeatInterval = this.startHeartbeat(result.job.id);
+ 
+           // Process the job
+           await handler(result.job);
+@@ -162,8 +163,10 @@ export class JobPoller {
+           // Mark job as failed
+           await this.updateJobStatus(result.job.id, 'failed', {
+             error_message: error instanceof Error ? error.message : String(error),
++            ...(error instanceof Error && error.name === 'AssignmentDeadlineHold' ? {error_code:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',error_stage:'validation',error_category:'validation'} : {}),
+           });
+         } finally {
++          if (heartbeatInterval) clearInterval(heartbeatInterval);
+           this.currentJobId = null;
+         }
+       }
+@@ -416,6 +419,7 @@ export class JobPoller {
+       try {
+         await this.apiClient.updateStatus(jobId, status, {
+           error: additionalData?.error_message as string | undefined,
++          errorCode: additionalData?.error_code as string | undefined,
+           intuneAppId: additionalData?.intune_app_id as string | undefined,
+           intuneAppUrl: additionalData?.intune_app_url as string | undefined,
+           duplicateInfo: additionalData?.duplicate_info as
 diff --git a/packager/src/job-processor.ts b/packager/src/job-processor.ts
-index 9f405cf5b..b680cf291 100644
+index 9f405cf5b..d4d9ac9e4 100644
 --- a/packager/src/job-processor.ts
 +++ b/packager/src/job-processor.ts
 @@ -2,6 +2,7 @@
@@ -2872,7 +3099,15 @@ index 9f405cf5b..b680cf291 100644
  import * as fs from 'fs';
  import * as path from 'path';
  import * as crypto from 'crypto';
-@@ -493,6 +494,7 @@ export class JobProcessor {
+@@ -110,6 +111,7 @@ export class JobProcessor {
+     }
+ 
+     try {
++      await this.uploader.checkReplacementDeadlines(job);
+       // Create job work directory
+       if (host === 'win32') await fs.promises.mkdir(jobWorkDir, { recursive: true });
+       else await fs.promises.chmod(jobWorkDir, 0o700);
+@@ -493,6 +495,7 @@ export class JobProcessor {
        'utf8'
      );
  
@@ -2880,7 +3115,7 @@ index 9f405cf5b..b680cf291 100644
      this.logger.debug('PSADT package created', { packageDir });
      return packageDir;
    }
-@@ -764,6 +766,7 @@ catch
+@@ -764,6 +767,7 @@ catch
        86_400
      );
      const allowDefer = strictBoolean('allowDefer');
@@ -2888,7 +3123,7 @@ index 9f405cf5b..b680cf291 100644
      const deferTimes = boundedInteger(config?.deferTimes, 'deferTimes', 3, 1_000)!;
      const blockExecution = strictBoolean('blockExecution');
      const promptToSave = strictBoolean('promptToSave');
-@@ -789,6 +792,7 @@ catch
+@@ -789,6 +793,7 @@ catch
        // v4.1 rejects an explicitly supplied -DeferDays 0 value.
        if (deferDays === 0) deferDays = null;
      }
@@ -2896,7 +3131,7 @@ index 9f405cf5b..b680cf291 100644
      let deferDeadline: string | null = null;
      if (config?.deferDeadline !== undefined && config.deferDeadline !== null) {
        if (typeof config.deferDeadline !== 'string') {
-@@ -829,7 +833,7 @@ catch
+@@ -829,7 +834,7 @@ catch
          installParameters.push(forceCloseCountdown !== null
            ? `-ForceCloseProcessesCountdown ${forceCloseCountdown}`
            : `-CloseProcessesCountdown ${closeCountdown}`);
@@ -2905,7 +3140,7 @@ index 9f405cf5b..b680cf291 100644
          if (deferDeadline) installParameters.push(`-DeferDeadline '${psSingleQuotedContent(deferDeadline)}'`);
          if (deferDays !== null) installParameters.push(`-DeferDays ${deferDays}`);
        } else if (showClosePrompt) {
-@@ -841,7 +845,8 @@ catch
+@@ -841,7 +846,8 @@ catch
        }
        if (blockExecution) installParameters.push('-BlockExecution');
      } else if (allowDefer) {
@@ -2951,7 +3186,7 @@ index 000000000..db00cacf7
 +}
 diff --git a/packager/tests/assignment-settings.fixture.ps1 b/packager/tests/assignment-settings.fixture.ps1
 new file mode 100644
-index 000000000..5268a52c0
+index 000000000..1042ccadd
 --- /dev/null
 +++ b/packager/tests/assignment-settings.fixture.ps1
 @@ -0,0 +1,14 @@
@@ -2959,33 +3194,32 @@ index 000000000..5268a52c0
 +. (Join-Path $PSScriptRoot '../../.github/scripts/Preserve-AssignmentSettings.ps1')
 +$rows=@(@{id='a';intent='required';target=@{'@odata.type'='#microsoft.graph.groupAssignmentTarget';groupId='example'};settings=@{'@odata.type'='#microsoft.graph.win32LobAppAssignmentSettings';notifications='hideAll';deliveryOptimizationPriority='foreground';installTimeSettings=@{useLocalTime=$false;startDateTime='2020-01-01T00:00:00Z';deadlineDateTime='2020-01-02T00:00:00Z'};restartSettings=@{gracePeriodInMinutes=60}}},@{id='b';intent='available';target=@{'@odata.type'='#microsoft.graph.exclusionGroupAssignmentTarget';groupId='excluded'}})
 +$snapshot=Get-IntuneGetAssignmentSnapshot $rows
-+$review=@{sourceAppId='source';expected=$snapshot;expiredDates='keep'}
++$review=@{sourceAppId='source';expected=$snapshot;expiredDates='keep';deadlineConfirmation=@{decision='retain';assignmentIds=@('a')}}
 +$kept=Get-IntuneGetCarriedAssignments $rows 'source' $review
 +if($kept.Count -ne 2 -or $kept[0].settings.notifications -ne 'hideAll' -or $kept[0].settings.restartSettings.gracePeriodInMinutes -ne 60 -or $kept[1].Contains('settings')){throw 'Settings or exclusion not preserved'}
 +if($kept[0].settings.installTimeSettings.deadlineDateTime -ne '2020-01-02T00:00:00Z'){throw 'Deadline lost'}
-+$review.expiredDates='reset';$reset=Get-IntuneGetCarriedAssignments $rows 'source' $review
-+if($null -ne $reset[0].settings.installTimeSettings -or $reset[0].settings.notifications -ne 'hideAll'){throw 'Reset changed unrelated settings'}
++$review.deadlineConfirmation=@{decision='reschedule';assignmentIds=@('a');newDeadline='2099-01-01T00:00:00Z'};$reset=Get-IntuneGetCarriedAssignments $rows 'source' $review
++if($reset[0].settings.installTimeSettings.deadlineDateTime -ne '2099-01-01T00:00:00Z' -or $reset[0].settings.notifications -ne 'hideAll'){throw 'Reschedule changed unrelated settings'}
 +$blocked=$false;try{Get-IntuneGetCarriedAssignments $rows 'source' $null|Out-Null}catch{$blocked=$true};if(-not $blocked){throw 'Unreviewed past dates allowed'}
 +$review.expected=@();$blocked=$false;try{Get-IntuneGetCarriedAssignments $rows 'source' $review|Out-Null}catch{$blocked=$true};if(-not $blocked){throw 'Stale snapshot allowed'}
 +if($rows[0].settings.installTimeSettings.deadlineDateTime -ne '2020-01-02T00:00:00Z'){throw 'Source mutated'}
 +Write-Output 'PASS: preserve/reset, exclusions, stale snapshot, missing review, source immutability'
 diff --git a/packager/tests/assignment-settings.test.ts b/packager/tests/assignment-settings.test.ts
 new file mode 100644
-index 000000000..882096d2f
+index 000000000..9f585e788
 --- /dev/null
 +++ b/packager/tests/assignment-settings.test.ts
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,33 @@
 +import {describe,it,expect} from 'vitest';
 +import {assignmentSnapshot,carryoverAssignments} from '../src/assignment-settings';
 +const source='11111111-1111-4111-8111-111111111111';
 +const rows=[{id:'assignment',intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:'pilot',deviceAndAppManagementAssignmentFilterId:'filter',deviceAndAppManagementAssignmentFilterType:'include'},settings:{'@odata.type':'#microsoft.graph.win32LobAppAssignmentSettings',notifications:'hideAll',deliveryOptimizationPriority:'foreground',installTimeSettings:{useLocalTime:false,startDateTime:'2026-01-01T00:00:00Z',deadlineDateTime:'2026-01-02T00:00:00Z'},restartSettings:{gracePeriodInMinutes:1440,countdownDisplayBeforeRestartInMinutes:15,restartNotificationSnoozeDurationInMinutes:60}}}];
 +describe('replacement assignment timing review',()=>{
 + it('holds expired dates until explicit review, preserves settings and never mutates source',()=>{
-+  expect(()=>carryoverAssignments(rows,source)).toThrow('require review');
-+  const out=carryoverAssignments(rows,source,{sourceAppId:source,expected:assignmentSnapshot(rows),expiredDates:'keep'});
++  expect(()=>carryoverAssignments(rows,source)).toThrow('Paused for IT');
++  const out=carryoverAssignments(rows,source,{sourceAppId:source,expected:assignmentSnapshot(rows),expiredDates:'keep',deadlineConfirmation:{decision:'retain',assignmentIds:['assignment']}});
 +  expect(out[0].settings).toEqual(rows[0].settings);expect(out[0].target).toEqual(rows[0].target);expect(out[0]).not.toHaveProperty('id');
-+  const reset=carryoverAssignments(rows,source,{sourceAppId:source,expected:assignmentSnapshot(rows),expiredDates:'reset'});
-+  expect(reset[0].settings).toMatchObject({notifications:'hideAll',restartSettings:rows[0].settings.restartSettings,installTimeSettings:null});
++  expect(()=>carryoverAssignments(rows,source,{sourceAppId:source,expected:assignmentSnapshot(rows),expiredDates:'reset'})).toThrow('Paused for IT');
 +  expect(rows[0].settings.installTimeSettings.deadlineDateTime).toBe('2026-01-02T00:00:00Z');
 + });
 + it('rejects changed source or settings after review',()=>{
@@ -3043,6 +3277,19 @@ index acbae2fd6..d7029fdf6 100644
      await fs.writeFile(path.join(input, 'same.txt'), 'second');
      await expect(writeIntunewinPackage(input, 'Invoke-AppDeployToolkit.exe', output)).rejects.toThrow('collision');
    });
+diff --git a/packager/tests/linux-runtime.test.ts b/packager/tests/linux-runtime.test.ts
+index f574e1c6c..c42017e5d 100644
+--- a/packager/tests/linux-runtime.test.ts
++++ b/packager/tests/linux-runtime.test.ts
+@@ -7,7 +7,7 @@ import type { PackagerConfig } from '../src/config.js';
+ import type { PackagingJob, JobPoller } from '../src/job-poller.js';
+ 
+ vi.mock('../src/logger.js', () => ({ createLogger: () => ({info:vi.fn(),debug:vi.fn(),warn:vi.fn(),error:vi.fn()}) }));
+-vi.mock('../src/intune-uploader.js', () => ({ IntuneUploader: class {}, DuplicateAppError: class extends Error {} }));
++vi.mock('../src/intune-uploader.js', () => ({ IntuneUploader: class { async checkReplacementDeadlines() {} }, DuplicateAppError: class extends Error {} }));
+ const roots: string[] = [];
+ afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(p => fs.rm(p,{recursive:true,force:true}))); });
+ async function fixture(host = 'linux') {
 diff --git a/packager/tests/psadt-nested-portable.test.ts b/packager/tests/psadt-nested-portable.test.ts
 index d17cf5b2c..6126c00d7 100644
 --- a/packager/tests/psadt-nested-portable.test.ts
@@ -3061,6 +3308,88 @@ index d17cf5b2c..6126c00d7 100644
 +  expect(() => generator.generateDeployScript.call(generator, packagingJob({ package_config: {
 +    psadtConfig: { allowDefer: true, deferByDaysOnly: true, deferTimes: 1000 },
 +  } }), 'piicrawler.zip')).toThrow('positive day limit');
++});
+diff --git a/packager/tests/replacement-admission.test.ts b/packager/tests/replacement-admission.test.ts
+new file mode 100644
+index 000000000..55540151f
+--- /dev/null
++++ b/packager/tests/replacement-admission.test.ts
+@@ -0,0 +1,30 @@
++import {beforeEach,expect,it,vi} from 'vitest';
++import {mkdtemp,rm} from 'node:fs/promises';
++import {tmpdir} from 'node:os';
++import {join} from 'node:path';
++const graph=vi.hoisted(()=>({get:vi.fn(),post:vi.fn()}));
++vi.mock('../src/graph-client',()=>({GraphClient:class {get=graph.get;post=graph.post}}));
++import {JobProcessor} from '../src/job-processor';
++import {IntuneUploader} from '../src/intune-uploader';
++import type {PackagerConfig} from '../src/config';
++import type {PackagingJob} from '../src/job-poller';
++import {assignmentSnapshot} from '../src/assignment-settings';
++const rows=[{id:'a',intent:'required',target:{'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'},settings:{installTimeSettings:{useLocalTime:false,deadlineDateTime:'2020-01-01T00:00:00Z'}}}];
++beforeEach(()=>{graph.get.mockReset().mockResolvedValue({value:rows});graph.post.mockReset()});
++it('stops the actual local processor before tools or installer download, including retry',async()=>{
++ const work=await mkdtemp(join(tmpdir(),'deadline-admission-'));
++ try{
++  const config={paths:{work,tools:work},azure:{clientId:'fixture',useManagedIdentity:false}} as PackagerConfig;
++  const processor=new JobProcessor(config,{updateJobProgress:vi.fn()} as never);vi.spyOn(processor as any,'packagingPlatform').mockReturnValue('win32');
++  const tools=vi.spyOn(processor as any,'ensureToolsAvailable').mockRejectedValue(Error('tools reached'));
++  const job={id:'held',tenant_id:'tenant',installer_type:'exe',package_config:{replacesIntuneAppId:'source'}} as unknown as PackagingJob;
++  await expect(processor.processJob(job)).rejects.toThrow('Paused for IT');await expect(processor.processJob(job)).rejects.toThrow('Paused for IT');expect(tools).not.toHaveBeenCalled();expect(graph.post).not.toHaveBeenCalled();
++  job.package_config={replacesIntuneAppId:'source',assignmentReview:{sourceAppId:'source',expected:assignmentSnapshot(rows),expiredDates:'keep',deadlineConfirmation:{decision:'retain',assignmentIds:['a']}}};
++  await expect(processor.processJob(job)).rejects.toThrow('tools reached');expect(tools).toHaveBeenCalledTimes(1);
++ }finally{await rm(work,{recursive:true,force:true})}
++});
++it('rechecks live source timing before applying explicit replacement groups',async()=>{
++ const uploader=new IntuneUploader({azure:{clientId:'fixture',useManagedIdentity:false}} as PackagerConfig);
++ const job={tenant_id:'tenant',package_config:{sourceIntuneAppId:'source',assignments:[{type:'group',intent:'required',groupId:'new-group'}]}} as unknown as PackagingJob;
++ await expect((uploader as any).applyAssignments(graph,'new-app',job)).rejects.toThrow('Paused for IT');expect(graph.post).not.toHaveBeenCalled();
++});
+diff --git a/packager/tests/replacement-deadlines.test.ts b/packager/tests/replacement-deadlines.test.ts
+new file mode 100644
+index 000000000..5f14333c3
+--- /dev/null
++++ b/packager/tests/replacement-deadlines.test.ts
+@@ -0,0 +1,40 @@
++import {describe,it,expect} from 'vitest';
++import {assignmentSnapshot,carryoverAssignments,assertAssignmentDeadlines,type AssignmentTimingReview} from '../src/assignment-settings';
++const source='11111111-1111-4111-8111-111111111111',now=Date.parse('2026-11-24T12:00:00Z');
++const rows=[{id:'assignment',intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:'pilot'},settings:{notifications:'hideAll',installTimeSettings:{useLocalTime:false,startDateTime:'2026-01-01T00:00:00Z',deadlineDateTime:'2026-01-02T00:00:00Z'},restartSettings:{gracePeriodInMinutes:1440}}}];
++const review=(decision:'retain'|'reschedule'='retain',newDeadline?:string):AssignmentTimingReview=>({sourceAppId:source,expected:assignmentSnapshot(rows),expiredDates:'keep',deadlineConfirmation:{decision,assignmentIds:['assignment'],newDeadline}});
++describe('replacement deadline admission',()=>{
++ it('holds old flag-off requests and rejects the old reset-to-ASAP shortcut',()=>{
++  expect(()=>carryoverAssignments(rows,source,undefined,now,false)).toThrow('Paused for IT');
++  expect(()=>carryoverAssignments(rows,source,{sourceAppId:source,expected:assignmentSnapshot(rows),expiredDates:'reset'},now,false)).toThrow('Paused for IT');
++ });
++ it('retains explicitly and reschedules only affected deadlines without mutating any input',()=>{
++  const optional={...rows[0],id:'optional',intent:'available'},input=[...rows,optional],before=structuredClone(input);
++  const r={...review('reschedule','2026-11-25T12:00:00Z'),expected:assignmentSnapshot(input)};
++  const out=carryoverAssignments(input,source,r,now,false);
++  expect(out.find(r=>r.intent==='required')?.settings).toMatchObject({...rows[0].settings,installTimeSettings:{...rows[0].settings.installTimeSettings,deadlineDateTime:'2026-11-25T12:00:00Z'}});
++  expect(out.find(r=>r.intent==='available')?.settings).toMatchObject(rows[0].settings);expect(input).toEqual(before);
++  expect(carryoverAssignments(rows,source,review(),now,false)[0].settings).toMatchObject(rows[0].settings);
++ });
++ it('rejects stale reviews and rechecks a new deadline on retries',()=>{
++  expect(()=>assertAssignmentDeadlines([{...rows[0],intent:'available'}],source,review(),now)).toThrow('changed after review');
++  expect(()=>assertAssignmentDeadlines(rows,'other',review(),now)).toThrow('changed after review');
++  expect(()=>assertAssignmentDeadlines(rows,source,review('reschedule','2026-11-25T12:00:00Z'),now+172800000)).toThrow('future');
++ });
++ it('requires another confirmation if another assignment expires after review',()=>{
++  const future={...rows[0],id:'later',settings:{...rows[0].settings,installTimeSettings:{...rows[0].settings.installTimeSettings,deadlineDateTime:'2026-11-25T00:00:00Z'}}},both=[...rows,future],r={...review(),expected:assignmentSnapshot(both)};
++  expect(()=>assertAssignmentDeadlines(both,source,r,now)).not.toThrow();expect(()=>assertAssignmentDeadlines(both,source,r,now+86400000)).toThrow('another deadline expired');
++ });
++ it.each(['bad','2026-02-30T12:00:00Z','2026-11-24T10:00:00Z'])('rejects invalid new deadlines %s',value=>expect(()=>assertAssignmentDeadlines(rows,source,review('reschedule',value),now)).toThrow());
++ it('does not hold future UTC or optional deadlines',()=>{
++  const input=[{...rows[0],intent:'available'},{...rows[0],id:'future',settings:{installTimeSettings:{useLocalTime:false,deadlineDateTime:'2027-01-01T00:00:00Z'}}}];
++  expect(carryoverAssignments(input,source,undefined,now,false)).toHaveLength(2);
++ });
++ it('reviews only local deadlines that may already be due, and rejects a new wall time that is due in UTC+14',()=>{
++  const local=(hours:number)=>[{...rows[0],settings:{installTimeSettings:{useLocalTime:true,deadlineDateTime:new Date(now+hours*3600000).toISOString()}}}];
++  expect(()=>assertAssignmentDeadlines(local(13),source,undefined,now)).toThrow('Paused for IT');
++  expect(()=>assertAssignmentDeadlines(local(15),source,undefined,now)).not.toThrow();
++  const input=local(13),r={...review('reschedule',new Date(now+13*3600000).toISOString()),expected:assignmentSnapshot(input)};
++  expect(()=>assertAssignmentDeadlines(input,source,r,now)).toThrow('14 hours');
++ });
 +});
 diff --git a/packager/tests/startup-install.test.ts b/packager/tests/startup-install.test.ts
 new file mode 100644
