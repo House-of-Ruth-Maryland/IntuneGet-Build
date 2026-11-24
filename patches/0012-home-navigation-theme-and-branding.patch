@@ -1666,7 +1666,7 @@ index 27c710577..776a9b69c 100644
        />
      </>
 diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
-index 33d0890cc..a7734ef08 100644
+index 33d0890cc..edf468227 100644
 --- a/components/dashboard/CommandPalette.tsx
 +++ b/components/dashboard/CommandPalette.tsx
 @@ -2,8 +2,9 @@
@@ -1680,7 +1680,7 @@ index 33d0890cc..a7734ef08 100644
  import {
    LayoutDashboard,
    Package,
-@@ -13,24 +14,27 @@ import {
+@@ -13,24 +14,28 @@ import {
    ArrowUpCircle,
    BarChart3,
    Settings,
@@ -1715,12 +1715,13 @@ index 33d0890cc..a7734ef08 100644
 +  { name: 'Check for new app versions', href: '/dashboard/settings#app-updates', icon: Settings, keywords: 'catalog discovery cadence check schedule 3:30 new versions' },
 +  { name: 'Automatic publishing window', href: '/dashboard/updates#automatic-updates', icon: ArrowUpCircle, keywords: 'automatic update delivery edit schedule refresh check for app updates when can intuneget send automatic updates to intune update schedule publishing window blackout pause' },
 +  { name: 'Installation timing guide', href: '/dashboard/help#automatic-installation-policy', icon: LifeBuoy, keywords: 'installation behavior behaviour employee choice postpone startup restart schedule next rollout' },
++  { name: 'Installation settings guide', href: '/dashboard/help#install-settings', icon: LifeBuoy, keywords: 'toolkit windows installer silent progress only installer decides more settings what staff see postpone deferral disk space restart countdown inactive settings' },
    { name: 'Settings', href: '/dashboard/settings', icon: Settings, keywords: 'settings preferences permissions' },
 +  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy, keywords: 'help support how' },
  ];
  
  interface CommandPaletteProps {
-@@ -40,23 +44,18 @@ interface CommandPaletteProps {
+@@ -40,23 +45,18 @@ interface CommandPaletteProps {
  
  export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
    const router = useRouter();
@@ -1753,7 +1754,7 @@ index 33d0890cc..a7734ef08 100644
  
    const handleSelect = useCallback(
      (href: string) => {
-@@ -66,29 +65,31 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -66,29 +66,31 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
      [onOpenChange, router]
    );
  
@@ -1800,7 +1801,7 @@ index 33d0890cc..a7734ef08 100644
                className="flex-1 py-3 text-sm bg-transparent text-text-primary placeholder:text-text-muted outline-none"
              />
              <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-text-muted bg-overlay/10 rounded border border-overlay/5">
-@@ -106,7 +107,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -106,7 +108,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                heading={<T>Navigation</T>}
                className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
              >
@@ -1809,7 +1810,7 @@ index 33d0890cc..a7734ef08 100644
                  <Command.Item
                    key={item.href}
                    value={`${item.name} ${item.keywords}`}
-@@ -122,7 +123,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -122,7 +124,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
              {/* Keyboard shortcuts group */}
              {!search && (
                <Command.Group
@@ -1818,7 +1819,7 @@ index 33d0890cc..a7734ef08 100644
                  className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:mt-2"
                >
                  {SHORTCUT_HINTS.map((hint) => (
-@@ -142,7 +143,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -142,7 +144,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                            key={key}
                            className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5"
                          >
@@ -1827,7 +1828,7 @@ index 33d0890cc..a7734ef08 100644
                          </kbd>
                        ))}
                      </div>
-@@ -151,8 +152,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -151,8 +153,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                </Command.Group>
              )}
            </Command.List>
@@ -2063,10 +2064,10 @@ index d834efe1b..6a84253d2 100644
              <T>Sign out</T>
 diff --git a/components/dashboard/__tests__/CommandPalette.test.ts b/components/dashboard/__tests__/CommandPalette.test.ts
 new file mode 100644
-index 000000000..604a6b853
+index 000000000..8b49c3c3c
 --- /dev/null
 +++ b/components/dashboard/__tests__/CommandPalette.test.ts
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,97 @@
 +// @vitest-environment happy-dom
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { act, createElement } from 'react';
@@ -2132,7 +2133,7 @@ index 000000000..604a6b853
 +  // HRM patch 0053: pages in the sidebar's order, and the new G shortcuts listed.
 +  it('lists pages in sidebar order and shows the new G shortcuts', () => {
 +    const pages = [...document.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])')].map((el) => el.textContent);
-+    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Check for new app versions', 'Automatic publishing window', 'Installation timing guide', 'Settings', 'Help']);
++    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Check for new app versions', 'Automatic publishing window', 'Installation timing guide', 'Installation settings guide', 'Settings', 'Help']);
 +    const text = document.querySelector('[role="dialog"]')!.textContent;
 +    for (const hint of ['Go to App updates', 'Go to Discovered apps', 'Go to Help']) expect(text).toContain(hint);
 +  });
@@ -2150,6 +2151,18 @@ index 000000000..604a6b853
 +  it('closes with Escape', async () => {
 +    await key('Escape');
 +    expect(onOpenChange).toHaveBeenCalledWith(false);
++  });
++
++  it.each(['installer decides', 'progress only', 'more settings', 'toolkit windows'])('finds the installation guide through %s and opens its stable link', async (alias) => {
++    await act(async () => {
++      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input(), alias);
++      input().dispatchEvent(new Event('input', { bubbles: true }));
++    });
++    const guide = [...document.querySelectorAll<HTMLElement>('[cmdk-item]')].find(el => el.textContent === 'Installation settings guide');
++    expect(guide).toBeDefined();
++    expect(guide!.getAttribute('data-value')).toContain(alias);
++    await act(async () => guide!.click());
++    expect(push).toHaveBeenCalledWith('/dashboard/help#install-settings');
 +  });
 +});
 diff --git a/components/dashboard/__tests__/mobile-menu-layering.test.ts b/components/dashboard/__tests__/mobile-menu-layering.test.ts
@@ -3467,16 +3480,17 @@ index 000000000..23d48dae8
 +}
 diff --git a/lib/hrm/settings-summary.ts b/lib/hrm/settings-summary.ts
 new file mode 100644
-index 000000000..9917ea899
+index 000000000..556b50edb
 --- /dev/null
 +++ b/lib/hrm/settings-summary.ts
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,38 @@
 +/**
-+ * HRM patch 0036: the current setting of each row under More settings and What staff see during
-+ * install, in a few words. Shared by the deploy panel (PackageConfig) and the cart editor
++ * Effective row summaries for app setup, checks and staff experience.
++ * Shared by the deploy panel (PackageConfig) and the cart editor
 + * (CartItemConfig) so the two always describe the same settings the same way.
 + */
 +import type { PSADTConfig } from '@/types/psadt';
++import { installExperience, type PackagingPath } from './install-experience';
 +
 +const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 +
@@ -3488,23 +3502,24 @@ index 000000000..9917ea899
 +  /** Description, install or uninstall command differ from what the app started with. */
 +  descriptionOrCommandsChanged: boolean;
 +  customDetectionActive?: boolean;
++  packagingPath?: PackagingPath;
 +}
 +
-+export function settingsSummaries({ config, espProfiles, relationships, categories, descriptionOrCommandsChanged, customDetectionActive = false }: SettingsSummaryInput) {
++export function settingsSummaries({ config, espProfiles, relationships, categories, descriptionOrCommandsChanged, customDetectionActive = false, packagingPath = 'github' }: SettingsSummaryInput) {
++  const experience = installExperience(config, packagingPath);
 +  return {
 +    detection: customDetectionActive ? 'Your own rules' : 'Automatic',
 +    esp: espProfiles.length ? `Required on ${plural(espProfiles.length, 'setup profile', 'setup profiles')}` : 'Not required',
 +    dependencies: relationships.length ? plural(relationships.length, 'linked app', 'linked apps') : 'None',
 +    category: categories.map((c) => c.displayName).join(', ') || 'None',
-+    behavior: config.installAfterRestartBeta ? 'After next restart · Beta' : `${{ Silent: 'Silent', NonInteractive: 'Progress only', Auto: 'Installer decides' }[config.deployMode || 'Silent'] ?? 'Silent'}, ${
-+      { Suppress: 'no restart', Prompt: 'asks to restart', Force: 'restarts' }[config.restartBehavior] ?? 'no restart'}`,
++    behavior: `${experience.processes ? plural(experience.processes, 'app to close', 'apps to close') : 'No apps to close'} · ${!experience.known ? 'packaging not verified' : packagingPath === 'local' ? 'Intune restarts suppressed' : { Suppress: 'Intune restarts suppressed', Prompt: 'restart by return code', Force: 'Intune restart forced' }[config.restartBehavior] ?? 'Intune restarts suppressed'}`,
 +    advanced: descriptionOrCommandsChanged || config.postInstallCommands?.length || config.postUninstallCommands?.length ? 'Changed' : 'Default',
-+    deferral: config.allowDefer ? `Up to ${plural(config.deferTimes, 'time', 'times')}` : 'Off',
-+    progress: config.progressDialog?.enabled || config.balloonTips?.length ? 'On' : 'Off',
-+    prompts: config.customPrompts?.length ? plural(config.customPrompts.length, 'message', 'messages') : 'None',
-+    restart: config.restartPrompt?.enabled ? 'On' : 'Off',
-+    diskspace: config.checkDiskSpace ? (config.requiredDiskSpace ? `${config.requiredDiskSpace} MB` : 'On') : 'Off',
-+    branding: config.brandingCompanyName || config.brandingWelcomeTitle || config.brandingLogoPath ? 'Custom' : 'Default',
++    deferral: experience.deferral,
++    progress: experience.progress || experience.notifications ? 'On' : 'Off',
++    prompts: experience.messages ? plural(experience.enabledMessages, 'enabled message', 'enabled messages') : 'None enabled',
++    restart: experience.restartPrompt ? 'Countdown enabled' : 'Off',
++    diskspace: config.checkDiskSpace ? (config.requiredDiskSpace !== undefined ? `${config.requiredDiskSpace} MB` : 'Package size') : 'Off',
++    branding: config.brandingCompanyName || config.brandingWelcomeMessage || config.brandingAccentColor || config.brandingLogoPath || config.brandingLogoDarkPath || config.brandingBannerPath ? 'Custom' : 'Default',
 +  };
 +}
 diff --git a/lib/hrm/site.ts b/lib/hrm/site.ts

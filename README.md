@@ -242,3 +242,11 @@ The local review change pauses replacement packaging for explicit IT confirmatio
 required deadlines. It requires the paired private workflow change; production remains pinned
 to hrm33 and install choices and pilot defaults are unchanged. See
 [behavior, validation and release prerequisites](docs/replacement-deadline-hold.md).
+
+### Installation settings and existing assignments
+
+[The behavior audit](docs/install-behavior-audit.md) maps toolkit mode, vendor switches,
+background checks, assignment timing, future automatic-update settings and role boundaries.
+Saved inactive values remain stored. Edit assignments adds one reviewed group to an existing
+Win32 copy without replacing other assignments. Hosted diagnostic release and live pilot
+validation remain separate; production flags and targets are unchanged.

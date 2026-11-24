@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Clarify effective installation settings, inactive saved values and hosted/local differences.
+  Separate future automatic-update saves from current-copy changes and pilot start.
+- Add reviewed, additive group assignments for existing Win32 apps, preserving other groups.
+  Explain assignment-review failures separately from installer validation.
+
 - Pause replacement packaging for explicit IT confirmation of expired required deadlines,
   preserving availability and unrelated assignment settings across legacy, manual, bulk,
   automatic and local-packager paths. Requires the paired workflow update; no pilot activation.

@@ -82,10 +82,10 @@ index 000000000..10d83cc0a
 +[IO.File]::WriteAllText((Join-Path $PackageDirectory 'Uninstall-AfterRestart.cmd'),($uninstall -replace "`r?`n","`r`n"),[Text.Encoding]::ASCII)
 diff --git a/.github/scripts/Preserve-AssignmentSettings.ps1 b/.github/scripts/Preserve-AssignmentSettings.ps1
 new file mode 100644
-index 000000000..a6312e1d0
+index 000000000..788be759a
 --- /dev/null
 +++ b/.github/scripts/Preserve-AssignmentSettings.ps1
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,129 @@
 +# Pure replacement-assignment contract. Dot-source only; no Graph writes or installation.
 +function Copy-IntuneGetAssignmentValue($Value) {
 +    if($Value -is [Collections.IDictionary] -or $Value -is [pscustomobject]){
@@ -105,7 +105,16 @@ index 000000000..a6312e1d0
 +function Get-IntuneGetPreservedSettings($Value) {
 +    $old=Get-IntuneGetAssignmentMap $Value
 +    $keys=@('@odata.type','@odata.context','notifications','deliveryOptimizationPriority','installTimeSettings','restartSettings','autoUpdateSettings')
-+    foreach($key in $old.Keys){if($key -notin $keys){throw 'Unsupported assignment settings. Review this copy in Intune before replacing it.'}}
++    $unsupported=@($old.Keys | Where-Object {$_ -notin $keys} | Sort-Object)
++    if($unsupported.Count){
++        # Names only: never serialize settings values or the Graph response into errors.
++        # Bound output for callback limits; suppress nonstandard names (including control characters).
++        $names=@(foreach($key in @($unsupported | Select-Object -First 12)){
++            if($key -cmatch '^(?:@odata\.)?[A-Za-z][A-Za-z0-9_]{0,79}$'){$key}else{'[nonstandard field name]'}
++        })
++        $fields=ConvertTo-Json -InputObject $names -Compress
++        throw "Unsupported assignment settings. Review this copy in Intune before replacing it. Unsupported field names ($($unsupported.Count) total, at most 12 shown): $fields"
++    }
 +    if($old.ContainsKey('@odata.type') -and $old['@odata.type'] -ne '#microsoft.graph.win32LobAppAssignmentSettings'){throw 'Only Win32 assignment settings can be carried over.'}
 +    $result=[ordered]@{'@odata.type'='#microsoft.graph.win32LobAppAssignmentSettings';notifications='showAll';deliveryOptimizationPriority='notConfigured'}
 +    foreach($key in $keys[2..6]){if($old.ContainsKey($key)){$result[$key]=Copy-IntuneGetAssignmentValue $old[$key]}}
@@ -1099,10 +1108,10 @@ index 000000000..50bdd42af
 +}
 diff --git a/components/hrm/AppWorkspace.test.ts b/components/hrm/AppWorkspace.test.ts
 new file mode 100644
-index 000000000..46ad404bf
+index 000000000..bdd567f63
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.test.ts
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,46 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot } from 'react-dom/client';
@@ -1116,6 +1125,7 @@ index 000000000..46ad404bf
 +vi.mock('@/hooks/useMspOptional', () => ({ useMspOptional: () => ({ isMspUser: true, selectedTenantId: state.otherTenant ? 'other' : 'own' }) }));
 +vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ account: { tenantId: 'own' } }) }));
 +vi.mock('./InstallationPolicyPanel', () => ({ InstallationPolicyPanel: () => createElement('button', null, 'Edit next rollout') }));
++vi.mock('./EditAssignments', () => ({ EditAssignments: () => createElement('button', null, 'Edit assignments') }));
 +vi.mock('./AppTimingPanel', () => ({ AppTimingPanel: () => createElement('div', null, 'Install dates') }));
 +vi.mock('./AppGroupsLine', () => ({ AppGroupsLine: () => createElement('div', null, 'Groups') }));
 +vi.mock('./InstallStatusBar', () => ({ InstallStatusBar: () => createElement('div', null, 'Install results') }));
@@ -1150,10 +1160,10 @@ index 000000000..46ad404bf
 +});
 diff --git a/components/hrm/AppWorkspace.tsx b/components/hrm/AppWorkspace.tsx
 new file mode 100644
-index 000000000..ae5c0af45
+index 000000000..1e9026c35
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.tsx
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,98 @@
 +'use client';
 +import Link from 'next/link';
 +import { useEffect, useState } from 'react';
@@ -1170,6 +1180,7 @@ index 000000000..ae5c0af45
 +import { installationPolicySummary } from '@/lib/hrm/installation-policy';
 +import { effectiveInstallationRule, savedInstallationSummary } from '@/lib/hrm/rollout-workspace';
 +import type { AppUpdatePolicy } from '@/types/update-policies';
++import { EditAssignments } from "./EditAssignments";
 +import { AppTimingPanel } from './AppTimingPanel';
 +import { AppGroupsLine } from './AppGroupsLine';
 +import { InstallStatusBar } from './InstallStatusBar';
@@ -1224,7 +1235,7 @@ index 000000000..ae5c0af45
 +        <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="current-copy" className="scroll-mt-24 text-lg font-semibold text-text-primary">Current release</h2><span className="rounded-md bg-overlay/5 px-2 py-1 text-xs text-text-secondary">Saved in Intune</span></div>
 +        <p className="font-medium text-text-primary">{app.displayVersion || 'Version unavailable'}</p><PreviousCopyNote appId={appId} />
 +        <dl className="grid gap-x-5 gap-y-4 text-sm sm:grid-cols-2">
-+          <div><dt className="font-medium text-text-primary">Who gets it</dt><dd className="mt-1"><AppGroupsLine intuneAppId={appId} /></dd></div>
++          <div><dt className="font-medium text-text-primary">Who gets it</dt><dd className="mt-1 space-y-3"><AppGroupsLine intuneAppId={appId} /><EditAssignments appId={appId} /></dd></div>
 +          <div><dt className="font-medium text-text-primary">When it installs</dt><dd className="mt-1 text-text-secondary">{currentTiming === 'Available ASAP · deadline ASAP' ? 'ASAP' : currentTiming}</dd></div>
 +          <div><dt className="font-medium text-text-primary">Install behavior</dt><dd className="mt-1 text-text-secondary">{current.isLoading ? 'Loading saved settings…' : behavior(config)}</dd></div>
 +          <div><dt className="font-medium text-text-primary">Restart after installation</dt><dd className="mt-1 text-text-secondary">{restart}</dd></div>
@@ -1253,10 +1264,10 @@ index 000000000..ae5c0af45
 +}
 diff --git a/components/hrm/InstallationPolicyPanel.test.ts b/components/hrm/InstallationPolicyPanel.test.ts
 new file mode 100644
-index 000000000..cf209f5ba
+index 000000000..d57bf6d09
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.test.ts
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,125 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -1307,12 +1318,12 @@ index 000000000..cf209f5ba
 +  await act(async () => button('Edit app exception').click());
 +  expect(document.querySelector<HTMLInputElement>('input[value="restart"]')!.disabled).toBe(true);
 +  expect(document.body.textContent).toContain(message);
-+  expect(button('Save app exception').disabled).toBe(true);
-+  await act(async () => button('Save app exception').click());
++  expect(button('Save for this app').disabled).toBe(true);
++  await act(async () => button('Save for this app').click());
 +  expect(state.mutate).not.toHaveBeenCalled();
 +  const automatic = document.querySelector<HTMLInputElement>('input[value="silent"]')!;
 +  await act(async () => automatic.click());
-+  expect(button('Save app exception').disabled).toBe(false);
++  expect(button('Save for this app').disabled).toBe(false);
 +});
 +it('shows restrictions found in the current package by the server', async () => {
 +  state.eligibility = [{ appId: 'vendor.app', problem: 'The startup installer Beta cannot be used for New computer setup.' }];
@@ -1328,10 +1339,10 @@ index 000000000..cf209f5ba
 +  const restart = document.querySelector<HTMLInputElement>('input[value="restart"]')!;
 +  expect(restart.disabled).toBe(false);
 +  await act(async () => restart.click());
-+  expect(button('Save app exception').disabled).toBe(true);
++  expect(button('Save for this app').disabled).toBe(true);
 +  expect(state.mutate).not.toHaveBeenCalled();
 +  await act(async () => button('Select fixture pilot').click());
-+  await act(async () => button('Save app exception').click());
++  await act(async () => button('Save for this app').click());
 +  expect(state.mutate.mock.calls[0][0]).toMatchObject({ policy: { mode: 'restart', restartPilot: { groupId: '33333333-3333-4333-8333-333333333333' } } });
 +});
 +
@@ -1341,14 +1352,53 @@ index 000000000..cf209f5ba
 +  expect(document.body.textContent).not.toContain('Review app exceptions');
 +  await act(async () => button('Edit next rollout').click());
 +  expect(document.querySelector<HTMLInputElement>('input[value="silent"]')!.checked).toBe(true);
-+  expect(button('Save app exception').disabled).toBe(true);
++  expect(button('Save for this app').disabled).toBe(true);
++});
++
++it('confirms an app save only after success, offers Done, and allows further edits', async () => {
++  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps, appId: 'Vendor.App' })));
++  await act(async () => button('Edit next rollout').click());
++  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('Settings for Vendor App. Applies to future automatic packages.');
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="prompt"]')!.click());
++  await act(async () => button('Save for this app').click());
++  expect(state.mutate.mock.calls[0][0]).toMatchObject({ action: 'save', appId: 'Vendor.App', policy: { mode: 'prompt', days: 3 } });
++  expect(button('Done')).toBeUndefined();
++  await act(async () => state.mutate.mock.calls[0][1].onSuccess());
++  expect(document.body.textContent).toContain('Saved for Vendor App. Future automatic packages for this app will use these settings.');
++  expect(button('Save for this app')).toBeUndefined();
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="silent"]')!.click());
++  expect(button('Done')).toBeUndefined();
++  expect(document.body.textContent).not.toContain('Saved for Vendor App.');
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="prompt"]')!.click());
++  await act(async () => button('Save for this app').click());
++  await act(async () => state.mutate.mock.calls[1][1].onSuccess());
++  await act(async () => button('Done').click());
++  expect(document.querySelector('[role="dialog"]')).toBeNull();
++  await act(async () => button('Edit next rollout').click());
++  expect(button('Done')).toBeUndefined();
++});
++
++it('keeps shared save and inheritance success distinct', async () => {
++  await act(async () => button('Edit shared policy').click());
++  await act(async () => document.querySelector<HTMLInputElement>('input[value="prompt"]')!.click());
++  await act(async () => button('Save shared policy').click());
++  await act(async () => state.mutate.mock.calls[0][1].onSuccess());
++  expect(document.body.textContent).toContain('Shared policy saved for future automatic packages. Apps with their own exceptions keep their settings.');
++  await act(async () => button('Done').click());
++  await act(async () => button('Edit app exception').click());
++  await act(async () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
++  await act(async () => button('Use shared policy').click());
++  expect(state.mutate.mock.calls[1][0]).toMatchObject({ action: 'inherit', appId: 'vendor.app' });
++  await act(async () => state.mutate.mock.calls[1][1].onSuccess());
++  expect(document.body.textContent).toContain('Vendor App now uses the shared policy for future automatic packages.');
++  expect(button('Done')).toBeDefined();
 +});
 diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
 new file mode 100644
-index 000000000..278c31ea5
+index 000000000..7322da70c
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.tsx
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,108 @@
 +'use client';
 +import { useState } from 'react';
 +import Link from 'next/link';
@@ -1371,6 +1421,10 @@ index 000000000..278c31ea5
 +  const [saved, setSaved] = useState(false);
 +  if (data?.supported === false) return null;
 +  const exceptions = data?.exceptions ?? [];
++  const selectedName = apps.find(app => app.winget_id.toLowerCase() === selected.toLowerCase())?.deployment_config?.displayName || selected;
++  const saveMessage = selected && !inherit && draft.mode === 'restart' ? 'Rule saved. No deployment started.'
++    : selected ? inherit ? `${selectedName} now uses the shared policy for future automatic packages.` : `Saved for ${selectedName}. Future automatic packages for this app will use these settings.`
++    : 'Shared policy saved for future automatic packages. Apps with their own exceptions keep their settings.';
 +  const selectedConfig = apps.find(app => app.winget_id.toLowerCase() === selected.toLowerCase())?.deployment_config;
 +  const restartProblem = data?.restartPilotSupported === false ? 'Restart Beta requires a validated startup workflow on this server.' : data?.restartEligibility?.find(app => app.appId === selected.toLowerCase())?.problem
 +    ?? startupInstallationProblem({ ...selectedConfig, customDetection: selectedConfig?.psadtConfig?.customDetection });
@@ -1391,7 +1445,7 @@ index 000000000..278c31ea5
 +  const editor = <Dialog open={open} onOpenChange={value => { if (!action.isPending) { setOpen(value); if (value) choose(appId ?? ''); } }}>
 +        <DialogTrigger asChild><Button variant={compact ? 'default' : 'ghost'} size="sm" disabled={!data?.shared}>{appId ? 'Edit next rollout' : 'Edit shared policy'}</Button></DialogTrigger>
 +        <DialogContent side="right" onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }} hideCloseButton={action.isPending}>
-+          <DialogHeader className="pr-12"><DialogTitle>{appId ? 'Edit next rollout' : selected ? 'Edit app exception' : 'Edit shared policy'}</DialogTitle><DialogDescription>Save settings for the next package. Deployed copies stay unchanged.</DialogDescription></DialogHeader>
++          <DialogHeader className="pr-12"><DialogTitle>{appId ? 'Edit next rollout' : selected ? 'Edit app exception' : 'Edit shared policy'}</DialogTitle><DialogDescription>{selected ? `Settings for ${selectedName}. ` : 'Shared settings for apps with Automatic updates on. '}{effectiveMode === 'restart' ? 'Applies only to an explicitly started restart Beta pilot.' : 'Applies to future automatic packages.'} Current and queued packages stay unchanged.</DialogDescription></DialogHeader>
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
 +            <div className="rounded-lg border border-overlay/10 p-3 text-sm"><h3 className="font-medium text-text-primary">1. Scope</h3><p className="mt-1 text-text-secondary">{draft.mode === 'restart' ? 'App-scoped restart Beta pilot only. Save the rule, then explicitly start its selected pilot.' : 'Future automatic packages for the selected scope.'}</p><p role="status" className="mt-2 text-text-muted">{dirty && !saved ? 'Unsaved changes' : 'Saved settings'}</p></div>{appId ? <div className="text-sm"><span className="text-text-muted">Applies to</span><p className="mt-1 font-medium text-text-primary">{apps.find(app => app.winget_id.toLowerCase() === appId.toLowerCase())?.deployment_config?.displayName || appId}</p></div> : <label className="block text-sm text-text-secondary">Apply to
 +              <select className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={selected} disabled={action.isPending} onChange={e => choose(e.target.value)}>
@@ -1425,9 +1479,11 @@ index 000000000..278c31ea5
 +            <div className="flex flex-wrap gap-4 text-xs"><Link href="/dashboard/inventory" className="text-accent-cyan hover:underline">Open Inventory for install results</Link><Link href="/dashboard/help#automatic-installation-policy" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline">Automatic installation guide<span className="sr-only"> (opens in a new tab)</span></Link></div>
 +            {appId && draft.mode === 'restart' && !inherit && !dirty && stored?.mode === 'restart' && stored.restartPilot && (intuneAppId ? <RestartPilotStart wingetId={appId} appId={intuneAppId} groupId={stored.restartPilot.groupId} groupName={stored.restartPilot.groupName} /> : <p className="text-sm text-text-muted">Open the app workspace to start the saved restart Beta pilot.</p>)}
 +            {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
-+            {saved && <p role="status" className="text-sm text-status-success">{effectiveMode === 'restart' ? 'Rule saved. No deployment started.' : 'Saved for future automatic updates.'}</p>}
 +          </div>
-+          <DialogFooter><Button variant="ghost" disabled={action.isPending} onClick={() => setOpen(false)}>Close</Button><Button disabled={action.isPending || saved || invalidRestart || !dirty} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save app exception' : 'Save shared policy'}</Button></DialogFooter>
++          <DialogFooter className="flex-col items-stretch">
++            {saved && <p role="status" className="text-sm text-status-success">{saveMessage}</p>}
++            <div className="flex justify-end gap-3"><Button variant={saved ? 'default' : 'ghost'} disabled={action.isPending} onClick={() => setOpen(false)}>{saved ? 'Done' : 'Close'}</Button>{!saved && <Button disabled={action.isPending || invalidRestart || !dirty} onClick={() => action.mutate({ action: selected && inherit ? 'inherit' : 'save', appId: selected, policy: draft }, { onSuccess: () => setSaved(true) })}>{action.isPending ? 'Saving…' : selected ? inherit ? 'Use shared policy' : 'Save for this app' : 'Save shared policy'}</Button>}</div>
++          </DialogFooter>
 +        </DialogContent>
 +      </Dialog>;
 +  if (compact) return editor;
@@ -1678,7 +1734,7 @@ index 000000000..d1027869a
 +  return { ...query, refresh, cancellation };
 +}
 diff --git a/lib/github-actions.test.ts b/lib/github-actions.test.ts
-index b19ddfdf4..af39f2d46 100644
+index b19ddfdf4..da437ff8a 100644
 --- a/lib/github-actions.test.ts
 +++ b/lib/github-actions.test.ts
 @@ -15,6 +15,9 @@ import { QaCompatibilityGateError } from './qa/gate';
@@ -1701,7 +1757,7 @@ index b19ddfdf4..af39f2d46 100644
  const config: GitHubActionsConfig = {
    token: 'test-token',
    owner: 'example',
-@@ -78,6 +84,14 @@ function workflowInputs(overrides: Partial<WorkflowInputs> = {}): WorkflowInputs
+@@ -78,12 +84,31 @@ function workflowInputs(overrides: Partial<WorkflowInputs> = {}): WorkflowInputs
    };
  }
  
@@ -1716,7 +1772,24 @@ index b19ddfdf4..af39f2d46 100644
  afterEach(() => {
    vi.useRealTimers();
    vi.unstubAllGlobals();
-@@ -1401,3 +1415,22 @@ describe('bounded runner evidence reads', () => {
+   vi.clearAllMocks();
+ });
+ 
++describe('active postponement deadline admission', () => {
++  it('rejects competing day and date bounds before any external request', async () => {
++    const fetchMock = vi.fn();
++    vi.stubGlobal('fetch', fetchMock);
++    await expect(triggerPackagingWorkflow(workflowInputs({ psadtConfig: JSON.stringify({ deployMode: 'Auto', allowDefer: true, deferDays: 3, deferDeadline: '2027-01-03' }) }), config)).rejects.toThrow('stores one deadline');
++    expect(fetchMock).not.toHaveBeenCalled();
++    expect(reconcileCatalogInstallerMock).not.toHaveBeenCalled();
++    expect(enforceQaGateMock).not.toHaveBeenCalled();
++  });
++});
++
+ describe('packaging run identity capture', () => {
+   const jobId = '4a4f09e2-cc56-4ad2-a264-38b8f91e79c7';
+   const run = (overrides: Record<string, unknown> = {}) => ({
+@@ -1401,3 +1426,22 @@ describe('bounded runner evidence reads', () => {
      await expect(getWorkflowRun(42, config)).rejects.toThrow('GitHub workflow evidence unavailable (HTTP 500)');
    });
  });
@@ -1740,20 +1813,22 @@ index b19ddfdf4..af39f2d46 100644
 +  });
 +});
 diff --git a/lib/github-actions.ts b/lib/github-actions.ts
-index a53fd5a91..81314ab22 100644
+index a53fd5a91..35206cb2a 100644
 --- a/lib/github-actions.ts
 +++ b/lib/github-actions.ts
-@@ -8,6 +8,9 @@ import { isExactPackagingRun } from './runner-loss';
+@@ -8,6 +8,11 @@ import { isExactPackagingRun } from './runner-loss';
  
  import { createHash, createHmac } from 'node:crypto';
  import { dispatchRateLimitError, WorkflowDispatchUnconfirmedError } from './workflow-dispatch-rate-limit';
-+import {checkReplacementDeadlines} from '@/lib/hrm/replacement-deadlines';
-+import type {AssignmentTimingReview} from '@/packager/src/assignment-settings';
 +import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
++import { installSettingsProblem } from '@/lib/hrm/install-experience';
++import type { PSADTConfig } from '@/types/psadt';
++import { checkReplacementDeadlines } from '@/lib/hrm/replacement-deadlines';
++import type { AssignmentTimingReview } from '@/packager/src/assignment-settings';
  import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
  import { authorizeCuratedWorkflow } from '@/lib/curated-catalog/server';
  import { assertCuratedLicenceAccepted } from '@/lib/curated-catalog/licence';
-@@ -56,6 +59,8 @@ export interface WorkflowInputs {
+@@ -56,6 +61,8 @@ export interface WorkflowInputs {
    detectionRules?: string; // JSON-serialized DetectionRule[]
    requirementRules?: string; // JSON-serialized RequirementRule[]
    assignments?: string; // JSON-serialized PackageAssignment[]
@@ -1762,21 +1837,30 @@ index a53fd5a91..81314ab22 100644
    categories?: string; // JSON-serialized IntuneAppCategorySelection[]
    espProfiles?: string; // JSON-serialized EspProfileSelection[]
    relationships?: string; // JSON-serialized AppRelationship[]
-@@ -137,6 +142,13 @@ export async function triggerPackagingWorkflow(
+@@ -137,6 +144,22 @@ export async function triggerPackagingWorkflow(
      newJobAdmission?: boolean; beforeDispatch?: (identity: string) => Promise<void> }
  ): Promise<TriggerResult> {
    const cfg = config || getGitHubActionsConfig();
 +  let deadlineReview: AssignmentTimingReview | undefined;
 +  if (inputs.assignmentReview) {
 +    try { deadlineReview = JSON.parse(inputs.assignmentReview); }
-+    catch { throw new Error("Invalid assignment deadline review. Review this update again."); }
++    catch { throw new Error('Invalid assignment deadline review. Review this update again.'); }
 +  }
++  // Run before reconciliation, QA, downloads or dispatch, independently of UI flags.
 +  await checkReplacementDeadlines(inputs.tenantId, inputs.sourceIntuneAppId, deadlineReview);
 +
++  // Reject ambiguous active bounds before catalog work or any dispatch.
++  let requestedSettings: Partial<PSADTConfig> = {};
++  try {
++    const parsed: unknown = JSON.parse(inputs.psadtConfig || '{}');
++    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) requestedSettings = parsed;
++  } catch { /* Existing normalization reports malformed configuration. */ }
++  const settingsProblem = installSettingsProblem(requestedSettings as PSADTConfig);
++  if (settingsProblem) throw new Error(settingsProblem);
  
    let effectiveInputs = inputs;
    let trustedInstallers: NormalizedInstaller[] | undefined;
-@@ -248,6 +260,19 @@ export async function triggerPackagingWorkflow(
+@@ -248,6 +271,19 @@ export async function triggerPackagingWorkflow(
            effectiveInputs.installerSuccessCodes
          ),
        };
@@ -1796,7 +1880,7 @@ index a53fd5a91..81314ab22 100644
    // Final dispatch boundary: custom callers bypass catalog reconciliation, so
    // they must still prove an unattended install contract before GitHub sees
    // the installer URL or any tenant-scoped packaging request.
-@@ -321,6 +346,7 @@ export async function triggerPackagingWorkflow(
+@@ -321,6 +357,7 @@ export async function triggerPackagingWorkflow(
        client_payload: {
          job: {
            jobId: inputs.jobId,
@@ -1804,7 +1888,7 @@ index a53fd5a91..81314ab22 100644
            tenantId: inputs.tenantId,
            callbackUrl: inputs.callbackUrl,
          },
-@@ -351,6 +377,8 @@ export async function triggerPackagingWorkflow(
+@@ -351,6 +388,8 @@ export async function triggerPackagingWorkflow(
              normalizedPackageInput?.detectionRulesJson || inputs.detectionRules || '[]',
            requirementRules: inputs.requirementRules || '[]',
            assignments: inputs.assignments || '[]',
@@ -2745,10 +2829,10 @@ index b977e1ae3..9b941a4ab 100644
        duplicateInfo?: Record<string, unknown>;
 diff --git a/packager/src/assignment-settings.ts b/packager/src/assignment-settings.ts
 new file mode 100644
-index 000000000..a92fa2392
+index 000000000..926d99b62
 --- /dev/null
 +++ b/packager/src/assignment-settings.ts
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,107 @@
 +/** Shared assignment review contract. Pure functions; never contacts Intune. */
 +export type PlainRecord = Record<string, unknown>;
 +export interface DeadlineConfirmation { decision: 'retain' | 'reschedule'; assignmentIds: string[]; newDeadline?: string }
@@ -2764,7 +2848,11 @@ index 000000000..a92fa2392
 +const settingsKeys = ['@odata.type','@odata.context','notifications','deliveryOptimizationPriority','installTimeSettings','restartSettings','autoUpdateSettings'];
 +export function preservedAssignmentSettings(value: unknown): PlainRecord {
 +  const old = asObject(value);
-+  if (Object.keys(old).some(key => !settingsKeys.includes(key))) throw new Error('Unsupported assignment settings. Review this copy in Intune before replacing it.');
++  const unsupported = Object.keys(old).filter(key => !settingsKeys.includes(key)).sort();
++  if (unsupported.length) {
++    const names = unsupported.slice(0, 12).map(key => /^(?:@odata\.)?[A-Za-z][A-Za-z0-9_]{0,79}$/.test(key) ? key : '[nonstandard field name]');
++    throw new Error(`Unsupported assignment settings. Review this copy in Intune before replacing it. Unsupported field names (${unsupported.length} total, at most 12 shown): ${JSON.stringify(names)}`);
++  }
 +  if (old['@odata.type'] && old['@odata.type'] !== SETTINGS) throw new Error('Only Win32 assignment settings can be carried over.');
 +  const result: PlainRecord = { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured' };
 +  for (const key of settingsKeys.slice(2)) if (Object.hasOwn(old, key)) result[key] = copy(old[key]);
@@ -3206,13 +3294,28 @@ index 000000000..1042ccadd
 +Write-Output 'PASS: preserve/reset, exclusions, stale snapshot, missing review, source immutability'
 diff --git a/packager/tests/assignment-settings.test.ts b/packager/tests/assignment-settings.test.ts
 new file mode 100644
-index 000000000..9f585e788
+index 000000000..ba7954bba
 --- /dev/null
 +++ b/packager/tests/assignment-settings.test.ts
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,48 @@
 +import {describe,it,expect} from 'vitest';
-+import {assignmentSnapshot,carryoverAssignments} from '../src/assignment-settings';
++import {assignmentSnapshot,carryoverAssignments,preservedAssignmentSettings} from '../src/assignment-settings';
 +const source='11111111-1111-4111-8111-111111111111';
++it('reports only bounded safe unknown field names and never accepts unknown values',()=>{
++ for (const value of [null,false,'private-value',{secret:'private-value'}]) {
++  const input={unknown:value};
++  expect(()=>preservedAssignmentSettings(input)).toThrow('Unsupported field names (1 total, at most 12 shown): ["unknown"]');
++  try { preservedAssignmentSettings(input); } catch(error) { expect(String(error)).not.toContain('private-value'); }
++  expect(input).toEqual({unknown:value});
++ }
++ const input=Object.fromEntries(Array.from({length:20},(_,i)=>[`field${i}`,false]));
++ input['bad\nname']=false;
++ try { preservedAssignmentSettings(input); throw Error('must reject'); } catch(error) {
++  expect(String(error)).toContain('21 total, at most 12 shown');
++  expect(String(error)).toContain('[nonstandard field name]');
++  expect(String(error)).not.toContain('bad\nname');
++ }
++});
 +const rows=[{id:'assignment',intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:'pilot',deviceAndAppManagementAssignmentFilterId:'filter',deviceAndAppManagementAssignmentFilterType:'include'},settings:{'@odata.type':'#microsoft.graph.win32LobAppAssignmentSettings',notifications:'hideAll',deliveryOptimizationPriority:'foreground',installTimeSettings:{useLocalTime:false,startDateTime:'2026-01-01T00:00:00Z',deadlineDateTime:'2026-01-02T00:00:00Z'},restartSettings:{gracePeriodInMinutes:1440,countdownDisplayBeforeRestartInMinutes:15,restartNotificationSnoozeDurationInMinutes:60}}}];
 +describe('replacement assignment timing review',()=>{
 + it('holds expired dates until explicit review, preserves settings and never mutates source',()=>{
@@ -3694,9 +3797,22 @@ index 000000000..65a976d26
 +    exit 0
 +}
 diff --git a/types/psadt.ts b/types/psadt.ts
-index 18ff46ff8..da17d82c5 100644
+index 18ff46ff8..2a8902be8 100644
 --- a/types/psadt.ts
 +++ b/types/psadt.ts
+@@ -20,9 +20,9 @@ export type RestartBehavior =
+  * PSADT deploy mode - controls UI visibility during installation
+  */
+ export type DeployMode =
+-  | 'Silent'           // No UI at all (recommended for Intune)
+-  | 'NonInteractive'   // Shows progress but no user interaction required
+-  | 'Auto';            // PSADT auto-detects based on session state
++  | 'Silent'           // Suppresses toolkit windows, not arbitrary vendor UI or Intune notifications
++  | 'NonInteractive'   // Suppresses questions; enabled status/restart windows may still appear in 4.1.8
++  | 'Auto';            // PSADT chooses toolkit interactivity from session and running-process state
+ 
+ /**
+  * Detection rule type for Intune
 @@ -124,6 +124,7 @@ export interface BalloonTipConfig {
   * Comprehensive support for all PSADT v4 UI elements
   */
@@ -3705,6 +3821,15 @@ index 18ff46ff8..da17d82c5 100644
    // Process management
    processesToClose: ProcessToClose[];
  
+@@ -139,7 +140,7 @@ export interface PSADTConfig {
+   minimizeWindows: boolean;        // Minimize other windows when showing dialog
+   windowLocation: DialogPosition;  // Position of dialog on screen
+   brandingCompanyName?: string;    // Company name used by toolkit UI
+-  brandingWelcomeTitle?: string;   // Custom title for the welcome prompt
++  brandingWelcomeTitle?: string;   // Retained legacy value; current generator does not apply this title
+   brandingWelcomeMessage?: string; // Custom message for the welcome prompt
+   brandingAccentColor?: string;    // Fluent UI accent color
+   brandingLogoPath?: string;       // Optional logo image path
 @@ -148,6 +149,7 @@ export interface PSADTConfig {
  
    // Deferral handling
@@ -3713,3 +3838,590 @@ index 18ff46ff8..da17d82c5 100644
    deferTimes: number;              // How many times user can defer (default 3)
    deferDeadline?: string;          // ISO date string deadline for deferrals
    deferDays?: number;              // Number of days user can defer
+diff --git a/app/api/hrm/packaging-capabilities/route.test.ts b/app/api/hrm/packaging-capabilities/route.test.ts
+new file mode 100644
+index 000000000..d59818093
+--- /dev/null
++++ b/app/api/hrm/packaging-capabilities/route.test.ts
+@@ -0,0 +1,25 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import { NextRequest } from 'next/server';
++const state = vi.hoisted(() => ({ signedIn: true, local: false, pipeline: true, github: true, startup: false }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.signedIn ? { tenantId: 'fixture', userId: 'fixture' } : null }));
++vi.mock('@/lib/features', () => ({ getFeatureFlags: () => ({ pipeline: state.pipeline, localPackager: state.local }) }));
++vi.mock('@/lib/github-actions', () => ({ isGitHubActionsConfigured: () => state.github }));
++vi.mock('@/lib/hrm/packaging-capabilities', () => ({ startupPilotValidated: () => state.startup }));
++import { GET } from './route';
++beforeEach(() => Object.assign(state, { signedIn: true, local: false, pipeline: true, github: true, startup: false }));
++describe('read-only packaging capability discovery', () => {
++  it('requires authentication and exposes no secrets', async () => {
++    state.signedIn = false;
++    expect((await GET(new NextRequest('http://localhost/api/fixture'))).status).toBe(401);
++    state.signedIn = true;
++    const response = await GET(new NextRequest('http://localhost/api/fixture'));
++    expect(await response.json()).toEqual({ path: 'github', startupBeta: false });
++    expect(response.headers.get('Cache-Control')).toContain('no-store');
++  });
++  it('uses server configuration, never a client-selected mode', async () => {
++    state.local = true; state.startup = true;
++    expect(await (await GET(new NextRequest('http://localhost/api/fixture?path=github'))).json()).toEqual({ path: 'local', startupBeta: false });
++    state.local = false; state.pipeline = false;
++    expect(await (await GET(new NextRequest('http://localhost/api/fixture'))).json()).toEqual({ path: 'unavailable', startupBeta: false });
++  });
++});
+diff --git a/app/api/hrm/packaging-capabilities/route.ts b/app/api/hrm/packaging-capabilities/route.ts
+new file mode 100644
+index 000000000..0f5f0fb7a
+--- /dev/null
++++ b/app/api/hrm/packaging-capabilities/route.ts
+@@ -0,0 +1,14 @@
++import { NextRequest, NextResponse } from 'next/server';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { getFeatureFlags } from '@/lib/features';
++import { isGitHubActionsConfigured } from '@/lib/github-actions';
++import { startupPilotValidated } from '@/lib/hrm/packaging-capabilities';
++
++/** Read-only capabilities of this server's configured packaging path, never client-selected. */
++export async function GET(request: NextRequest) {
++  const user = await parseAccessToken(request.headers.get('Authorization'));
++  if (!user) return NextResponse.json({ error: 'Sign in to view installation options.' }, { status: 401 });
++  const features = getFeatureFlags();
++  const path = features.localPackager ? 'local' : features.pipeline && isGitHubActionsConfigured() ? 'github' : 'unavailable';
++  return NextResponse.json({ path, startupBeta: path === 'github' && startupPilotValidated() }, { headers: { 'Cache-Control': 'private, no-store' } });
++}
+diff --git a/components/hrm/InstallExperienceSummary.tsx b/components/hrm/InstallExperienceSummary.tsx
+new file mode 100644
+index 000000000..83bbeef38
+--- /dev/null
++++ b/components/hrm/InstallExperienceSummary.tsx
+@@ -0,0 +1,35 @@
++'use client';
++import { installExperience, installSettingsProblem, TOOLKIT_MODES, type PackagingPath } from '@/lib/hrm/install-experience';
++import type { PSADTConfig, DeployMode } from '@/types/psadt';
++import { useId } from 'react';
++
++export function ToolkitModePicker({ config, path, onChange }: { config: PSADTConfig; path: PackagingPath; onChange: (value: DeployMode) => void }) {
++  const id = useId();
++  return <div className="space-y-2">
++    <label htmlFor={id} className="block text-sm font-medium text-text-secondary">Toolkit windows</label>
++    <select id={id} value={config.deployMode || 'Silent'} disabled={!!config.installAfterRestartBeta || path === 'unknown' || path === 'unavailable'}
++      onChange={event => onChange(event.target.value as DeployMode)}
++      className="w-full rounded-lg border border-overlay/15 bg-bg-elevated px-3 py-2 text-sm text-text-primary disabled:opacity-60">
++      {TOOLKIT_MODES.map(mode => <option key={mode.value} value={mode.value} disabled={mode.value === 'Auto' && path === 'local'}>{mode.label}{mode.value === 'Auto' && path === 'local' ? ' (unavailable locally)' : ''}</option>)}
++    </select>
++    <p className="text-xs text-text-muted">Controls IntuneGet’s toolkit windows. The vendor installer still uses its configured command and switches. Intune notifications are separate.</p>
++    <a href="/dashboard/help#install-settings" className="inline-block text-xs text-accent-cyan underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-cyan">Installation settings guide</a>
++  </div>;
++}
++
++export function InstallExperienceSummary({ config, path }: { config: PSADTConfig; path: PackagingPath }) {
++  const experience = installExperience(config, path);
++  return <section aria-label="Effective staff experience" className="rounded-lg border border-overlay/15 bg-bg-elevated/60 p-4 text-sm leading-relaxed">
++    <h3 className="font-semibold text-text-primary">Staff experience</h3>
++    <p className="mt-1 text-text-secondary">{experience.staff}</p>
++    {experience.visible && (experience.progress || experience.notifications || experience.messages) && <p className="mt-2 text-text-secondary">Enabled toolkit windows: {[experience.progress && 'installation progress', experience.notifications && `${experience.enabledNotifications} notifications`, experience.messages && `${experience.enabledMessages} custom messages when interactive`].filter(Boolean).join(', ')}.</p>}
++    {experience.automatic && config.allowDefer && <p className="mt-2 text-text-secondary">Postponement: {experience.deferral}.</p>}
++    {installSettingsProblem(config, path) && <p role="alert" tabIndex={-1} data-install-settings-problem className="mt-2 rounded-sm text-status-warning focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-cyan">{installSettingsProblem(config, path)}</p>}
++    {experience.known && experience.background.length > 0 && <div className="mt-3 border-t border-overlay/10 pt-3"><p className="font-medium text-text-primary">Background actions</p><ul className="mt-1 list-disc space-y-1 pl-4 text-text-secondary">{experience.background.map(line => <li key={line}>{line}</li>)}</ul></div>}
++    {experience.restartPrompt && <p className="mt-2 text-status-warning">The package restart countdown can restart the computer after installation, even when the installer did not request a restart.</p>}
++    {path === 'github' && config.restartBehavior !== 'Suppress' && <p className="mt-2 text-text-secondary">{config.restartBehavior === 'Force' ? 'Intune is configured to force a restart. Toolkit window settings do not suppress it.' : 'Intune handles restart-required return codes using the assignment’s restart settings.'}</p>}
++    {experience.known && !experience.automatic && (config.allowDefer || config.showClosePrompt || config.customPrompts?.some(p => p.enabled)) && <details className="mt-3 text-text-secondary"><summary className="cursor-pointer rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-cyan">Saved question settings are inactive</summary><p className="mt-2 text-xs">Your saved close-app, postponement and message choices are kept. They do not ask staff in this mode. Choose Ask when needed to use them on a supported packaging service.</p></details>}
++    {path === 'local' && <p className="mt-2 text-xs text-text-muted">This local packager supports process handling and disk checks. Branding, status messages and package restart countdowns are not generated; Intune restart behavior is suppressed.</p>}
++    {path === 'unknown' && <p role="status" className="mt-2 text-xs text-text-muted">Installation options are unavailable until this server’s packaging capabilities can be verified. Reload after signing in.</p>}
++  </section>;
++}
+diff --git a/hooks/usePackagingCapabilities.ts b/hooks/usePackagingCapabilities.ts
+new file mode 100644
+index 000000000..8cef46ae9
+--- /dev/null
++++ b/hooks/usePackagingCapabilities.ts
+@@ -0,0 +1,26 @@
++'use client';
++import { useEffect, useState } from 'react';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++import type { PackagingPath } from '@/lib/hrm/install-experience';
++
++export function usePackagingCapabilities(): { path: PackagingPath; startupBeta: boolean } {
++  const { isAuthenticated, getAccessToken } = useMicrosoftAuth();
++  const [capabilities, setCapabilities] = useState<{ path: PackagingPath; startupBeta: boolean }>({ path: 'unknown', startupBeta: false });
++  useEffect(() => {
++    let active = true;
++    setCapabilities({ path: 'unknown', startupBeta: false });
++    if (!isAuthenticated || typeof getAccessToken !== 'function') return;
++    void (async () => {
++      try {
++        const token = await getAccessToken();
++        if (!token) return;
++        const response = await fetch('/api/hrm/packaging-capabilities', { headers: { Authorization: `Bearer ${token}` } });
++        if (!response.ok || response.redirected) return;
++        const value = await response.json();
++        if (active && ['github', 'local', 'unavailable'].includes(value.path)) setCapabilities({ path: value.path, startupBeta: value.startupBeta === true });
++      } catch { /* Unknown is deliberately not treated as full capability. */ }
++    })();
++    return () => { active = false; };
++  }, [isAuthenticated, getAccessToken]);
++  return capabilities;
++}
+diff --git a/lib/hrm/__tests__/install-experience.test.ts b/lib/hrm/__tests__/install-experience.test.ts
+new file mode 100644
+index 000000000..a71beee84
+--- /dev/null
++++ b/lib/hrm/__tests__/install-experience.test.ts
+@@ -0,0 +1,54 @@
++import { describe, it, expect } from 'vitest';
++import { DEFAULT_PSADT_CONFIG } from '@/types/psadt';
++import { installExperience, installSettingsProblem } from '../install-experience';
++import { settingsSummaries } from '../settings-summary';
++
++const config = () => structuredClone(DEFAULT_PSADT_CONFIG);
++describe('effective install experience', () => {
++  it('keeps saved postponement inactive in Silent while disk and process actions still apply', () => {
++    const saved = { ...config(), allowDefer: true, deferTimes: 3, checkDiskSpace: true, requiredDiskSpace: 500, processesToClose: [{ name: 'example', description: '' }], blockExecution: true };
++    const before = structuredClone(saved);
++    const result = installExperience(saved);
++    expect(result.automatic).toBe(false);
++    expect(result.deferral).toBe('Saved, inactive in this mode');
++    expect(result.background.join(' ')).toContain('500 MB');
++    expect(result.background.join(' ')).toContain('without asking');
++    expect(saved).toEqual(before);
++    expect(settingsSummaries({ config: saved, espProfiles: [], relationships: [], categories: [], descriptionOrCommandsChanged: false }).deferral).not.toContain('3 postponements');
++  });
++  it('distinguishes NonInteractive status windows from questions and the pinned restart countdown', () => {
++    const saved = { ...config(), deployMode: 'NonInteractive' as const, allowDefer: true, progressDialog: { enabled: false }, restartPrompt: { enabled: true, countdownSeconds: 600, countdownNoHideSeconds: 60 } };
++    const result = installExperience(saved);
++    expect(result.progress).toBe(false);
++    expect(result.automatic).toBe(false);
++    expect(result.restartPrompt).toBe(true);
++    expect(result.staff).toContain('restart countdowns');
++    expect(installExperience(saved, 'local').restartPrompt).toBe(false);
++  });
++  it('reports every active postponement limit and ignores disabled messages', () => {
++    const saved = { ...config(), deployMode: 'Auto' as const, allowDefer: true, deferTimes: 0, deferDays: 2, deferDeadline: '2027-01-03', customPrompts: [{ enabled: false, timing: 'pre-install' as const, title: 'Stored', message: 'Hidden', icon: 'None' as const }] };
++    const result = installExperience(saved);
++    expect(result.deferral).toBe('0 postponements, 2 days from the first attempt, until 2027-01-03');
++    expect(result.messages).toBe(false);
++    expect(installExperience({ ...saved, deferByDaysOnly: true }).deferral).not.toContain('postponements');
++  });
++  it('does not claim local Auto parity or trust an unknown packaging path', () => {
++    expect(installExperience({ ...config(), deployMode: 'Auto' }, 'local').staff).toContain('defaults to Silent');
++    const unknown = installExperience({ ...config(), deployMode: 'Auto', allowDefer: true }, 'unknown');
++    expect(unknown.known).toBe(false);
++    expect(unknown.automatic).toBe(false);
++    expect(unknown.deferral).toBe('Saved; packaging not verified');
++  });
++  it('rejects competing active deadlines while preserving inactive values and one time limit', () => {
++    const saved = { ...config(), deployMode: 'Auto' as const, allowDefer: true, deferTimes: 3, deferDays: 2, deferDeadline: '2027-01-03' };
++    const before = structuredClone(saved);
++    expect(installSettingsProblem(saved)).toContain('stores one deadline');
++    expect(installSettingsProblem({ ...saved, deployMode: 'Silent' })).toBeNull();
++    expect(installSettingsProblem({ ...saved, deployMode: 'NonInteractive' })).toBeNull();
++    expect(installSettingsProblem({ ...saved, allowDefer: false })).toBeNull();
++    expect(installSettingsProblem({ ...saved, deferDeadline: undefined })).toBeNull();
++    expect(installSettingsProblem({ ...saved, deferDays: undefined })).toBeNull();
++    expect(installSettingsProblem(saved, 'local')).toBeNull();
++    expect(saved).toEqual(before);
++  });
++});
+diff --git a/lib/hrm/install-experience.ts b/lib/hrm/install-experience.ts
+new file mode 100644
+index 000000000..09f75e68f
+--- /dev/null
++++ b/lib/hrm/install-experience.ts
+@@ -0,0 +1,53 @@
++import type { PSADTConfig } from '@/types/psadt';
++
++export type PackagingPath = 'github' | 'local' | 'unavailable' | 'unknown';
++
++export const TOOLKIT_MODES = [
++  { value: 'Silent', label: 'No toolkit windows' },
++  { value: 'NonInteractive', label: 'No questions; status windows allowed' },
++  { value: 'Auto', label: 'Ask when needed (automatic)' },
++] as const;
++
++/** PSADT 4.1.8 persists one deadline; days plus a date do not form two bounds. */
++export function installSettingsProblem(config: Pick<PSADTConfig, 'deployMode' | 'allowDefer' | 'deferDays' | 'deferDeadline' | 'installAfterRestartBeta'>, path: PackagingPath = 'github'): string | null {
++  if (path === 'github' && !config.installAfterRestartBeta && config.deployMode === 'Auto' && config.allowDefer && Number(config.deferDays) > 0 && config.deferDeadline) {
++    return 'Choose a day limit or a date deadline. The toolkit stores one deadline, so combining both can replace the day limit on a later attempt.';
++  }
++  return null;
++}
++
++/** Describe effective runtime behavior without changing the saved configuration. */
++export function installExperience(config: PSADTConfig, path: PackagingPath = 'github') {
++  const mode = config.installAfterRestartBeta ? 'Silent' : config.deployMode || 'Silent';
++  const known = path === 'github' || path === 'local';
++  const automatic = mode === 'Auto' && path === 'github';
++  const visible = mode !== 'Silent' && path === 'github' && !config.installAfterRestartBeta;
++  const processes = config.processesToClose?.filter(p => p.name.trim()).length || 0;
++  const welcome = automatic && (config.allowDefer || (processes > 0 && config.showClosePrompt));
++  const enabledMessages = config.customPrompts?.filter(p => p.enabled).length || 0;
++  const enabledNotifications = config.balloonTips?.filter(p => p.enabled).length || 0;
++  const limits = [
++    !config.deferByDaysOnly && `${config.deferTimes ?? 3} postponements`,
++    config.deferDays && `${config.deferDays} days from the first attempt`,
++    config.deferDeadline && `until ${config.deferDeadline}`,
++  ].filter(Boolean).join(', ');
++  const deferral = automatic && config.allowDefer ? limits || 'Enabled' : config.allowDefer ? known ? 'Saved, inactive in this mode' : 'Saved; packaging not verified' : 'Off';
++  const background = [
++    processes > 0 && (welcome ? 'Running listed apps may trigger a close-app prompt; otherwise they are handled without asking.' : `${processes} listed ${processes === 1 ? 'app closes' : 'apps close'} without asking.`),
++    config.blockExecution && processes > 0 && 'Listed apps cannot reopen during installation.',
++    config.checkDiskSpace && `Free space is checked${config.requiredDiskSpace !== undefined ? ` (${config.requiredDiskSpace} MB minimum)` : ' against package size'}.`,
++  ].filter(Boolean) as string[];
++  let staff = !known ? 'Verify the packaging service to see which options apply.'
++    : config.installAfterRestartBeta ? 'Staged for a later startup. No forced reboot or sign-in block.'
++    : mode === 'Silent' ? 'No toolkit windows. Installer windows and Intune notifications are controlled separately.'
++    : path === 'local' ? 'No toolkit questions. This local packager does not generate status windows or custom messages.'
++    : mode === 'NonInteractive' ? 'No close-app, postponement or custom-message questions. Enabled status windows and restart countdowns can still appear.'
++    : 'The toolkit checks the signed-in session and running apps. It may ask staff or run silently; the installer does not choose this mode.';
++  if (path === 'local' && mode === 'Auto') staff = 'Saved automatic mode is not supported by this local generator: its script currently defaults to Silent.';
++  return { mode, known, automatic, visible, welcome, processes, enabledMessages, enabledNotifications, deferral, background, staff,
++    progress: visible && config.progressDialog?.enabled,
++    notifications: visible && enabledNotifications > 0,
++    messages: automatic && enabledMessages > 0,
++    restartPrompt: visible && config.restartPrompt?.enabled,
++  };
++}
+diff --git a/packager/tests/install-settings-contract.test.ts b/packager/tests/install-settings-contract.test.ts
+new file mode 100644
+index 000000000..e9eac23eb
+--- /dev/null
++++ b/packager/tests/install-settings-contract.test.ts
+@@ -0,0 +1,39 @@
++import { describe, expect, it } from 'vitest';
++import { JobProcessor } from '../src/job-processor';
++import type { PackagingJob } from '../src/job-poller';
++
++const generator = JobProcessor.prototype as unknown as {
++  generateDeployScript(job: PackagingJob, fileName: string): string;
++};
++const job = (settings: Record<string, unknown>): PackagingJob => ({
++  id: 'fixture', user_id: 'fixture', user_email: 'admin@example.invalid', tenant_id: 'fixture',
++  winget_id: 'Example.App', version: '1.8.2', display_name: 'Example App', publisher: 'Example',
++  architecture: 'x64', installer_type: 'exe', installer_url: 'https://example.invalid/setup.exe',
++  installer_sha256: 'a'.repeat(64), install_command: 'setup.exe /S', uninstall_command: 'uninstall.exe /S',
++  install_scope: 'machine', detection_rules: [], status: 'queued', progress_percent: 0,
++  created_at: '2026-11-23T12:00:00Z', package_config: { psadtConfig: settings },
++});
++const script = (settings: Record<string, unknown>) => generator.generateDeployScript.call(generator, job(settings), 'setup.exe');
++
++describe('local generated installation contract', () => {
++  it('keeps background process and disk handling independently from display mode', () => {
++    const output = script({ deployMode: 'Silent', processesToClose: [{ name: 'example', description: 'Example App' }], checkDiskSpace: true, requiredDiskSpace: 500, blockExecution: true });
++    expect(output).toMatch(/Show-ADTInstallationWelcome[^\n]*-CloseProcesses[^\n]*-Silent[^\n]*-BlockExecution[^\n]*-CheckDiskSpace[^\n]*-RequiredDiskSpace 500/);
++    expect(output).toContain("'Silent'");
++    expect(output).not.toContain('Show-ADTInstallationProgress');
++  });
++  it('postponement creates a welcome despite a saved false close-app switch', () => {
++    const output = script({ deployMode: 'Auto', allowDefer: true, showClosePrompt: false, deferTimes: 3, processesToClose: [{ name: 'example', description: 'Example App' }], forceCloseProcessesCountdown: 90, closeCountdown: 60 });
++    expect(output).toMatch(/Show-ADTInstallationWelcome[^\n]*-AllowDeferCloseProcesses[^\n]*-ForceCloseProcessesCountdown 90[^\n]*-DeferTimes 3/);
++    expect(output).not.toContain('-CloseProcessesCountdown 60');
++    // Local Auto currently omits the command-line mode and uses this default.
++    expect(output).toMatch(/\$DeployMode\s*=\s*'Silent'/);
++  });
++  it('does not pretend local generation supports hosted presentation choices', () => {
++    const output = script({ deployMode: 'NonInteractive', progressDialog: { enabled: true }, restartPrompt: { enabled: true }, customPrompts: [{ enabled: true, title: 'Example', message: 'Example', timing: 'pre-install' }], balloonTips: [{ enabled: true }], brandingWelcomeTitle: 'Saved title' });
++    expect(output).not.toContain('Show-ADTInstallationProgress');
++    expect(output).not.toContain('Show-ADTInstallationRestartPrompt');
++    expect(output).not.toContain('Show-ADTInstallationPrompt');
++    expect(output).not.toContain('Saved title');
++  });
++});
+diff --git a/app/api/hrm/app-assignments/route.test.ts b/app/api/hrm/app-assignments/route.test.ts
+new file mode 100644
+index 000000000..0ffaa5f0b
+--- /dev/null
++++ b/app/api/hrm/app-assignments/route.test.ts
+@@ -0,0 +1,90 @@
++import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++import { NextRequest } from 'next/server';
++const state = vi.hoisted(() => ({ user: { userId: 'staff', tenantId: 'tenant', userEmail: 'staff@example.test' } as unknown, supabase: null as unknown }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.user }));
++vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => state.supabase }));
++vi.mock('@/lib/db', () => ({ isSqliteMode: () => false }));
++vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'fixture-token' }));
++vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: async () => ({ tenantId: 'tenant', errorResponse: null }) }));
++import { POST } from './route';
++const APP = '10000000-0000-0000-0000-000000000001';
++const GROUP = '20000000-0000-0000-0000-000000000002';
++let rows: Record<string, unknown>[];
++let writes: Record<string, unknown>[];
++let version: string;
++let writeStatus: number;
++let missingReadback: boolean;
++let failAfterWrite: boolean;
++const request = (body: object, tenant?: string) => POST(new NextRequest('http://localhost/api/hrm/app-assignments', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tenant ? { 'X-MSP-Tenant-Id': tenant } : {}) }, body: JSON.stringify({ appId: APP, groupId: GROUP, intent: 'required', ...body }) }));
++const review = async (intent = 'required') => (await (await request({ action: 'review', intent })).json()).review;
++beforeEach(() => {
++  state.user = { userId: 'staff', tenantId: 'tenant' }; state.supabase = null;
++  rows = [{ id: 'old', intent: 'uninstall', target: { '@odata.type': '#microsoft.graph.exclusionGroupAssignmentTarget', groupId: '30000000-0000-0000-0000-000000000003', deviceAndAppManagementAssignmentFilterId: 'filter', futureTarget: { preserve: true } }, settings: { '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings', futureSetting: true }, futureRoot: { keep: true } }];
++  writes = []; version = '1.2'; writeStatus = 201; missingReadback = false; failAfterWrite = false;
++  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
++    if (url.includes('/groups/')) return Response.json({ id: GROUP, displayName: 'Enrolled staff', securityEnabled: true });
++    if (url.endsWith('/assignments')) {
++      if (init?.method === 'POST') {
++        const input = JSON.parse(init.body as string); writes.push(input);
++        if (writeStatus !== 201) return new Response('', { status: writeStatus });
++        if (!missingReadback) rows.push({ id: 'new', ...input });
++        if (failAfterWrite) throw new Error('Connection lost after commit');
++        return Response.json(input, { status: 201 });
++      }
++      return Response.json({ value: rows });
++    }
++    return Response.json({ id: APP, displayName: 'Example app', displayVersion: version, '@odata.type': '#microsoft.graph.win32LobApp' });
++  }));
++});
++afterEach(() => vi.unstubAllGlobals());
++it.each(['required', 'available'])('adds only one %s assignment and reads back actual rows without rewriting unknown fields', async intent => {
++  const original = structuredClone(rows[0]);
++  const r = await review(intent);
++  expect(r).toMatchObject({ appName: 'Example app', version: '1.2', groupName: 'Enrolled staff', intent });
++  expect(writes).toHaveLength(0);
++  const saved = await request({ action: 'save', intent, token: r.token });
++  expect(saved.status).toBe(200);
++  expect((await saved.json()).assignments).toHaveLength(2);
++  expect(rows[0]).toEqual(original);
++  expect(writes).toEqual([{ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent, target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: GROUP }, settings: { '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings', notifications: 'showAll' } }]);
++  expect((await request({ action: 'save', intent, token: r.token })).status).toBe(200);
++  expect(writes).toHaveLength(1);
++});
++it('recovers an ambiguous committed write through review and retry without another write', async () => {
++  const r = await review(); failAfterWrite = true;
++  expect((await request({ action: 'save', token: r.token })).status).toBe(424);
++  const next = await review();
++  expect((await request({ action: 'save', token: next.token })).status).toBe(200);
++  expect(writes).toHaveLength(1);
++});
++it('rejects changed app identity and invalid intent', async () => {
++  const r = await review(); version = '2';
++  expect((await request({ action: 'save', token: r.token })).status).toBe(409);
++  expect((await request({ action: 'review', intent: 'availableWithoutEnrollment' })).status).toBe(400);
++  expect(writes).toHaveLength(0);
++});
++it.each(['uninstall', 'available', 'required'])('rejects existing conflicting %s or filtered assignment', async intent => {
++  rows.push({ intent, target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: GROUP, deviceAndAppManagementAssignmentFilterId: 'filter', deviceAndAppManagementAssignmentFilterType: 'include' } });
++  expect((await request({ action: 'review' })).status).toBe(409);
++  expect(writes).toHaveLength(0);
++});
++it('enforces authentication and tenant scoping before Graph', async () => {
++  state.user = null;
++  expect((await request({ action: 'review' })).status).toBe(401);
++  state.user = { userId: 'staff', tenantId: 'tenant' };
++  expect((await request({ action: 'review' }, 'other')).status).toBe(403);
++  expect(fetch).not.toHaveBeenCalled();
++});
++it('denies MSP viewers server-side', async () => {
++  const chain = { select: () => chain, eq: () => chain, maybeSingle: async () => ({ data: { role: 'viewer' }, error: null }) };
++  state.supabase = { from: () => chain };
++  expect((await request({ action: 'review' })).status).toBe(403);
++  expect(fetch).not.toHaveBeenCalled();
++});
++it('reports Graph denial and unconfirmed readback without a replacement fallback', async () => {
++  const r = await review(); writeStatus = 403;
++  expect((await request({ action: 'save', token: r.token })).status).toBe(403);
++  writeStatus = 201; missingReadback = true;
++  expect((await request({ action: 'save', token: r.token })).status).toBe(424);
++  expect(writes).toHaveLength(2);
++});
+diff --git a/app/api/hrm/app-assignments/route.ts b/app/api/hrm/app-assignments/route.ts
+new file mode 100644
+index 000000000..5c2b5fb1a
+--- /dev/null
++++ b/app/api/hrm/app-assignments/route.ts
+@@ -0,0 +1,73 @@
++import { createHash } from 'node:crypto';
++import { NextRequest, NextResponse } from 'next/server';
++import { parseAccessToken } from '@/lib/auth-utils';
++import { getServerClientOrNull } from '@/lib/supabase';
++import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
++import { hasPermission } from '@/lib/msp-permissions';
++import { getServicePrincipalToken } from '@/lib/intune/graph-client';
++import { GUID } from '@/lib/hrm/app-insights';
++import { isSqliteMode } from '@/lib/db';
++import { pilotGraph, PilotError } from '@/lib/hrm/pilot-graph';
++
++const reply = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
++// Serialize requests within this server. Never retry a POST automatically:
++// every new attempt rereads Intune and recognizes the existing group target.
++const saving = new Set<string>();
++export async function POST(request: NextRequest) {
++  let lock: string | undefined;
++  try {
++    const user = await parseAccessToken(request.headers.get('Authorization'));
++    if (!user) return reply({ error: 'Authentication required' }, 401);
++    const body = await request.json().catch(() => null);
++    if (!body || !GUID.test(body.appId ?? '') || !GUID.test(body.groupId ?? '') || !['required', 'available'].includes(body.intent) || !['review', 'save'].includes(body.action)) return reply({ error: 'Choose an app, Entra security group and installation intent.' }, 400);
++    const supabase = getServerClientOrNull();
++    const requestedTenantId = request.headers.get('X-MSP-Tenant-Id');
++    const resolution = supabase ? await resolveTargetTenantId({ supabase, userId: user.userId, tokenTenantId: user.tenantId, requestedTenantId }) : { tenantId: user.tenantId, errorResponse: null };
++    if (resolution.errorResponse) return resolution.errorResponse;
++    const tenantId = resolution.tenantId;
++    if (!supabase && requestedTenantId && requestedTenantId !== tenantId) return reply({ error: 'Tenant access denied' }, 403);
++    if (supabase) {
++      const membership = await supabase.from('msp_user_memberships').select('role').eq('user_id', user.userId).maybeSingle();
++      if (membership.error || (membership.data && !hasPermission(membership.data.role, 'deploy_apps'))) return reply({ error: 'Permission to deploy apps is required.' }, 403);
++      const consent = await supabase.from('tenant_consent').select('tenant_id').eq('tenant_id', tenantId).eq('is_active', true).maybeSingle();
++      if (consent.error || !consent.data) return reply({ error: 'Admin consent not found' }, 403);
++    }
++    lock = `${tenantId}:${body.appId.toLowerCase()}`;
++    if (saving.has(lock)) { lock = undefined; return reply({ error: 'An assignment save is in progress. Refresh before retrying.' }, 409); }
++    saving.add(lock);
++    const checkHold = async () => {
++      if (!isSqliteMode()) return;
++      const { sqliteRetirements: retire, sqlitePilotRollouts: pilots, sqliteAppInsights: insights } = await import('@/lib/db/sqlite');
++      const family = insights.family(tenantId, body.appId);
++      if (retire.holdsApp(tenantId, body.appId)) throw new PilotError('This app is being retired. Finish retirement before editing assignments.');
++      if (pilots.holdsApp(tenantId, body.appId) || (family && pilots.active(tenantId, family))) throw new PilotError('This app is part of an active pilot. Finish it in App updates first.');
++    };
++    await checkHold();
++    const token = await getServicePrincipalToken(tenantId);
++    if (!token) throw new PilotError('Could not reach Intune. Try again.', 424);
++    const graph = pilotGraph(token);
++    const [app, group, assignments] = await Promise.all([graph.app(body.appId), graph.group(body.groupId), graph.assignments(body.appId)]);
++    const reviewToken = createHash('sha256').update(JSON.stringify([tenantId, app.id, app.displayName, app.displayVersion, group.id, group.name, body.intent])).digest('hex');
++    const review = { appId: app.id, appName: app.displayName, version: app.displayVersion, groupId: group.id, groupName: group.name, intent: body.intent, token: reviewToken };
++    const existing = assignments.filter(row => row.target.groupId?.toLowerCase() === group.id.toLowerCase());
++    const same = existing.length === 1 && existing[0].intent === body.intent && existing[0].target['@odata.type'] === '#microsoft.graph.groupAssignmentTarget' && (!existing[0].target.deviceAndAppManagementAssignmentFilterType || existing[0].target.deviceAndAppManagementAssignmentFilterType === 'none') && !existing[0].target.deviceAndAppManagementAssignmentFilterId;
++    if (existing.length && !same) throw new PilotError('This group already has a different assignment or filter. Review it in Intune before making changes.');
++    if (body.action === 'review') return reply({ review, alreadyAssigned: same });
++    if (body.token !== reviewToken) throw new PilotError('The app or group changed. Review the assignment again.');
++    if (same) return reply({ success: true, alreadyAssigned: true, assignments });
++    await checkHold();
++    // Add just one object. Do not use /assign: it replaces the entire collection
++    // and would lose concurrent edits and fields this client does not know.
++    // https://learn.microsoft.com/graph/api/intune-apps-mobileappassignment-create?view=graph-rest-beta
++    const response = await fetch(`https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/${app.id}/assignments`, {
++      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, cache: 'no-store', signal: AbortSignal.timeout(30000),
++      body: JSON.stringify({ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: body.intent, target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: group.id }, settings: { '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings', notifications: 'showAll' } }),
++    });
++    if (!response.ok) throw new PilotError(response.status === 403 ? 'Intune denied assignment changes. Check app permissions.' : 'Intune did not confirm the save. Review again before retrying; the assignment may already exist.', response.status === 403 ? 403 : 424);
++    const actual = await graph.assignments(app.id);
++    if (!actual.some(row => row.target.groupId?.toLowerCase() === group.id.toLowerCase() && row.intent === body.intent)) throw new PilotError('Intune accepted the save, but the assignment is not visible yet. Refresh assignments before retrying.', 424);
++    return reply({ success: true, assignments: actual });
++  } catch (error) {
++    return reply({ error: error instanceof PilotError ? error.message : 'Could not confirm the assignment. Review again before retrying; the assignment may already exist.' }, error instanceof PilotError ? error.status : 424);
++  } finally { if (lock) saving.delete(lock); }
++}
+diff --git a/components/hrm/EditAssignments.test.ts b/components/hrm/EditAssignments.test.ts
+new file mode 100644
+index 000000000..43c1109e8
+--- /dev/null
++++ b/components/hrm/EditAssignments.test.ts
+@@ -0,0 +1,55 @@
++// @vitest-environment happy-dom
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
++import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ getAccessToken: async () => 'fixture' }) }));
++vi.mock('@/hooks/useMspOptional', () => ({ useMspOptional: () => ({ isMspUser: true, selectedTenantId: 'customer' }) }));
++vi.mock('./PilotGroupPicker', () => ({ PilotGroupPicker: (props: { onSelect: (value: unknown) => void; disabled: boolean; tenantId: string }) => createElement('button', { disabled: props.disabled, onClick: () => props.onSelect({ id: 'group', displayName: 'Selected group' }) }, `Choose group in ${props.tenantId}`) }));
++import { AssignmentEditor } from './EditAssignments';
++(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++let root: Root;
++let node: HTMLDivElement;
++let client: QueryClient;
++let calls: Record<string, unknown>[];
++let failSave: boolean;
++beforeEach(() => {
++  failSave = false; calls = []; client = new QueryClient();
++  vi.spyOn(client, 'invalidateQueries');
++  node = document.createElement('div'); document.body.append(node); root = createRoot(node);
++  vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
++    const body = JSON.parse(init.body); calls.push(body);
++    if (body.action === 'review') return Response.json({ review: { appName: 'Verified app', version: '3.2.1', groupName: 'Verified group', groupId: 'group', intent: body.intent, token: 'review-token' } });
++    return failSave ? Response.json({ error: 'Graph denied save. Review again.' }, { status: 403 }) : Response.json({ success: true, assignments: [] });
++  }));
++});
++afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
++const click = async (label: string) => act(async () => { const button = [...node.querySelectorAll('button')].find(b => b.textContent === label); expect(button).toBeDefined(); button!.click(); });
++async function mount() { await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(AssignmentEditor, { appId: 'app', tenantId: 'customer' })))); }
++it('requires review showing verified app/version/group/intent, then saves and refreshes actual assignments', async () => {
++  await mount();
++  expect((node.querySelector('button:last-child') as HTMLButtonElement).disabled).toBe(true);
++  await click('Choose group in customer'); await click('Review assignment');
++  expect(node.textContent).toContain('Verified app'); expect(node.textContent).toContain('3.2.1'); expect(node.textContent).toContain('Verified group');
++  expect(node.querySelector('[aria-label="Assignment review"]')!.textContent).toContain('Required');
++  expect(calls).toHaveLength(1);
++  await click('Save assignment');
++  expect(calls[1]).toMatchObject({ action: 'save', appId: 'app', token: 'review-token', intent: 'required' });
++  expect(node.textContent).toContain('Assignment saved in Intune');
++  expect(client.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inventory'] });
++  expect(fetch).toHaveBeenCalledWith('/api/hrm/app-assignments', expect.objectContaining({ headers: expect.objectContaining({ 'X-MSP-Tenant-Id': 'customer' }) }));
++});
++it('invalidates the review after intent changes and shows available for enrolled devices', async () => {
++  await mount(); await click('Choose group in customer'); await click('Review assignment');
++  await act(async () => { const select = node.querySelector('select')!; select.value = 'available'; select.dispatchEvent(new Event('change', { bubbles: true })); });
++  expect(node.querySelector('[aria-label="Assignment review"]')).toBeNull();
++  await click('Review assignment');
++  expect(node.querySelector('[aria-label="Assignment review"]')!.textContent).toContain('Available for enrolled devices');
++});
++it('shows server errors and requires another review before retrying', async () => {
++  await mount(); await click('Choose group in customer'); await click('Review assignment'); failSave = true;
++  await click('Save assignment');
++  expect(node.querySelector('[role="alert"]')!.textContent).toContain('Graph denied');
++  expect(node.querySelector('[aria-label="Assignment review"]')).toBeNull();
++  expect(node.textContent).toContain('Review assignment');
++});
+diff --git a/components/hrm/EditAssignments.tsx b/components/hrm/EditAssignments.tsx
+new file mode 100644
+index 000000000..fda4f386a
+--- /dev/null
++++ b/components/hrm/EditAssignments.tsx
+@@ -0,0 +1,57 @@
++'use client';
++import { useRef, useState } from 'react';
++import { useQueryClient } from '@tanstack/react-query';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++import { useMspOptional } from '@/hooks/useMspOptional';
++import { Button } from '@/components/ui/button';
++import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
++import { PilotGroupPicker, type PilotGroupSelection } from './PilotGroupPicker';
++
++interface Review { appName: string; version: string; groupName: string; groupId: string; intent: string; token: string }
++export function EditAssignments({ appId }: { appId: string }) {
++  const { isMspUser, selectedTenantId } = useMspOptional();
++  const tenantId = isMspUser ? selectedTenantId : null;
++  return <Dialog><DialogTrigger asChild><Button size="sm" variant="outline">Edit assignments</Button></DialogTrigger><DialogContent side="right"><DialogHeader className="pr-12"><DialogTitle>Edit assignments</DialogTitle><DialogDescription>Add an Entra security group to this existing Intune app. No new package is created.</DialogDescription></DialogHeader><div className="overflow-y-auto p-6"><AssignmentEditor key={`${appId}:${tenantId}`} appId={appId} tenantId={tenantId} /></div></DialogContent></Dialog>;
++}
++export function AssignmentEditor({ appId, tenantId }: { appId: string; tenantId?: string | null }) {
++  const { getAccessToken } = useMicrosoftAuth();
++  const client = useQueryClient();
++  const [group, setGroup] = useState<PilotGroupSelection | null>(null);
++  const [intent, setIntent] = useState('required');
++  const [review, setReview] = useState<Review | null>(null);
++  const [busy, setBusy] = useState(false);
++  const pending = useRef(false);
++  const [error, setError] = useState('');
++  const [message, setMessage] = useState('');
++  async function run(action: 'review' | 'save') {
++    if (!group || pending.current) return;
++    pending.current = true; setBusy(true); setError(''); setMessage('');
++    try {
++      const token = await getAccessToken();
++      if (!token) throw new Error('Sign in again.');
++      const response = await fetch('/api/hrm/app-assignments', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(tenantId ? { 'X-MSP-Tenant-Id': tenantId } : {}) }, body: JSON.stringify({ action, appId, groupId: group.id, intent, token: review?.token }) });
++      if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Your sign-in expired. Reload and sign in again.');
++      const data = await response.json();
++      if (!response.ok) throw new Error(data.error || 'Could not save assignments.');
++      if (action === 'review') { setReview(data.review); if (data.alreadyAssigned) setMessage('This group already has this intent. Its existing settings will be kept.'); }
++      else {
++        setReview(null);
++        setMessage(data.alreadyAssigned ? 'Already assigned. Existing settings kept.' : 'Assignment saved in Intune.');
++        await client.invalidateQueries({ queryKey: ['inventory'] });
++        await client.invalidateQueries({ queryKey: ['hrm', 'app-insights'] });
++      }
++    } catch (e) {
++      setError(e instanceof Error ? e.message : 'Could not confirm assignment. Review again before retrying.'); setReview(null);
++      if (action === 'save') await client.invalidateQueries({ queryKey: ['inventory'] });
++    } finally { pending.current = false; setBusy(false); }
++  }
++  return <div className="space-y-4 text-sm text-text-secondary">
++    <p>Existing assignments and their filters, install dates and settings are kept. This adds one unfiltered group with Intune’s default install timing and all notifications.</p>
++    <PilotGroupPicker selected={group} onSelect={value => { setGroup(value); setReview(null); setMessage(''); }} disabled={busy} label="Find an Entra group" tenantId={tenantId} />
++    <label className="block font-medium text-text-primary">Installation intent<select className="mt-2 block w-full rounded-lg border border-overlay/20 bg-bg-elevated p-2" value={intent} disabled={busy} onChange={event => { setIntent(event.target.value); setReview(null); setMessage(''); }}><option value="required">Required</option><option value="available">Available for enrolled devices</option></select></label>
++    <p>{intent === 'required' ? 'Intune installs this app automatically on eligible devices in the group.' : 'Employees with enrolled devices can choose this app in Company Portal.'}</p>
++    {review && <section aria-label="Assignment review" className="space-y-2 rounded-lg border border-overlay/20 p-4"><h3 className="font-semibold text-text-primary">Confirm assignment</h3><p>App: <strong>{review.appName}</strong> · version <strong>{review.version || 'not reported'}</strong></p><p>Intune app: {appId}</p><p>Group: <strong>{review.groupName}</strong></p><p className="break-all">{review.groupId}</p><p>Intent: <strong>{review.intent === 'required' ? 'Required' : 'Available for enrolled devices'}</strong></p></section>}
++    {error && <p role="alert" className="text-status-error">{error}</p>}{message && <p role="status">{message}</p>}
++    <Button disabled={busy || !group} onClick={() => void run(review ? 'save' : 'review')}>{busy ? 'Checking Intune…' : review ? 'Save assignment' : 'Review assignment'}</Button>
++  </div>;
++}
