@@ -402,7 +402,7 @@ index 000000000..9ac6c1c4e
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 000000000..bdd9f1e97
+index 0000000..32e4d81
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -0,0 +1,222 @@
@@ -625,7 +625,7 @@ index 000000000..bdd9f1e97
 +
 +it('distinguishes Curated current security holds from unavailable verification', () => {
 +  const text = HELP_SECTIONS.find(section => section.id === 'deploying')!.points.join(' ');
-+  for (const fact of ['exact installer hash', 'Allowed means', 'Held means', 'Unavailable means', 'not evidence that the installer is malicious', 'cached public QA results do not replace', 'v0.8.6 integration is not deployed']) expect(text).toContain(fact);
++  for (const fact of ['exact installer hash', 'Allowed means', 'Held means', 'Unavailable means', 'not evidence that the installer is malicious', 'cached public QA results do not replace', 'current-hold service is not configured or cannot be read']) expect(text).toContain(fact);
 +  expect(HELP_SECTIONS.find(section => section.id === 'updating')!.points.join(' ')).toContain('Retry safely cannot supply missing verification or clear a hold');
 +});
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
@@ -833,7 +833,7 @@ index 000000000..3328aa1a6
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 0000000..5e30910
+index 0000000..ad43055
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
 @@ -0,0 +1,587 @@
@@ -899,7 +899,7 @@ index 0000000..5e30910
 +      'Curated deployment requires a current security-hold check for the exact installer hash. Allowed means that check found no active hold; it does not prove installation or bypass other deployment checks.',
 +      'Held means an active security hold prevents packaging. Unavailable means the current check could not be completed; packaging still stops. An unavailable check is not evidence that the installer is malicious.',
 +      'Signed catalog approval or withdrawal and cached public QA results do not replace the current hold check. A previous clean result cannot override a new hold or an unreadable current check.',
-+      'The v0.8.6 integration is not deployed. Its required current-hold service is not configured for this server; Curated publishing remains unavailable in that integration. Ask HRM Support to restore supported verification before retrying.',
++      'If the current-hold service is not configured or cannot be read, Curated publishing pauses. Ask HRM Support to restore supported verification before retrying.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
 +  },
