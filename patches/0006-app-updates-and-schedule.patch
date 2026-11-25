@@ -2957,7 +2957,7 @@ index 000000000..e9171e045
 +  return { ...query, action };
 +}
 diff --git a/lib/auto-update/__tests__/sqlite.test.ts b/lib/auto-update/__tests__/sqlite.test.ts
-index eebc25b5e..4283fa887 100644
+index eebc25b..6576667 100644
 --- a/lib/auto-update/__tests__/sqlite.test.ts
 +++ b/lib/auto-update/__tests__/sqlite.test.ts
 @@ -1,3 +1,6 @@
@@ -2975,7 +2975,7 @@ index eebc25b5e..4283fa887 100644
    tempDir = mkdtempSync(join(tmpdir(), 'intuneget-autoupdate-'));
    process.env.DATABASE_PATH = join(tempDir, 'app.db');
    getAppsByWingetIdsMock.mockReset();
-@@ -87,6 +91,17 @@ const deploymentConfig = {
+@@ -87,6 +91,23 @@ const deploymentConfig = {
    detectionRules: [],
  };
  
@@ -2989,11 +2989,17 @@ index eebc25b5e..4283fa887 100644
 +  expect(await db.jobs.getByTenantId('t1')).toHaveLength(0);
 +  expect((await db.updatePolicies.getById(policy.id,'u1'))?.consecutive_failures).toBe(0);
 +});
++it('holds unsupported settings under their own code without creating a job or counting a deployment failure',async()=>{
++ const {db,triggerSqliteAutoUpdate}=await load();const policy=await seedDeployment(db);
++ assignmentRead.mockResolvedValue([{id:'a',intent:'required',target:{'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'},settings:{futureField:false}}]);
++ const result=await triggerSqliteAutoUpdate(db,policy,{...installerResolution().info,currentVersion:'1.0.0',currentIntuneAppId:'app-1'},{skipRateLimits:true});
++ expect(result).toMatchObject({success:false,skipped:true,code:'ASSIGNMENT_SETTINGS_REVIEW_REQUIRED'});expect(await db.jobs.getByTenantId('t1')).toHaveLength(0);expect((await db.updatePolicies.getById(policy.id,'u1'))?.consecutive_failures).toBe(0);
++});
 +
  async function seedDeployment(db: Awaited<ReturnType<typeof load>>['db'], withPrior = true) {
    const policy = await db.updatePolicies.upsert({
      user_id: 'u1',
-@@ -351,6 +366,26 @@ describe('sqlite auto-update check', () => {
+@@ -351,6 +372,26 @@ describe('sqlite auto-update check', () => {
      expect(await db.updateCheckResults.list('u2', { includeDismissed: true })).toHaveLength(1);
    });
  
@@ -3020,7 +3026,7 @@ index eebc25b5e..4283fa887 100644
    it('records nothing when every deployed app is up to date', async () => {
      const { db, runSqliteUpdateCheck } = await load();
      await seedDeployment(db);
-@@ -428,3 +463,309 @@ it.each(['minor', 'major'] as const)('SQLite scope %s holds before history, jobs
+@@ -428,3 +469,309 @@ it.each(['minor', 'major'] as const)('SQLite scope %s holds before history, jobs
    expect(history).not.toHaveBeenCalled();
    expect(acquireGraphTokenMock).not.toHaveBeenCalled();
  });
@@ -3355,7 +3361,7 @@ index a266e0d18..24fde1240 100644
    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
  
 diff --git a/lib/auto-update/sqlite.ts b/lib/auto-update/sqlite.ts
-index 9db764f3e..6258c95f9 100644
+index 9db764f..f682415 100644
 --- a/lib/auto-update/sqlite.ts
 +++ b/lib/auto-update/sqlite.ts
 @@ -18,6 +18,10 @@
@@ -3374,7 +3380,7 @@ index 9db764f3e..6258c95f9 100644
    skipped?: boolean;
    skipReason?: string;
 -  code?: 'CURATED_LICENCE_NOT_ACCEPTED' | 'INTUNE_APPROVAL_PENDING' | 'UPDATE_SCOPE_HELD';
-+  code?: 'CURATED_LICENCE_NOT_ACCEPTED' | 'INTUNE_APPROVAL_PENDING' | 'UPDATE_SCOPE_HELD' | 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED';
++  code?: 'CURATED_LICENCE_NOT_ACCEPTED' | 'INTUNE_APPROVAL_PENDING' | 'UPDATE_SCOPE_HELD' | 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED' | 'ASSIGNMENT_SETTINGS_REVIEW_REQUIRED';
    error?: string;
    packagingJobId?: string;
    historyId?: string;
@@ -3447,8 +3453,8 @@ index 9db764f3e..6258c95f9 100644
 +        try {
 +          await (await import('@/lib/hrm/replacement-deadlines')).checkReplacementDeadlines(policy.tenant_id, updateInfo.currentIntuneAppId, options?.assignmentReview);
 +        } catch (error) {
-+          const { AssignmentDeadlineHold } = await import('@/lib/hrm/replacement-deadlines');
-+          if (error instanceof AssignmentDeadlineHold) return { success: false, skipped: true, skipReason: error.message, code: error.code };
++          const { AssignmentDeadlineHold, AssignmentSettingsReview } = await import('@/lib/hrm/replacement-deadlines');
++          if (error instanceof AssignmentDeadlineHold || error instanceof AssignmentSettingsReview) return { success: false, skipped: true, skipReason: error.message, code: error.code };
 +          throw error;
 +        }
 +      }
@@ -4004,10 +4010,10 @@ index 000000000..3fea9ca51
 +});
 diff --git a/lib/hrm/__tests__/manual-update-review.test.ts b/lib/hrm/__tests__/manual-update-review.test.ts
 new file mode 100644
-index 000000000..8e8b07ecb
+index 0000000..d17c5e9
 --- /dev/null
 +++ b/lib/hrm/__tests__/manual-update-review.test.ts
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,41 @@
 +import {beforeEach,expect,it,vi} from 'vitest';
 +const state=vi.hoisted(()=>({assignments:[] as unknown[]}));
 +vi.mock('@/lib/auto-update/trigger',()=>({getLatestInstallerInfo:async()=>({ok:true,info:{latestVersion:'2.0',installerUrl:'https://example.test/app.exe',installerSha256:'a'.repeat(64),installerType:'exe'}})}));
@@ -4030,6 +4036,12 @@ index 000000000..8e8b07ecb
 +});
 +it('rejects another tenant before reading deployment or assignment data',async()=>{
 + await expect(readManualUpdateReview(db,user,{...input,tenant_id:'other'})).rejects.toThrow('another tenant');
++});
++it('reviews both future-dated in-use groups without inventing an expired-deadline confirmation',async()=>{
++ state.assignments=['a','b'].map((id,index)=>({id,intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:id},settings:{inUseSettings:index?null:{countdownMinutes:15,minutesBetweenDeferrals:60,numberOfDeferrals:3},installTimeSettings:{useLocalTime:false,deadlineDateTime:'2099-01-01T00:00:00Z'}}}));
++ const read=await readManualUpdateReview(db,user,input);expect(read.row.dateReviewRequired).toBe(false);
++ const reviewed=reviewedAssignmentSettings(read,{...input,reviewToken:read.row.token,expiredDates:'keep'});
++ expect(reviewed?.expected).toHaveLength(2);expect((reviewed?.expected[0] as any).settings.inUseSettings).toEqual({countdownMinutes:15,minutesBetweenDeferrals:60,numberOfDeferrals:3});
 +});
 +it('invalidates a retain decision when another unchanged assignment deadline expires during review',async()=>{
 + vi.useFakeTimers();

@@ -11,10 +11,10 @@ index 000000000..ceaaa2f16
 +}
 diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
 new file mode 100644
-index 000000000..b62067990
+index 000000000..472408086
 --- /dev/null
 +++ b/components/hrm/help/HelpVisual.tsx
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,88 @@
 +'use client';
 +import { ArrowRight, ArrowUpCircle, Box, Check, ChevronDown, Circle, LayoutDashboard, LifeBuoy, Package, Rocket, Search, Server } from 'lucide-react';
 +import type { LucideIcon } from 'lucide-react';
@@ -59,12 +59,13 @@ index 000000000..b62067990
 +  const target = (<div className="relative my-4 rounded-xl border-2 border-accent-cyan bg-accent-cyan/5 p-3.5"><span className="absolute -left-2.5 -top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-accent-cyan text-xs font-bold text-bg-deep">{number}</span><div className={`flex min-h-10 items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm font-semibold ${action ? 'bg-accent-cyan/15 text-text-primary' : 'border border-overlay/15 bg-bg-surface text-text-primary'}`}><span>{step.focus}</span>{action ? <ArrowRight size={16} className="shrink-0 text-accent-cyan"/> : <ChevronDown size={15} className="shrink-0 text-text-muted"/>}</div></div>);
 +  // Home: task guides about apps show Needs attention; the server guide shows Server status (patch 0058 layout 3B).
 +  const needsAttention = step.screen === 'server' && guideId !== 'server';
++  const installSettings = guideId === 'install-settings';
 +  const rowLabels: Partial<Record<HelpScreen, string[]>> = { catalog: ['Who gets it', 'When a new version comes out'], 'deployment-list': ['Who gets it', 'When a new version comes out'], updates: ['When can IntuneGet send automatic updates to Intune?', 'Installation timing', 'Startup install results'], inventory: ['Current release', 'Who gets it', 'Install results', 'Next automatic update', 'App activity'], discovered: ['App found on computers'], settings: ['Appearance', 'Notifications'], server: needsAttention ? ['Needs attention'] : ['Server status', 'Intune self-test', 'Version', 'All checks'] };
 +  const heading = screen.heading ?? screen.label;
 +  const focusAtHeading = step.focus === heading;
 +  // Inventory app details: Install dates, Previous version and Retire app sit under Actions, between Install results and Groups.
 +  const actionsPanel = step.screen === 'inventory' ? ({ rollback: 'Previous version', retire: 'Retire app' } as Record<string, string>)[guideId] : undefined;
-+  const focusAtRow = manualReview || restartEditor || rowLabels[step.screen]?.includes(step.focus);
++  const focusAtRow = manualReview || restartEditor || (installSettings && ['Toolkit windows', 'App setup and checks', 'Staff experience'].includes(step.focus)) || rowLabels[step.screen]?.includes(step.focus);
 +  const row = (label: string, value: string) => step.focus === label ? target : <ExampleRow label={label} value={value}/>;
 +  // App updates: publishing controls and Installation timing are separate; discovery is in Settings.
 +  const scheduleDialog = ['Pause automatic updates', 'Edit publishing window', 'Restrict deploying to selected days and hours', 'Add blackout'].includes(step.focus);
@@ -83,9 +84,9 @@ index 000000000..b62067990
 +            <div className="mb-4 flex items-center justify-between gap-3"><span className="text-sm font-semibold text-text-primary">{heading}</span>{step.screen === 'updates' && <span className="text-[11px] text-text-muted">Deploying ≠ installing</span>}</div>
 +            {['catalog', 'discovered'].includes(step.screen) && <div className="mb-4 flex items-center gap-2 rounded-lg border border-overlay/10 bg-overlay/[0.02] px-3 py-2 text-xs text-text-muted"><Search size={13}/>Search apps</div>}
 +            {['catalog', 'inventory', 'discovered', 'deployments', 'deployment-list', 'updates'].includes(step.screen) && <div className="mb-3 flex items-center gap-3"><span className="rounded-xl bg-accent-cyan/10 p-2.5 text-accent-cyan"><Package size={20}/></span><div className="min-w-0"><p className="text-sm font-medium text-text-primary">Example app</p><p className="mt-1 text-xs text-text-muted">{step.screen === 'deployments' ? 'Deployment history' : 'Deployment configuration'}</p></div></div>}
-+            {['catalog', 'deployment-list'].includes(step.screen) && <>{row('Who gets it', 'Pilot device group')}{row('When a new version comes out', 'Notify only')}{guideId === 'deploying' && <ExampleRow label="Curated" value="Installation settings are provided by the IntuneGet catalog."/>}</>}
++            {['catalog', 'deployment-list'].includes(step.screen) && (installSettings ? <>{row('Toolkit windows', 'No toolkit windows')}{row('App setup and checks', 'Disk space check remains active')}{row('Staff experience', 'Saved postponement is inactive')}<p className="mt-3 text-xs text-text-muted">Vendor installer switches and Intune notifications are separate. Switching mode keeps saved values.</p></> : <>{row('Who gets it', 'Pilot device group')}{row('When a new version comes out', 'Notify only')}{guideId === 'deploying' && <ExampleRow label="Curated" value="Installation settings are provided by the IntuneGet catalog."/>}</>)}
 +            {step.screen === 'updates' && (manualReview ? <>{row('Effective update settings', 'Example app · version 1 to 2')}{row('Saved app settings', 'Saved installer behavior · restart suppressed')}{row('Groups', 'Example pilot group · Required')}{row('Confirm replacement deadlines', 'Paused for IT')}{row('Retain the existing deadlines', 'Availability and other settings stay unchanged')}{row('Choose a new deadline', 'Future date for affected required assignments')}{row('Send update to Intune', 'Single app; bulk uses Update all')}<p className="mt-3 text-xs text-text-muted">Expired required deadlines need explicit IT confirmation. Single app uses Send update to Intune; bulk uses Update all. Reviewing starts nothing. Device installation follows assignments and check-in.</p></> : <>{row('When can IntuneGet send automatic updates to Intune?', 'Review pause, hours and blackouts')}{row('Installation timing', 'Users can postpone · 3 days')}{row('Startup install results', 'No reports yet · Beta')}{guideId === 'updates' && step.focus !== 'Check for app updates' && <ExampleRow label="Check for app updates" value="May start enabled automatic updates"/>}{guideId === 'pilot-rollouts' && <ExampleRow label="Refresh pilot status" value="Read pilot status only"/>}</>)}
-+            {step.screen === 'inventory' && (restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save app exception', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{step.focus === 'Edit next rollout' && target}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{row('Install behavior', 'Saved installer settings')}{row('What employees see', 'Saved installer experience')}{row('Next automatic update', 'Future automatic packages only')}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
++            {step.screen === 'inventory' && (restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save for this app', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{step.focus === 'Edit next rollout' && target}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{row('Install behavior', 'Saved installer settings')}{row('What employees see', 'Saved installer experience')}{row('Next automatic update', 'Future automatic packages only')}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
 +            {step.screen === 'discovered' && row('App found on computers', 'Review match and eligibility')}
 +            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">Deployment outcome</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Installing on computers is a separate result.</p></div>}
 +            {step.screen === 'settings' && <>{row('Appearance', 'Your preference')}{row('Notifications', 'Review configuration')}</>}
@@ -401,7 +402,7 @@ index 000000000..9ac6c1c4e
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 000000000..5174b6e00
+index 000000000..bdd9f1e97
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -0,0 +1,222 @@
@@ -485,7 +486,7 @@ index 000000000..5174b6e00
 +    for (const label of ['Current release', 'Next automatic update', 'Install behavior', 'What employees see', 'Timing and policy details']) expect(policy).toContain(label);
 +    expect(policy).not.toContain('disabled employee preview');
 +    expect(policy).toContain('bounded startup fallback are unavailable');
-+    expect(policy).toContain('The deploy panel’s Installation timing configures one deployment');
++    expect(policy).toContain('The deploy panel’s Installation and staff experience configures one deployment');
 +    expect(policy).toContain('Install dates edits one group’s dates and restart grace on the current Intune copy');
 +    expect(HELP_SECTIONS.find((s) => s.id === 'your-settings')!.points.join(' ')).toContain('On this server, Settings has no update switches');
 +  });
@@ -593,7 +594,7 @@ index 000000000..5174b6e00
 +
 +it('documents saved restart target, held automatic updates and exact Curated hint', () => {
 +  const text = HELP_SECTIONS.find(section => section.id === 'startup-beta')!.points.join(' ');
-+  for (const fact of ['Save app exception saves the rule and target without deploying', 'Start restart Beta pilot', 'previous wider assignments remain intact', 'Broad automatic updates are held', 'not shipped', 'Intune delivery is unverified']) expect(text).toContain(fact);
++  for (const fact of ['Save for this app saves the rule and target without deploying', 'Start restart Beta pilot', 'previous wider assignments remain intact', 'Broad automatic updates are held', 'not shipped', 'Intune delivery is unverified']) expect(text).toContain(fact);
 +  expect(HELP_SECTIONS.find(section => section.id === 'deploying')!.points.join(' ')).toContain('Installation settings are provided by the IntuneGet catalog.');
 +});
 +
@@ -629,7 +630,7 @@ index 000000000..5174b6e00
 +});
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 new file mode 100644
-index 000000000..e2f0e41a3
+index 000000000..03c665a00
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-guides.test.ts
 @@ -0,0 +1,123 @@
@@ -745,8 +746,8 @@ index 000000000..e2f0e41a3
 +it('separates saving a restart pilot target from starting deployment', () => {
 +  const guide = HELP_GUIDES.find(item => item.id === 'startup-beta')!;
 +  const text = JSON.stringify(guide);
-+  for (const label of ['Find a pilot group', 'Save app exception', 'Start restart Beta pilot', 'Required', 'existing wider assignments', 'Broad automatic updates are held', 'real Intune delivery remains unverified']) expect(text).toContain(label);
-+  expect(guide.steps.findIndex(step => step.focus === 'Save app exception')).toBeLessThan(guide.steps.findIndex(step => step.focus === 'Start restart Beta pilot'));
++  for (const label of ['Find a pilot group', 'Save for this app', 'Start restart Beta pilot', 'Required', 'existing wider assignments', 'Broad automatic updates are held', 'real Intune delivery remains unverified']) expect(text).toContain(label);
++  expect(guide.steps.findIndex(step => step.focus === 'Save for this app')).toBeLessThan(guide.steps.findIndex(step => step.focus === 'Start restart Beta pilot'));
 +});
 +
 +it('places manual settings review before the distinct start control', () => {
@@ -832,10 +833,10 @@ index 000000000..3328aa1a6
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..0f42a60b9
+index 0000000..5e30910
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,564 @@
+@@ -0,0 +1,587 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -853,11 +854,29 @@ index 000000000..0f42a60b9
 +
 +export const HELP_SECTIONS: HelpSection[] = [
 +  {
++    id: 'install-settings', title: 'Installation settings',
++    uiLabels: ['Installation and staff experience', 'Toolkit windows', 'No toolkit windows', 'No questions; status windows allowed', 'Ask when needed (automatic)', 'Staff experience', 'App setup and checks', 'App handling and restart', 'Disk space check', 'Postponement', 'Toolkit messages and appearance', 'Package restart countdown', 'Use installer return codes', 'Save to Deployment list'],
++    flow: ['Choose toolkit windows', 'Review background checks', 'Read Staff experience', 'Save to Deployment list'],
++    points: [
++      'In the app configuration or Edit settings, open Installation and staff experience. Toolkit windows controls the wrapper around the installer. The vendor installer still follows its configured command and switches; Intune notifications are separate.',
++      'No toolkit windows suppresses toolkit dialogs. Listed apps may still close without asking, and disk checks still run. A silent toolkit does not make an arbitrary vendor installer silent.',
++      'No questions; status windows allowed suppresses close-app, postponement and custom-message questions. Progress requires its own enabled setting. Notifications and the package restart countdown are separate; this mode does not guarantee only a progress window.',
++      'Ask when needed (automatic) lets the toolkit check the signed-in session, setup state and running apps. It may run silently when nobody can answer or the configured apps are not running. It is not the vendor installer choosing.',
++      'Changing Toolkit windows keeps saved values. Toolkit messages and appearance shows applicable controls only. Staff experience identifies inactive choices; switching back restores their controls and values.',
++      'Under App setup and checks, App handling and restart manages listed apps; Disk space check runs before installation, even without toolkit windows. Leave its minimum blank for package source size. Insufficient space stops installation.',
++      'Postponement needs interactive mode. Use an attempt count with either days or a date. Combining both time limits is rejected because the toolkit stores one deadline. Saved inactive values remain. Employee scheduling and bounded restart fallback are unavailable.',
++      'Use installer return codes follows installer results and Intune assignment settings. Package restart countdown is separate: it can restart after installation without a reboot-required result, including silently when nobody is signed in.',
++      'The local packager does not generate branding, status messages or package restart countdowns and suppresses Intune restarts. Its automatic mode is unavailable here. If capabilities cannot be verified, sign in and reload; unsupported controls remain hidden.',
++      'Read Staff experience before Save to Deployment list or Add to Deployment list. Saving a draft does not change a deployed package. Current-copy groups and categories use Save to Intune; packaged installer changes require deployment again.',
++    ],
++    links: [{ label: 'Open App catalog', href: '/dashboard/apps' }, { label: 'Automatic installation guide', href: '/dashboard/help#automatic-installation-policy' }],
++  },
++  {
 +    id: 'deploying',
 +    title: 'Deploying an app',
-+    uiLabels: ['App catalog', 'Who gets it', 'When a new version comes out', 'Notify only', 'Auto-update', 'Ignore', 'Add to deployment', 'Deployment list', 'Deploy to Intune', 'Edit settings', 'Save to Deployment list', 'Clear list', 'Add a second copy anyway', 'Second copy', 'Previous copy', 'Replaces current copy', 'Deploy now', 'More settings', 'What staff see during install', 'Inventory', 'Keep this copy', 'Delete from Intune', 'Save to Intune', 'New computer setup', 'Deploy again', 'Apps', 'Details', 'Curated'],
++    uiLabels: ['App catalog', 'Who gets it', 'When a new version comes out', 'Notify only', 'Auto-update', 'Ignore', 'Add to Deployment list', 'Deployment list', 'Deploy to Intune', 'Edit settings', 'Save to Deployment list', 'Clear list', 'Add a second copy anyway', 'Second copy', 'Previous copy', 'Replaces current copy', 'Deploy now', 'App setup and checks', 'Toolkit messages and appearance', 'Inventory', 'Keep this copy', 'Delete from Intune', 'Save to Intune', 'New computer setup', 'Deploy again', 'Apps', 'Details', 'Curated'],
 +    points: [
-+      'Find the app in App catalog. Choose Who gets it, then Notify only, Auto-update or Ignore under When a new version comes out. Press Add to deployment.',
++      'Find the app in App catalog. Choose Who gets it, then Notify only, Auto-update or Ignore under When a new version comes out. Press Add to Deployment list.',
 +      'Open the Deployment list with the round button at the bottom right of the page, which shows how many apps it holds. Then press Deploy to Intune.',
 +      'A review shows what will happen in Intune for each app, which groups get it and anything to check, such as no groups or a second copy.',
 +      'In the review, press Deploy now to start the deployment, or Change to fix an app first.',
@@ -865,7 +884,7 @@ index 000000000..0f42a60b9
 +      'Previous deployment history stops ordinary queueing until acknowledged. Review Inventory and Deployments before choosing Deploy again from Inventory or the App catalog. Replaces current copy describes a replacement; history alone does not confirm a live copy.',
 +      'Add a second copy anyway acknowledges this item in this tenant and requests a Second copy. Review again after changing tenant or package. It never bypasses a queued or running deployment. Afterwards, consolidate groups with Keep this copy in Inventory.',
 +      'Inventory may tag the older of the 2 copies Previous copy. IntuneGet never removes a copy you added on purpose, because the newer copy doesn\'t replace it.',
-+      'More settings and What staff see during install show each setting. Curated explains: Installation settings are provided by the IntuneGet catalog. Hover, focus or tap its badge to read the hint.',
++      'Installation and staff experience, App setup and checks, and Toolkit messages and appearance separate effective settings. Curated hint: Installation settings are provided by the IntuneGet catalog. Hover, focus or tap the badge.',
 +      'In Apps, Inventory app names open the workspace. Details opens the app details dialog, where Groups lists Required and Available assignments. No groups means it installs nowhere.',
 +      'IntuneGet removes old copies left by its own updates (see How old copies are removed). For other copies, such as a second copy or one added in Intune by hand, use duplicate cleanup in Inventory.',
 +      'If Inventory finds more than one copy of an app in Intune, it lists them at the top. Previous copies waiting for automatic removal are left out of that list.',
@@ -910,11 +929,11 @@ index 000000000..0f42a60b9
 +  {
 +    id: 'esp',
 +    title: 'New computers and the Enrollment Status Page',
-+    uiLabels: ['More settings', 'New computer setup', 'Deploy again'],
++    uiLabels: ['App setup and checks', 'New computer setup', 'Deploy again'],
 +    points: [
 +      'The Enrollment Status Page (ESP) holds a new computer at setup until the apps on its list are installed.',
 +      'Add only apps a person needs before first use, such as security tools. Every app on the list makes setup slower.',
-+      'In IntuneGet, choose the setup profiles under More settings, then New computer setup. For an app that is already deployed, a change there needs Deploy again.',
++      'In IntuneGet, choose the setup profiles under App setup and checks, then New computer setup. For an app that is already deployed, a change there needs Deploy again.',
 +    ],
 +  },
 +  {
@@ -1058,13 +1077,13 @@ index 000000000..0f42a60b9
 +  {
 +    id: 'startup-beta',
 +    title: 'Startup installation beta',
-+    uiLabels: ['Installation timing', 'Install dates', 'Install after next restart · Beta', 'Startup install results', 'Beta', 'Check startup reports', 'Set up startup reporting', 'Open app workspace', 'Edit next rollout', 'Apply to', 'Use shared policy', 'Save app exception', 'Not set up', 'Cancel before installation', 'Download cancellation script', 'Reports need review', 'Find a pilot group', 'Start restart Beta pilot', 'Saved target', 'Rule saved. No deployment started.'],
-+    flow: ['Open Edit next rollout', 'Choose restart Beta', 'Select pilot group', 'Save app exception', 'Start restart Beta pilot', 'Verify later startup'],
++    uiLabels: ['Installation timing', 'Install dates', 'Install after next restart · Beta', 'Startup install results', 'Beta', 'Check startup reports', 'Set up startup reporting', 'Open app workspace', 'Edit next rollout', 'Apply to', 'Use shared policy', 'Save for this app', 'Not set up', 'Cancel before installation', 'Download cancellation script', 'Reports need review', 'Find a pilot group', 'Start restart Beta pilot', 'Saved target', 'Rule saved. No deployment started.'],
++    flow: ['Open Edit next rollout', 'Choose restart Beta', 'Select pilot group', 'Save for this app', 'Start restart Beta pilot', 'Verify later startup'],
 +    points: [
 +      "Beta: local natural-startup testing passed one installation, detection and cleanup. The correction is not shipped; real Intune delivery is unverified. Save and start require an administrator-enabled validated startup workflow; production is not enabled.",
 +      "Install after next restart · Beta is opt-in for one app and off by default. Set it in the Installation timing section of the deploy panel or the Deployment list editor. Install dates in Inventory only sets dates.",
 +      "The deploy panel sets one deployment. In Edit next rollout, restart Beta instead requires a saved app exception and pilot target, followed by a separate start. Broad automatic updates are held while the saved rule is restart Beta.",
-+      "Open app workspace, then Edit next rollout. In Apply to choose the app and clear Use shared policy. Choose Install after next restart · Beta and Find a pilot group. Save app exception saves the rule and target without deploying.",
++      "Open app workspace, then Edit next rollout. In Apply to choose the app and clear Use shared policy. Choose Install after next restart · Beta and Find a pilot group. Save for this app saves the rule and target without deploying.",
 +      "Confirm Rule saved. No deployment started. Check Saved target, then Start restart Beta pilot. The server verifies the saved group and app eligibility. Only that group receives Required; previous wider assignments remain intact.",
 +      "Store apps, per-user apps, ZIP/portable installers, custom detection, New computer setup and replacement of the previous version are excluded. The app explains restrictions before saving; the server also checks the saved and current deployment configuration.",
 +      "The packaging workflow adds a startup coordinator to the selected package. GitHub Actions builds it and deploys it to Intune; installation runs on the computer. Deploy the matching workflow and its startup scripts before using the Beta.",
@@ -1093,14 +1112,14 @@ index 000000000..0f42a60b9
 +  {
 +    id: 'automatic-installation-policy',
 +    title: 'Installation timing for automatic updates',
-+    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Next automatic update', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Installation timing', 'Edit shared policy', 'Edit next rollout', 'Review next rollout', 'Review current copy and install dates', 'Search', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save app exception', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot'],
-+    flow: ['Open app workspace', 'Review current saved version', 'Edit next rollout', 'Review saved rule', 'Save app exception'],
++    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Next automatic update', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Installation timing', 'Edit shared policy', 'Edit next rollout', 'Review next rollout', 'Review current copy and install dates', 'Search', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot'],
++    flow: ['Open app workspace', 'Review current saved version', 'Edit next rollout', 'Review saved rule', 'Save for this app'],
 +    points: [
 +      'In App updates or Deployments, press Open app workspace. Inventory opens the selected app, with Install results above Current release and Next automatic update. The app title on an App updates card also opens this workspace.',
 +      'Installation timing controls prompts and postponement in packages. Next automatic update and its Saved settings describe future automatic updates; they do not describe what the current installed copy will do.',
 +      'For a verified app with Automatic updates configured in your signed-in tenant, press Edit next rollout. Search offers Review next rollout and Review current copy and install dates; both jump within this app.',
 +      'Edit next rollout is scoped to this app. Clear Use shared policy to edit an exception. For the shared rule, open App updates, then Edit shared policy and select All apps with Automatic updates on in Apply to.',
-+      'Under Installation timing, choose Let users install now or postpone and Days users can postpone. Save app exception saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
++      'Under Installation timing, choose Let users install now or postpone and Days users can postpone. Save for this app saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
 +      'Use each app’s saved settings preserves existing configurations and is the default; restart Beta is off by default. It does not mean silent installation. Install automatically is separate. Current and queued packages keep their settings.',
 +      'Postponement starts at each computer’s first install attempt, not when the server finds or deploys a version. Offline computers start later. After expiry, the next Intune attempt enforces installation, without an exact appointment.',
 +      'Postponement uses the installer toolkit. Prompts may be skipped when nobody is signed in or no app needs closing. Retry and reminder times follow Intune attempts, not an employee-selected time.',
@@ -1110,7 +1129,7 @@ index 000000000..0f42a60b9
 +      'Update history records packaging and deployment. Deployed to Intune means the app reached Intune, not that computers installed it. The workspace shows live aggregate results and their last check time.',
 +      'Installation policy for this release in expanded Update history is the snapshot saved when packaging was queued. Each computer’s postponement and deadlines are not reported there.',
 +      'Install dates edits one group’s dates and restart grace on the current Intune copy. When enabled, reviewed manual updates can retain or explicitly reset assignment dates. Login-only installation is unavailable.',
-+      'The deploy panel’s Installation timing configures one deployment. Install after next restart · Beta remains a separate pilot option with no forced restart or deadline fallback.',
++      'The deploy panel’s Installation and staff experience configures one deployment. Install after next restart · Beta remains a separate pilot option with no forced restart or deadline fallback.',
 +    ],
 +    links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'Open Inventory', href: '/dashboard/inventory' }],
 +  },
@@ -1228,19 +1247,21 @@ index 000000000..0f42a60b9
 +  {
 +    id: 'app-activity',
 +    title: 'App activity',
-+    uiLabels: ['Apps', 'Inventory', 'App activity', 'Open activity', 'Open in Intune', 'Group changes to review', 'Save to Intune', 'Keep this copy'],
++    uiLabels: ['Apps', 'Inventory', 'App activity', 'Open activity', 'Open in Intune', 'Group changes to review', 'Save to Intune', 'Keep this copy', 'Latest deployment attempt', 'Version in Intune', 'Next automatic update'],
 +    points: [
 +      'In Apps, open an Inventory app name, then expand App activity to see its latest 100 events across versions deployed by IntuneGet: deployments, failed deployment attempts, version changes, group changes and installation-result counts.',
 +      'Existing deployment history appears immediately. Group and installation-result history starts with the first successful check of Intune. Unchanged counts do not add another event.',
 +      'Changes found in Intune show when they were observed. IntuneGet does not know who made those changes in Intune. Known group edits through Save to Intune or Keep this copy show the staff member who saved them.',
 +      'For a copy that is no longer in Intune, open Inventory, then Open activity beside its warning in Group changes to review, to see its recorded history. Open in Intune checks it there.',
++      'Latest deployment attempt is linked to the exact copy and tenant, including a replacement attempt that failed before upload. Archived attempts stay read-only here. They remain hidden from deployment history. No retry starts from this summary.',
++      'Version in Intune is configuration, not per-computer version inventory. Install results remain separate from failed packaging attempts. Per-computer versions are not collected here. Next automatic update shows your account’s saved future policy, not the installed copy or another account’s policy.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }],
 +  },
 +  {
 +    id: 'group-changes',
 +    title: 'Group changes to review',
-+    uiLabels: ['Group changes to review', 'Check now', 'Previously', 'Open app', 'Mark reviewed'],
++    uiLabels: ['Group changes to review', 'Check now', 'Previously', 'Open app', 'Mark reviewed', 'Edit assignments', 'Review assignment', 'Save assignment'],
 +    points: [
 +      'In Inventory, Group changes to review lists the newest copy of each app IntuneGet deployed when its groups or assignment settings changed, it has no groups receiving installations, or it is no longer in Intune.',
 +      'Checks run at 3:30 AM and 3:30 PM, Maryland time. Press Check now in Group changes to review for a fresh check. If Intune cannot be read, the last successful check is kept.',
@@ -1248,6 +1269,8 @@ index 000000000..0f42a60b9
 +      'Mark reviewed acknowledges the displayed change without changing anything in Intune. A newer change needs its own review. Warnings for missing apps or no groups receiving installations remain until the problem is fixed.',
 +      'Saved group-change warnings also appear with the live groups in App updates and when the deployment review replaces a current copy. Check the groups before you update or deploy again.',
 +      'Exclusions and Uninstall assignments do not install an app. Group checks describe assignments, not which computers or users are in a group.',
++      'Edit assignments in the app workspace adds one Required or Available group to the existing copy. Review assignment shows the live app and group before Save assignment. New groups use default install timing and all notifications; existing assignments stay unchanged.',
++      'Changing a selection clears its review. Conflicting filters, exclusions, active pilots or retirement can block saving. If a response is uncertain, review again before retrying: Intune may already have saved it. An identical existing assignment is kept without another write.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open App updates', href: '/dashboard/updates' }],
 +  },
@@ -1292,7 +1315,7 @@ index 000000000..0f42a60b9
 +  {
 +    id: 'remove-discovered',
 +    title: 'Removing an app found on computers',
-+    uiLabels: ['Discovered apps', 'Remove', 'Remove from computers', 'How to remove', 'Matched', 'Partial match', 'No match', 'Link package', 'Microsoft Store app', 'What gets removed', 'Remove it from', 'All devices', 'Groups I choose in the Deployment list', 'I understand this uninstalls the app from every computer in the groups I choose', 'Add removal to Deployment list', 'To remove', 'Deployment list', 'Removal', 'This only removes the app', 'Who gets it', 'More settings', 'Choose groups', 'Adds it to Intune only to uninstall', 'Deploy to Intune', 'Ignore', 'Inventory', 'Removing this app', 'Delete from Intune', 'Delete without confirmation from Intune', 'Cancel retiring'],
++    uiLabels: ['Discovered apps', 'Remove', 'Remove from computers', 'How to remove', 'Matched', 'Partial match', 'No match', 'Link package', 'Microsoft Store app', 'What gets removed', 'Remove it from', 'All devices', 'Groups I choose in the Deployment list', 'I understand this uninstalls the app from every computer in the groups I choose', 'Add removal to Deployment list', 'To remove', 'Deployment list', 'Removal', 'This only removes the app', 'Who gets it', 'App setup and checks', 'Choose groups', 'Adds it to Intune only to uninstall', 'Deploy to Intune', 'Ignore', 'Inventory', 'Removing this app', 'Delete from Intune', 'Delete without confirmation from Intune', 'Cancel retiring'],
 +    flow: ['Press Remove from computers', 'Choose where to remove it', 'Add removal to Deployment list', 'Deploy to Intune', 'Wait for computers', 'Delete from Intune'],
 +    points: [
 +      'In Discovered apps, Matched rows that aren\'t in the Deployment list have Remove (list view) or Remove from computers (card view). Other rows have How to remove, which explains what to do instead.',
@@ -1307,7 +1330,7 @@ index 000000000..0f42a60b9
 +      'Under Remove it from, choose All devices, or Groups I choose in the Deployment list.',
 +      'Select I understand this uninstalls the app from every computer in the groups I choose, then press Add removal to Deployment list. The row then shows To remove: in Deployment list.',
 +      'In the Deployment list, the app has a Removal badge and says what it uninstalls. Its settings show This only removes the app, and Remove it from instead of Who gets it.',
-+      'Every group is Uninstall. Install scope, update settings and More settings are hidden.',
++      'Every group is Uninstall. Install scope, update settings and App setup and checks are hidden.',
 +      'Deploy to Intune stays off until the removal has at least one group and every group is Uninstall. Press Choose groups to fix it. The review says Adds it to Intune only to uninstall the app.',
 +      'Deploying adds the app to Intune with (uninstall only) after its name. It never installs anything, and its updates are set to Ignore. Computers that have the app remove it when they check in.',
 +      'Afterwards, open the copy in Inventory. Removing this app shows what Intune reports: still installed, pending, failed, not installed, not applicable and unknown. Computers check in over the next hours, so check back later.',
@@ -1382,7 +1405,7 @@ index 000000000..0f42a60b9
 +    title: 'Reports',
 +    uiLabels: ['Reports', 'My deployment reports', 'Deployments', 'All in tenant', 'Failed', 'Cancelled', 'Dismiss', 'Clear cancelled history', 'Completed', 'All', 'Active'],
 +    points: [
-+      'Reports, headed My deployment reports, shows only deployments you started. In Deployments, choose All in tenant for everyone’s history. Failed excludes Cancelled deployments.',
++      'My deployment reports shows only deployments you started. In Deployments, All in tenant includes other owners. Each scope loads its newest 50 unarchived records before filtering by status. Inventory lists current apps beyond that history window. Failed excludes Cancelled deployments.',
 +      'Dismiss hides one of your finished deployments. Clear cancelled history hides your cancellations; Completed and Failed clear their outcomes. All clears your finished history. Active has no clear action. Audit records stay.',
 +    ],
 +    links: [{ label: 'Open Deployments', href: '/dashboard/uploads' }],
@@ -1396,16 +1419,17 @@ index 000000000..0f42a60b9
 +      'If you open a ticket about a deployment, include the Support ID from its card.',
 +      'For anything else, open a ticket with HRM Support.',
 +      'For Curated packaging, the message may say Packaging remains paused until current installer security eligibility can be verified. Send HRM Support that reason and Support ID. A paused status alone does not distinguish a hold from unavailable verification.',
++      'Assignment review concerns the source app’s groups and timing, not the downloaded file. Unsupported or unreadable settings need settings review, not deadline confirmation. Older workflow codes can mean either problem without proving an expired deadline; read the recorded reason.',
 +    ],
 +    links: [{ label: 'HRM Support', href: HRM_SUPPORT_URL }],
 +  },
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..ed75e7501
+index 0000000..bf797ff
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,403 @@
 +/** Task-first Help. Detailed rules remain in help-content; indexes are zero-based. */
 +export type HelpScreen = 'catalog' | 'deployment-list' | 'updates' | 'inventory' | 'deployments' | 'discovered' | 'settings' | 'server' | 'support' | 'reports';
 +export type HelpCategory = 'deploy' | 'updates' | 'devices' | 'troubleshoot' | 'settings';
@@ -1437,12 +1461,28 @@ index 000000000..ed75e7501
 +
 +export const HELP_GUIDES: HelpGuide[] = [
 +  {
++    id: 'install-settings', category: 'deploy', title: 'Choose installation settings',
++    summary: 'Separate installer commands, toolkit questions, background checks and restart handling before saving a deployment.',
++    keywords: ['silent', 'NonInteractive', 'Auto', 'installer decides', 'progress only', 'Nothing it installs silently', 'More settings', 'What staff see during install', 'Letting staff postpone', 'toolkit windows', 'postponement', 'disk space', 'restart countdown', 'inactive settings'],
++    start: catalog, before: ['Know whether the app needs running programs closed.', 'Review the vendor installer command separately from toolkit windows.'],
++    steps: [
++      step('Choose toolkit windows', 'Open the app configuration and choose Toolkit windows. This controls the toolkit, not the vendor installer switches.', 'catalog', 'Toolkit windows', 'Only settings supported by this mode and packaging service are offered.'),
++      step('Review background checks', 'Open App setup and checks. Review listed apps, disk space and Intune restart handling separately from staff questions.', 'catalog', 'App setup and checks', 'Background checks stay available without visible prompts.'),
++      step('Check the staff experience', 'Read Staff experience, then save to the Deployment list. Changing mode keeps inactive values; saving does not alter deployed copies.', 'catalog', 'Staff experience', 'The draft retains your settings and accurately describes their effective scope.'),
++    ],
++    success: 'The saved package settings distinguish toolkit windows, installer commands and Intune assignment behavior.',
++    caution: 'A package restart countdown can restart even when the installer did not request it. Check before enabling it.',
++    related: ['deploying', 'automatic-installation-policy', 'installation-timing'],
++    troubleshoot: [{ problem: 'Controls are missing', action: 'Check Toolkit windows and the packaging service. Inactive settings are kept; local packaging does not support every toolkit feature.' }],
++    referenceGroups: [reference('Toolkit modes and retained values', [0, 1, 2, 3, 4]), reference('Checks, postponement and restarts', [5, 6, 7]), reference('Packaging support and saving', [8, 9])],
++  },
++  {
 +    id: 'deploying', category: 'deploy', title: 'Deploy an app',
 +    summary: 'Choose who gets an app, review the deployment and deploy it to Intune.', keywords: ['catalog', 'Required', 'Available', 'groups', 'deployment list', 'new app', 'Curated', 'security hold', 'eligibility unavailable', 'installer hash'],
 +    start: catalog, before: ['Know which device or user group should receive the app.', 'Use Available only with a user group.'],
 +    steps: [
 +      step('Choose the app', 'Find the app in App catalog and open its deployment configuration.', 'catalog', 'App catalog', 'The app’s configuration opens on the right.'),
-+      step('Choose who gets it', 'Under Who gets it, choose groups and Required or Available. Set When a new version comes out, then press Add to deployment.', 'catalog', 'Who gets it', 'The app is saved in the Deployment list; computers have not changed.'),
++      step('Choose who gets it', 'Under Who gets it, choose groups and Required or Available. Set When a new version comes out, then press Add to Deployment list.', 'catalog', 'Who gets it', 'The app is saved in the Deployment list; computers have not changed.'),
 +      step('Check the list', 'Open the round Deployment list button. Use the pencil to edit an app, then Save to Deployment list.', 'deployment-list', 'Edit settings', 'The list shows the intended version and groups.'),
 +      step('Review and deploy', 'Press Deploy to Intune. Check every app’s groups and replacement behavior, then press Deploy now.', 'deployment-list', 'Deploy now', 'Packaging starts; follow the job in Deployments.'),
 +      step('Check install results', 'After the deployment finishes, open the app in Inventory. Read Install results, or press Check installs now to read them from Intune.', 'inventory', 'Inventory', 'Deploying to Intune and installing on computers are checked separately.'),
@@ -1475,7 +1515,7 @@ index 000000000..ed75e7501
 +    start: catalog, before: ['Choose only apps needed before first use. More apps make setup slower.'],
 +    steps: [
 +      step('Open deployment settings', 'Open the app in App catalog, or press Details in Inventory. Review its device-group assignments.', 'catalog', 'Who gets it', 'The intended computers receive the app.'),
-+      step('Choose setup profiles', 'Open More settings, then New computer setup. Select the required setup profiles.', 'catalog', 'New computer setup', 'The app is included in those setup profiles for this deployment.'),
++      step('Choose setup profiles', 'Under App setup and checks, open New computer setup. Select the required setup profiles.', 'catalog', 'New computer setup', 'The app is included in those setup profiles for this deployment.'),
 +      step('Deploy the change', 'Add the app to the Deployment list and deploy it. For an app already deployed, use Deploy again.', 'deployment-list', 'Deploy to Intune', 'The package and selected setup profiles are submitted for deployment.'),
 +    ],
 +    success: 'The deployed app is included in the selected Enrollment Status Page profiles.', caution: 'Saving ordinary group changes does not apply a New computer setup change; use Deploy again.',
@@ -1553,7 +1593,7 @@ index 000000000..ed75e7501
 +    steps: [
 +      step('Open this app’s rule', 'In Apps, open the Inventory app name, then Edit next rollout. Clear Use shared policy to edit this app’s exception.', 'inventory', 'Edit next rollout', 'The editor applies to this app, not every app.'),
 +      step('Choose the Beta target', 'Choose Install after next restart · Beta. In Find a pilot group, type at least 2 characters and select the intended security group.', 'inventory', 'Find a pilot group', 'The selected group is explicit; eligibility restrictions must be resolved.'),
-+      step('Save without deploying', 'Press Save app exception. Confirm Rule saved. No deployment started. Broad automatic updates are held while this app’s saved rule is restart Beta.', 'inventory', 'Save app exception', 'The rule and pilot target are saved; no package has started.'),
++      step('Save without deploying', 'Press Save for this app. Confirm Rule saved. No deployment started. Broad automatic updates are held while this app’s saved rule is restart Beta.', 'inventory', 'Save for this app', 'The rule and pilot target are saved; no package has started.'),
 +      step('Start the saved pilot', 'Check Saved target, then press Start restart Beta pilot. Only that group receives the package as Required; existing wider assignments stay on the previous version.', 'inventory', 'Start restart Beta pilot', 'The server checks the saved target and eligibility before requesting the pilot.'),
 +      step('Verify a later startup', 'Open Activity, then Deployments. Confirm staging without installation on a pilot computer. Use Windows Restart; verify one installation, version detection and task cleanup.', 'deployments', 'Deployments', 'Real pilot evidence is still required; sign-in is not blocked.'),
 +      step('Check reporting and cancellation', 'In Updates, press Open on Startup install results. Use Set up startup reporting, then Check startup reports. Follow the cancellation reference to test Cancel before installation separately.', 'updates', 'Check startup reports', 'Received reports and cancellation evidence remain separate from deployment success.'),
@@ -1572,7 +1612,7 @@ index 000000000..ed75e7501
 +      step('Open the policy', 'In App updates or Deployments, press Open app workspace. Read Install results above Current release and Next automatic update before editing future settings.', 'updates', 'Open app workspace', 'Inventory opens the selected app workspace.'),
 +      step('Choose the scope', 'In the workspace, press Edit next rollout. Clear Use shared policy to edit this app’s exception. For the shared rule, open App updates, then Edit shared policy.', 'inventory', 'Edit next rollout', 'You are editing either the shared policy or one app exception.'),
 +      step('Choose when computers install', 'For an ordinary automatic rule, choose Let users install now or postpone and set Days users can postpone. Alternatively, choose Install automatically or Use each app’s saved settings.', 'inventory', 'Days users can postpone', 'The form shows the chosen behavior; 3 days is the suggested choice period.'),
-+      step('Save the intended rule', 'Press Save app exception. To remove an exception, select Use shared policy and press Use shared policy. Save shared policy applies when editing the shared rule from App updates.', 'inventory', 'Save app exception', 'The rule is saved without starting a deployment; restart Beta also needs an explicit pilot start.'),
++      step('Save the intended rule', 'Press Save for this app. To remove an exception, select Use shared policy and press Use shared policy. Save shared policy applies when editing the shared rule from App updates.', 'inventory', 'Save for this app', 'The rule is saved without starting a deployment; restart Beta also needs an explicit pilot start.'),
 +      step('Check a deployed release', 'In Update history, expand the deployed version and read Installation policy for this release. Its install results show there and in Inventory.', 'updates', 'Installation policy for this release', 'You can separate a package’s saved rule from install results on computers.'),
 +    ],
 +    success: 'Next automatic update reflects the saved policy; the current copy and its live results remain separately visible.',
@@ -1653,6 +1693,8 @@ index 000000000..ed75e7501
 +    summary: 'Use recorded activity to understand deployments, group edits and installation-count changes across versions.', keywords: ['history', 'audit', 'events', 'who changed', 'activity'],
 +    start: inventory, before: ['Activity describes observed changes; it cannot identify who edited Intune directly.'],
 +    steps: [
++      step('Separate the copy from an attempt', 'Open an Inventory app name. Compare Version in Intune and install results with Latest deployment attempt; a failed newer package does not mean the existing copy stopped working.', 'inventory', 'Latest deployment attempt', 'Current configuration, installation evidence and a packaging attempt stay distinct.'),
++      step('Read archived evidence', 'An archived latest attempt remains read-only here. For recent history, follow the personal or tenant history link. Review Next automatic update separately from the current copy.', 'inventory', 'Next automatic update', 'You know the attempt’s scope and whether it is hidden from history.'),
 +      step('Open the activity', 'Open Apps, then the app name in Inventory. Expand App activity in the app workspace.', 'inventory', 'App activity', 'The latest recorded events across deployed versions appear.'),
 +      step('Compare the events', 'Read deployments, failures, version changes, group changes and installation-count events in sequence.', 'inventory', 'App activity', 'You can connect the change with the recorded deployment or check.'),
 +      step('Check the source', 'Use Open in Intune for current configuration. For a missing copy, use Open activity beside its Group changes to review warning.', 'inventory', 'Open activity', 'Historical evidence remains distinct from current Intune state.'),
@@ -1660,10 +1702,10 @@ index 000000000..ed75e7501
 +    success: 'You can explain the recorded change and whether it was observed in Intune or made through IntuneGet.',
 +    related: ['group-changes', 'install-results', 'old-copies'],
 +    troubleshoot: [{ problem: 'No event appears for a recent check', action: 'Unchanged counts do not add an event. Group and result history begins with the first successful check.' }],
-+    referenceGroups: [reference('Read recorded activity and its limits', [0, 1, 2, 3])],
++    referenceGroups: [reference('Read recorded activity and its limits', [0, 1, 2, 3]),reference('Separate copy, attempt and installation', [4,5])],
 +  },
 +  {
-+    id: 'group-changes', category: 'devices', title: 'Review changed app assignments',
++    id: 'group-changes', category: 'devices', title: 'Review and add app assignments',
 +    summary: 'Compare previous and current groups before acknowledging a change or deploying another version.', keywords: ['assignments', 'groups', 'Previously', 'Now', 'no groups', 'mark reviewed'],
 +    start: inventory, before: ['Acknowledging a warning does not change Intune.'],
 +    steps: [
@@ -1671,12 +1713,14 @@ index 000000000..ed75e7501
 +      step('Compare the assignments', 'Read Previously and Now, including exclusions, filters and installation choices. Check the last successful check time.', 'inventory', 'Previously', 'You know what changed and how current the evidence is.'),
 +      step('Inspect the current app', 'Press Open app to review live groups. Correct unintended assignments before updating or deploying again.', 'inventory', 'Open app', 'The intended assignment can be checked against the warning.'),
 +      step('Acknowledge the review', 'Use Mark reviewed after checking the displayed change.', 'inventory', 'Mark reviewed', 'That change is acknowledged without changing assignments.'),
++      step('Add a group to the current app', 'Open the app workspace. Under Current release, choose Edit assignments, find an Entra security group and choose Required or Available for enrolled devices.', 'inventory', 'Edit assignments', 'The choice concerns this existing copy, without creating a package.'),
++      step('Review before saving', 'Press Review assignment. Check the app, version, group and intent, then Save assignment. New groups use default install timing and all notifications; existing assignments keep their settings.', 'inventory', 'Review assignment', 'Intune readback confirms the assignment, or an error asks you to review again.'),
 +    ],
 +    success: 'The change has been understood and acknowledged, or the missing app or empty assignments have been corrected.',
 +    caution: 'Missing-app and no-installation-group warnings stay until the underlying problem is fixed. Group checks do not verify group membership.',
 +    related: ['app-activity', 'deploying', 'install-results'],
 +    troubleshoot: [{ problem: 'Check now cannot read Intune', action: 'Use the last successful timestamp and do not assume the saved groups are current.' }, { problem: 'A warning remains after Mark reviewed', action: 'Missing apps and groups receiving no installations require a real fix.' }],
-+    referenceGroups: [reference('Refresh and compare assignment evidence', [0, 1, 2]), reference('Acknowledge changes and understand limits', [3, 4, 5])],
++    referenceGroups: [reference('Refresh and compare assignment evidence', [0, 1, 2]), reference('Acknowledge changes and understand limits', [3, 4, 5]), reference('Add one group safely', [6, 7])],
 +  },
 +  {
 +    id: 'discovered', category: 'devices', title: 'Manage an app found on computers',
@@ -1760,7 +1804,7 @@ index 000000000..ed75e7501
 +  {
 +    id: 'reports', category: 'devices', title: 'Review deployment results and history',
 +    summary: 'Check deployment trends, distinguish failed and cancelled outcomes, and hide only the finished history you own.', keywords: ['reports', 'trends', 'all in tenant', 'history', 'staff', 'failed', 'cancelled', 'dismiss', 'clear history'],
-+    start: { label: 'Open Activity, then Reports', href: '/dashboard/reports' }, before: ['Reports includes only deployments you started.', 'Dismiss and clear-history controls are available only for your finished deployments.'],
++    start: { label: 'Open Activity, then Reports', href: '/dashboard/reports' }, before: ['Reports includes only deployments you started. Deployments loads the newest 50 unarchived records in the selected scope before filtering.', 'Dismiss and clear-history controls are available only for your finished deployments.'],
 +    steps: [
 +      step('Read your report', 'Open Activity, then Reports. My deployment reports shows the outcomes and trends for deployments you started.', 'reports', 'My deployment reports', 'The report’s personal scope is clear.'),
 +      step('Choose whose history to view', 'Open Deployments to inspect recorded outcomes. Choose All in tenant when you need deployments started by other staff.', 'deployments', 'All in tenant', 'Deployments shows the selected personal or tenant-wide scope.'),
@@ -1786,7 +1830,7 @@ index 000000000..ed75e7501
 +    success: 'The failure is understood or a support request includes the exact deployment identifier and evidence.',
 +    related: ['updating', 'install-results', 'server'],
 +    troubleshoot: [{ problem: 'The package deployed but computers failed', action: 'Investigate install results on computers instead of retrying packaging.', guide: 'install-results' }, { problem: 'There is no deployment involved', action: 'Open HRM Support and describe the page, time and visible problem.' }],
-+    referenceGroups: [reference('Failure details and support requests', [0, 1, 2, 3])],
++    referenceGroups: [reference('Failure details and support requests', [0, 1, 2, 3, 4])],
 +  },
 +];
 diff --git a/lib/hrm/help-navigation.ts b/lib/hrm/help-navigation.ts

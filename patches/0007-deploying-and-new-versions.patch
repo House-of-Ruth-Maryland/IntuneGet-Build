@@ -13,15 +13,15 @@ index 764cbe59e..abc7c643f 100644
        logLabel="Uploads"
 diff --git a/app/(app)/dashboard/uploads/page.test.ts b/app/(app)/dashboard/uploads/page.test.ts
 new file mode 100644
-index 000000000..5fae8f243
+index 0000000..c112fd2
 --- /dev/null
 +++ b/app/(app)/dashboard/uploads/page.test.ts
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,103 @@
 +// @vitest-environment happy-dom
 +import { act,createElement,type ReactNode } from 'react';
 +import { createRoot,type Root } from 'react-dom/client';
 +import { beforeEach,afterEach,expect,it,vi } from 'vitest';
-+const state=vi.hoisted(()=>({jobs:[] as Record<string,unknown>[],getAccessToken:vi.fn().mockResolvedValue('fixture-token'),fetch:vi.fn(),invalidate:vi.fn(),queryClient:{} as {invalidateQueries?:unknown}}));
++const state=vi.hoisted(()=>({search:'',jobs:[] as Record<string,unknown>[],getAccessToken:vi.fn().mockResolvedValue('fixture-token'),fetch:vi.fn(),invalidate:vi.fn(),queryClient:{} as {invalidateQueries?:unknown}}));
 +vi.mock('@tanstack/react-query',()=>({useQueryClient:()=>{state.queryClient.invalidateQueries=state.invalidate;return state.queryClient;}}));
 +vi.mock('gt-next',()=>({T:({children}:{children:ReactNode})=>children,Var:({children}:{children:ReactNode})=>children}));
 +vi.mock('framer-motion', async () => {
@@ -32,7 +32,7 @@ index 000000000..5fae8f243
 + };
 + return {motion:{div:element('div'),span:element('span')},useReducedMotion:()=>true,AnimatePresence:({children}:{children:ReactNode})=>children};
 +});
-+vi.mock('next/navigation',()=>({useSearchParams:()=>new URLSearchParams(),useRouter:()=>({push:vi.fn()})}));
++vi.mock('next/navigation',()=>({useSearchParams:()=>new URLSearchParams(state.search),useRouter:()=>({push:vi.fn()})}));
 +vi.mock('@/hooks/useMicrosoftAuth',()=>({useMicrosoftAuth:()=>({user:{id:'owner',tenantId:'tenant'},getAccessToken:state.getAccessToken,signIn:vi.fn()})}));
 +vi.mock('@/hooks/useMspOptional',()=>({useMspOptional:()=>({isMspUser:false})}));
 +vi.mock('@/components/dashboard',()=>({
@@ -51,7 +51,7 @@ index 000000000..5fae8f243
 +const job=(status:string,user='owner')=>({id:status+'-'+user,user_id:user,status,display_name:status+' example',winget_id:'Example.App',version:'1',publisher:'Example',architecture:'x64',installer_type:'msi',progress_percent:0,created_at:'2026-11-01T00:00:00Z',updated_at:'2026-11-01T00:00:00Z'});
 +const button=(label:string,within:ParentNode=document)=>[...within.querySelectorAll('button')].find(b=>b.textContent===label)!;
 +const render=async()=>{await act(async()=>root.render(createElement(UploadsPage)));};
-+beforeEach(()=>{state.jobs=[];state.fetch.mockReset();state.invalidate.mockReset();vi.stubGlobal('fetch',state.fetch);state.fetch.mockImplementation(async(url:string,init?:RequestInit)=>{
++beforeEach(()=>{state.search='';state.jobs=[];state.fetch.mockReset();state.invalidate.mockReset();vi.stubGlobal('fetch',state.fetch);state.fetch.mockImplementation(async(url:string,init?:RequestInit)=>{
 + if(url==='/api/package/cancel'){const body=JSON.parse(String(init?.body));state.jobs=state.jobs.filter(j=>j.id!==body.jobId);return Response.json({success:true,archived:true});}
 + if(url==='/api/package/clear-history'){const body=JSON.parse(String(init?.body));state.jobs=state.jobs.filter(j=>j.user_id!=='owner'||!body.statuses.includes(j.status));return Response.json({success:true,archivedCount:1});}
 + return Response.json({jobs:state.jobs});
@@ -118,13 +118,15 @@ index 000000000..5fae8f243
 + await act(async()=>button('Refresh').click());
 + expect(state.invalidate).not.toHaveBeenCalled();
 +});
++
++it('opens explicit tenant-history navigation in tenant scope while ignoring arbitrary scope values',async()=>{state.search='scope=tenant';await render();expect(button('All in tenant').getAttribute('aria-selected')).toBe('true');expect(state.fetch.mock.calls.some(([url])=>url==='/api/package?scope=tenant')).toBe(true);});
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index 93f7400e8..200232928 100644
+index 93f7400..7b7172a 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
 @@ -1,5 +1,11 @@
  'use client';
-+import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
++import { appWorkspaceUrl, attemptWorkspaceId } from '@/lib/hrm/rollout-workspace';
 +import {ReplacementDeadlineReview} from '@/components/hrm/ReplacementDeadlineReview';
  
 +import { DEPLOYMENT_FILTERS, deploymentFilter, deploymentCounts, clearableDeploymentStatuses, matchesDeploymentFilter, isActiveDeployment, isTerminalDeployment, hasNewlyFinishedDeployment, DEPLOYMENT_FINISHED_QUERY_KEYS, type DeploymentFilter } from '@/lib/hrm/deployment-status';
@@ -155,7 +157,8 @@ index 93f7400e8..200232928 100644
 +  const [filter, setFilter] = useState<DeploymentFilter>(() => deploymentFilter(urlStatus));
    // 'mine' shows the signed-in user's deployments; 'tenant' shows everyone's in
    // the tenant so a team can avoid deploying the same app twice.
-   const [viewScope, setViewScope] = useState<'mine' | 'tenant'>('mine');
+-  const [viewScope, setViewScope] = useState<'mine' | 'tenant'>('mine');
++  const [viewScope, setViewScope] = useState<'mine' | 'tenant'>(() => searchParams.get('scope') === 'tenant' ? 'tenant' : 'mine');
  
    const jobsRequest = useRef<AbortController | null>(null);
 +  // HRM patch 0049: when a watched job finishes, refresh App updates, Home and Inventory straight away.
@@ -451,7 +454,7 @@ index 93f7400e8..200232928 100644
        color: 'text-accent-violet',
        bg: 'bg-accent-violet/10',
        border: 'border-l-accent-violet',
-@@ -760,21 +754,21 @@ function UploadJobCard({
+@@ -760,21 +754,22 @@ function UploadJobCard({
      },
      duplicate_skipped: {
        icon: AlertCircle,
@@ -464,6 +467,7 @@ index 93f7400e8..200232928 100644
    };
  
 -  const config = statusConfig[job.status] || statusConfig.queued;
++  const workspaceId = attemptWorkspaceId(job);
 +  const config = job.error_code==='EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED' ? {...statusConfig.queued,label:'Paused for IT',color:'text-status-warning',bg:'bg-status-warning/10',border:'border-l-status-warning'} : statusConfig[job.status] || statusConfig.queued;
    const StatusIcon = config.icon;
 -  const isActive = ['blocked_upstream', 'awaiting_qa', 'queued', 'packaging', 'uploading'].includes(job.status);
@@ -479,7 +483,7 @@ index 93f7400e8..200232928 100644
  
    const itemVariants = {
      hidden: { opacity: 0, y: prefersReducedMotion ? 0 : 20 },
-@@ -819,9 +813,9 @@ function UploadJobCard({
+@@ -819,9 +814,9 @@ function UploadJobCard({
                className="absolute inset-0 rounded-xl"
                animate={{
                  boxShadow: [
@@ -492,16 +496,16 @@ index 93f7400e8..200232928 100644
                  ],
                }}
                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-@@ -833,7 +827,7 @@ function UploadJobCard({
+@@ -833,7 +828,7 @@ function UploadJobCard({
          <div className="flex-1 min-w-0">
            <div className="flex items-start justify-between gap-4">
              <div>
 -              <h3 className="text-text-primary text-[15px] font-semibold">{job.display_name}</h3>
-+              <h3 className="text-text-primary text-[15px] font-semibold">{job.intune_app_id ? <Link href={appWorkspaceUrl(job.intune_app_id)} aria-label={`${job.display_name} · Open app workspace`} className="rounded hover:text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{job.display_name}</Link> : job.display_name}</h3>
++              <h3 className="text-text-primary text-[15px] font-semibold">{workspaceId ? <Link href={appWorkspaceUrl(workspaceId)} aria-label={`${job.display_name} · Open app workspace`} className="rounded hover:text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{job.display_name}</Link> : job.display_name}</h3>
                <p className="text-text-secondary text-sm mt-0.5">
                  {job.publisher}
                  {job.app_source !== 'store' && job.installer_type && (
-@@ -864,10 +858,8 @@ function UploadJobCard({
+@@ -864,10 +859,8 @@ function UploadJobCard({
                        {assignment.type === 'allUsers' && <Users className="w-3 h-3" />}
                        {assignment.type === 'allDevices' && <Monitor className="w-3 h-3" />}
                        {assignment.type === 'group' && <UserCircle className="w-3 h-3" />}
@@ -514,7 +518,7 @@ index 93f7400e8..200232928 100644
                      </span>
                    ))}
                  </div>
-@@ -900,21 +892,21 @@ function UploadJobCard({
+@@ -900,21 +893,21 @@ function UploadJobCard({
                    <AlertDialogContent>
                      <AlertDialogHeader>
                        <AlertDialogTitle>
@@ -540,7 +544,7 @@ index 93f7400e8..200232928 100644
                        </AlertDialogAction>
                      </AlertDialogFooter>
                    </AlertDialogContent>
-@@ -1004,7 +996,9 @@ function UploadJobCard({
+@@ -1004,7 +997,9 @@ function UploadJobCard({
            )}
  
            {/* Retry button for failures */}
@@ -550,7 +554,7 @@ index 93f7400e8..200232928 100644
                !isIntuneApprovalFailure(job) && (
              <div className="mt-3">
                <Button
-@@ -1044,6 +1038,48 @@ function UploadJobCard({
+@@ -1044,6 +1039,48 @@ function UploadJobCard({
            {job.status === 'duplicate_skipped' && (() => {
              const details = job.error_details as Record<string, unknown> | undefined;
              const existingVersion = details?.existingVersion ? String(details.existingVersion) : null;
@@ -599,7 +603,7 @@ index 93f7400e8..200232928 100644
              return (
              <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
                <div className="flex items-start gap-2">
-@@ -1053,7 +1089,7 @@ function UploadJobCard({
+@@ -1053,7 +1090,7 @@ function UploadJobCard({
                      <T>Duplicate app already exists in Intune</T>
                    </p>
                    <p className="text-status-warning/70 text-xs mt-1">
@@ -608,15 +612,15 @@ index 93f7400e8..200232928 100644
                      {existingVersion && (
                        <span> <T>Existing version: <Var>{existingVersion}</Var></T></span>
                      )}
-@@ -1108,6 +1144,7 @@ function UploadJobCard({
+@@ -1108,6 +1145,7 @@ function UploadJobCard({
              ) : null;
            })()}
  
-+          {job.intune_app_id && <Link href={appWorkspaceUrl(job.intune_app_id)} className="mt-3 inline-block text-sm text-accent-cyan hover:underline">Open app workspace</Link>}
++          {workspaceId && <Link href={appWorkspaceUrl(workspaceId)} className="mt-3 inline-block text-sm text-accent-cyan hover:underline">Open app workspace</Link>}
            {/* Success - deployed to Intune */}
            {job.intune_app_url && job.status !== 'duplicate_skipped' && (
              <div className="mt-4 p-3 bg-status-success/[0.05] border border-status-success/10 rounded-lg">
-@@ -1118,7 +1155,7 @@ function UploadJobCard({
+@@ -1118,7 +1156,7 @@ function UploadJobCard({
                  className="inline-flex items-center gap-2 text-accent-cyan hover:text-accent-cyan-bright text-sm font-medium transition-colors"
                >
                  <ExternalLink className="w-4 h-4" />
@@ -1012,10 +1016,10 @@ index 000000000..092115fb3
 +}
 diff --git a/app/api/hrm/replacement-deadline-review/route.test.ts b/app/api/hrm/replacement-deadline-review/route.test.ts
 new file mode 100644
-index 000000000..8b2b2635f
+index 0000000..c91110a
 --- /dev/null
 +++ b/app/api/hrm/replacement-deadline-review/route.test.ts
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,50 @@
 +import {beforeEach,expect,it,vi} from 'vitest';
 +import {NextRequest} from 'next/server';
 +const state=vi.hoisted(()=>({job:{} as any,rows:[] as unknown[],cas:true,dispatch:vi.fn(),update:vi.fn(),reads:0}));
@@ -1026,6 +1030,16 @@ index 000000000..8b2b2635f
 +vi.mock('@/lib/hrm/update-dispatch',()=>({dispatchUpdateJob:state.dispatch}));
 +import {POST} from './route';
 +const request=(body:unknown)=>POST(new NextRequest('https://example.test/api/hrm/replacement-deadline-review',{method:'POST',body:JSON.stringify(body),headers:{Authorization:'Bearer fixture'}}));
++it('does not offer deadline resume for settings-review failures or legacy holds without expired dates',async()=>{
++ state.job.error_code='ASSIGNMENT_SETTINGS_REVIEW_REQUIRED';
++ expect((await request({jobId:'job',action:'confirm'})).status).toBe(409);expect(state.reads).toBe(0);
++ state.job.error_code='EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED';state.rows=[];
++ expect((await request({jobId:'job'})).status).toBe(409);expect(state.update).not.toHaveBeenCalled();expect(state.dispatch).not.toHaveBeenCalled();
++});
++it('returns a distinct settings review for legacy misclassified unsupported assignments without resuming',async()=>{
++ state.rows=[{id:'a',intent:'required',target:{'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'},settings:{futureField:false}}];
++ const response=await request({jobId:'job',action:'confirm'});expect(response.status).toBe(424);expect(await response.json()).toMatchObject({code:'ASSIGNMENT_SETTINGS_REVIEW_REQUIRED'});expect(state.update).not.toHaveBeenCalled();expect(state.dispatch).not.toHaveBeenCalled();
++});
 +beforeEach(()=>{
 + state.job={id:'job',user_id:'owner',tenant_id:'tenant',status:'failed',error_code:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',github_run_id:null,intune_app_id:null,updated_at:'one',package_config:{replacesIntuneAppId:'source',psadtConfig:{deployMode:'Silent'}}};
 + state.rows=[{id:'a',intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:'g'},settings:{notifications:'hideAll',installTimeSettings:{useLocalTime:false,deadlineDateTime:'2020-01-01T00:00:00Z'}}}];state.cas=true;state.reads=0;state.update.mockReset().mockImplementation(async(_id,data)=>{if(!state.cas)return null;state.job={...state.job,...data};return state.job});state.dispatch.mockReset().mockResolvedValue({dispatched:true});
@@ -1058,10 +1072,10 @@ index 000000000..8b2b2635f
 +});
 diff --git a/app/api/hrm/replacement-deadline-review/route.ts b/app/api/hrm/replacement-deadline-review/route.ts
 new file mode 100644
-index 000000000..843c6d59f
+index 0000000..5524805
 --- /dev/null
 +++ b/app/api/hrm/replacement-deadline-review/route.ts
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,38 @@
 +import {createHash} from 'node:crypto';
 +import {NextRequest,NextResponse} from 'next/server';
 +import {parseAccessToken} from '@/lib/auth-utils';
@@ -1069,7 +1083,7 @@ index 000000000..843c6d59f
 +import {getServicePrincipalToken} from '@/lib/intune/graph-client';
 +import {pilotGraph} from '@/lib/hrm/pilot-graph';
 +import {dispatchUpdateJob} from '@/lib/hrm/update-dispatch';
-+import {assignmentSnapshot,deadlineAssignments,deadlineProblem,canonical,asObject,DEADLINE_HOLD_CODE,type AssignmentTimingReview} from '@/packager/src/assignment-settings';
++import {assignmentSnapshot,deadlineAssignments,deadlineProblem,canonical,asObject,DEADLINE_HOLD_CODE,AssignmentSettingsReview,type AssignmentTimingReview} from '@/packager/src/assignment-settings';
 +const reply=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'private, no-store'}});
 +/** Resume only an owned replacement held before any hosted run started. */
 +export async function POST(request:NextRequest){
@@ -1087,6 +1101,7 @@ index 000000000..843c6d59f
 +  const token=await getServicePrincipalToken(user.tenantId);if(!token)throw Error('Could not read current Intune assignments.');
 +  const snapshot=assignmentSnapshot(await pilotGraph(token).assignments(source));
 +  const affected=deadlineAssignments(snapshot);
++  if(!affected.length)return reply({error:'No expired required deadline is present. This is not a deadline confirmation; review assignment settings and create a fresh deployment review.'},409);
 +  const reviewToken=createHash('sha256').update(canonical([job.id,job.updated_at,job.package_config,source,snapshot,affected.map(row=>row.id)])).digest('hex');
 +  if(body.action!=='confirm')return reply({token:reviewToken,assignments:snapshot,affectedIds:affected.map(row=>row.id)});
 +  if(body.token!==reviewToken)return reply({error:'Settings or assignments changed. Refresh the review.'},409);
@@ -1097,7 +1112,7 @@ index 000000000..843c6d59f
 +  if(typeof config.autoUpdateHistoryId==='string')await db.autoUpdateHistory.update(config.autoUpdateHistoryId,{status:'pending',error_message:null,completed_at:null}).catch(()=>console.warn('Could not reopen replacement history; deployment status remains authoritative.'));
 +  const result=await dispatchUpdateJob(db,job.id);
 +  return reply({resumed:result.dispatched||result.reason==='local-packager',result});
-+ }catch(error){return reply({error:error instanceof Error?error.message:'Could not review replacement deadlines.'},424);}
++ }catch(error){return reply({error:error instanceof Error?error.message:'Could not review replacement deadlines.',...(error instanceof AssignmentSettingsReview?{code:error.code}:{})},424);}
 +}
 diff --git a/app/api/package/callback/route.test.ts b/app/api/package/callback/route.test.ts
 index ab4fa8130..e12c1df4c 100644
@@ -1450,7 +1465,7 @@ index d29f428c0..dac880c43 100644
  export async function POST(request: NextRequest) {
    try {
 diff --git a/app/api/package/route.test.ts b/app/api/package/route.test.ts
-index b68952f05..78a59ed01 100644
+index b68952f05..1c42323e9 100644
 --- a/app/api/package/route.test.ts
 +++ b/app/api/package/route.test.ts
 @@ -178,7 +178,7 @@ describe('GET /api/package (userId listing)', () => {
@@ -1462,7 +1477,36 @@ index b68952f05..78a59ed01 100644
          getByUserId: getByUserIdMock,
          getByTenantId: getByTenantIdMock,
          getById: getByIdMock,
-@@ -400,7 +400,7 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -218,6 +218,28 @@ describe('GET /api/package (userId listing)', () => {
+     expect(enrichQaMock).toHaveBeenNthCalledWith(2, [own]);
+   });
+ 
++  it.each(['owner-role', 'authorized-colleague-role'])('%s sees own jobs by default and both owners in tenant view', async role => {
++    isSupabaseServerConfiguredMock.mockReturnValue(false);
++    const staff = role === 'owner-role' ? 'fixture-owner' : 'fixture-colleague';
++    parseAccessTokenMock.mockResolvedValue({userId: staff, tenantId: 'fixture-tenant', roles: [role]});
++    const rows = [makeJob({id: 'owner-job', user_id: 'fixture-owner', tenant_id: 'fixture-tenant', status: 'deployed'}), makeJob({id: 'colleague-job', user_id: 'fixture-colleague', tenant_id: 'fixture-tenant', status: 'deployed'}), makeJob({id: 'foreign-job', user_id: 'foreign-owner', tenant_id: 'foreign-tenant', status: 'deployed'})];
++    getByUserIdMock.mockImplementation(async user => rows.filter(row => row.user_id === user));
++    getByTenantIdMock.mockImplementation(async tenant => rows.filter(row => row.tenant_id === tenant));
++    const mine = await (await GET(new NextRequest('http://localhost/api/package'))).json();
++    expect(mine.jobs.map((job: PackagingJob) => job.user_id)).toEqual([staff]);
++    const all = await (await GET(new NextRequest('http://localhost/api/package?scope=tenant&tenantId=foreign-tenant', {headers: {'X-MSP-Tenant-Id': 'foreign-tenant'}}))).json();
++    expect(all.jobs.map((job: PackagingJob) => job.id)).toEqual(['owner-job', 'colleague-job']);
++    expect(getByTenantIdMock).toHaveBeenCalledWith('fixture-tenant', 50);
++    expect(updateMock).not.toHaveBeenCalled();
++    getByIdMock.mockResolvedValue(rows.find(row => row.user_id !== staff));
++    expect((await GET(new NextRequest('http://localhost/api/package?jobId=other-owner'))).status).toBe(404);
++  });
++  it('denied staff cannot read tenant jobs', async () => {
++    parseAccessTokenMock.mockResolvedValue(null);
++    expect((await GET(new NextRequest('http://localhost/api/package?scope=tenant'))).status).toBe(401);
++    expect(getByTenantIdMock).not.toHaveBeenCalled();
++  });
++
+   it('marks stale intermediate jobs as failed and returns the corrected status', async () => {
+     const staleJob = makeJob({
+       id: 'job-stale',
+@@ -400,7 +422,7 @@ describe('POST /api/package (workflow dispatch)', () => {
      delete process.env.QA_MAINTENANCE_MODE;
      delete process.env.QA_DEFERRED_CUSTOMER_UPLOADS_UNTIL;
      getDatabaseMock.mockReturnValue({
@@ -1471,7 +1515,7 @@ index b68952f05..78a59ed01 100644
          create: createMock,
          update: updateMock,
          getApprovalFailures: getApprovalFailuresMock,
-@@ -606,6 +606,47 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -606,6 +628,47 @@ describe('POST /api/package (workflow dispatch)', () => {
      expect(job.package_config.psadtConfig).toMatchObject({customDetection:true,detectionRules:rules});
    });
  
@@ -1519,7 +1563,7 @@ index b68952f05..78a59ed01 100644
    it('returns an actionable conflict for removed versions before creating or dispatching jobs', async () => {
      getLiveInstallersMock.mockResolvedValueOnce([]);
      const response = await POST(new NextRequest('http://localhost:3000/api/package', {
-@@ -979,7 +1020,7 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -979,7 +1042,7 @@ describe('POST /api/package (workflow dispatch)', () => {
      expect(updateMock).toHaveBeenCalledOnce();
      expect(updateMock.mock.calls[0][1].status).toBe('awaiting_qa');
    });
@@ -1528,7 +1572,7 @@ index b68952f05..78a59ed01 100644
      const item = { ...makeWin32Item(), forceCreate: false };
      triggerPackagingWorkflowMock.mockRejectedValueOnce(new WorkflowDispatchUnconfirmedError(503, Date.now(), 'A'.repeat(64)));
      const response = await POST(new NextRequest('http://localhost:3000/api/package', {
-@@ -988,11 +1029,11 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -988,11 +1051,11 @@ describe('POST /api/package (workflow dispatch)', () => {
      }));
      expect(await response.json()).toMatchObject({ jobs: [{ status: 'awaiting_qa' }] });
      expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ package_config: expect.objectContaining({ forceCreate: false }) }));
@@ -1542,7 +1586,7 @@ index b68952f05..78a59ed01 100644
    });
    it('still reports other dispatched jobs when saving a capacity hold fails', async () => {
      triggerPackagingWorkflowMock.mockRejectedValueOnce(new WorkflowDispatchRateLimitError(429,
-@@ -2417,7 +2458,7 @@ describe('POST /api/package (curated licence attestation)', () => {
+@@ -2417,7 +2480,7 @@ describe('POST /api/package (curated licence attestation)', () => {
      acrobatItem = cart(0);
      chromeItem = cart(1, CURATED_APPS[0]);
      getDatabaseMock.mockReturnValue({
@@ -1725,7 +1769,7 @@ index 6137d71cc..57177be03 100644
        }
 diff --git a/app/api/packager/jobs/deadline.test.ts b/app/api/packager/jobs/deadline.test.ts
 new file mode 100644
-index 000000000..b6b6ae887
+index 0000000..2cbefdd
 --- /dev/null
 +++ b/app/api/packager/jobs/deadline.test.ts
 @@ -0,0 +1,14 @@
@@ -1737,8 +1781,8 @@ index 000000000..b6b6ae887
 +import {PATCH} from './route';
 +beforeEach(()=>{state.job={id:'job',packager_id:'packager',status:'packaging',updated_at:new Date().toISOString(),winget_id:'Example.App',version:'1'};state.updates.mockReset().mockImplementation(async(_id,data)=>({...state.job,...data}))});
 +const request=(packagerId='packager',errorCode='EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED')=>PATCH(new NextRequest('https://example.test/api/packager/jobs',{method:'PATCH',headers:{Authorization:'Bearer fixture-key'},body:JSON.stringify({jobId:'job',packagerId,status:'failed',error:'Paused for IT',errorCode})}));
-+it('persists the owned local packager deadline hold for the same confirmation path',async()=>{
-+ expect((await request()).status).toBe(200);expect(state.updates).toHaveBeenCalledWith('job',expect.objectContaining({status:'failed',error_code:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',error_stage:'validation',error_category:'validation'}),{packager_id:'packager',status:'packaging'});
++it.each(['EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED','ASSIGNMENT_SETTINGS_REVIEW_REQUIRED'])('persists the owned local packager code %s without conflating the confirmation paths',async code=>{
++ expect((await request('packager',code)).status).toBe(200);expect(state.updates).toHaveBeenCalledWith('job',expect.objectContaining({status:'failed',error_code:code,error_stage:'validation',error_category:'validation'}),{packager_id:'packager',status:'packaging'});
 +});
 +it('rejects another packager and does not trust arbitrary error codes',async()=>{
 + expect((await request('other')).status).toBe(400);expect(state.updates).not.toHaveBeenCalled();expect((await request('packager','ARBITRARY')).status).toBe(200);expect(state.updates.mock.calls[0][1]).not.toHaveProperty('error_code');
@@ -1756,7 +1800,7 @@ index b2e79aca9..c21043bf1 100644
    tenant_id: 'tenant-1',
    winget_id: 'Test.App',
 diff --git a/app/api/packager/jobs/route.ts b/app/api/packager/jobs/route.ts
-index 9452411cf..dc610e4c3 100644
+index 9452411..7ef9205 100644
 --- a/app/api/packager/jobs/route.ts
 +++ b/app/api/packager/jobs/route.ts
 @@ -1,3 +1,5 @@
@@ -1797,7 +1841,7 @@ index 9452411cf..dc610e4c3 100644
      } else if (status === 'failed') {
        updateData.completed_at = now;
        if (errorMessage) updateData.error_message = errorMessage;
-+      if (body.errorCode === 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED') {
++      if (['EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED','ASSIGNMENT_SETTINGS_REVIEW_REQUIRED'].includes(body.errorCode)) {
 +        updateData.error_code = body.errorCode;
 +        updateData.error_stage = 'validation';
 +        updateData.error_category = 'validation';
@@ -1980,10 +2024,18 @@ index f1120662d..b1dbb72ad 100644
                                  <select
                                    value={assignment.deliveryOptimizationPriority || 'notConfigured'}
 diff --git a/components/CartItemConfig.advanced.test.ts b/components/CartItemConfig.advanced.test.ts
-index 67179d7a2..19e1562c3 100644
+index 67179d7a2..e8a3db3fa 100644
 --- a/components/CartItemConfig.advanced.test.ts
 +++ b/components/CartItemConfig.advanced.test.ts
-@@ -36,8 +36,8 @@ async function render(cart: Win32CartItem) {
+@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
+ vi.hoisted(() => {
+   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
+ });
++vi.mock('@/hooks/usePackagingCapabilities', () => ({ usePackagingCapabilities: () => ({ path: 'github', startupBeta: false }) }));
+ vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: {} }) }));
+ vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: () => null }));
+ vi.mock('@/components/CategoryConfig', () => ({ CategoryConfig: () => null }));
+@@ -36,8 +37,8 @@ async function render(cart: Win32CartItem) {
    await act(async () => root.render(createElement(CartItemConfig, { item: cart, onClose: vi.fn() })));
  }
  const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.includes(label) || b.getAttribute('aria-label') === label)!;
@@ -1994,11 +2046,62 @@ index 67179d7a2..19e1562c3 100644
  const type = (el: HTMLInputElement | HTMLTextAreaElement, value: string) => act(async () => {
    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value);
+@@ -46,6 +47,42 @@ const type = (el: HTMLInputElement | HTMLTextAreaElement, value: string) => act(
+ const descriptionField = () => document.querySelector<HTMLTextAreaElement>('#cart-description-override')!;
+ 
+ describe('cart item advanced options (#162)', () => {
++  it('focuses the conflicting deadline explanation and keeps the saved draft unchanged', async () => {
++    const cart = item();
++    cart.psadtConfig = { ...cart.psadtConfig, deployMode: 'Auto', allowDefer: true, deferDays: 3, deferDeadline: '2027-01-03' };
++    await render(cart);
++    await save();
++    expect(document.activeElement?.getAttribute('role')).toBe('alert');
++    expect(document.activeElement?.textContent).toContain('stores one deadline');
++    expect(useCartStore.getState().items[0]).toEqual(cart);
++  });
++  it('preserves inactive postponement and message choices through mode changes and save', async () => {
++    const cart = item();
++    cart.psadtConfig.allowDefer = true;
++    cart.psadtConfig.deferTimes = 7;
++    cart.psadtConfig.deployMode = 'Auto';
++    cart.psadtConfig.checkDiskSpace = true;
++    cart.psadtConfig.requiredDiskSpace = 500;
++    cart.psadtConfig.customPrompts = [{ enabled: true, timing: 'pre-install', title: 'Example', message: 'Saved message', icon: 'Information' }];
++    await render(cart);
++    const mode = () => [...document.querySelectorAll<HTMLSelectElement>('select')].find(s => [...s.options].some(o => o.value === 'Auto'))!;
++    const change = (value: string) => act(async () => { mode().value = value; mode().dispatchEvent(new Event('change', { bubbles: true })); });
++    expect(document.body.textContent).toContain('7 postponements');
++    await change('Silent');
++    expect([...document.querySelectorAll('button')].some(b => b.textContent?.startsWith('Postponement'))).toBe(false);
++    expect(document.body.textContent).toContain('Saved question settings are inactive');
++    expect(document.body.textContent).toContain('500 MB');
++    expect([...document.querySelectorAll('button')].some(b => b.textContent?.startsWith('Disk space check'))).toBe(true);
++    await change('Auto');
++    expect(document.body.textContent).toContain('7 postponements');
++    await change('NonInteractive');
++    expect(document.body.textContent).not.toContain('7 postponements');
++    await save();
++    expect(useCartStore.getState().items[0]).toMatchObject({ psadtConfig: {
++      deployMode: 'NonInteractive', allowDefer: true, deferTimes: 7, checkDiskSpace: true, requiredDiskSpace: 500,
++      customPrompts: cart.psadtConfig.customPrompts,
++    } });
++  });
+   it('offers the same advanced options as the catalog deployment configuration', async () => {
+     await render(item());
+     await openAdvanced();
 diff --git a/components/CartItemConfig.curated.test.ts b/components/CartItemConfig.curated.test.ts
-index cfc35553c..482196c0d 100644
+index cfc35553c..4a0da91f6 100644
 --- a/components/CartItemConfig.curated.test.ts
 +++ b/components/CartItemConfig.curated.test.ts
-@@ -32,14 +32,14 @@ async function render(cart: Win32CartItem) {
+@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
+ vi.hoisted(() => {
+   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
+ });
++vi.mock('@/hooks/usePackagingCapabilities', () => ({ usePackagingCapabilities: () => ({ path: 'github', startupBeta: false }) }));
+ vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: {} }) }));
+ vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: () => null }));
+ vi.mock('@/components/CategoryConfig', () => ({ CategoryConfig: () => null }));
+@@ -32,14 +33,14 @@ async function render(cart: Win32CartItem) {
    await act(async () => root.render(createElement(CartItemConfig, { item: cart, onClose: vi.fn() })));
  }
  const radios = () => [...document.querySelectorAll<HTMLInputElement>('input[type="radio"][name="curated-settings"]')];
@@ -2009,37 +2112,68 @@ index cfc35553c..482196c0d 100644
      await render(item());
      expect(radios()[0].checked).toBe(true);
 -    expect(document.body.textContent).not.toContain('Installation Behavior');
-+    expect(document.body.textContent).not.toContain('Installation timing');
++    expect(document.body.textContent).not.toContain('App handling and restart');
      await act(async () => radios()[1].click());
 -    expect(document.body.textContent).toContain('Installation Behavior');
-+    expect(document.body.textContent).toContain('Installation timing');
++    expect(document.body.textContent).toContain('App handling and restart');
      await act(async () => save());
      expect(useCartStore.getState().items[0]).toMatchObject({ curatedSettingsMode: 'custom' });
    });
-@@ -68,7 +68,7 @@ describe('curated deployment settings choice', () => {
-     await act(async () => appearance.click());
-     expect(document.querySelector('#curated-progress-message')).not.toBeNull();
-     expect(document.body.textContent).not.toContain('Show progress dialog');
+@@ -60,27 +61,16 @@ describe('curated deployment settings choice', () => {
+     await act(async () => save());
+     expect(useCartStore.getState().items[0]).toMatchObject({ curatedSettingsMode: 'custom', psadtConfig: { processesToClose: cart.psadtConfig.processesToClose } });
+   });
+-  it('lets tested-defaults users change presentation without enabling execution customizations', async () => {
++  it('preserves inactive presentation without exposing ignored controls in tested Silent mode', async () => {
+     const cart = item();
+-    cart.psadtConfig.progressDialog = { ...cart.psadtConfig.progressDialog, enabled: false, statusMessage: 'Please wait' };
++    cart.psadtConfig.windowLocation = 'BottomRight';
++    cart.psadtConfig.progressDialog = { enabled: false, statusMessage: 'Please wait', windowLocation: 'Center' };
+     await render(cart);
+-    const appearance = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Dialog appearance'))!;
+-    await act(async () => appearance.click());
+-    expect(document.querySelector('#curated-progress-message')).not.toBeNull();
+-    expect(document.body.textContent).not.toContain('Show progress dialog');
 -    expect(document.body.textContent).not.toContain('Installation Behavior');
-+    expect(document.body.textContent).not.toContain('Installation timing');
-     await act(async () => {
-       const dialog = document.querySelector<HTMLSelectElement>('#curated-dialog-position')!;
-       dialog.value = 'BottomRight'; dialog.dispatchEvent(new Event('change', { bubbles: true }));
+-    await act(async () => {
+-      const dialog = document.querySelector<HTMLSelectElement>('#curated-dialog-position')!;
+-      dialog.value = 'BottomRight'; dialog.dispatchEvent(new Event('change', { bubbles: true }));
+-      const progress = document.querySelector<HTMLSelectElement>('#curated-progress-position')!;
+-      progress.value = 'Center'; progress.dispatchEvent(new Event('change', { bubbles: true }));
+-      const message = document.querySelector<HTMLInputElement>('#curated-progress-message')!;
+-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(message, 'Installing Firefox ESR');
+-      message.dispatchEvent(new Event('input', { bubbles: true }));
+-    });
++    expect([...document.querySelectorAll('button')].some(button => button.textContent?.includes('Dialog appearance'))).toBe(false);
++    expect(document.querySelector('#curated-progress-message')).toBeNull();
++    expect(document.body.textContent).not.toContain('App handling and restart');
+     await act(async () => save());
+     expect(useCartStore.getState().items[0]).toMatchObject({ curatedSettingsMode: 'tested-defaults',
+-      psadtConfig: { windowLocation: 'BottomRight', progressDialog: { enabled: DEFAULT_PSADT_CONFIG.progressDialog.enabled,
+-        statusMessage: 'Installing Firefox ESR', windowLocation: 'Center' } } });
++      psadtConfig: { windowLocation: 'BottomRight', progressDialog: { enabled: false, statusMessage: 'Please wait', windowLocation: 'Center' } } });
+   });
+ });
 diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
-index 68bc640bf..9ea661540 100644
+index 68bc640..4ca4ba6 100644
 --- a/components/CartItemConfig.tsx
 +++ b/components/CartItemConfig.tsx
-@@ -1,5 +1,9 @@
+@@ -1,6 +1,13 @@
  'use client';
  
+-import { useEffect, useRef, useState } from 'react';
 +import { StartupInstallChoice } from '@/components/hrm/StartupInstallChoice';
 +import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
 +import { settingsSummaries } from '@/lib/hrm/settings-summary';
++import { installExperience, installSettingsProblem } from '@/lib/hrm/install-experience';
++import { usePackagingCapabilities } from '@/hooks/usePackagingCapabilities';
++import { InstallExperienceSummary, ToolkitModePicker } from '@/components/hrm/InstallExperienceSummary';
 +
- import { useEffect, useRef, useState } from 'react';
++import { useEffect, useId, useRef, useState } from 'react';
  import {
    ArrowUpCircle,
-@@ -89,6 +93,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+   X,
+@@ -89,6 +96,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
    const isWin32 = isWin32CartItem(item);
    const isCurated = isWin32 && item.sourceType === 'curated';
    const isEditableWin32 = isWin32 && !isCurated;
@@ -2048,7 +2182,21 @@ index 68bc640bf..9ea661540 100644
    const [curatedSettingsMode, setCuratedSettingsMode] = useState<'tested-defaults' | 'custom'>(
      isCurated ? item.curatedSettingsMode || 'custom' : 'custom'
    );
-@@ -135,8 +141,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -106,6 +115,13 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+   const [config, setConfig] = useState<PSADTConfig>(() =>
+     isWin32 ? { ...item.psadtConfig } : ({} as PSADTConfig)
+   );
++  const packagingCapabilities = usePackagingCapabilities();
++  const packagingPath = packagingCapabilities.path;
++  const experienceConfig = isCurated && curatedSettingsMode === 'tested-defaults'
++    ? testedCuratedSettings({ ...DEFAULT_PSADT_CONFIG, detectionRules: isWin32 ? item.detectionRules : [] }, config)
++    : config;
++  const experience = installExperience(experienceConfig, packagingPath);
++
+   const [assignments, setAssignments] = useState<PackageAssignment[]>(
+     item.assignments || []
+   );
+@@ -135,8 +151,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
    );
  
    // UI state
@@ -2058,22 +2206,69 @@ index 68bc640bf..9ea661540 100644
 +
 +  // HRM patch 0022/0036: the current setting of each row, shared with the deploy panel
 +  const summaries = settingsSummaries({
-+    config, espProfiles, relationships, categories,
++    config: experienceConfig, espProfiles, relationships, categories, packagingPath,
 +    descriptionOrCommandsChanged: description !== initialDescription || (isWin32 && (installCommand !== item.installCommand || uninstallCommand !== item.uninstallCommand)),
 +  });
    const [processesError, setProcessesError] = useState<string | null>(null);
  
    const modalRef = useFocusTrap<HTMLDivElement>();
-@@ -345,7 +357,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -181,7 +203,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+     setConfig((prev) => ({
+       ...prev,
+       processesToClose: [
+-        ...prev.processesToClose,
++        ...(prev.processesToClose || []),
+         { name: '', description: '' },
+       ],
+     }));
+@@ -191,7 +213,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+     setProcessesError(null);
+     setConfig((prev) => ({
+       ...prev,
+-      processesToClose: prev.processesToClose.filter((_, i) => i !== index),
++      processesToClose: (prev.processesToClose || []).filter((_, i) => i !== index),
+     }));
+   };
+ 
+@@ -199,7 +221,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+     setProcessesError(null);
+     setConfig((prev) => ({
+       ...prev,
+-      processesToClose: prev.processesToClose.map((p, i) =>
++      processesToClose: (prev.processesToClose || []).map((p, i) =>
+         i === index ? { ...p, ...updates } : p
+       ),
+     }));
+@@ -236,6 +258,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+   };
+ 
+   const handleSave = async () => {
++    if (isWin32 && installSettingsProblem(experienceConfig, packagingPath)) {
++      modalRef.current?.querySelector<HTMLElement>('[data-install-settings-problem]')?.focus();
++      return;
++    }
+     if (isCurated) {
+       // PSADT behaviour may be customised; the server verifies a changed
+       // execution configuration in the QA VM before its first deployment.
+@@ -331,7 +357,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+   };
+ 
+   return (
+-    <div className="fixed inset-0 z-[60] overflow-hidden">
++    <div className="fixed inset-0 z-[60] overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="cart-settings-title">
+       {/* Backdrop */}
+       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={requestClose} />
+ 
+@@ -345,7 +371,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                  <Settings className="w-5 h-5 text-blue-400" />
                </div>
                <div>
 -                <h2 className="text-xl font-bold text-text-primary">Edit Configuration</h2>
-+                <h2 className="text-xl font-bold text-text-primary">Edit settings</h2>
++                <h2 id="cart-settings-title" className="text-xl font-bold text-text-primary">Edit settings</h2>
                  <p className="text-text-muted text-sm">{item.displayName}</p>
                  <p className="text-text-muted text-xs font-mono mt-1">{item.wingetId}</p>
                </div>
-@@ -380,7 +392,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -380,7 +406,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        <p className="text-text-primary font-medium">{item.architecture}</p>
                      </div>
                      <div>
@@ -2082,7 +2277,7 @@ index 68bc640bf..9ea661540 100644
                        <p className="text-text-primary font-medium uppercase">{item.installerType}</p>
                      </div>
                    </>
-@@ -397,10 +409,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -397,10 +423,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                </p>
              </div>
  
@@ -2095,7 +2290,7 @@ index 68bc640bf..9ea661540 100644
                  <div className="flex gap-2">
                    {(['user', 'system'] as const).map((exp) => (
                      <button
-@@ -413,7 +425,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -413,7 +439,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                            : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
                        )}
                      >
@@ -2104,7 +2299,7 @@ index 68bc640bf..9ea661540 100644
                      </button>
                    ))}
                  </div>
-@@ -426,20 +438,27 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -426,20 +452,27 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                <label className="flex items-start gap-2 text-sm text-text-primary">
                  <input type="radio" name="curated-settings" checked={curatedSettingsMode === 'tested-defaults'}
                    onChange={() => setCuratedSettingsMode('tested-defaults')} className="mt-1" />
@@ -2137,7 +2332,7 @@ index 68bc640bf..9ea661540 100644
                      return (
                        <button
                          key={scope}
-@@ -460,78 +479,111 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -460,93 +493,113 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
              )}
  
              <div className="border-t border-overlay/10 pt-6">
@@ -2218,8 +2413,16 @@ index 68bc640bf..9ea661540 100644
                  </div>
                </ConfigSection>}
 -
++              {isWin32 && !removal && <section aria-label="Installation and staff experience" className="mb-6 space-y-4">
++                <h3 className="text-sm font-semibold text-text-primary">Installation and staff experience</h3>
++                  <p className="text-xs text-text-muted">These settings are packaged with this version. Future automatic updates use Edit next rollout in the app workspace.</p>
++                  {canEditExecution && (packagingCapabilities.startupBeta || config.installAfterRestartBeta) && <StartupInstallChoice value={config.installAfterRestartBeta === true} problem={startupInstallationProblem({ installScope: selectedScope, installerType: isWin32 ? item.installerType : '', customDetection: config.customDetection, relationships, espProfiles, removal })} onChange={value => updateConfig({ installAfterRestartBeta: value, ...(value ? { deployMode: 'Silent', allowDefer: false, restartBehavior: 'Suppress' } : {}) })} />}
++                  {canEditExecution && <ToolkitModePicker config={config} path={packagingPath} onChange={deployMode => updateConfig({ deployMode })} />}
++                  <InstallExperienceSummary config={experienceConfig} path={packagingPath} />
++
++              </section>}
 +              {!removal && (<div className="mb-6">
-+                <h3 className="text-sm font-semibold text-text-primary mb-2">More settings</h3>
++                <h3 className="text-sm font-semibold text-text-primary mb-2">App setup and checks</h3>
 +                <div className="rounded-lg border border-overlay/10 divide-y divide-overlay/10 overflow-hidden">
 +              {/* ESP Configuration */}
 +              <ConfigSection
@@ -2267,48 +2470,50 @@ index 68bc640bf..9ea661540 100644
                {canEditExecution && <ConfigSection
 -                title="Installation Behavior"
 +                summary={summaries.behavior}
-+                title="Installation timing"
++                title="App handling and restart"
                  icon={<Settings className="w-4 h-4" />}
                  expanded={expandedSection === 'behavior'}
                  onToggle={() => toggleSection('behavior')}
                >
                  <div className="space-y-4">
-+                  <p className="text-xs text-text-muted">These settings go into this package. Future automatic updates use Installation timing in App updates.</p>
-+                  <StartupInstallChoice value={config.installAfterRestartBeta === true} problem={startupInstallationProblem({ installScope: selectedScope, installerType: isWin32 ? item.installerType : '', customDetection: config.customDetection, relationships, espProfiles, removal })} onChange={value => updateConfig({ installAfterRestartBeta: value, ...(value ? { deployMode: 'Silent', allowDefer: false, restartBehavior: 'Suppress' } : {}) })} />
-                   {/* Deploy Mode */}
-                   <div>
-                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                  {/* Deploy Mode */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
 -                      Deploy mode
-+                      What staff see while it installs
-                     </label>
-                     <select
-                       value={config.deployMode || 'Silent'}
-                       onChange={(e) => updateConfig({ deployMode: e.target.value as DeployMode })}
-                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-                     >
+-                    </label>
+-                    <select
+-                      value={config.deployMode || 'Silent'}
+-                      onChange={(e) => updateConfig({ deployMode: e.target.value as DeployMode })}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                    >
 -                      <option value="Silent">Silent - No UI popups (recommended)</option>
 -                      <option value="NonInteractive">Non-Interactive - Show progress only</option>
 -                      <option value="Auto">Auto-detect (PSADT default)</option>
-+                      <option value="Silent">Nothing, it installs silently (recommended)</option>
-+                      <option value="NonInteractive">A progress window only</option>
-+                      <option value="Auto">Let the installer decide</option>
-                     </select>
-                     <p className="text-xs text-text-muted mt-1">
+-                    </select>
+-                    <p className="text-xs text-text-muted mt-1">
 -                      Controls whether PSADT shows dialogs during installation. Silent is recommended for Intune.
-+                      Silent suits Intune: nobody is interrupted. Anything under What staff see during install only shows when this isn't silent.
-                     </p>
-                   </div>
- 
-@@ -545,7 +597,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+-                    </p>
+-                  </div>
+-
+                   {/* Remove Existing Install Toggle */}
+                   <ToggleOption
+                     label="Remove existing installation first"
+-                    description="Uninstalls any detected existing installation of this application before installing. Use when upgrades fail because a previous version is present."
++                    description="Attempts to uninstall registered apps whose names contain this app name. A removal failure is logged and installation continues."
+                     checked={config.removeExistingInstall || false}
+                     onChange={(checked) => updateConfig({ removeExistingInstall: checked })}
+                   />
  
                    {/* Verify Install Toggle */}
                    <ToggleOption
 -                    label="Verify installation before marking as installed"
+-                    description="After the installer finishes, checks Add/Remove Programs for the application and fails the deployment if it is not found. Prevents false success from installers that exit without installing."
 +                    label="Check it installed before reporting success"
-                     description="After the installer finishes, checks Add/Remove Programs for the application and fails the deployment if it is not found. Prevents false success from installers that exit without installing."
++                    description="Adds a registered-app name check after installation. Package-specific detection and required checks still apply separately."
                      checked={config.verifyInstall || false}
                      onChange={(checked) => updateConfig({ verifyInstall: checked })}
-@@ -554,7 +606,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                   />
+@@ -554,7 +607,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    {/* Detection Marker Registry Path: curated detection is fixed to the signed release. */}
                    {!isCurated && <div>
                      <label className="block text-sm font-medium text-text-secondary mb-1.5">
@@ -2317,7 +2522,7 @@ index 68bc640bf..9ea661540 100644
                      </label>
                      <input
                        type="text"
-@@ -572,7 +624,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -572,7 +625,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    <div>
                      <div className="flex items-center justify-between mb-2">
                        <label className="block text-sm font-medium text-text-secondary">
@@ -2326,37 +2531,130 @@ index 68bc640bf..9ea661540 100644
                        </label>
                        <button
                          onClick={addProcess}
-@@ -625,8 +677,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
-                   {/* Show Close Prompt Toggle */}
-                   <div className="space-y-3">
+@@ -583,15 +636,16 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                       </button>
+                     </div>
+                     <div className="space-y-2">
+-                      {config.processesToClose.length === 0 ? (
++                      {(config.processesToClose || []).length === 0 ? (
+                         <p className="text-text-muted text-sm italic">No processes configured</p>
+                       ) : (
+-                        config.processesToClose.map((process, index) => (
++                        (config.processesToClose || []).map((process, index) => (
+                           <div key={index} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                             <input
+                               type="text"
+                               value={process.name}
+                               onChange={(e) => updateProcess(index, { name: e.target.value })}
++                              aria-label={`Process executable ${index + 1}`}
+                               placeholder="Process name (e.g., chrome)"
+                               className={cn(
+                                 'flex-1 px-3 py-2 bg-bg-elevated border rounded-lg text-text-primary text-sm',
+@@ -604,10 +658,12 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                               type="text"
+                               value={process.description}
+                               onChange={(e) => updateProcess(index, { description: e.target.value })}
++                              aria-label={`Process display name ${index + 1}`}
+                               placeholder="Display name"
+                               className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                             />
+                             <button
++                              aria-label={`Remove process ${index + 1}`}
+                               onClick={() => removeProcess(index)}
+                               className="text-text-muted hover:text-red-400 transition-colors"
+                             >
+@@ -622,58 +678,79 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                     </div>
+                   </div>
+ 
+-                  {/* Show Close Prompt Toggle */}
+-                  <div className="space-y-3">
++                  {experience.processes > 0 && <div className="space-y-3">
++                    {/* Block Execution Toggle */}
                      <ToggleOption
 -                      label="Show close prompt to users"
 -                      description="When enabled, users see a countdown dialog if the app is running"
++                      label="Stop staff opening the app while it installs"
++                      description="Applies only to the listed executable names during this installation."
++                      checked={config.blockExecution || false}
++                      onChange={(checked) => updateConfig({ blockExecution: checked })}
++                    />
++
++                  </div>}
++                  {/* Show Close Prompt Toggle */}
++                  {experience.automatic && experience.processes > 0 && <div className="space-y-3">
++                    {config.allowDefer ? <p className="text-xs text-text-muted">Postponement includes a close-app prompt when listed apps are running. The saved close-app prompt switch is inactive while postponement is on.</p> : <ToggleOption
 +                      label="Ask staff to close the app first"
 +                      description="When on, staff see a countdown if the app is open"
                        checked={config.showClosePrompt || false}
                        onChange={(checked) => updateConfig({ showClosePrompt: checked })}
-                     />
-@@ -656,8 +708,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+-                    />
++                    />}
  
-                     {/* Block Execution Toggle */}
-                     <ToggleOption
+                     {/* Countdown Duration - only show when close prompt is enabled */}
+-                    {config.showClosePrompt && (
++                    {(config.showClosePrompt || config.allowDefer) && config.forceCloseProcessesCountdown === undefined && (
+                       <div className="ml-6 border-l-2 border-overlay/15 pl-4">
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                        <label htmlFor="cart-close-countdown" className="block text-sm font-medium text-text-secondary mb-2">
+                           Countdown duration (seconds)
+                         </label>
+                         <div className="flex items-center gap-3">
+-                          <input
++                          <input id="cart-close-countdown"
+                             type="range"
+                             min="10"
+                             max="300"
+                             step="10"
+-                            value={config.closeCountdown || 60}
++                            value={config.closeCountdown ?? 60}
+                             onChange={(e) => updateConfig({ closeCountdown: parseInt(e.target.value) })}
+                             className="flex-1"
+                           />
+                           <span className="text-text-primary text-sm font-mono w-12 text-right">
+-                            {config.closeCountdown || 60}s
++                            {config.closeCountdown ?? 60}s
+                           </span>
+                         </div>
+                       </div>
+                     )}
+ 
+-                    {/* Block Execution Toggle */}
+-                    <ToggleOption
 -                      label="Block execution during install"
 -                      description="Prevent users from launching the application during installation"
-+                      label="Stop staff opening the app while it installs"
-+                      description="Stop staff opening the app while it installs"
-                       checked={config.blockExecution || false}
-                       onChange={(checked) => updateConfig({ blockExecution: checked })}
-                     />
-@@ -665,15 +717,15 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+-                      checked={config.blockExecution || false}
+-                      onChange={(checked) => updateConfig({ blockExecution: checked })}
+-                    />
++{experience.welcome && <div className="space-y-2">                      <div>
++                        <label htmlFor="cart-force-close" className="block text-sm font-medium text-text-secondary mb-2">
++                          Close apps anyway after (seconds, optional)
++                        </label>
++                        <div className="flex items-center gap-3">
++                          <input id="cart-force-close"
++                            type="number"
++                            min="0"
++                            max="3600"
++                            value={config.forceCloseProcessesCountdown ?? ''}
++                            onChange={(e) => updateConfig({ forceCloseProcessesCountdown: e.target.value ? parseInt(e.target.value) : undefined })}
++                            placeholder="Not set"
++                            className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                          />
++                          <span className="text-text-muted text-sm">seconds</span>
++                        </div></div><p className="text-xs text-text-muted">When set, this countdown takes precedence over the ordinary close-app countdown and can close listed apps even while postponement is offered. Use a positive number for a timed countdown. Zero still passes the force-countdown option; clear the field to omit it.</p></div>}
+ 
                      {/* Prompt to Save Toggle */}
-                     <ToggleOption
+-                    <ToggleOption
++                    {experience.welcome && <ToggleOption
                        label="Prompt to save documents"
 -                      description="Ask users to save their work before closing applications"
 +                      description="Ask staff to save their work before apps are closed"
                        checked={config.promptToSave || false}
                        onChange={(checked) => updateConfig({ promptToSave: checked })}
-                     />
+-                    />
++                    />}
++                  </div>}
++                  {experience.welcome && <div className="space-y-3">
  
                      {/* Persist Prompt Toggle */}
                      <ToggleOption
@@ -2367,7 +2665,26 @@ index 68bc640bf..9ea661540 100644
                        checked={config.persistPrompt || false}
                        onChange={(checked) => updateConfig({ persistPrompt: checked })}
                      />
-@@ -701,42 +753,231 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -685,14 +762,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                       checked={config.minimizeWindows || false}
+                       onChange={(checked) => updateConfig({ minimizeWindows: checked })}
+                     />
+-                  </div>
++                  </div>}
+ 
+                   {/* Window Location */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                  {experience.welcome && <div>
++                    <label htmlFor="cart-dialog-position" className="block text-sm font-medium text-text-secondary mb-2">
+                       Dialog position
+                     </label>
+-                    <select
++                    <select id="cart-dialog-position"
+                       value={config.windowLocation || 'Default'}
+                       onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
+                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+@@ -701,124 +778,336 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        <option value="Center">Center</option>
                        <option value="Top">Top</option>
                        <option value="Bottom">Bottom</option>
@@ -2380,15 +2697,19 @@ index 68bc640bf..9ea661540 100644
 +                      <option value="BottomLeft">Bottom left</option>
 +                      <option value="BottomRight">Bottom right</option>
                      </select>
-                   </div>
+-                  </div>
++                  </div>}
  
                    {/* Restart Behavior */}
-                   <div>
-                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
 -                      Restart behavior
-+                      After installing
++                  {packagingPath === 'github' ? <div>
++                    <label htmlFor="cart-intune-restart" className="block text-sm font-medium text-text-secondary mb-2">
++                      Restart handling in Intune
                      </label>
-                     <select
+-                    <select
++                    <select id="cart-intune-restart"
                        value={config.restartBehavior}
                        onChange={(e) => updateConfig({ restartBehavior: e.target.value as RestartBehavior })}
                        className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
@@ -2396,13 +2717,121 @@ index 68bc640bf..9ea661540 100644
 -                      <option value="Suppress">Suppress restart (recommended)</option>
 -                      <option value="Prompt">Prompt user to restart</option>
 -                      <option value="Force">Force restart</option>
-+                      <option value="Suppress">Don't restart (recommended)</option>
-+                      <option value="Prompt">Ask staff to restart</option>
-+                      <option value="Force">Restart the computer</option>
++                      <option value="Suppress">Suppress Intune restarts</option>
++                      <option value="Prompt">Use installer return codes</option>
++                      <option value="Force">Force an Intune restart</option>
                      </select>
-                   </div>
+-                  </div>
++                    <p className="mt-1 text-xs text-text-muted">Return-code handling depends on the installer result and Intune assignment settings. It does not add a toolkit restart countdown.</p>
++                  </div> : <p className="text-xs text-text-muted">{packagingPath === 'local' ? 'This local packager suppresses Intune restarts. Other saved restart choices are retained but not applied.' : 'Verify packaging capabilities before changing Intune restart handling.'}</p>}
                  </div>
                </ConfigSection>}
+-
+-              {/* Deferral Settings (win32 only) */}
++              {/* Disk Space Check (win32 only) */}
+               {canEditExecution && <ConfigSection
+-                title="Deferral Settings"
+-                icon={<Clock className="w-4 h-4" />}
+-                expanded={expandedSection === 'deferral'}
+-                onToggle={() => toggleSection('deferral')}
++                summary={summaries.diskspace}
++                title="Disk space check"
++                icon={<HardDrive className="w-4 h-4" />}
++                expanded={expandedSection === 'diskspace'}
++                onToggle={() => toggleSection('diskspace')}
+               >
+                 <div className="space-y-4">
+                   <ToggleOption
+-                    label="Allow users to defer installation"
+-                    description="Let users postpone the installation to a later time"
+-                    checked={config.allowDefer}
+-                    onChange={(checked) => updateConfig({ allowDefer: checked })}
++                    label="Check disk space before installation"
++                    description="Verify sufficient disk space is available before proceeding"
++                    checked={config.checkDiskSpace || false}
++                    onChange={(checked) => updateConfig({ checkDiskSpace: checked })}
+                   />
+ 
+-                  {config.allowDefer && (
+-                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Maximum deferrals allowed
+-                        </label>
+-                        <input
+-                          type="number"
+-                          min="1"
+-                          max="99"
+-                          value={config.deferTimes || 3}
+-                          onChange={(e) => updateConfig({ deferTimes: parseInt(e.target.value) || 3 })}
+-                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                        />
+-                      </div>
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Deferral days limit (optional)
+-                        </label>
++                  {config.checkDiskSpace && (
++                    <div className="ml-6 border-l-2 border-overlay/15 pl-4">
++                      <label className="block text-sm font-medium text-text-secondary mb-2">
++                        Required disk space (MB)
++                      </label>
++                      <div className="flex items-center gap-3">
+                         <input
+                           type="number"
+                           min="1"
+-                          max="365"
+-                          value={config.deferDays || ''}
+-                          onChange={(e) => updateConfig({ deferDays: e.target.value ? parseInt(e.target.value) : undefined })}
+-                          placeholder="No limit"
+-                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                        />
+-                      </div>
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Deferral deadline (optional)
+-                        </label>
+-                        <input
+-                          type="date"
+-                          value={config.deferDeadline || ''}
+-                          onChange={(e) => updateConfig({ deferDeadline: e.target.value || undefined })}
+-                          className="px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                          max="100000"
++                          value={config.requiredDiskSpace ?? ''}
++                          onChange={(e) => updateConfig({ requiredDiskSpace: e.target.value ? parseInt(e.target.value) : undefined })}
++                          placeholder="Auto-detect"
++                          className="w-32 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                         />
+-                      </div>
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Force close countdown (optional)
+-                        </label>
+-                        <div className="flex items-center gap-3">
+-                          <input
+-                            type="number"
+-                            min="0"
+-                            max="3600"
+-                            value={config.forceCloseProcessesCountdown || ''}
+-                            onChange={(e) => updateConfig({ forceCloseProcessesCountdown: e.target.value ? parseInt(e.target.value) : undefined })}
+-                            placeholder="Not set"
+-                            className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                          />
+-                          <span className="text-text-muted text-sm">seconds</span>
+-                        </div>
++                        <span className="text-text-muted text-sm">MB</span>
+                       </div>
+                     </div>
+                   )}
+                 </div>
+               </ConfigSection>}
+-
+-              {/* Progress & Notifications (win32 only) */}
+-              {canEditExecution && <ConfigSection
+-                title="Progress & Notifications"
+-                icon={<Bell className="w-4 h-4" />}
+-                expanded={expandedSection === 'progress'}
+-                onToggle={() => toggleSection('progress')}
 +              {/* Advanced (win32 only) */}
 +              {isEditableWin32 && <ConfigSection
 +                summary={summaries.advanced}
@@ -2410,8 +2839,16 @@ index 68bc640bf..9ea661540 100644
 +                icon={<Terminal className="w-4 h-4" />}
 +                expanded={expandedSection === 'advanced'}
 +                onToggle={() => toggleSection('advanced')}
-+              >
-+                <div className="space-y-4">
+               >
+                 <div className="space-y-4">
+-                  <ToggleOption
+-                    label="Show progress dialog"
+-                    description="Display a progress window during installation"
+-                    checked={config.progressDialog?.enabled || false}
+-                    onChange={(checked) => updateConfig({
+-                      progressDialog: { ...config.progressDialog, enabled: checked }
+-                    })}
+-                  />
 +                  {/* Custom Description */}
 +                  <div>
 +                    <label htmlFor="cart-description-override" className="block text-sm font-medium text-text-secondary mb-2">
@@ -2429,7 +2866,7 @@ index 68bc640bf..9ea661540 100644
 +                      Shown in Intune and the Company Portal. Leave empty to keep the current description.
 +                    </p>
 +                  </div>
- 
++
 +                  {/* Custom Install Command */}
 +                  <div>
 +                    <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -2545,11 +2982,11 @@ index 68bc640bf..9ea661540 100644
 +              </ConfigSection>}
 +                </div>
 +              </div>)}
-+              {isWin32 && !removal && (<div className="mb-6">
-+                <h3 className="text-sm font-semibold text-text-primary mb-2">What staff see during install</h3>
-+                <p className="text-xs text-text-muted mb-2">All off unless you turn them on. Staff only see these when the app doesn't install silently.</p>
++              {isWin32 && !removal && experience.visible && (<div className="mb-6">
++                <h3 className="text-sm font-semibold text-text-primary mb-2">Toolkit messages and appearance</h3>
++                <p className="text-xs text-text-muted mb-2">Only options supported by this mode and packaging service appear. Changing mode keeps your saved values.</p>
 +                <div className="rounded-lg border border-overlay/10 divide-y divide-overlay/10 overflow-hidden">
-+              {isCurated && !canEditExecution && <ConfigSection
++              {isCurated && !canEditExecution && experience.visible && <ConfigSection
 +                summary={summaries.branding}
 +                title="Dialog appearance"
 +                icon={<MessageSquare className="w-4 h-4" />}
@@ -2592,47 +3029,89 @@ index 68bc640bf..9ea661540 100644
 +                  </div>
 +                </div>
 +              </ConfigSection>}
-               {/* Deferral Settings (win32 only) */}
-               {canEditExecution && <ConfigSection
--                title="Deferral Settings"
++              {/* Deferral Settings (win32 only) */}
++              {canEditExecution && experience.automatic && <ConfigSection
 +                summary={summaries.deferral}
-+                title="Letting staff postpone"
-                 icon={<Clock className="w-4 h-4" />}
-                 expanded={expandedSection === 'deferral'}
-                 onToggle={() => toggleSection('deferral')}
-               >
-                 <div className="space-y-4">
-                   <ToggleOption
--                    label="Allow users to defer installation"
--                    description="Let users postpone the installation to a later time"
++                title="Postponement"
++                icon={<Clock className="w-4 h-4" />}
++                expanded={expandedSection === 'deferral'}
++                onToggle={() => toggleSection('deferral')}
++              >
++                <div className="space-y-4">
++                  <ToggleOption
 +                    label="Let staff postpone the install"
-+                    description="Staff can choose to install later"
-                     checked={config.allowDefer}
-                     onChange={(checked) => updateConfig({ allowDefer: checked })}
-                   />
-@@ -783,7 +1024,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
-                       </div>
-                       <div>
-                         <label className="block text-sm font-medium text-text-secondary mb-2">
--                          Force close countdown (optional)
-+                          Close apps anyway after (seconds, optional)
-                         </label>
-                         <div className="flex items-center gap-3">
-                           <input
-@@ -802,10 +1043,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
-                   )}
-                 </div>
-               </ConfigSection>}
--
-               {/* Progress & Notifications (win32 only) */}
-               {canEditExecution && <ConfigSection
--                title="Progress & Notifications"
++                    description="Offer postponement when the toolkit runs interactively. Use a day limit or a date deadline; a count can also limit attempts."
++                    checked={config.allowDefer}
++                    onChange={(checked) => updateConfig({ allowDefer: checked })}
++                  />
++
++                  {config.allowDefer && (
++                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
++                      {!config.deferByDaysOnly && <div>
++                        <label htmlFor="cart-defer-count" className="block text-sm font-medium text-text-secondary mb-2">
++                          Maximum postponements
++                        </label>
++                        <input id="cart-defer-count"
++                          type="number"
++                          min="0"
++                          max="1000"
++                          value={config.deferTimes ?? 3}
++                          onChange={(e) => updateConfig({ deferTimes: Number.isNaN(parseInt(e.target.value)) ? 3 : parseInt(e.target.value) })}
++                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                        />
++                      </div>}
++                      <div>
++                        <label htmlFor="cart-defer-days" className="block text-sm font-medium text-text-secondary mb-2">
++                          Deferral days limit (optional)
++                        </label>
++                        <input id="cart-defer-days"
++                          type="number"
++                          min="1"
++                          max="365"
++                          value={config.deferDays || ''}
++                          onChange={(e) => updateConfig({ deferDays: e.target.value ? parseInt(e.target.value) : undefined })}
++                          placeholder="No limit"
++                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                        />
++                      </div>
++                      <div>
++                        <label htmlFor="cart-defer-date" className="block text-sm font-medium text-text-secondary mb-2">
++                          Deferral deadline (optional)
++                        </label>
++                        <input id="cart-defer-date"
++                          type="date"
++                          value={config.deferDeadline || ''}
++                          onChange={(e) => updateConfig({ deferDeadline: e.target.value || undefined })}
++                          className="px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                        />
++                        <p className="mt-1 text-xs text-text-muted">A date-only deadline expires at the start of that date on each computer.</p>
++                      </div>
++
++                    </div>
++                  )}
++                </div>
++              </ConfigSection>}
++              {/* Progress & Notifications (win32 only) */}
++              {canEditExecution && experience.visible && <ConfigSection
 +                summary={summaries.progress}
 +                title="Progress and notifications"
-                 icon={<Bell className="w-4 h-4" />}
-                 expanded={expandedSection === 'progress'}
-                 onToggle={() => toggleSection('progress')}
-@@ -849,7 +1090,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
++                icon={<Bell className="w-4 h-4" />}
++                expanded={expandedSection === 'progress'}
++                onToggle={() => toggleSection('progress')}
++              >
++                <div className="space-y-4">
++                  <ToggleOption
++                    label="Show progress dialog"
++                    description="Display a progress window during installation"
++                    checked={config.progressDialog?.enabled || false}
++                    onChange={(checked) => updateConfig({
++                      progressDialog: { ...config.progressDialog, enabled: checked }
++                    })}
++                  />
+ 
+                   {config.progressDialog?.enabled && (
+                     <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
+@@ -849,7 +1138,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                          >
                            <option value="Default">Default</option>
                            <option value="Center">Center</option>
@@ -2641,20 +3120,21 @@ index 68bc640bf..9ea661540 100644
                          </select>
                        </div>
                      </div>
-@@ -956,10 +1197,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -956,10 +1245,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    </div>
                  </div>
                </ConfigSection>}
 -
                {/* Custom Prompts (win32 only) */}
-               {canEditExecution && <ConfigSection
+-              {canEditExecution && <ConfigSection
 -                title="Custom Prompts"
++              {canEditExecution && experience.automatic && <ConfigSection
 +                summary={summaries.prompts}
 +                title="Messages to staff"
                  icon={<MessageSquare className="w-4 h-4" />}
                  expanded={expandedSection === 'prompts'}
                  onToggle={() => toggleSection('prompts')}
-@@ -1032,10 +1273,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1032,10 +1321,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                  }}
                                  className="w-full px-2 py-1.5 bg-bg-elevated border border-overlay/15 rounded text-text-primary text-sm"
                                >
@@ -2669,7 +3149,7 @@ index 68bc640bf..9ea661540 100644
                                </select>
                              </div>
                              <div>
-@@ -1087,7 +1328,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1087,7 +1376,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                            </div>
                            <div className="grid grid-cols-3 gap-2">
                              <div>
@@ -2678,7 +3158,7 @@ index 68bc640bf..9ea661540 100644
                                <input
                                  type="text"
                                  value={prompt.buttonLeftText || ''}
-@@ -1101,7 +1342,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1101,7 +1390,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                />
                              </div>
                              <div>
@@ -2687,7 +3167,7 @@ index 68bc640bf..9ea661540 100644
                                <input
                                  type="text"
                                  value={prompt.buttonMiddleText || ''}
-@@ -1115,7 +1356,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1115,7 +1404,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                />
                              </div>
                              <div>
@@ -2696,29 +3176,31 @@ index 68bc640bf..9ea661540 100644
                                <input
                                  type="text"
                                  value={prompt.buttonRightText || ''}
-@@ -1163,10 +1404,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1163,18 +1452,18 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    )}
                  </div>
                </ConfigSection>}
 -
                {/* Restart Prompt (win32 only) */}
-               {canEditExecution && <ConfigSection
+-              {canEditExecution && <ConfigSection
 -                title="Restart Prompt"
++              {canEditExecution && experience.visible && <ConfigSection
 +                summary={summaries.restart}
-+                title="Restart prompt"
++                title="Package restart countdown"
                  icon={<RefreshCw className="w-4 h-4" />}
                  expanded={expandedSection === 'restart'}
                  onToggle={() => toggleSection('restart')}
-@@ -1174,7 +1415,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+               >
                  <div className="space-y-4">
                    <ToggleOption
-                     label="Show restart prompt after installation"
+-                    label="Show restart prompt after installation"
 -                    description="Display a countdown dialog prompting users to restart"
-+                    description="Show a countdown asking staff to restart"
++                    label="Start a restart countdown after installation"
++                    description="This separate countdown can restart the computer even if the installer did not request it. With no signed-in user, the pinned toolkit may restart silently."
                      checked={config.restartPrompt?.enabled || false}
                      onChange={(checked) => updateConfig({
                        restartPrompt: { ...config.restartPrompt, enabled: checked, countdownSeconds: config.restartPrompt?.countdownSeconds || 600, countdownNoHideSeconds: config.restartPrompt?.countdownNoHideSeconds || 60 }
-@@ -1206,7 +1447,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1206,7 +1495,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        </div>
                        <div>
                          <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -2727,23 +3209,47 @@ index 68bc640bf..9ea661540 100644
                          </label>
                          <div className="flex items-center gap-3">
                            <input
-@@ -1229,10 +1470,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1229,123 +1518,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    )}
                  </div>
                </ConfigSection>}
 -
-               {/* Disk Space Check (win32 only) */}
-               {canEditExecution && <ConfigSection
+-              {/* Disk Space Check (win32 only) */}
+-              {canEditExecution && <ConfigSection
 -                title="Disk Space Check"
-+                summary={summaries.diskspace}
-+                title="Disk space check"
-                 icon={<HardDrive className="w-4 h-4" />}
-                 expanded={expandedSection === 'diskspace'}
-                 onToggle={() => toggleSection('diskspace')}
-@@ -1266,86 +1507,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
-                   )}
-                 </div>
-               </ConfigSection>}
+-                icon={<HardDrive className="w-4 h-4" />}
+-                expanded={expandedSection === 'diskspace'}
+-                onToggle={() => toggleSection('diskspace')}
+-              >
+-                <div className="space-y-4">
+-                  <ToggleOption
+-                    label="Check disk space before installation"
+-                    description="Verify sufficient disk space is available before proceeding"
+-                    checked={config.checkDiskSpace || false}
+-                    onChange={(checked) => updateConfig({ checkDiskSpace: checked })}
+-                  />
+-
+-                  {config.checkDiskSpace && (
+-                    <div className="ml-6 border-l-2 border-overlay/15 pl-4">
+-                      <label className="block text-sm font-medium text-text-secondary mb-2">
+-                        Required disk space (MB)
+-                      </label>
+-                      <div className="flex items-center gap-3">
+-                        <input
+-                          type="number"
+-                          min="1"
+-                          max="100000"
+-                          value={config.requiredDiskSpace || ''}
+-                          onChange={(e) => updateConfig({ requiredDiskSpace: e.target.value ? parseInt(e.target.value) : undefined })}
+-                          placeholder="Auto-detect"
+-                          className="w-32 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                        />
+-                        <span className="text-text-muted text-sm">MB</span>
+-                      </div>
+-                    </div>
+-                  )}
+-                </div>
+-              </ConfigSection>}
 -
 -              {/* Assignment Configuration (all app types) */}
 -              <ConfigSection
@@ -2822,13 +3328,34 @@ index 68bc640bf..9ea661540 100644
 -              </ConfigSection>}
 -
                {/* Branding (win32 only) */}
-               {isEditableWin32 && <ConfigSection
+-              {isEditableWin32 && <ConfigSection
 -                title="Branding"
++              {isEditableWin32 && experience.visible && <ConfigSection
 +                summary={summaries.branding}
 +                title="Install window branding"
                  icon={<Palette className="w-4 h-4" />}
                  expanded={expandedSection === 'branding'}
                  onToggle={() => toggleSection('branding')}
+@@ -1364,18 +1540,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                     />
+                   </div>
+ 
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Welcome dialog title (optional)
+-                    </label>
+-                    <input
+-                      type="text"
+-                      value={config.brandingWelcomeTitle || ''}
+-                      onChange={(e) => updateConfig({ brandingWelcomeTitle: e.target.value || undefined })}
+-                      placeholder={`${item.displayName} Installation`}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                    />
+-                  </div>
++                  {config.brandingWelcomeTitle && <p className="text-xs text-text-muted">A welcome title is stored, but the current generator does not apply it. The saved value is preserved.</p>}
+ 
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
 @@ -1392,7 +1557,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
  
                    <div>
@@ -3012,7 +3539,7 @@ index 68bc640bf..9ea661540 100644
              </AlertDialogAction>
            </AlertDialogFooter>
          </AlertDialogContent>
-@@ -1655,22 +1682,37 @@ interface ConfigSectionProps {
+@@ -1655,22 +1682,48 @@ interface ConfigSectionProps {
    expanded: boolean;
    onToggle: () => void;
    children: React.ReactNode;
@@ -3024,10 +3551,14 @@ index 68bc640bf..9ea661540 100644
  
 -function ConfigSection({ title, icon, expanded, onToggle, children }: ConfigSectionProps) {
 +function ConfigSection({ title, icon, expanded, onToggle, children, summary, fixed }: ConfigSectionProps) {
++  const sectionId = useId();
++  const contentId = `${sectionId}-content`;
++  const headerId = `${sectionId}-header`;
++
 +  if (fixed) {
 +    return (
-+      <section className="mb-6">
-+        <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
++      <section aria-labelledby={headerId} className="mb-6">
++        <h3 id={headerId} className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
 +          <span className="text-text-muted">{icon}</span>
 +          {title}
 +        </h3>
@@ -3035,14 +3566,17 @@ index 68bc640bf..9ea661540 100644
 +      </section>
 +    );
 +  }
++
    return (
 -    <div className="border border-overlay/10 rounded-lg overflow-hidden mb-3">
 +    <div>
        <button
++        id={headerId}
          onClick={onToggle}
 -        className="w-full flex items-center justify-between px-4 py-3 bg-bg-elevated/50 hover:bg-overlay/10 transition-colors"
 +        aria-expanded={expanded}
-+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-overlay/5 transition-colors"
++        aria-controls={contentId}
++        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-overlay/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-cyan"
        >
 -        <div className="flex items-center gap-2 text-text-primary">
 -          {icon}
@@ -3055,8 +3589,58 @@ index 68bc640bf..9ea661540 100644
 +        <ChevronRight className={cn('w-4 h-4 flex-shrink-0 text-text-muted transition-transform', expanded && 'rotate-90')} />
        </button>
 -      {expanded && <div className="p-4 bg-bg-surface/50">{children}</div>}
-+      {expanded && <div className="px-4 pb-4 pt-1">{children}</div>}
++      {expanded && (
++        <div id={contentId} role="region" aria-labelledby={headerId} className="px-4 pb-4 pt-1">
++          {children}
++        </div>
++      )}
      </div>
+   );
+ }
+@@ -1683,15 +1736,22 @@ interface ToggleOptionProps {
+ }
+ 
+ function ToggleOption({ label, description, checked, onChange }: ToggleOptionProps) {
++  const toggleId = useId();
++
+   return (
+-    <label className="flex items-start gap-3 cursor-pointer">
++    <div className="flex items-start gap-3">
+       <div className="pt-0.5">
+-        <div
++        <button
++          type="button"
++          role="switch"
++          aria-checked={checked}
++          aria-labelledby={label ? `${toggleId}-label` : undefined}
++          aria-describedby={description ? `${toggleId}-desc` : undefined}
++          onClick={() => onChange(!checked)}
+           className={cn(
+-            'w-10 h-6 rounded-full transition-colors relative',
+-            checked ? 'bg-blue-600' : 'bg-overlay/15'
++            'w-10 h-6 rounded-full transition-colors relative cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface',
++            checked ? 'bg-accent-cyan' : 'bg-overlay/15'
+           )}
+-          onClick={() => onChange(!checked)}
+         >
+           <div
+             className={cn(
+@@ -1699,12 +1759,12 @@ function ToggleOption({ label, description, checked, onChange }: ToggleOptionPro
+               checked ? 'translate-x-5' : 'translate-x-1'
+             )}
+           />
+-        </div>
++        </button>
+       </div>
+-      <div>
+-        <span className="text-text-primary text-sm font-medium">{label}</span>
+-        <p className="text-text-muted text-xs">{description}</p>
++      <div className="cursor-pointer" onClick={() => onChange(!checked)}>
++        {label && <span id={`${toggleId}-label`} className="text-text-primary text-sm font-medium">{label}</span>}
++        {description && <p id={`${toggleId}-desc`} className="text-text-muted text-xs">{description}</p>}
+       </div>
+-    </label>
++    </div>
    );
  }
 diff --git a/components/CustomAppModal.tsx b/components/CustomAppModal.tsx
@@ -3165,10 +3749,63 @@ index 9957a5ab1..58b850fde 100644
                  {errors.silentSwitches && (
                    <p className="text-xs text-red-500 mt-1">{errors.silentSwitches}</p>
 diff --git a/components/ErrorDisplay.test.ts b/components/ErrorDisplay.test.ts
-index 43ef55e76..fe3c7eb0c 100644
+index 43ef55e..4225423 100644
 --- a/components/ErrorDisplay.test.ts
 +++ b/components/ErrorDisplay.test.ts
-@@ -65,7 +65,7 @@ describe('ErrorDisplay QA failure stage', () => {
+@@ -2,6 +2,7 @@ import { createElement, type ReactNode } from 'react';
+ import { renderToStaticMarkup } from 'react-dom/server';
+ import { beforeEach, describe, expect, it, vi } from 'vitest';
+ import { ErrorDisplay } from './ErrorDisplay';
++import { HELP_SECTIONS } from '@/lib/hrm/help-content';
+ 
+ const translation = vi.hoisted(() => ({ messages: [] as string[], localized: false }));
+ vi.mock('gt-next', () => ({
+@@ -13,6 +14,44 @@ vi.mock('gt-next', () => ({
+ }));
+ beforeEach(() => { translation.messages = []; translation.localized = false; });
+ 
++describe('assignment review guidance', () => {
++  it('never offers a deadline confirmation as recovery for unsupported settings',()=>{
++    const html=renderToStaticMarkup(createElement(ErrorDisplay,{errorCode:'ASSIGNMENT_SETTINGS_REVIEW_REQUIRED',errorCategory:'validation',errorMessage:'Unsupported field names (1 total, at most 12 shown): ["futureField"]'}));
++    expect(html).toContain('futureField');expect(html).toContain('A deadline confirmation cannot resolve');expect(html).not.toContain('downloaded file');
++  });
++  it('keeps Help explicit about the history window and assignment-review uncertainty', () => {
++    const reports = HELP_SECTIONS.find(section => section.id === 'reports')!;
++    expect(reports.points.join(' ')).toContain('newest 50 unarchived records before filtering');
++    const support = HELP_SECTIONS.find(section => section.id === 'support')!;
++    expect(support.points.join(' ')).toContain('without proving an expired deadline');
++  });
++  it.each(['package', 'validation', 'authenticate'])('overrides legacy %s stages without inventing an expired deadline or installer failure', (errorStage) => {
++    const reason = 'Unsupported assignment settings. Review this copy in Intune before replacing it.';
++    const html = renderToStaticMarkup(createElement(ErrorDisplay, {
++      errorCode: 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED', errorStage,
++      errorCategory: 'validation', errorMessage: reason,
++    }));
++    expect(html).toContain('Assignment review');
++    expect(html).toContain(reason);
++    expect(html).toContain('does not confirm an expired deadline');
++    expect(html).toContain('Retrying without resolving the review may stop again');
++    expect(html).not.toContain('downloaded file');
++    expect(html).not.toContain('Failed at: Packaging');
++    expect(html).not.toContain('Re-verify permissions');
++  });
++
++  it('retains a real expired-deadline reason and translates the guidance', () => {
++    translation.localized = true;
++    const html = renderToStaticMarkup(createElement(ErrorDisplay, {
++      errorCode: 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',
++      errorMessage: 'Confirm whether to retain the expired deadline or choose a new deadline.',
++    }));
++    expect(html).toContain('translated: Assignment review');
++    expect(html).toContain('Confirm whether to retain the expired deadline');
++    expect(translation.messages).toHaveLength(2);
++  });
++});
++
+ describe('ErrorDisplay QA failure stage', () => {
+   it('names an unsupported dependency without QA or installer failure guidance', () => {
+     const html = renderToStaticMarkup(createElement(ErrorDisplay, {
+@@ -65,7 +104,7 @@ describe('ErrorDisplay QA failure stage', () => {
        errorCode: 'HASH_MISMATCH', errorStage: 'validation', errorCategory: 'validation',
      }));
      expect(html).toContain('Failed at: Validation');
@@ -3178,7 +3815,7 @@ index 43ef55e76..fe3c7eb0c 100644
    });
  });
 diff --git a/components/ErrorDisplay.tsx b/components/ErrorDisplay.tsx
-index 086e99f85..27cb240d1 100644
+index 086e99f..4c0514b 100644
 --- a/components/ErrorDisplay.tsx
 +++ b/components/ErrorDisplay.tsx
 @@ -96,7 +96,10 @@ const errorCodeMessages: Record<string, string> = {
@@ -3193,7 +3830,30 @@ index 086e99f85..27cb240d1 100644
    PACKAGE_CREATION_FAILED: 'Failed to create the .intunewin package',
    AUTH_FAILED: 'Failed to acquire authentication token',
    AUTH_INVALID_CREDENTIALS: 'Service principal credentials are invalid',
-@@ -211,6 +214,9 @@ export function ErrorDisplay({
+@@ -162,12 +165,20 @@ export function ErrorDisplay({
+   const architectureUnavailable = errorCode === 'ARCHITECTURE_UNAVAILABLE';
+   const unavailable = errorCode === 'VERSION_UNAVAILABLE' || errorCode === 'PACKAGE_UNAVAILABLE' || architectureUnavailable;
+   const unsupportedDependency = errorCode === 'DEPENDENCY_NOT_SUPPORTED';
+-  const stage = unavailable ? { ...stageConfig.validation, label: architectureUnavailable ? <T>Architecture not available</T> : 'Not available' } : unsupportedDependency ? { ...stageConfig.validation, label: 'Not supported yet' }
++  // Legacy workflow preflight also uses this code for an unreadable or
++  // unsupported assignment. It does not prove a deadline is expired.
++  const settingsReview = errorCode === 'ASSIGNMENT_SETTINGS_REVIEW_REQUIRED';
++  const assignmentReview = settingsReview || errorCode === 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED';
++  const stage = assignmentReview ? { ...stageConfig.validation, label: <T>Assignment review</T> }
++    : unavailable ? { ...stageConfig.validation, label: architectureUnavailable ? <T>Architecture not available</T> : 'Not available' } : unsupportedDependency ? { ...stageConfig.validation, label: 'Not supported yet' }
+     : qaFailed ? { ...stageConfig.validation, label: blockedBeforeTest ? 'Security check' : <T>Deployment validation</T> } : stageConfig[errorStage || 'unknown'] || stageConfig.unknown;
+   const StageIcon = stage.icon;
+   // Older QA failures were stored with the installer category, whose hint
+   // describes package creation. The QA code alone does not prove a test ran.
+-  const hint = qaFailed ? {
++  const hint = assignmentReview ? {
++    message: settingsReview ? <T>Review the source app’s assignment settings or resolve the recorded read error before retrying. A deadline confirmation cannot resolve this error. The recorded details identify what could not be verified.</T> : <T>IT must review the source app’s assignment settings and timing before replacing it. Read the recorded details above; this code alone does not confirm an expired deadline. Retrying without resolving the review may stop again.</T>,
++    showReVerify: false,
++  } : qaFailed ? {
+     message: blockedBeforeTest
+       ? 'A security check stopped this deployment before the installation test ran.'
+       : errorMessage?.includes('MANIFEST_CHANGED')
+@@ -211,6 +222,9 @@ export function ErrorDisplay({
        {/* Main error message */}
        <div className="text-sm text-status-error/90">
          <p>{codeMessage || displayErrorMessage || 'An error occurred'}</p>
@@ -3204,10 +3864,16 @@ index 086e99f85..27cb240d1 100644
  
        {/* Hash mismatch details */}
 diff --git a/components/PackageConfig.custom-detection.test.ts b/components/PackageConfig.custom-detection.test.ts
-index 90076292c..9982671c2 100644
+index 9007629..c1472c8 100644
 --- a/components/PackageConfig.custom-detection.test.ts
 +++ b/components/PackageConfig.custom-detection.test.ts
-@@ -25,6 +25,9 @@ vi.mock('@/hooks/use-packages', () => ({
+@@ -20,11 +20,15 @@ const manifestState = vi.hoisted(() => ({
+   isFetching: false,
+   error: null as Error | null,
+ }));
++vi.mock('@/hooks/usePackagingCapabilities', () => ({ usePackagingCapabilities: () => ({ path: 'github', startupBeta: false }) }));
+ vi.mock('@/hooks/use-packages', () => ({
+   useLocaleVariants: () => ({ data: { variants: [] }, isSuccess: true }),
    usePackageManifest: () => manifestState,
  }));
  vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: { carryOverAssignments: false } }) }));
@@ -3217,7 +3883,7 @@ index 90076292c..9982671c2 100644
  vi.mock('@/hooks/use-update-app-settings', () => ({ useUpdateAppSettings: () => ({ isUpdating: false }) }));
  vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
  vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: () => null }));
-@@ -59,6 +62,9 @@ async function render(props: Record<string, unknown> = {}) {
+@@ -59,6 +63,9 @@ async function render(props: Record<string, unknown> = {}) {
    await act(async () => root.render(createElement(PackageConfig, {
      package: pkg, installers: [installer], versions: ['2.0', '1.0'], onClose: vi.fn(), ...props,
    } as Parameters<typeof PackageConfig>[0])));
@@ -3227,16 +3893,16 @@ index 90076292c..9982671c2 100644
  }
  
  function buttonWithText(text: string) {
-@@ -99,7 +105,7 @@ async function selectVersion(version: string) {
+@@ -99,7 +106,7 @@ async function selectVersion(version: string) {
  }
  
  async function save() {
 -  await click(buttonWithText('Add to Selection'));
-+  await click(buttonWithText('Add to deployment'));
++  await click(buttonWithText('Add to Deployment list'));
    return useCartStore.getState().items[0] as Win32CartItem | undefined;
  }
  
-@@ -306,7 +312,7 @@ describe('custom detection rules', () => {
+@@ -306,7 +313,7 @@ describe('custom detection rules', () => {
        ...props,
        deployedConfig: { ...base, psadtConfig: { ...base.psadtConfig, customDetection: true, detectionRules: forged } },
      });
@@ -3245,7 +3911,7 @@ index 90076292c..9982671c2 100644
      expect(customToggle()).toBeUndefined();
      expect(document.body.textContent).not.toContain('Rule 1 type');
      const item = await save();
-@@ -316,7 +322,7 @@ describe('custom detection rules', () => {
+@@ -316,7 +323,7 @@ describe('custom detection rules', () => {
  
    it('does not show detection rules for Microsoft Store apps', async () => {
      await render({ package: { ...pkg, appSource: 'store', packageIdentifier: '9NBLGGH4NNS1' }, installers: [] });
@@ -3256,10 +3922,10 @@ index 90076292c..9982671c2 100644
  });
 diff --git a/components/PackageConfig.layout.test.ts b/components/PackageConfig.layout.test.ts
 new file mode 100644
-index 000000000..ab1734028
+index 0000000..b25e489
 --- /dev/null
 +++ b/components/PackageConfig.layout.test.ts
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,135 @@
 +// @vitest-environment happy-dom
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { act, createElement } from 'react';
@@ -3277,6 +3943,7 @@ index 000000000..ab1734028
 +});
 +
 +const manifestState = vi.hoisted(() => ({ data: undefined, isFetching: false, error: null as Error | null }));
++vi.mock('@/hooks/usePackagingCapabilities', () => ({ usePackagingCapabilities: () => ({ path: 'github', startupBeta: false }) }));
 +vi.mock('@/hooks/use-packages', () => ({
 +  useLocaleVariants: () => ({ data: { variants: [] }, isSuccess: true }),
 +  usePackageManifest: () => manifestState,
@@ -3314,6 +3981,8 @@ index 000000000..ab1734028
 +
 +const text = () => document.body.textContent ?? '';
 +const button = (label: string) => [...document.querySelectorAll('button')].find((b) => b.textContent?.includes(label));
++const mode = () => [...document.querySelectorAll<HTMLSelectElement>('select')].find(s => [...s.options].some(o => o.value === 'Auto'))!;
++const setMode = (value: string) => act(async () => { mode().value = value; mode().dispatchEvent(new Event('change', { bubbles: true })); });
 +
 +async function render(props: Record<string, unknown> = {}) {
 +  await act(async () => root.render(createElement(PackageConfig, {
@@ -3336,7 +4005,7 @@ index 000000000..ab1734028
 +describe('deploy panel layout', () => {
 +  it('shows the main choices, then every other setting as a closed row with its current value', async () => {
 +    await render();
-+    for (const heading of ['Installs for', 'Who gets it', 'When a new version comes out', 'More settings', 'What staff see during install']) {
++    for (const heading of ['Installs for', 'Who gets it', 'When a new version comes out', 'Installation and staff experience', 'App setup and checks']) {
 +      expect(text()).toContain(heading);
 +    }
 +    expect(text()).not.toMatch(/Quick|Advanced|more configuration sections/);
@@ -3345,28 +4014,33 @@ index 000000000..ab1734028
 +      "How Intune checks it's installedAutomatic",
 +      'New computer setupNot required',
 +      'Replaces or needs other appsNone',
-+      'Installation timingSilent, no restart',
-+      'Letting staff postponeOff',
-+      'Install window brandingDefault',
++      'App handling and restartNo apps to close · Intune restarts suppressed',
++      'Disk space checkOff',
 +    ]));
 +    expect(document.querySelectorAll('button[aria-expanded="true"]')).toHaveLength(0);
++    expect(button('Postponement')).toBeUndefined();
++    expect(text()).not.toContain('All off');
 +  });
 +
 +  it('keeps every setting reachable: opening a row shows its options', async () => {
 +    await render();
-+    await act(async () => button('Letting staff postpone')!.click());
++    await setMode('Auto');
++    await act(async () => button('Postponement')!.click());
 +    expect(text()).toContain('Let staff postpone the install');
-+    await act(async () => button('Installation timing')!.click());
-+    expect(text()).toContain('What staff see while it installs');
++    await act(async () => button('App handling and restart')!.click());
++    expect(text()).toContain('Toolkit windows');
 +    expect(text()).toContain('Remove existing installation first');
 +  });
 +
 +  it("summarises a deployed app's current settings", async () => {
 +    await render({ isDeployed: true, deployedConfig: deployed });
 +    const rows = [...document.querySelectorAll('button[aria-expanded]')].map((b) => b.textContent);
-+    expect(rows).toContain('Letting staff postponeUp to 7 times');
++    expect(rows.some(row => row?.includes('Postponement'))).toBe(false);
++    expect(text()).toContain('Saved question settings are inactive');
 +    expect(rows).toContain('Company Portal categoryProductivity');
 +    expect(text()).toContain('Editing a deployed app');
++    await setMode('Auto');
++    expect(button('Postponement')?.textContent).toContain('7 postponements');
 +  });
 +
 +  it('sends a new computer setup change through Deploy again, not Save to Intune', async () => {
@@ -3385,11 +4059,19 @@ index 000000000..ab1734028
 +    expect(useCartStore.getState().items[0]).toMatchObject({ forceCreate: true, replacesIntuneAppId: '00000000-0000-0000-0000-00000000000a' });
 +  });
 +});
++
++it('renders a legacy partial saved snapshot without inventing or mutating its saved settings',async()=>{const partial={...deployed,psadtConfig:{deployMode:'Silent',allowDefer:true,deferTimes:3}};const original=JSON.stringify(partial);await render({isDeployed:true,deployedConfig:partial});expect(text()).toContain('Saved question settings are inactive');expect(JSON.stringify(partial)).toBe(original);await act(async()=>button('App handling and restart')!.click());expect(text()).toContain('No processes configured');await act(async()=>button('Add')!.click());expect(text()).not.toContain('No processes configured');});
 diff --git a/components/PackageConfig.recovery.test.ts b/components/PackageConfig.recovery.test.ts
-index f08f394ac..c95658ca8 100644
+index f08f394..2336759 100644
 --- a/components/PackageConfig.recovery.test.ts
 +++ b/components/PackageConfig.recovery.test.ts
-@@ -20,6 +20,9 @@ vi.mock('@/hooks/use-packages', () => ({
+@@ -15,11 +15,15 @@ vi.hoisted(() => {
+ });
+ 
+ const manifestState = vi.hoisted(() => ({ data: undefined, isFetching: false, error: null as Error | null }));
++vi.mock('@/hooks/usePackagingCapabilities', () => ({ usePackagingCapabilities: () => ({ path: 'github', startupBeta: false }) }));
+ vi.mock('@/hooks/use-packages', () => ({
+   useLocaleVariants: () => ({ data: { variants: [] }, isSuccess: true }),
    usePackageManifest: () => manifestState,
  }));
  vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: { carryOverAssignments: false } }) }));
@@ -3399,48 +4081,51 @@ index f08f394ac..c95658ca8 100644
  vi.mock('@/hooks/use-update-app-settings', () => ({ useUpdateAppSettings: () => ({ isUpdating: false }) }));
  vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
  vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: () => null }));
-@@ -63,7 +66,7 @@ describe('reviewing a replacement version', () => {
+@@ -63,7 +67,7 @@ describe('reviewing a replacement version', () => {
        installers: [installer], versions: ['v3.0'],
        deployedConfig: { ...oldItem, version: '3.0' }, onClose: vi.fn(),
      })));
 -    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Selection'))!;
-+    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to deployment'))!;
++    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Deployment list'))!;
      expect(add.disabled).toBe(false);
      await act(async () => add.click());
      expect(useCartStore.getState().items[0]).toMatchObject({ version: 'v3.0', installerUrl: installer.url });
-@@ -81,7 +84,7 @@ describe('reviewing a replacement version', () => {
+@@ -81,7 +85,7 @@ describe('reviewing a replacement version', () => {
        onAddedToCart: saved, onClose: vi.fn(),
      })));
      expect(useCartStore.getState().items[0].version).toBe('1.0');
 -    const save = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Update Selection'))!;
-+    const save = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Update in deployment'))!;
++    const save = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Save to Deployment list'))!;
      expect(save.disabled).toBe(false);
      await act(async () => save.click());
      expect(useCartStore.getState().items).toHaveLength(1);
-@@ -104,7 +107,7 @@ describe('reviewing a replacement version', () => {
+@@ -104,7 +108,7 @@ describe('reviewing a replacement version', () => {
        installers: [installer], versions: ['2.0', '1.0'], deployedConfig: oldItem, onClose: vi.fn(),
      })));
      expect(document.querySelector('[role="alert"]')?.textContent).toContain('no longer available');
 -    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Selection'))!;
-+    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to deployment'))!;
++    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Deployment list'))!;
      expect(add.disabled).toBe(true);
      await act(async () => add.click());
      expect(useCartStore.getState().items).toEqual([]);
 diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
-index eea1131fe..b5b0944c9 100644
+index eea1131..2f30f2d 100644
 --- a/components/PackageConfig.tsx
 +++ b/components/PackageConfig.tsx
-@@ -1,5 +1,9 @@
+@@ -1,5 +1,12 @@
  'use client';
  
 +import { StartupInstallChoice } from '@/components/hrm/StartupInstallChoice';
 +import { startupInstallationProblem } from '@/lib/hrm/startup-installation';
 +import { settingsSummaries } from '@/lib/hrm/settings-summary';
++import { installExperience, installSettingsProblem } from '@/lib/hrm/install-experience';
++import { usePackagingCapabilities } from '@/hooks/usePackagingCapabilities';
++import { InstallExperienceSummary, ToolkitModePicker } from '@/components/hrm/InstallExperienceSummary';
 +
  import { useState, useEffect, useRef, useMemo, useId } from 'react';
  import {
    ArrowUpCircle,
-@@ -21,8 +25,6 @@ import {
+@@ -21,8 +28,6 @@ import {
    Clock,
    FolderTree,
    Palette,
@@ -3449,7 +4134,7 @@ index eea1131fe..b5b0944c9 100644
    Globe,
    Search,
    Shield,
-@@ -66,6 +68,8 @@ import { DEFAULT_PSADT_CONFIG, getDefaultProcessesToClose, sanitizeProcessesToCl
+@@ -66,6 +71,8 @@ import { DEFAULT_PSADT_CONFIG, getDefaultProcessesToClose, sanitizeProcessesToCl
  import { useCartStore, createStoreCartItem } from '@/stores/cart-store';
  import { useUserSettings } from '@/components/providers/UserSettingsProvider';
  import { useUpdateAppSettings } from '@/hooks/use-update-app-settings';
@@ -3458,7 +4143,18 @@ index eea1131fe..b5b0944c9 100644
  import { useFocusTrap } from '@/hooks/use-focus-trap';
  import { generateDetectionRules, generateInstallCommand, generateUninstallCommand } from '@/lib/detection-rules';
  import { INTUNE_APP_SOURCE_MARKER } from '@/lib/intune-description';
-@@ -221,6 +225,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -205,6 +212,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     () => stripSourceMarker(deployedConfig?.description ?? pkg.description ?? '')
+   );
+ 
++  const packagingCapabilities = usePackagingCapabilities();
++  const packagingPath = packagingCapabilities.path;
++  const experience = installExperience(config, packagingPath);
++
+   // Assignment configuration state - pre-fill from deployed config
+   const [assignments, setAssignments] = useState<PackageAssignment[]>(
+     deployedConfig?.assignments || []
+@@ -221,6 +232,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
    const [updatePolicy, setUpdatePolicy] = useState<CartUpdatePolicyValue>(
      deployedConfig?.updatePolicy
    );
@@ -3469,7 +4165,7 @@ index eea1131fe..b5b0944c9 100644
    const { settings: userSettings } = useUserSettings();
    const [carryOverAssignments, setCarryOverAssignments] = useState<boolean>(
      deployedConfig?.assignmentMigration?.carryOverAssignments ??
-@@ -228,16 +236,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -228,16 +243,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
    );
  
    // UI state
@@ -3485,12 +4181,12 @@ index eea1131fe..b5b0944c9 100644
 -  const isQuickSection = (section: ConfigSection) => quickSections.includes(section);
 -  const visibleSections = configMode === 'quick' ? quickSections : null; // null = show all
 +  // HRM patch 0022: no Quick/Advanced switch. The main choices are always shown and every
-+  // other setting is a row under More settings or What staff see during install.
++  // other setting is a row under App setup and checks or Toolkit messages and appearance.
 +  const visibleSections = null as ConfigSection[] | null;
  
    // Cart store
    const addItemToStore = useCartStore((state) => state.addItem);
-@@ -257,7 +263,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -257,7 +270,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
    // Change detection: categorize modifications as Graph-patchable vs requires-redeploy
    const changeState = useMemo(() => {
      if (!isDeployed || !deployedConfig) {
@@ -3499,7 +4195,7 @@ index eea1131fe..b5b0944c9 100644
      }
  
      // Graph-patchable: assignments + categories
-@@ -267,7 +273,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -267,7 +280,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
        JSON.stringify(categories) !== JSON.stringify(deployedConfig.categories || []);
      const hasEspChanges =
        JSON.stringify(espProfiles) !== JSON.stringify(deployedConfig.espProfiles || []);
@@ -3514,7 +4210,7 @@ index eea1131fe..b5b0944c9 100644
  
      // Redeploy-required: version, architecture, scope, locale, PSADT config
      const hasVersionChange = selectedVersion !== deployedConfig.version;
-@@ -283,12 +295,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -283,12 +302,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
      const deployedDescription = stripSourceMarker(deployedConfig.description ?? pkg.description ?? '');
      const hasDescriptionChange = description.trim() !== deployedDescription.trim();
      const hasRedeployChanges =
@@ -3532,20 +4228,44 @@ index eea1131fe..b5b0944c9 100644
    // Installers always arrive for the package's default (latest) version. When the
    // user selects a different version we must re-fetch so the installer URL/SHA
    // (which flow straight into the cart item) match the chosen version rather than
-@@ -334,6 +348,12 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -334,9 +355,15 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
        nestedInstallerType: selectedInstaller.nestedInstallerType,
      });
    const customDetectionActive = config.customDetection === true && customDetectionSupported;
 +
-+  // HRM patch 0022/0036: the current setting of each row under More settings, in a few words
++  // HRM patch 0022/0036: the current setting of each row under App setup and checks, in a few words
 +  const summaries = settingsSummaries({
-+    config, espProfiles, relationships, categories, customDetectionActive,
++    config, espProfiles, relationships, categories, packagingPath, customDetectionActive,
 +    descriptionOrCommandsChanged: description.trim() !== stripSourceMarker(pkg.description ?? '').trim() || Boolean(config.installCommand || config.uninstallCommand),
 +  });
    const lastCustomRulesRef = useRef<DetectionRule[] | null>(null);
    useEffect(() => {
-     if (customDetectionActive) lastCustomRulesRef.current = config.detectionRules;
-@@ -562,6 +582,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+-    if (customDetectionActive) lastCustomRulesRef.current = config.detectionRules;
++    if (customDetectionActive) lastCustomRulesRef.current = config.detectionRules || [];
+   }, [customDetectionActive, config.detectionRules]);
+   const availableArchitectures = [...new Set(effectiveInstallers.map((i) => i.architecture))];
+   const availableVersions = versions.length > 0 ? versions : (pkg.versions ?? []);
+@@ -443,7 +470,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+       lastCustomRulesRef.current = rules;
+       setConfig((prev) => ({ ...prev, customDetection: true, detectionRules: rules }));
+     } else {
+-      lastCustomRulesRef.current = config.detectionRules;
++      lastCustomRulesRef.current = config.detectionRules || [];
+       setConfig((prev) => {
+         const { customDetection: _customDetection, ...rest } = prev;
+         return rest;
+@@ -453,6 +480,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+ 
+   const handleAddToCart = async () => {
+     if (addedToCartSuccess) return;
++    if (!isStoreApp && installSettingsProblem(config, packagingPath)) {
++      modalRef.current?.querySelector<HTMLElement>('[data-install-settings-problem]')?.focus();
++      return;
++    }
+ 
+     // Store apps don't need an installer
+     if (!isStoreApp && !selectedInstaller) return;
+@@ -562,6 +593,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                  }
                : undefined,
            ...(isDeployed ? { forceCreate: true } : {}),
@@ -3554,7 +4274,7 @@ index eea1131fe..b5b0944c9 100644
          });
        }
        setAddedToCartSuccess(true);
-@@ -577,12 +599,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -577,12 +610,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
      setSettingsError(null);
      setSettingsSuccess(false);
      try {
@@ -3578,7 +4298,34 @@ index eea1131fe..b5b0944c9 100644
        setSettingsSuccess(true);
        setTimeout(() => onClose(), 1200);
      } catch (err) {
-@@ -695,18 +722,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -598,7 +636,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     setConfig((prev) => ({
+       ...prev,
+       processesToClose: [
+-        ...prev.processesToClose,
++        ...(prev.processesToClose || []),
+         { name: '', description: '' },
+       ],
+     }));
+@@ -608,7 +646,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     setProcessesError(null);
+     setConfig((prev) => ({
+       ...prev,
+-      processesToClose: prev.processesToClose.filter((_, i) => i !== index),
++      processesToClose: (prev.processesToClose || []).filter((_, i) => i !== index),
+     }));
+   };
+ 
+@@ -616,7 +654,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     setProcessesError(null);
+     setConfig((prev) => ({
+       ...prev,
+-      processesToClose: prev.processesToClose.map((p, i) =>
++      processesToClose: (prev.processesToClose || []).map((p, i) =>
+         i === index ? { ...p, ...updates } : p
+       ),
+     }));
+@@ -695,18 +733,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                <div className="flex items-start gap-3 p-3 bg-accent-cyan/10 border border-accent-cyan/20 rounded-lg">
                  <RefreshCw className="w-5 h-5 text-accent-cyan flex-shrink-0 mt-0.5" />
                  <div className="text-sm">
@@ -3604,7 +4351,7 @@ index eea1131fe..b5b0944c9 100644
                    </p>
                  </div>
                </div>
-@@ -716,7 +743,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -716,7 +754,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              {isStoreApp && (
                <div className="flex items-center gap-2 px-3 py-2 bg-violet-500/10 border border-violet-500/20 rounded-lg">
                  <Store className="w-4 h-4 text-violet-400" />
@@ -3613,7 +4360,7 @@ index eea1131fe..b5b0944c9 100644
                  <span className="text-xs text-violet-400/70 ml-auto font-mono">{pkg.packageIdentifier || pkg.id}</span>
                </div>
              )}
-@@ -724,7 +751,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -724,7 +762,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              {/* Store App: Install Experience */}
              {isStoreApp && (
                <div>
@@ -3622,7 +4369,7 @@ index eea1131fe..b5b0944c9 100644
                  <div className="flex gap-2">
                    {(['user', 'system'] as const).map((exp) => (
                      <button
-@@ -737,7 +764,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -737,7 +775,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
                        )}
                      >
@@ -3631,7 +4378,7 @@ index eea1131fe..b5b0944c9 100644
                      </button>
                    ))}
                  </div>
-@@ -758,7 +785,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -758,7 +796,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                  {/* PackageFamilyName */}
                  {storeManifest.packageFamilyName && (
                    <div>
@@ -3640,7 +4387,7 @@ index eea1131fe..b5b0944c9 100644
                      <div className="px-3 py-2 bg-bg-elevated border border-overlay/10 rounded-lg">
                        <code className="text-xs text-text-secondary font-mono break-all">{storeManifest.packageFamilyName}</code>
                      </div>
-@@ -768,7 +795,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -768,7 +806,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                  {/* Supported Architectures */}
                  {storeManifest.architectures.length > 0 && (
                    <div>
@@ -3649,7 +4396,7 @@ index eea1131fe..b5b0944c9 100644
                      <div className="flex flex-wrap gap-1.5">
                        {storeManifest.architectures.map((arch) => (
                          <span
-@@ -970,13 +997,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -970,13 +1008,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
  
              {/* Install Scope */}
              <div>
@@ -3665,7 +4412,7 @@ index eea1131fe..b5b0944c9 100644
                    const isAvailable = scopeIsAvailable(scope);
  
                    return (
-@@ -992,7 +1019,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -992,7 +1030,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
                        )}
                      >
@@ -3674,7 +4421,7 @@ index eea1131fe..b5b0944c9 100644
                      </button>
                    );
                  })}
-@@ -1001,63 +1028,175 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1001,78 +1039,177 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              </>)}
  
              <div className="border-t border-overlay/10 pt-6">
@@ -3742,8 +4489,16 @@ index eea1131fe..b5b0944c9 100644
 -              </div>}
 +              </ConfigSection>}
  
++              {!isStoreApp && <section aria-label="Installation and staff experience" className="mb-6 space-y-4">
++                <h3 className="text-sm font-semibold text-text-primary">Installation and staff experience</h3>
++                  <p className="text-xs text-text-muted">These settings are packaged with this version. Future automatic updates use Edit next rollout in the app workspace.</p>
++                  {(packagingCapabilities.startupBeta || config.installAfterRestartBeta) && <StartupInstallChoice value={config.installAfterRestartBeta === true} problem={startupInstallationProblem({ installScope: selectedScope, installerType: selectedInstaller?.type, customDetection: config.customDetection, relationships, espProfiles })} onChange={value => updateConfig({ installAfterRestartBeta: value, ...(value ? { deployMode: 'Silent', allowDefer: false, restartBehavior: 'Suppress' } : {}) })} />}
++                  <ToolkitModePicker config={config} path={packagingPath} onChange={deployMode => updateConfig({ deployMode })} />
++                  <InstallExperienceSummary config={config} path={packagingPath} />
++
++              </section>}
 +              <div className="mb-6">
-+                <h3 className="text-sm font-semibold text-text-primary mb-2">More settings</h3>
++                <h3 className="text-sm font-semibold text-text-primary mb-2">App setup and checks</h3>
 +                <div className="rounded-lg border border-overlay/10 divide-y divide-overlay/10 overflow-hidden">
 +              {/* Detection Rules (quick + advanced, win32 only) */}
 +              {!isStoreApp && (visibleSections === null || visibleSections.includes('detection')) && <ConfigSection
@@ -3764,7 +4519,7 @@ index eea1131fe..b5b0944c9 100644
 +                  )}
 +                  {customDetectionActive ? (
 +                    <CustomDetectionEditor
-+                      rules={config.detectionRules}
++                      rules={config.detectionRules || []}
 +                      onChange={(detectionRules) => {
 +                        setCustomDetectionErrors([]);
 +                        lastCustomRulesRef.current = detectionRules;
@@ -3773,10 +4528,10 @@ index eea1131fe..b5b0944c9 100644
 +                      errors={customDetectionErrors}
 +                    />
 +                  ) : <>
-+                  {config.detectionRules.length === 0 ? (
++                  {(config.detectionRules || []).length === 0 ? (
 +                    <p className="text-text-muted text-sm italic">No detection rules configured</p>
 +                  ) : (
-+                    config.detectionRules.map((rule, index) => (
++                    (config.detectionRules || []).map((rule, index) => (
 +                      <div key={index} className="bg-bg-elevated/50 rounded-lg p-3">
 +                        <div className="flex items-center gap-2 mb-2">
 +                          <span className="px-2 py-0.5 bg-accent-cyan/10 text-accent-cyan text-xs font-medium rounded uppercase">
@@ -3855,48 +4610,50 @@ index eea1131fe..b5b0944c9 100644
                {!isStoreApp && (visibleSections === null || visibleSections.includes('behavior')) && <ConfigSection
 -                title="Installation Behavior"
 +                summary={summaries.behavior}
-+                title="Installation timing"
++                title="App handling and restart"
                  icon={<Settings className="w-4 h-4" />}
                  expanded={expandedSection === 'behavior'}
                  onToggle={() => toggleSection('behavior')}
                >
                  <div className="space-y-4">
-+                  <p className="text-xs text-text-muted">These settings go into this package. Future automatic updates use Installation timing in App updates.</p>
-+                  <StartupInstallChoice value={config.installAfterRestartBeta === true} problem={startupInstallationProblem({ installScope: selectedScope, installerType: selectedInstaller?.type, customDetection: config.customDetection, relationships, espProfiles })} onChange={value => updateConfig({ installAfterRestartBeta: value, ...(value ? { deployMode: 'Silent', allowDefer: false, restartBehavior: 'Suppress' } : {}) })} />
-                   {/* Deploy Mode */}
-                   <div>
-                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                  {/* Deploy Mode */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
 -                      Deploy mode
-+                      What staff see while it installs
-                     </label>
-                     <select
-                       value={config.deployMode || 'Silent'}
-                       onChange={(e) => updateConfig({ deployMode: e.target.value as DeployMode })}
-                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-                     >
+-                    </label>
+-                    <select
+-                      value={config.deployMode || 'Silent'}
+-                      onChange={(e) => updateConfig({ deployMode: e.target.value as DeployMode })}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                    >
 -                      <option value="Silent">Silent - No UI popups (recommended)</option>
 -                      <option value="NonInteractive">Non-Interactive - Show progress only</option>
 -                      <option value="Auto">Auto-detect (PSADT default)</option>
-+                      <option value="Silent">Nothing, it installs silently (recommended)</option>
-+                      <option value="NonInteractive">A progress window only</option>
-+                      <option value="Auto">Let the installer decide</option>
-                     </select>
-                     <p className="text-xs text-text-muted mt-1">
+-                    </select>
+-                    <p className="text-xs text-text-muted mt-1">
 -                      Controls whether PSADT shows dialogs during installation. Silent is recommended for Intune.
-+                      Silent suits Intune: nobody is interrupted. Anything under What staff see during install only shows when this isn't silent.
-                     </p>
-                   </div>
- 
-@@ -1071,7 +1210,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+-                    </p>
+-                  </div>
+-
+                   {/* Remove Existing Install Toggle */}
+                   <ToggleOption
+                     label="Remove existing installation first"
+-                    description="Uninstalls any detected existing installation of this application before installing. Use when upgrades fail because a previous version is present."
++                    description="Attempts to uninstall registered apps whose names contain this app name. A removal failure is logged and installation continues."
+                     checked={config.removeExistingInstall || false}
+                     onChange={(checked) => updateConfig({ removeExistingInstall: checked })}
+                   />
  
                    {/* Verify Install Toggle */}
                    <ToggleOption
 -                    label="Verify installation before marking as installed"
+-                    description="After the installer finishes, checks Add/Remove Programs for the application and fails the deployment if it is not found. Prevents false success from installers that exit without installing."
 +                    label="Check it installed before reporting success"
-                     description="After the installer finishes, checks Add/Remove Programs for the application and fails the deployment if it is not found. Prevents false success from installers that exit without installing."
++                    description="Adds a registered-app name check after installation. Package-specific detection and required checks still apply separately."
                      checked={config.verifyInstall || false}
                      onChange={(checked) => updateConfig({ verifyInstall: checked })}
-@@ -1081,7 +1220,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                   />
+@@ -1081,7 +1218,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    <div>
                      <div className="flex items-center justify-between mb-2">
                        <label className="block text-sm font-medium text-text-secondary">
@@ -3905,37 +4662,130 @@ index eea1131fe..b5b0944c9 100644
                        </label>
                        <button
                          onClick={addProcess}
-@@ -1134,8 +1273,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
-                   {/* Show Close Prompt Toggle */}
-                   <div className="space-y-3">
+@@ -1092,15 +1229,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                       </button>
+                     </div>
+                     <div className="space-y-2">
+-                      {config.processesToClose.length === 0 ? (
++                      {(config.processesToClose || []).length === 0 ? (
+                         <p className="text-text-muted text-sm italic">No processes configured</p>
+                       ) : (
+-                        config.processesToClose.map((process, index) => (
++                        (config.processesToClose || []).map((process, index) => (
+                           <div key={index} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                             <input
+                               type="text"
+                               value={process.name}
+                               onChange={(e) => updateProcess(index, { name: e.target.value })}
++                              aria-label={`Process executable ${index + 1}`}
+                               placeholder="Process name (e.g., chrome)"
+                               className={cn(
+                                 'flex-1 px-3 py-2 bg-bg-elevated border rounded-lg text-text-primary text-sm',
+@@ -1113,10 +1251,12 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                               type="text"
+                               value={process.description}
+                               onChange={(e) => updateProcess(index, { description: e.target.value })}
++                              aria-label={`Process display name ${index + 1}`}
+                               placeholder="Display name"
+                               className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                             />
+                             <button
++                              aria-label={`Remove process ${index + 1}`}
+                               onClick={() => removeProcess(index)}
+                               className="text-text-muted hover:text-red-400 transition-colors"
+                             >
+@@ -1131,58 +1271,79 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                     </div>
+                   </div>
+ 
+-                  {/* Show Close Prompt Toggle */}
+-                  <div className="space-y-3">
++                  {experience.processes > 0 && <div className="space-y-3">
++                    {/* Block Execution Toggle */}
                      <ToggleOption
 -                      label="Show close prompt to users"
 -                      description="When enabled, users see a countdown dialog if the app is running"
++                      label="Stop staff opening the app while it installs"
++                      description="Applies only to the listed executable names during this installation."
++                      checked={config.blockExecution || false}
++                      onChange={(checked) => updateConfig({ blockExecution: checked })}
++                    />
++
++                  </div>}
++                  {/* Show Close Prompt Toggle */}
++                  {experience.automatic && experience.processes > 0 && <div className="space-y-3">
++                    {config.allowDefer ? <p className="text-xs text-text-muted">Postponement includes a close-app prompt when listed apps are running. The saved close-app prompt switch is inactive while postponement is on.</p> : <ToggleOption
 +                      label="Ask staff to close the app first"
 +                      description="When on, staff see a countdown if the app is open"
                        checked={config.showClosePrompt || false}
                        onChange={(checked) => updateConfig({ showClosePrompt: checked })}
-                     />
-@@ -1165,8 +1304,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+-                    />
++                    />}
  
-                     {/* Block Execution Toggle */}
-                     <ToggleOption
+                     {/* Countdown Duration - only show when close prompt is enabled */}
+-                    {config.showClosePrompt && (
++                    {(config.showClosePrompt || config.allowDefer) && config.forceCloseProcessesCountdown === undefined && (
+                       <div className="ml-6 border-l-2 border-overlay/15 pl-4">
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                        <label htmlFor="package-close-countdown" className="block text-sm font-medium text-text-secondary mb-2">
+                           Countdown duration (seconds)
+                         </label>
+                         <div className="flex items-center gap-3">
+-                          <input
++                          <input id="package-close-countdown"
+                             type="range"
+                             min="10"
+                             max="300"
+                             step="10"
+-                            value={config.closeCountdown || 60}
++                            value={config.closeCountdown ?? 60}
+                             onChange={(e) => updateConfig({ closeCountdown: parseInt(e.target.value) })}
+                             className="flex-1"
+                           />
+                           <span className="text-text-primary text-sm font-mono w-12 text-right">
+-                            {config.closeCountdown || 60}s
++                            {config.closeCountdown ?? 60}s
+                           </span>
+                         </div>
+                       </div>
+                     )}
+ 
+-                    {/* Block Execution Toggle */}
+-                    <ToggleOption
 -                      label="Block execution during install"
 -                      description="Prevent users from launching the application during installation"
-+                      label="Stop staff opening the app while it installs"
-+                      description="Stop staff opening the app while it installs"
-                       checked={config.blockExecution || false}
-                       onChange={(checked) => updateConfig({ blockExecution: checked })}
-                     />
-@@ -1174,15 +1313,15 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+-                      checked={config.blockExecution || false}
+-                      onChange={(checked) => updateConfig({ blockExecution: checked })}
+-                    />
++{experience.welcome && <div className="space-y-2">                      <div>
++                        <label htmlFor="package-force-close" className="block text-sm font-medium text-text-secondary mb-2">
++                          Close apps anyway after (seconds, optional)
++                        </label>
++                        <div className="flex items-center gap-3">
++                          <input id="package-force-close"
++                            type="number"
++                            min="0"
++                            max="3600"
++                            value={config.forceCloseProcessesCountdown ?? ''}
++                            onChange={(e) => updateConfig({ forceCloseProcessesCountdown: e.target.value ? parseInt(e.target.value) : undefined })}
++                            placeholder="Not set"
++                            className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
++                          />
++                          <span className="text-text-muted text-sm">seconds</span>
++                        </div></div><p className="text-xs text-text-muted">When set, this countdown takes precedence over the ordinary close-app countdown and can close listed apps even while postponement is offered. Use a positive number for a timed countdown. Zero still passes the force-countdown option; clear the field to omit it.</p></div>}
+ 
                      {/* Prompt to Save Toggle */}
-                     <ToggleOption
+-                    <ToggleOption
++                    {experience.welcome && <ToggleOption
                        label="Prompt to save documents"
 -                      description="Ask users to save their work before closing applications"
 +                      description="Ask staff to save their work before apps are closed"
                        checked={config.promptToSave || false}
                        onChange={(checked) => updateConfig({ promptToSave: checked })}
-                     />
+-                    />
++                    />}
++                  </div>}
++                  {experience.welcome && <div className="space-y-3">
  
                      {/* Persist Prompt Toggle */}
                      <ToggleOption
@@ -3946,7 +4796,26 @@ index eea1131fe..b5b0944c9 100644
                        checked={config.persistPrompt || false}
                        onChange={(checked) => updateConfig({ persistPrompt: checked })}
                      />
-@@ -1210,105 +1349,245 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1194,14 +1355,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                       checked={config.minimizeWindows || false}
+                       onChange={(checked) => updateConfig({ minimizeWindows: checked })}
+                     />
+-                  </div>
++                  </div>}
+ 
+                   {/* Window Location */}
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
++                  {experience.welcome && <div>
++                    <label htmlFor="package-dialog-position" className="block text-sm font-medium text-text-secondary mb-2">
+                       Dialog position
+                     </label>
+-                    <select
++                    <select id="package-dialog-position"
+                       value={config.windowLocation || 'Default'}
+                       onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
+                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+@@ -1210,71 +1371,250 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        <option value="Center">Center</option>
                        <option value="Top">Top</option>
                        <option value="Bottom">Bottom</option>
@@ -3959,15 +4828,19 @@ index eea1131fe..b5b0944c9 100644
 +                      <option value="BottomLeft">Bottom left</option>
 +                      <option value="BottomRight">Bottom right</option>
                      </select>
-                   </div>
+-                  </div>
++                  </div>}
  
                    {/* Restart Behavior */}
-                   <div>
-                     <label className="block text-sm font-medium text-text-secondary mb-2">
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
 -                      Restart behavior
-+                      After installing
++                  {packagingPath === 'github' ? <div>
++                    <label htmlFor="package-intune-restart" className="block text-sm font-medium text-text-secondary mb-2">
++                      Restart handling in Intune
                      </label>
-                     <select
+-                    <select
++                    <select id="package-intune-restart"
                        value={config.restartBehavior}
                        onChange={(e) => updateConfig({ restartBehavior: e.target.value as RestartBehavior })}
                        className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
@@ -3975,11 +4848,13 @@ index eea1131fe..b5b0944c9 100644
 -                      <option value="Suppress">Suppress restart (recommended)</option>
 -                      <option value="Prompt">Prompt user to restart</option>
 -                      <option value="Force">Force restart</option>
-+                      <option value="Suppress">Don't restart (recommended)</option>
-+                      <option value="Prompt">Ask staff to restart</option>
-+                      <option value="Force">Restart the computer</option>
++                      <option value="Suppress">Suppress Intune restarts</option>
++                      <option value="Prompt">Use installer return codes</option>
++                      <option value="Force">Force an Intune restart</option>
                      </select>
-                   </div>
+-                  </div>
++                    <p className="mt-1 text-xs text-text-muted">Return-code handling depends on the installer result and Intune assignment settings. It does not add a toolkit restart countdown.</p>
++                  </div> : <p className="text-xs text-text-muted">{packagingPath === 'local' ? 'This local packager suppresses Intune restarts. Other saved restart choices are retained but not applied.' : 'Verify packaging capabilities before changing Intune restart handling.'}</p>}
                  </div>
                </ConfigSection>}
 -
@@ -3989,23 +4864,27 @@ index eea1131fe..b5b0944c9 100644
 -                icon={<Clock className="w-4 h-4" />}
 -                expanded={expandedSection === 'deferral'}
 -                onToggle={() => toggleSection('deferral')}
-+              {/* Advanced (advanced only, win32 only) */}
-+              {!isStoreApp && (visibleSections === null || visibleSections.includes('advanced')) && <ConfigSection
-+                summary={summaries.advanced}
-+                title="Commands and description"
-+                icon={<Terminal className="w-4 h-4" />}
-+                expanded={expandedSection === 'advanced'}
-+                onToggle={() => toggleSection('advanced')}
++              {/* Disk Space Check (advanced only, win32 only) */}
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('diskspace')) && <ConfigSection
++                summary={summaries.diskspace}
++                title="Disk space check"
++                icon={<HardDrive className="w-4 h-4" />}
++                expanded={expandedSection === 'diskspace'}
++                onToggle={() => toggleSection('diskspace')}
                >
                  <div className="space-y-4">
 -                  {/* Allow Deferral Toggle */}
--                  <ToggleOption
+                   <ToggleOption
 -                    label="Allow users to defer installation"
 -                    description="Let users postpone the installation to a later time"
 -                    checked={config.allowDefer}
 -                    onChange={(checked) => updateConfig({ allowDefer: checked })}
--                  />
--
++                    label="Check disk space before installation"
++                    description="Verify sufficient disk space is available before proceeding"
++                    checked={config.checkDiskSpace || false}
++                    onChange={(checked) => updateConfig({ checkDiskSpace: checked })}
+                   />
+ 
 -                  {config.allowDefer && (
 -                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
 -                      {/* Maximum Deferrals */}
@@ -4013,15 +4892,41 @@ index eea1131fe..b5b0944c9 100644
 -                        <label className="block text-sm font-medium text-text-secondary mb-2">
 -                          Maximum deferrals allowed
 -                        </label>
--                        <input
--                          type="number"
--                          min="1"
++                  {config.checkDiskSpace && (
++                    <div className="ml-6 border-l-2 border-overlay/15 pl-4">
++                      <label className="block text-sm font-medium text-text-secondary mb-2">
++                        Required disk space (MB)
++                      </label>
++                      <div className="flex items-center gap-3">
+                         <input
+                           type="number"
+                           min="1"
 -                          max="99"
 -                          value={config.deferTimes || 3}
 -                          onChange={(e) => updateConfig({ deferTimes: parseInt(e.target.value) || 3 })}
 -                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
--                        />
--                      </div>
++                          max="100000"
++                          value={config.requiredDiskSpace ?? ''}
++                          onChange={(e) => updateConfig({ requiredDiskSpace: e.target.value ? parseInt(e.target.value) : undefined })}
++                          placeholder="Auto-detect"
++                          className="w-32 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                         />
++                        <span className="text-text-muted text-sm">MB</span>
+                       </div>
++                      <p className="text-text-muted text-xs mt-1">Leave empty to use the package source size. This check also runs without toolkit windows.</p>
++                    </div>
++                  )}
++                </div>
++              </ConfigSection>}
++              {/* Advanced (advanced only, win32 only) */}
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('advanced')) && <ConfigSection
++                summary={summaries.advanced}
++                title="Commands and description"
++                icon={<Terminal className="w-4 h-4" />}
++                expanded={expandedSection === 'advanced'}
++                onToggle={() => toggleSection('advanced')}
++              >
++                <div className="space-y-4">
 +                  {/* Custom Description */}
 +                  <div>
 +                    <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -4046,15 +4951,6 @@ index eea1131fe..b5b0944c9 100644
 -                        </label>
 -                        <input
 -                          type="number"
--                          min="1"
--                          max="365"
--                          value={config.deferDays || ''}
--                          onChange={(e) => updateConfig({ deferDays: e.target.value ? parseInt(e.target.value) : undefined })}
--                          placeholder="No limit"
--                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
--                        />
--                        <p className="text-text-muted text-xs mt-1">Number of days user can defer from first prompt</p>
--                      </div>
 +                  {/* Custom Install Command */}
 +                  <div>
 +                    <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -4069,20 +4965,7 @@ index eea1131fe..b5b0944c9 100644
 +                    />
 +                    <p className="text-text-muted text-xs mt-1">Leave empty to use auto-generated command</p>
 +                  </div>
- 
--                      {/* Deferral Deadline */}
--                      <div>
--                        <label className="block text-sm font-medium text-text-secondary mb-2">
--                          Deferral deadline (optional)
--                        </label>
--                        <input
--                          type="date"
--                          value={config.deferDeadline || ''}
--                          onChange={(e) => updateConfig({ deferDeadline: e.target.value || undefined })}
--                          className="px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
--                        />
--                        <p className="text-text-muted text-xs mt-1">After this date, users cannot defer</p>
--                      </div>
++
 +                  {/* Custom Uninstall Command */}
 +                  <div>
 +                    <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -4096,17 +4979,7 @@ index eea1131fe..b5b0944c9 100644
 +                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
 +                    />
 +                  </div>
- 
--                      {/* Force Close Countdown */}
--                      <div>
--                        <label className="block text-sm font-medium text-text-secondary mb-2">
--                          Force close countdown (optional)
--                        </label>
--                        <div className="flex items-center gap-3">
--                          <input
--                            type="number"
--                            min="0"
--                            max="3600"
++
 +                  {/* Post-install commands (#118) */}
 +                  <div>
 +                    <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -4188,14 +5061,14 @@ index eea1131fe..b5b0944c9 100644
 +              </ConfigSection>}
 +                </div>
 +              </div>
-+              {!isStoreApp && (<div className="mb-6">
-+                <h3 className="text-sm font-semibold text-text-primary mb-2">What staff see during install</h3>
-+                <p className="text-xs text-text-muted mb-2">All off unless you turn them on. Staff only see these when the app doesn't install silently.</p>
++              {!isStoreApp && experience.visible && (<div className="mb-6">
++                <h3 className="text-sm font-semibold text-text-primary mb-2">Toolkit messages and appearance</h3>
++                <p className="text-xs text-text-muted mb-2">Only options supported by this mode and packaging service appear. Changing mode keeps your saved values.</p>
 +                <div className="rounded-lg border border-overlay/10 divide-y divide-overlay/10 overflow-hidden">
 +              {/* Deferral Settings (advanced only, win32 only) */}
-+              {!isStoreApp && (visibleSections === null || visibleSections.includes('deferral')) && <ConfigSection
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('deferral')) && experience.automatic && <ConfigSection
 +                summary={summaries.deferral}
-+                title="Letting staff postpone"
++                title="Postponement"
 +                icon={<Clock className="w-4 h-4" />}
 +                expanded={expandedSection === 'deferral'}
 +                onToggle={() => toggleSection('deferral')}
@@ -4204,7 +5077,7 @@ index eea1131fe..b5b0944c9 100644
 +                  {/* Allow Deferral Toggle */}
 +                  <ToggleOption
 +                    label="Let staff postpone the install"
-+                    description="Staff can choose to install later"
++                    description="Offer postponement when the toolkit runs interactively. Use a day limit or a date deadline; a count can also limit attempts."
 +                    checked={config.allowDefer}
 +                    onChange={(checked) => updateConfig({ allowDefer: checked })}
 +                  />
@@ -4212,78 +5085,91 @@ index eea1131fe..b5b0944c9 100644
 +                  {config.allowDefer && (
 +                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
 +                      {/* Maximum Deferrals */}
-+                      <div>
-+                        <label className="block text-sm font-medium text-text-secondary mb-2">
-+                          Maximum deferrals allowed
++                      {!config.deferByDaysOnly && <div>
++                        <label htmlFor="package-defer-count" className="block text-sm font-medium text-text-secondary mb-2">
++                          Maximum postponements
 +                        </label>
-+                        <input
++                        <input id="package-defer-count"
 +                          type="number"
-+                          min="1"
-+                          max="99"
-+                          value={config.deferTimes || 3}
-+                          onChange={(e) => updateConfig({ deferTimes: parseInt(e.target.value) || 3 })}
++                          min="0"
++                          max="1000"
++                          value={config.deferTimes ?? 3}
++                          onChange={(e) => updateConfig({ deferTimes: Number.isNaN(parseInt(e.target.value)) ? 3 : parseInt(e.target.value) })}
 +                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
 +                        />
-+                      </div>
++                      </div>}
 +
 +                      {/* Deferral Days */}
 +                      <div>
-+                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                        <label htmlFor="package-defer-days" className="block text-sm font-medium text-text-secondary mb-2">
 +                          Deferral days limit (optional)
 +                        </label>
-+                        <input
++                        <input id="package-defer-days"
 +                          type="number"
-+                          min="1"
-+                          max="365"
-+                          value={config.deferDays || ''}
-+                          onChange={(e) => updateConfig({ deferDays: e.target.value ? parseInt(e.target.value) : undefined })}
-+                          placeholder="No limit"
-+                          className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-+                        />
+                           min="1"
+                           max="365"
+                           value={config.deferDays || ''}
+@@ -1282,50 +1622,35 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                           placeholder="No limit"
+                           className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                         />
+-                        <p className="text-text-muted text-xs mt-1">Number of days user can defer from first prompt</p>
 +                        <p className="text-text-muted text-xs mt-1">Days staff can keep postponing after the first prompt</p>
-+                      </div>
-+
-+                      {/* Deferral Deadline */}
-+                      <div>
-+                        <label className="block text-sm font-medium text-text-secondary mb-2">
-+                          Deferral deadline (optional)
-+                        </label>
-+                        <input
-+                          type="date"
-+                          value={config.deferDeadline || ''}
-+                          onChange={(e) => updateConfig({ deferDeadline: e.target.value || undefined })}
-+                          className="px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-+                        />
+                       </div>
+ 
+                       {/* Deferral Deadline */}
+                       <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                        <label htmlFor="package-defer-date" className="block text-sm font-medium text-text-secondary mb-2">
+                           Deferral deadline (optional)
+                         </label>
+-                        <input
++                        <input id="package-defer-date"
+                           type="date"
+                           value={config.deferDeadline || ''}
+                           onChange={(e) => updateConfig({ deferDeadline: e.target.value || undefined })}
+                           className="px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                         />
+-                        <p className="text-text-muted text-xs mt-1">After this date, users cannot defer</p>
++                        <p className="mt-1 text-xs text-text-muted">A date-only deadline expires at the start of that date on each computer.</p>
 +                        <p className="text-text-muted text-xs mt-1">After this date, staff can't postpone</p>
-+                      </div>
+                       </div>
+ 
+                       {/* Force Close Countdown */}
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Force close countdown (optional)
+-                        </label>
+-                        <div className="flex items-center gap-3">
+-                          <input
+-                            type="number"
+-                            min="0"
+-                            max="3600"
+-                            value={config.forceCloseProcessesCountdown || ''}
+-                            onChange={(e) => updateConfig({ forceCloseProcessesCountdown: e.target.value ? parseInt(e.target.value) : undefined })}
+-                            placeholder="Not set"
+-                            className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                          />
+-                          <span className="text-text-muted text-sm">seconds</span>
+-                        </div>
 +
-+                      {/* Force Close Countdown */}
-+                      <div>
-+                        <label className="block text-sm font-medium text-text-secondary mb-2">
-+                          Close apps anyway after (seconds, optional)
-+                        </label>
-+                        <div className="flex items-center gap-3">
-+                          <input
-+                            type="number"
-+                            min="0"
-+                            max="3600"
-                             value={config.forceCloseProcessesCountdown || ''}
-                             onChange={(e) => updateConfig({ forceCloseProcessesCountdown: e.target.value ? parseInt(e.target.value) : undefined })}
-                             placeholder="Not set"
-@@ -1322,10 +1601,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                         <p className="text-text-muted text-xs mt-1">Forces countdown regardless of deferral settings</p>
+-                      </div>
+                     </div>
                    )}
                  </div>
                </ConfigSection>}
 -
                {/* Progress & Notifications (advanced only, win32 only) */}
-               {!isStoreApp && (visibleSections === null || visibleSections.includes('progress')) && <ConfigSection
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('progress')) && <ConfigSection
 -                title="Progress & Notifications"
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('progress')) && experience.visible && <ConfigSection
 +                summary={summaries.progress}
 +                title="Progress and notifications"
                  icon={<Bell className="w-4 h-4" />}
                  expanded={expandedSection === 'progress'}
                  onToggle={() => toggleSection('progress')}
-@@ -1370,7 +1649,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1370,7 +1695,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                          >
                            <option value="Default">Default</option>
                            <option value="Center">Center</option>
@@ -4292,20 +5178,21 @@ index eea1131fe..b5b0944c9 100644
                          </select>
                        </div>
                      </div>
-@@ -1477,10 +1756,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1477,10 +1802,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    </div>
                  </div>
                </ConfigSection>}
 -
                {/* Custom Prompts (advanced only, win32 only) */}
-               {!isStoreApp && (visibleSections === null || visibleSections.includes('prompts')) && <ConfigSection
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('prompts')) && <ConfigSection
 -                title="Custom Prompts"
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('prompts')) && experience.automatic && <ConfigSection
 +                summary={summaries.prompts}
 +                title="Messages to staff"
                  icon={<MessageSquare className="w-4 h-4" />}
                  expanded={expandedSection === 'prompts'}
                  onToggle={() => toggleSection('prompts')}
-@@ -1507,7 +1786,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1507,7 +1832,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        className="text-accent-cyan hover:text-accent-cyan-dim text-sm flex items-center gap-1"
                      >
                        <Plus className="w-4 h-4" />
@@ -4314,7 +5201,7 @@ index eea1131fe..b5b0944c9 100644
                      </button>
                    </div>
  
-@@ -1553,10 +1832,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1553,10 +1878,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                  }}
                                  className="w-full px-2 py-1.5 bg-bg-elevated border border-overlay/15 rounded text-text-primary text-sm"
                                >
@@ -4329,7 +5216,7 @@ index eea1131fe..b5b0944c9 100644
                                </select>
                              </div>
                              <div>
-@@ -1608,7 +1887,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1608,7 +1933,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            </div>
                            <div className="grid grid-cols-3 gap-2">
                              <div>
@@ -4338,7 +5225,7 @@ index eea1131fe..b5b0944c9 100644
                                <input
                                  type="text"
                                  value={prompt.buttonLeftText || ''}
-@@ -1622,7 +1901,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1622,7 +1947,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                />
                              </div>
                              <div>
@@ -4347,7 +5234,7 @@ index eea1131fe..b5b0944c9 100644
                                <input
                                  type="text"
                                  value={prompt.buttonMiddleText || ''}
-@@ -1636,7 +1915,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1636,7 +1961,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                />
                              </div>
                              <div>
@@ -4356,29 +5243,31 @@ index eea1131fe..b5b0944c9 100644
                                <input
                                  type="text"
                                  value={prompt.buttonRightText || ''}
-@@ -1684,10 +1963,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1684,18 +2009,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    )}
                  </div>
                </ConfigSection>}
 -
                {/* Restart Prompt (advanced only, win32 only) */}
-               {!isStoreApp && (visibleSections === null || visibleSections.includes('restart')) && <ConfigSection
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('restart')) && <ConfigSection
 -                title="Restart Prompt"
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('restart')) && experience.visible && <ConfigSection
 +                summary={summaries.restart}
-+                title="Restart prompt"
++                title="Package restart countdown"
                  icon={<RefreshCw className="w-4 h-4" />}
                  expanded={expandedSection === 'restart'}
                  onToggle={() => toggleSection('restart')}
-@@ -1695,7 +1974,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+               >
                  <div className="space-y-4">
                    <ToggleOption
-                     label="Show restart prompt after installation"
+-                    label="Show restart prompt after installation"
 -                    description="Display a countdown dialog prompting users to restart"
-+                    description="Show a countdown asking staff to restart"
++                    label="Start a restart countdown after installation"
++                    description="This separate countdown can restart the computer even if the installer did not request it. With no signed-in user, the pinned toolkit may restart silently."
                      checked={config.restartPrompt?.enabled || false}
                      onChange={(checked) => updateConfig({
                        restartPrompt: { ...config.restartPrompt, enabled: checked, countdownSeconds: config.restartPrompt?.countdownSeconds || 600, countdownNoHideSeconds: config.restartPrompt?.countdownNoHideSeconds || 60 }
-@@ -1728,7 +2007,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1728,7 +2053,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        </div>
                        <div>
                          <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -4387,7 +5276,7 @@ index eea1131fe..b5b0944c9 100644
                          </label>
                          <div className="flex items-center gap-3">
                            <input
-@@ -1746,16 +2025,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1746,204 +2071,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                              {config.restartPrompt?.countdownNoHideSeconds || 60}s
                            </span>
                          </div>
@@ -4399,18 +5288,43 @@ index eea1131fe..b5b0944c9 100644
                  </div>
                </ConfigSection>}
 -
-               {/* Disk Space Check (advanced only, win32 only) */}
-               {!isStoreApp && (visibleSections === null || visibleSections.includes('diskspace')) && <ConfigSection
+-              {/* Disk Space Check (advanced only, win32 only) */}
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('diskspace')) && <ConfigSection
 -                title="Disk Space Check"
-+                summary={summaries.diskspace}
-+                title="Disk space check"
-                 icon={<HardDrive className="w-4 h-4" />}
-                 expanded={expandedSection === 'diskspace'}
-                 onToggle={() => toggleSection('diskspace')}
-@@ -1790,160 +2069,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
-                   )}
-                 </div>
-               </ConfigSection>}
+-                icon={<HardDrive className="w-4 h-4" />}
+-                expanded={expandedSection === 'diskspace'}
+-                onToggle={() => toggleSection('diskspace')}
+-              >
+-                <div className="space-y-4">
+-                  <ToggleOption
+-                    label="Check disk space before installation"
+-                    description="Verify sufficient disk space is available before proceeding"
+-                    checked={config.checkDiskSpace || false}
+-                    onChange={(checked) => updateConfig({ checkDiskSpace: checked })}
+-                  />
+-
+-                  {config.checkDiskSpace && (
+-                    <div className="ml-6 border-l-2 border-overlay/15 pl-4">
+-                      <label className="block text-sm font-medium text-text-secondary mb-2">
+-                        Required disk space (MB)
+-                      </label>
+-                      <div className="flex items-center gap-3">
+-                        <input
+-                          type="number"
+-                          min="1"
+-                          max="100000"
+-                          value={config.requiredDiskSpace || ''}
+-                          onChange={(e) => updateConfig({ requiredDiskSpace: e.target.value ? parseInt(e.target.value) : undefined })}
+-                          placeholder="Auto-detect"
+-                          className="w-32 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                        />
+-                        <span className="text-text-muted text-sm">MB</span>
+-                      </div>
+-                      <p className="text-text-muted text-xs mt-1">Leave empty to auto-detect from installer size</p>
+-                    </div>
+-                  )}
+-                </div>
+-              </ConfigSection>}
 -
 -              {/* Detection Rules (quick + advanced, win32 only) */}
 -              {!isStoreApp && (visibleSections === null || visibleSections.includes('detection')) && <ConfigSection
@@ -4563,14 +5477,35 @@ index eea1131fe..b5b0944c9 100644
 -              )}
 -
                {/* Branding (advanced only, win32 only) */}
-               {!isStoreApp && (visibleSections === null || visibleSections.includes('branding')) && <ConfigSection
+-              {!isStoreApp && (visibleSections === null || visibleSections.includes('branding')) && <ConfigSection
 -                title="Branding"
++              {!isStoreApp && (visibleSections === null || visibleSections.includes('branding')) && experience.visible && <ConfigSection
 +                summary={summaries.branding}
 +                title="Install window branding"
                  icon={<Palette className="w-4 h-4" />}
                  expanded={expandedSection === 'branding'}
                  onToggle={() => toggleSection('branding')}
-@@ -1990,7 +2119,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1962,18 +2099,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                     />
+                   </div>
+ 
+-                  <div>
+-                    <label className="block text-sm font-medium text-text-secondary mb-2">
+-                      Welcome dialog title (optional)
+-                    </label>
+-                    <input
+-                      type="text"
+-                      value={config.brandingWelcomeTitle || ''}
+-                      onChange={(e) => updateConfig({ brandingWelcomeTitle: e.target.value || undefined })}
+-                      placeholder={`${pkg.name} Installation`}
+-                      className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+-                    />
+-                  </div>
++                  {config.brandingWelcomeTitle && <p className="text-xs text-text-muted">A welcome title is stored, but the current generator does not apply it. The saved value is preserved.</p>}
+ 
+                   <div>
+                     <label className="block text-sm font-medium text-text-secondary mb-2">
+@@ -1990,7 +2116,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -4579,7 +5514,7 @@ index eea1131fe..b5b0944c9 100644
                      </label>
                      <input
                        type="text"
-@@ -2044,140 +2173,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2044,140 +2170,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    </div>
                  </div>
                </ConfigSection>}
@@ -4721,7 +5656,7 @@ index eea1131fe..b5b0944c9 100644
  
              </div>
            </div>
-@@ -2193,7 +2190,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2193,7 +2187,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
            {settingsSuccess && (
              <div className="flex items-center gap-2 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-400">
                <Check className="w-4 h-4" />
@@ -4730,7 +5665,7 @@ index eea1131fe..b5b0944c9 100644
              </div>
            )}
            {settingsError && (
-@@ -2204,11 +2201,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2204,11 +2198,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
            )}
            {canUpdateSettings ? (
              <div className="space-y-2">
@@ -4743,7 +5678,7 @@ index eea1131fe..b5b0944c9 100644
                <div className="flex gap-3">
                  <Button
                    onClick={handleUpdateSettings}
-@@ -2223,17 +2216,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2223,17 +2213,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    {isUpdating ? (
                      <>
                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
@@ -4764,7 +5699,7 @@ index eea1131fe..b5b0944c9 100644
                      </>
                    )}
                  </Button>
-@@ -2255,7 +2248,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2255,7 +2245,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    ) : (
                      <>
                        <RefreshCw className="w-5 h-5 mr-2" />
@@ -4773,7 +5708,7 @@ index eea1131fe..b5b0944c9 100644
                      </>
                    )}
                  </Button>
-@@ -2275,19 +2268,19 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2275,19 +2265,19 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                {isAddingToCart ? (
                  <>
                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
@@ -4792,11 +5727,11 @@ index eea1131fe..b5b0944c9 100644
                  <>
                    <Plus className="w-5 h-5 mr-2" />
 -                  {replaceCartItemId ? 'Update Selection' : 'Add to Selection'}
-+                  {replaceCartItemId ? 'Update in deployment' : 'Add to deployment'}
++                  {replaceCartItemId ? 'Save to Deployment list' : 'Add to Deployment list'}
                  </>
                )}
              </Button>
-@@ -2305,14 +2298,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2305,14 +2295,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              </AlertDialogDescription>
            </AlertDialogHeader>
            <AlertDialogFooter>
@@ -4813,7 +5748,7 @@ index eea1131fe..b5b0944c9 100644
              </AlertDialogAction>
            </AlertDialogFooter>
          </AlertDialogContent>
-@@ -2329,30 +2322,45 @@ interface ConfigSectionProps {
+@@ -2329,30 +2319,45 @@ interface ConfigSectionProps {
    expanded: boolean;
    onToggle: () => void;
    children: React.ReactNode;
@@ -4868,7 +5803,7 @@ index eea1131fe..b5b0944c9 100644
            {children}
          </div>
        )}
-@@ -2466,7 +2474,7 @@ function DetectionRuleDisplay({ rule }: { rule: DetectionRule }) {
+@@ -2466,7 +2471,7 @@ function DetectionRuleDisplay({ rule }: { rule: DetectionRule }) {
        <div className="space-y-1 text-xs">
          {m.productCode && (
            <div className="flex gap-2">
@@ -6059,13 +6994,17 @@ index 000000000..ea607693c
 +});
 diff --git a/lib/hrm/__tests__/dispatch-failure.test.ts b/lib/hrm/__tests__/dispatch-failure.test.ts
 new file mode 100644
-index 000000000..91d422a17
+index 0000000..35d15bb
 --- /dev/null
 +++ b/lib/hrm/__tests__/dispatch-failure.test.ts
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,16 @@
 +import { describe, expect, it } from 'vitest';
 +import { InstallerPreflightError } from '@/lib/installer-preflight';
 +import { dispatchFailureFields } from '../dispatch-failure';
++import {AssignmentSettingsReview} from '../replacement-deadlines';
++it('records unreadable or unsupported settings separately from expired deadlines',()=>{
++ expect(dispatchFailureFields(new AssignmentSettingsReview())).toEqual({error_stage:'validation',error_category:'validation',error_code:'ASSIGNMENT_SETTINGS_REVIEW_REQUIRED'});
++});
 +describe('jobs that never started (HRM patch 0031)', () => {
 +  it('records installer check failures as validation with their own code', () => {
 +    expect(dispatchFailureFields(new InstallerPreflightError('HASH_MISMATCH', 'bytes changed'))).toEqual({ error_stage: 'validation', error_category: 'validation', error_code: 'HASH_MISMATCH' });
@@ -6224,15 +7163,15 @@ index 000000000..d6ee8f0e8
 +});
 diff --git a/lib/hrm/__tests__/replacement-deadlines.test.ts b/lib/hrm/__tests__/replacement-deadlines.test.ts
 new file mode 100644
-index 000000000..4ec6d1345
+index 0000000..edc84bf
 --- /dev/null
 +++ b/lib/hrm/__tests__/replacement-deadlines.test.ts
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,18 @@
 +import {beforeEach,expect,it,vi} from 'vitest';
 +const state=vi.hoisted(()=>({token:'token' as string|null,rows:[] as unknown[],fail:false}));
 +vi.mock('@/lib/intune/graph-client',()=>({getServicePrincipalToken:async()=>state.token}));
 +vi.mock('@/lib/hrm/pilot-graph',()=>({pilotGraph:()=>({assignments:async()=>{if(state.fail)throw Error('read failed');return state.rows}})}));
-+import {checkReplacementDeadlines,AssignmentDeadlineHold} from '../replacement-deadlines';
++import {checkReplacementDeadlines,AssignmentDeadlineHold,AssignmentSettingsReview} from '../replacement-deadlines';
 +import {assignmentSnapshot} from '@/packager/src/assignment-settings';
 +beforeEach(()=>{state.token='token';state.fail=false;state.rows=[{id:'a',intent:'required',target:{'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'},settings:{installTimeSettings:{useLocalTime:false,deadlineDateTime:'2020-01-01T00:00:00Z'}}}]});
 +it('fails closed without a fresh explicit decision and succeeds only for matching current timing',async()=>{
@@ -6240,7 +7179,11 @@ index 000000000..4ec6d1345
 + await expect(checkReplacementDeadlines('tenant','source',{sourceAppId:'source',expected:assignmentSnapshot(state.rows),expiredDates:'keep',deadlineConfirmation:{decision:'retain',assignmentIds:['a']}})).resolves.toBeUndefined();
 +});
 +it('holds missing authority and read failures, while new apps need no replacement read',async()=>{
-+ state.token=null;await expect(checkReplacementDeadlines('tenant','source')).rejects.toBeInstanceOf(AssignmentDeadlineHold);state.token='token';state.fail=true;await expect(checkReplacementDeadlines('tenant','source')).rejects.toBeInstanceOf(AssignmentDeadlineHold);await expect(checkReplacementDeadlines('tenant',null)).resolves.toBeUndefined();
++ state.token=null;await expect(checkReplacementDeadlines('tenant','source')).rejects.toBeInstanceOf(AssignmentSettingsReview);state.token='token';state.fail=true;await expect(checkReplacementDeadlines('tenant','source')).rejects.toBeInstanceOf(AssignmentSettingsReview);await expect(checkReplacementDeadlines('tenant',null)).resolves.toBeUndefined();
++});
++it('preserves a names-only settings error and never labels it as an expired deadline',async()=>{
++ state.rows=[{id:'a',intent:'required',target:{'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'},settings:{unrecognizedSetting:'private fixture value'}}];
++ try{await checkReplacementDeadlines('tenant','source');throw Error('must reject')}catch(error){expect(error).toBeInstanceOf(AssignmentSettingsReview);expect((error as AssignmentSettingsReview).code).toBe('ASSIGNMENT_SETTINGS_REVIEW_REQUIRED');expect((error as Error).message).toContain('unrecognizedSetting');expect((error as Error).message).not.toContain('private fixture value');}
 +});
 diff --git a/lib/hrm/deploy-review.ts b/lib/hrm/deploy-review.ts
 new file mode 100644
@@ -6386,12 +7329,12 @@ index 000000000..c4ad1c9ab
 +}
 diff --git a/lib/hrm/dispatch-failure.ts b/lib/hrm/dispatch-failure.ts
 new file mode 100644
-index 000000000..0cc42fbf8
+index 0000000..cdc4f75
 --- /dev/null
 +++ b/lib/hrm/dispatch-failure.ts
 @@ -0,0 +1,16 @@
 +import { InstallerPreflightError } from '@/lib/installer-preflight';
-+import { AssignmentDeadlineHold } from './replacement-deadlines';
++import { AssignmentDeadlineHold, AssignmentSettingsReview } from './replacement-deadlines';
 +
 +/**
 + * HRM patch 0031: how a job that never started is recorded. Upstream recorded every failure to start
@@ -6400,7 +7343,7 @@ index 000000000..0cc42fbf8
 + * card shows the real stage and reason.
 + */
 +export function dispatchFailureFields(error: unknown): { error_stage: string; error_category: string; error_code: string } {
-+  if (error instanceof AssignmentDeadlineHold) return { error_stage: 'validation', error_category: 'validation', error_code: error.code };
++  if (error instanceof AssignmentDeadlineHold || error instanceof AssignmentSettingsReview) return { error_stage: 'validation', error_category: 'validation', error_code: error.code };
 +  if (error instanceof InstallerPreflightError) {
 +    return { error_stage: 'validation', error_category: error.retryable ? 'network' : 'validation', error_code: error.code };
 +  }
@@ -6599,14 +7542,14 @@ index 000000000..818619504
 +}
 diff --git a/lib/hrm/replacement-deadlines.ts b/lib/hrm/replacement-deadlines.ts
 new file mode 100644
-index 000000000..634ec8c69
+index 0000000..3d4f5b8
 --- /dev/null
 +++ b/lib/hrm/replacement-deadlines.ts
 @@ -0,0 +1,18 @@
 +import { getServicePrincipalToken } from '@/lib/intune/graph-client';
 +import { pilotGraph } from './pilot-graph';
-+import { assertAssignmentDeadlines, AssignmentDeadlineHold, type AssignmentTimingReview } from '@/packager/src/assignment-settings';
-+export { AssignmentDeadlineHold, DEADLINE_HOLD_CODE } from '@/packager/src/assignment-settings';
++import { assertAssignmentDeadlines, AssignmentDeadlineHold, AssignmentSettingsReview, type AssignmentTimingReview } from '@/packager/src/assignment-settings';
++export { AssignmentDeadlineHold, DEADLINE_HOLD_CODE, AssignmentSettingsReview, SETTINGS_REVIEW_CODE } from '@/packager/src/assignment-settings';
 +
 +/** Shared admission for every hosted request, including legacy and retry callers. */
 +export async function checkReplacementDeadlines(tenantId: string, sourceAppId: string | null | undefined, review?: AssignmentTimingReview | null) {
@@ -6617,8 +7560,8 @@ index 000000000..634ec8c69
 +    const rows = await pilotGraph(token).assignments(sourceAppId);
 +    assertAssignmentDeadlines(rows, sourceAppId, review);
 +  } catch (error) {
-+    if (error instanceof AssignmentDeadlineHold) throw error;
-+    throw new AssignmentDeadlineHold('Paused for IT: current assignment deadlines could not be verified. Refresh the review before retrying.');
++    if (error instanceof AssignmentDeadlineHold || error instanceof AssignmentSettingsReview) throw error;
++    throw new AssignmentSettingsReview();
 +  }
 +}
 diff --git a/lib/intune-description.ts b/lib/intune-description.ts

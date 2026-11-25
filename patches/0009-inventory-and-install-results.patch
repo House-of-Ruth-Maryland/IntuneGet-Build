@@ -211,16 +211,16 @@ index 000000000..06a5e72c5
 +}
 diff --git a/app/api/hrm/app-insights/route.test.ts b/app/api/hrm/app-insights/route.test.ts
 new file mode 100644
-index 000000000..f00169f11
+index 0000000..eda0662
 --- /dev/null
 +++ b/app/api/hrm/app-insights/route.test.ts
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,61 @@
 +import { beforeEach, describe, expect, it, vi } from 'vitest';
 +import { NextRequest } from 'next/server';
-+const mocks = vi.hoisted(() => ({ auth: vi.fn(), sqlite: true, family: vi.fn(), snapshot: vi.fn(), activity: vi.fn(), alerts: vi.fn(), review: vi.fn(), check: vi.fn() }));
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), sqlite: true, family: vi.fn(), snapshot: vi.fn(), activity: vi.fn(), alerts: vi.fn(), review: vi.fn(), check: vi.fn(), latestAttempt:vi.fn() }));
 +vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
 +vi.mock('@/lib/db', () => ({ isSqliteMode: () => mocks.sqlite }));
-+vi.mock('@/lib/db/sqlite', () => ({ sqliteAppInsights: { family: mocks.family, snapshot: mocks.snapshot, activity: mocks.activity, alerts: mocks.alerts, review: mocks.review } }));
++vi.mock('@/lib/db/sqlite', () => ({ sqliteAppInsights: { family: mocks.family, snapshot: mocks.snapshot, activity: mocks.activity, alerts: mocks.alerts, review: mocks.review, latestAttempt:mocks.latestAttempt } }));
 +vi.mock('@/lib/hrm/app-insights-check', () => ({ checkAppInsights: mocks.check }));
 +import { GET, POST } from './route';
 +const A = '11111111-1111-4111-8111-111111111111';
@@ -230,9 +230,15 @@ index 000000000..f00169f11
 +  mocks.auth.mockResolvedValue({ tenantId: 'signed-in-tenant', userId: 'staff' });
 +  mocks.family.mockReturnValue('Example.App'); mocks.snapshot.mockReturnValue({ appId: A });
 +  mocks.alerts.mockReturnValue([]); mocks.activity.mockReturnValue([]); mocks.review.mockReturnValue(true);
++  mocks.latestAttempt.mockReturnValue(null);
 +  mocks.check.mockResolvedValue({ checked: 1, errors: 0 });
 +});
 +describe('app insight authentication and tenant scope', () => {
++  it.each(['owner','colleague'])('binds latest attempt evidence to the token tenant and exact app for %s',async userId=>{
++    mocks.auth.mockResolvedValue({tenantId:'signed-in-tenant',userId});
++    await GET(request(undefined,`?appId=${A}&tenantId=foreign`));
++    expect(mocks.latestAttempt).toHaveBeenCalledWith('signed-in-tenant',A,'Example.App',userId);
++  });
 +  it('authenticates before reading or checking app data', async () => {
 +    mocks.auth.mockResolvedValue(null);
 +    expect((await GET(request())).status).toBe(401);
@@ -251,7 +257,8 @@ index 000000000..f00169f11
 +  });
 +  it('does not reveal history for another tenant or an untracked app', async () => {
 +    mocks.family.mockReturnValue(null);
-+    expect(await (await GET(request(undefined, `?appId=${A}`))).json()).toEqual({ supported: true, snapshot: null, activity: [] });
++    expect(await (await GET(request(undefined, `?appId=${A}`))).json()).toEqual({ supported: true, appId:A, family:null, latestAttempt:null, snapshot: null, activity: [] });
++    expect(mocks.latestAttempt).not.toHaveBeenCalled();
 +    expect(mocks.snapshot).not.toHaveBeenCalled(); expect(mocks.activity).not.toHaveBeenCalled();
 +  });
 +  it('rejects invalid IDs, actions and revisions and returns a conflict for stale reviews', async () => {
@@ -271,7 +278,7 @@ index 000000000..f00169f11
 +});
 diff --git a/app/api/hrm/app-insights/route.ts b/app/api/hrm/app-insights/route.ts
 new file mode 100644
-index 000000000..6215092e3
+index 0000000..fee0063
 --- /dev/null
 +++ b/app/api/hrm/app-insights/route.ts
 @@ -0,0 +1,36 @@
@@ -292,7 +299,7 @@ index 000000000..6215092e3
 +    const { sqliteAppInsights: store } = await import('@/lib/db/sqlite');
 +    if (!appId) return reply({ supported: true, alerts: store.alerts(user.tenantId) });
 +    const family = store.family(user.tenantId, appId);
-+    return reply({ supported: true, snapshot: family ? store.snapshot(user.tenantId, appId) : null,
++    return reply({ supported: true, appId, family, latestAttempt: family ? store.latestAttempt(user.tenantId, appId, family, user.userId) : null, snapshot: family ? store.snapshot(user.tenantId, appId) : null,
 +      activity: family ? store.activity(user.tenantId, family) : [] });
 +  } catch { return reply({ error: 'Could not load app activity. Try again.' }, 500); }
 +}
@@ -450,24 +457,41 @@ index 40eb97483..401ac1edd 100644
  
      if (assignmentsResponse.ok) {
 diff --git a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
-index 7dd46a659..42b3cd3bb 100644
+index 7dd46a6..3147ac7 100644
 --- a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
 +++ b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
-@@ -1,4 +1,4 @@
+@@ -1,32 +1,33 @@
 -import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  import { NextRequest } from 'next/server';
  import { randomUUID } from 'node:crypto';
  
-@@ -12,6 +12,7 @@ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.authent
+ const state = vi.hoisted(() => {
+   vi.stubEnv('DATABASE_PATH', ':memory:');
+   vi.stubEnv('DATABASE_MODE', 'sqlite');
+-  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false };
++  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false,real:false,live:[] as unknown[] };
+ });
+ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.authenticated
+   ? { userId: 'fixture-owner', tenantId: 'fixture-tenant' } : null }));
  vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
  vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'fixture-token' }));
- vi.mock('@/lib/intune-api', () => ({
-+  getAppAssignments: async () => [],
+-vi.mock('@/lib/intune-api', () => ({
++vi.mock('@/lib/intune-api', async () => {const actual=await vi.importActual<typeof import('@/lib/intune-api')>('@/lib/intune-api');return ({
++  getAppAssignments: async () => state.live,
    getApp: async () => ({ displayName: 'Fixture app', rules: [] }),
-   convertToGraphAssignments: (assignments: unknown) => assignments,
+-  convertToGraphAssignments: (assignments: unknown) => assignments,
++  convertToGraphAssignments: (assignments: unknown) => state.real ? actual.convertToGraphAssignments(assignments as never) : assignments,
    assignToGroups: async (...args: unknown[]) => {
-@@ -26,7 +27,7 @@ vi.mock('@/lib/db', async () => {
+     await state.assign(...args);
+     if (state.graphFails) throw new Error('Fixture Graph failure');
+   },
+   syncAppCategories: state.categories, setAppRules: vi.fn(),
+-}));
++});});
+ vi.mock('@/lib/requirement-rules', () => ({ buildCartItemRequirementRules: () => undefined }));
+ vi.mock('@/lib/db', async () => {
+   const { sqliteDb } = await vi.importActual<typeof import('@/lib/db/sqlite')>('@/lib/db/sqlite');
    return { getDatabase: () => sqliteDb, isSqliteMode: () => true };
  });
  
@@ -476,10 +500,22 @@ index 7dd46a659..42b3cd3bb 100644
  import { PATCH } from './route';
  import { GET } from '../../deployed/config/route';
  
-@@ -46,8 +47,23 @@ const create = async (overrides: Record<string, unknown> = {}) => {
+@@ -45,9 +46,34 @@ const create = async (overrides: Record<string, unknown> = {}) => {
+ };
  
  describe('deployed settings persistence with SQLite', () => {
-   beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false; });
+-  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false; });
++  it('preserves in-use, automatic-update and unknown untouched settings for both groups through the real converter and save entry point',async()=>{
++    await create();state.real=true;
++    const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222';
++    state.live=[a,b].map((groupId,index)=>({id:`live-${index}`,intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId},settings:{'@odata.type':'#microsoft.graph.win32LobAppAssignmentSettings',notifications:'showAll',inUseSettings:index?null:{countdownMinutes:15,minutesBetweenDeferrals:60,numberOfDeferrals:3},autoUpdateSettings:{autoUpdateSupersededAppsState:'enabled'},futureBehavior:{keep:true}}}));
++    vi.stubGlobal('fetch',vi.fn(async()=>Response.json({value:[]})));
++    const response=await call({wingetId:'Fixture.App',assignments:[a,b].map(groupId=>({type:'group',groupId,intent:'required'}))});
++    expect(response.status).toBe(200);
++    const sent=state.assign.mock.calls[0][2];expect(sent).toHaveLength(2);
++    for(let i=0;i<2;i++){expect(sent[i].settings).toMatchObject((state.live[i] as any).settings);expect(sent[i].target.groupId).toBe([a,b][i]);}
++  });
++  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false;state.real=false;state.live=[]; });
 +  afterEach(() => vi.unstubAllGlobals());
    afterAll(() => { closeSqliteDb(); vi.unstubAllEnvs(); });
  
@@ -2308,7 +2344,7 @@ index 000000000..afc4388f4
 +}
 diff --git a/hooks/useInstallStatus.ts b/hooks/useInstallStatus.ts
 new file mode 100644
-index 000000000..0cc61f1cf
+index 0000000..914f69f
 --- /dev/null
 +++ b/hooks/useInstallStatus.ts
 @@ -0,0 +1,95 @@
@@ -2338,12 +2374,12 @@ index 000000000..0cc61f1cf
 +  canCheck: boolean;
 +}
 +
-+const key = (appId: string | null) => ['hrm', 'install-status', appId] as const;
++export const installStatusKey = (appId: string | null, userId?: string, tenantId?: string) => ['hrm', 'install-status', userId, tenantId, appId] as const;
 +
 +function useInstallStatusQuery<T>(appId: string | null, select: (data: InstallStatusResponse) => T) {
-+  const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
++  const { getAccessToken, isAuthenticated, user } = useMicrosoftAuth();
 +  return useQuery<InstallStatusResponse, Error, T>({
-+    queryKey: key(appId),
++    queryKey: installStatusKey(appId, user?.id, user?.tenantId),
 +    queryFn: async () => {
 +      const token = await getAccessToken();
 +      if (!token) throw new Error('Not authenticated');
@@ -2379,7 +2415,7 @@ index 000000000..0cc61f1cf
 +
 +/** Patch 0054: Check installs now for one app. canCheck is false outside SQLite and for older copies. */
 +export function useCheckInstallsNow(appId: string | null) {
-+  const { getAccessToken } = useMicrosoftAuth();
++  const { getAccessToken, user } = useMicrosoftAuth();
 +  const queryClient = useQueryClient();
 +  const { data: canCheck } = useInstallStatusQuery(appId, (data) => data.canCheck);
 +  const check = useMutation<AppInstallStatus, Error>({
@@ -2401,7 +2437,7 @@ index 000000000..0cc61f1cf
 +      return body.status as AppInstallStatus;
 +    },
 +    onSuccess: async (status) => {
-+      queryClient.setQueryData<InstallStatusResponse>(key(appId), { status, canCheck: true });
++      queryClient.setQueryData<InstallStatusResponse>(installStatusKey(appId, user?.id, user?.tenantId), { status, canCheck: true });
 +      await queryClient.invalidateQueries({ queryKey: ['hrm', 'home'] });
 +    },
 +  });
@@ -3239,10 +3275,10 @@ index 000000000..526eb10da
 +}
 diff --git a/lib/hrm/app-insights-store.ts b/lib/hrm/app-insights-store.ts
 new file mode 100644
-index 000000000..0c070ea0c
+index 0000000..03cafd3
 --- /dev/null
 +++ b/lib/hrm/app-insights-store.ts
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,114 @@
 +/** SQLite activity store. Tenant and app are part of every key/read/write. */
 +import type Database from 'better-sqlite3';
 +import { assignmentsEqual, needsReview, type AppObservation, type AppSnapshot, type AppActivity } from './app-insights';
@@ -3263,6 +3299,19 @@ index 000000000..0c070ea0c
 +  }
 +  return {
 +    snapshot,
++    latestAttempt(tenant: string, appId: string, winget: string, userId: string) {
++      // Exact copy association, never display name or family alone. Archived
++      // attempts remain audit evidence, without restoring their history card.
++      const row = getDb().prepare(`SELECT id, version, status, created_at, archived_at, user_id, is_auto_update, error_code, error_message
++        FROM packaging_jobs WHERE tenant_id = ? AND lower(winget_id) = lower(?) AND
++        (lower(intune_app_id) = lower(?) OR CASE WHEN json_valid(package_config) THEN
++          lower(json_extract(package_config, '$.replacesIntuneAppId')) = lower(?) OR
++          lower(json_extract(package_config, '$.sourceIntuneAppId')) = lower(?) ELSE 0 END)
++        ORDER BY created_at DESC, id DESC LIMIT 1`).get(tenant, winget, appId, appId, appId) as {
++          id:string;version:string;status:string;created_at:string;archived_at:string|null;user_id:string;is_auto_update:number|null;error_code:string|null;error_message:string|null
++        } | undefined;
++      return row ? { id:row.id, version:row.version, status:row.status, createdAt:row.created_at, archived:Boolean(row.archived_at), owned:row.user_id===userId, automatic:Boolean(row.is_auto_update), errorCode:row.error_code, errorMessage:row.error_message } : null;
++    },
 +    observe(tenant: string, observation: AppObservation, actor = 'Observed in Intune', knownChange = false) {
 +      const db = getDb();
 +      return db.transaction(() => {
@@ -3326,8 +3375,8 @@ index 000000000..0c070ea0c
 +      // Existing completed deployments and failed attempts are available immediately.
 +      const deployed = (db.prepare(`SELECT id, deployed_at, version, intune_app_id FROM upload_history WHERE intune_tenant_id = ? AND winget_id = ? ORDER BY deployed_at DESC LIMIT 100`).all(tenant, winget) as Array<{ id: string; deployed_at: string; version: string; intune_app_id: string }>)
 +        .map((r) => ({ id: `deploy-${r.id}`, at: r.deployed_at, title: 'Deployed to Intune', detail: `Version ${r.version}`, actor: 'IntuneGet', appId: r.intune_app_id }));
-+      const failed = (db.prepare(`SELECT id, COALESCE(completed_at, updated_at, created_at) AS at, version FROM packaging_jobs WHERE tenant_id = ? AND winget_id = ? AND status = 'failed' ORDER BY created_at DESC LIMIT 100`).all(tenant, winget) as Array<{ id: string; at: string; version: string }>)
-+        .map((r) => ({ id: `failed-${r.id}`, at: r.at, title: 'Deployment failed', detail: `Version ${r.version}. Open Deployments for the failure details.`, actor: 'IntuneGet', appId: '' }));
++      const failed = (db.prepare(`SELECT id, COALESCE(completed_at, updated_at, created_at) AS at, version, archived_at FROM packaging_jobs WHERE tenant_id = ? AND winget_id = ? AND status = 'failed' ORDER BY created_at DESC LIMIT 100`).all(tenant, winget) as Array<{ id: string; at: string; version: string; archived_at:string|null }>)
++        .map((r) => ({ id: `failed-${r.id}`, at: r.at, title: 'Deployment failed', detail: `Version ${r.version}. ${r.archived_at ? 'Archived attempt; retained as audit evidence.' : 'Open Deployments for the failure details.'}`, actor: 'IntuneGet', appId: '' }));
 +      return [...observed, ...deployed, ...failed].sort((a, b) => (Date.parse(b.at) - Date.parse(a.at)) || b.id.localeCompare(a.id)).slice(0, 100);
 +    },
 +    tracked(tenant?: string, appId?: string) {
@@ -3346,10 +3395,10 @@ index 000000000..0c070ea0c
 +export type AppInsightsStore = ReturnType<typeof createAppInsightsStore>;
 diff --git a/lib/hrm/app-insights.ts b/lib/hrm/app-insights.ts
 new file mode 100644
-index 000000000..36d7c0840
+index 0000000..e1ecba4
 --- /dev/null
 +++ b/lib/hrm/app-insights.ts
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,63 @@
 +/** Shared, browser-safe app activity and assignment comparison types. */
 +export interface AssignmentSummary { key: string; label: string; installs: boolean }
 +export interface AssignmentChange { before: AssignmentSummary[]; after: AssignmentSummary[]; observedAt: string }
@@ -3361,7 +3410,8 @@ index 000000000..36d7c0840
 +  change: AssignmentChange | null; revision: number; reviewedRevision: number;
 +}
 +export interface AppActivity { id: string; at: string; title: string; detail: string; actor: string; appId: string }
-+export interface AppInsights { supported: boolean; snapshot: AppSnapshot | null; activity: AppActivity[] }
++export interface AppAttempt { id: string; version: string; status: string; createdAt: string; archived: boolean; owned: boolean; automatic?: boolean; errorCode: string | null; errorMessage: string | null }
++export interface AppInsights { supported: boolean; snapshot: AppSnapshot | null; activity: AppActivity[]; appId?: string; family?: string | null; latestAttempt?: AppAttempt | null }
 +export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 +
 +// Ignore Graph's generated assignment ID and object key order. Keep filters,
@@ -4088,3 +4138,22 @@ index 000000000..07785bd56
 +  const id = value?.trim() ?? '';
 +  return GUID.test(id) ? id.toLowerCase() : null;
 +}
+diff --git a/hooks/__tests__/app-evidence-scope.test.ts b/hooks/__tests__/app-evidence-scope.test.ts
+new file mode 100644
+index 0000000..cd977cd
+--- /dev/null
++++ b/hooks/__tests__/app-evidence-scope.test.ts
+@@ -0,0 +1,13 @@
++import {it,expect,vi} from 'vitest';
++const state=vi.hoisted(()=>({user:{id:'first',tenantId:'tenant-a'},query:vi.fn()}));
++vi.mock('@tanstack/react-query',()=>({useQuery:(options:unknown)=>{state.query(options);return {};},useMutation:()=>({}),useQueryClient:()=>({})}));
++vi.mock('@/hooks/useMicrosoftAuth',()=>({useMicrosoftAuth:()=>({user:state.user,isAuthenticated:true,getAccessToken:vi.fn()})}));
++vi.mock('@/hooks/useMspOptional',()=>({useMspOptional:()=>({isMspUser:false})}));
++import {useInstallStatus,installStatusKey} from '../useInstallStatus';
++import {useDeployedConfig} from '../use-deployed-config';
++it('separates cached results and saved settings when the authorized user or tenant changes',()=>{
++ const read=()=>{state.query.mockClear();useInstallStatus('copy');useDeployedConfig('Example.App','copy');return state.query.mock.calls.map(([q])=>q.queryKey);};
++ const first=read();state.user={id:'second',tenantId:'tenant-a'};const colleague=read();state.user={id:'second',tenantId:'tenant-b'};const other=read();
++ expect(first[0]).not.toEqual(colleague[0]);expect(first[1]).not.toEqual(colleague[1]);expect(colleague[0]).not.toEqual(other[0]);expect(colleague[1]).not.toEqual(other[1]);
++ expect(installStatusKey('copy','first','tenant-a')).not.toEqual(installStatusKey('other-copy','first','tenant-a'));
++});

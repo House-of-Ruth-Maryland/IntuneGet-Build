@@ -94,7 +94,10 @@ Use these exactly; sentence case, as the screen shows them.
 | App catalog | App Catalog, catalog page |
 | Deploy, deployed (sending an app or a new version to Intune) | Publish, published, Send to Intune, Upload |
 | Automatic updates (the App updates setup section and the process) | Automatic publishing, Automatic update setup |
-| Installation timing (deploy panel section and App updates card: prompts, postponement and startup install built into the package) | Device installation, Install behaviour, Installation behavior |
+| Installation and staff experience (app configuration: toolkit windows and effective staff summary) | Installation timing (for app configuration), installer decides |
+| App setup and checks (app configuration: background actions and package settings) | More settings |
+| Toolkit messages and appearance (app configuration: applicable toolkit presentation) | What staff see during install |
+| Installation timing (App updates card: prompts, postponement and startup install built into the package) | Device installation, Install behaviour, Installation behavior |
 | Install dates (panel opened from Inventory app details and App updates cards: one group's dates and restart grace for a copy already in Intune) | Availability and deadline, Installation timing (for that panel), timing |
 | Group (in Install dates) | assignment |
 | Each computer's own clock | Device local time |
