@@ -833,10 +833,10 @@ index 000000000..3328aa1a6
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..41b512d74
+index 0000000..472ede7
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,585 @@
+@@ -0,0 +1,587 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -1247,12 +1247,14 @@ index 000000000..41b512d74
 +  {
 +    id: 'app-activity',
 +    title: 'App activity',
-+    uiLabels: ['Apps', 'Inventory', 'App activity', 'Open activity', 'Open in Intune', 'Group changes to review', 'Save to Intune', 'Keep this copy'],
++    uiLabels: ['Apps', 'Inventory', 'App activity', 'Open activity', 'Open in Intune', 'Group changes to review', 'Save to Intune', 'Keep this copy', 'Latest deployment attempt', 'Version in Intune', 'Next automatic update'],
 +    points: [
 +      'In Apps, open an Inventory app name, then expand App activity to see its latest 100 events across versions deployed by IntuneGet: deployments, failed deployment attempts, version changes, group changes and installation-result counts.',
 +      'Existing deployment history appears immediately. Group and installation-result history starts with the first successful check of Intune. Unchanged counts do not add another event.',
 +      'Changes found in Intune show when they were observed. IntuneGet does not know who made those changes in Intune. Known group edits through Save to Intune or Keep this copy show the staff member who saved them.',
 +      'For a copy that is no longer in Intune, open Inventory, then Open activity beside its warning in Group changes to review, to see its recorded history. Open in Intune checks it there.',
++      'Latest deployment attempt is linked to the exact copy and tenant, including a replacement attempt that failed before upload. Archived attempts stay read-only here. They remain hidden from deployment history. No retry starts from this summary.',
++      'Version in Intune is configuration, not per-computer version inventory. Install results remain separate from failed packaging attempts. Per-computer versions are not collected here. Next automatic update shows your account’s saved future policy, not the installed copy or another account’s policy.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }],
 +  },
@@ -1417,17 +1419,17 @@ index 000000000..41b512d74
 +      'If you open a ticket about a deployment, include the Support ID from its card.',
 +      'For anything else, open a ticket with HRM Support.',
 +      'For Curated packaging, the message may say Packaging remains paused until current installer security eligibility can be verified. Send HRM Support that reason and Support ID. A paused status alone does not distinguish a hold from unavailable verification.',
-+      'Assignment review concerns the source app’s groups and timing, not the downloaded file. Read the recorded reason before retrying. Older workflow codes can also mean unsupported settings or an unavailable read, without proving an expired deadline.',
++      'Assignment review concerns the source app’s groups and timing, not the downloaded file. Unsupported or unreadable settings need settings review, not deadline confirmation. Older workflow codes can mean either problem without proving an expired deadline; read the recorded reason.',
 +    ],
 +    links: [{ label: 'HRM Support', href: HRM_SUPPORT_URL }],
 +  },
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..c794b9884
+index 0000000..e866b45
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
-@@ -0,0 +1,401 @@
+@@ -0,0 +1,403 @@
 +/** Task-first Help. Detailed rules remain in help-content; indexes are zero-based. */
 +export type HelpScreen = 'catalog' | 'deployment-list' | 'updates' | 'inventory' | 'deployments' | 'discovered' | 'settings' | 'server' | 'support' | 'reports';
 +export type HelpCategory = 'deploy' | 'updates' | 'devices' | 'troubleshoot' | 'settings';
@@ -1513,7 +1515,7 @@ index 000000000..c794b9884
 +    start: catalog, before: ['Choose only apps needed before first use. More apps make setup slower.'],
 +    steps: [
 +      step('Open deployment settings', 'Open the app in App catalog, or press Details in Inventory. Review its device-group assignments.', 'catalog', 'Who gets it', 'The intended computers receive the app.'),
-+      step('Choose setup profiles', 'Open More settings, then New computer setup. Select the required setup profiles.', 'catalog', 'New computer setup', 'The app is included in those setup profiles for this deployment.'),
++      step('Choose setup profiles', 'Under App setup and checks, open New computer setup. Select the required setup profiles.', 'catalog', 'New computer setup', 'The app is included in those setup profiles for this deployment.'),
 +      step('Deploy the change', 'Add the app to the Deployment list and deploy it. For an app already deployed, use Deploy again.', 'deployment-list', 'Deploy to Intune', 'The package and selected setup profiles are submitted for deployment.'),
 +    ],
 +    success: 'The deployed app is included in the selected Enrollment Status Page profiles.', caution: 'Saving ordinary group changes does not apply a New computer setup change; use Deploy again.',
@@ -1691,6 +1693,8 @@ index 000000000..c794b9884
 +    summary: 'Use recorded activity to understand deployments, group edits and installation-count changes across versions.', keywords: ['history', 'audit', 'events', 'who changed', 'activity'],
 +    start: inventory, before: ['Activity describes observed changes; it cannot identify who edited Intune directly.'],
 +    steps: [
++      step('Separate the copy from an attempt', 'Open an Inventory app name. Compare Version in Intune and install results with Latest deployment attempt; a failed newer package does not mean the existing copy stopped working.', 'inventory', 'Latest deployment attempt', 'Current configuration, installation evidence and a packaging attempt stay distinct.'),
++      step('Read archived evidence', 'An archived latest attempt remains read-only here. For recent history, follow the personal or tenant history link. Review Next automatic update separately from the current copy.', 'inventory', 'Next automatic update', 'You know the attempt’s scope and whether it is hidden from history.'),
 +      step('Open the activity', 'Open Apps, then the app name in Inventory. Expand App activity in the app workspace.', 'inventory', 'App activity', 'The latest recorded events across deployed versions appear.'),
 +      step('Compare the events', 'Read deployments, failures, version changes, group changes and installation-count events in sequence.', 'inventory', 'App activity', 'You can connect the change with the recorded deployment or check.'),
 +      step('Check the source', 'Use Open in Intune for current configuration. For a missing copy, use Open activity beside its Group changes to review warning.', 'inventory', 'Open activity', 'Historical evidence remains distinct from current Intune state.'),
@@ -1698,7 +1702,7 @@ index 000000000..c794b9884
 +    success: 'You can explain the recorded change and whether it was observed in Intune or made through IntuneGet.',
 +    related: ['group-changes', 'install-results', 'old-copies'],
 +    troubleshoot: [{ problem: 'No event appears for a recent check', action: 'Unchanged counts do not add an event. Group and result history begins with the first successful check.' }],
-+    referenceGroups: [reference('Read recorded activity and its limits', [0, 1, 2, 3])],
++    referenceGroups: [reference('Read recorded activity and its limits', [0, 1, 2, 3]),reference('Separate copy, attempt and installation', [4,5])],
 +  },
 +  {
 +    id: 'group-changes', category: 'devices', title: 'Review and add app assignments',

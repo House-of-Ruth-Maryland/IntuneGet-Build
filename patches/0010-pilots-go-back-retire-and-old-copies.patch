@@ -3837,3 +3837,33 @@ index 000000000..84423e037
 +    is_auto_update: false,
 +  };
 +}
+diff --git a/lib/hrm/__tests__/app-attempts.test.ts b/lib/hrm/__tests__/app-attempts.test.ts
+new file mode 100644
+index 0000000..784667d
+--- /dev/null
++++ b/lib/hrm/__tests__/app-attempts.test.ts
+@@ -0,0 +1,24 @@
++import {beforeEach,afterEach,it,expect} from 'vitest';
++import Database from 'better-sqlite3';
++import {runSqliteMigrations} from '@/lib/db/sqlite-migrations';
++import {createAppInsightsStore} from '../app-insights-store';
++let db:Database.Database;let store:ReturnType<typeof createAppInsightsStore>;
++const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222';
++beforeEach(()=>{db=new Database(':memory:');runSqliteMigrations(db);store=createAppInsightsStore(()=>db);});
++afterEach(()=>db.close());
++function job(id:string,tenant='tenant',app:string|null=null,config:unknown={},archived=false){
++ db.prepare(`INSERT INTO packaging_jobs(id,user_id,tenant_id,winget_id,version,display_name,installer_type,installer_url,status,intune_app_id,package_config,created_at,archived_at) VALUES (?,'owner',?,'Example.App','2','Example','exe','https://example.invalid/file','failed',?,?,?,?)`).run(id,tenant,app,typeof config==='string'?config:JSON.stringify(config),`2026-01-${id.padStart(2,'0')}T12:00:00Z`,archived?'2026-02-01T00:00:00Z':null);
++}
++it('links a failed newer version to the exact source copy and retains archived audit evidence for authorized colleagues',()=>{
++ job('01','tenant',A);job('02','tenant',null,{sourceIntuneAppId:A},true);
++ const result=store.latestAttempt('tenant',A,'Example.App','colleague')!;
++ expect(result).toMatchObject({id:'02',version:'2',status:'failed',archived:true,owned:false});
++ expect(store.latestAttempt('tenant',A,'Example.App','owner')?.owned).toBe(true);
++ expect(db.prepare('SELECT count(*) AS n FROM packaging_jobs').get()).toEqual({n:2});
++});
++it('rejects foreign tenants, other copies of the same family, same names and malformed configuration',()=>{
++ job('01','tenant',null,{replacesIntuneAppId:A});job('02','foreign',A);job('03','tenant',B,{sourceIntuneAppId:B});expect(()=>job('04','tenant',null,'{bad')).toThrow('malformed JSON');
++ expect(store.latestAttempt('tenant',A,'Example.App','owner')?.id).toBe('01');
++ expect(store.latestAttempt('tenant',A,'Other.App','owner')).toBeNull();
++ expect(store.latestAttempt('empty',A,'Example.App','owner')).toBeNull();
++});

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Connect exact-copy deployment attempts, installation evidence and account-scoped update
+  policy, retaining archived attempts as read-only audit evidence and fixing scoped links.
+- Preserve in-use and automatic-update assignment settings on general saves; align replacement
+  validation with the paired workflow contract and separate settings review from deadline review.
+
 - Clarify effective installation settings, inactive saved values and hosted/local differences.
   Separate future automatic-update saves from current-copy changes and pilot start.
 - Add reviewed, additive group assignments for existing Win32 apps, preserving other groups.

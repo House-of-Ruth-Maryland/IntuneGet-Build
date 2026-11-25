@@ -42,7 +42,27 @@ from saved inactive values; visibility alone is never treated as authorization.
 
 Application admission, tenant resolution and deployment permissions remain server-enforced. Tenant history does not grant another owner's mutation rights. Assignment saves recheck app/group identity, retirement/pilot holds and conflicts. An uncertain save must be rereviewed rather than automatically posted again. Readback uncertainty remains an error.
 
-Current main includes replacement-deadline review and its paired workflow contract. App/local diagnostics now report bounded field names only and still reject unknown settings, including null or false. The corresponding private hosted diagnostic remains a separate dependency; the rejected live field is unknown.
+Current main includes replacement-deadline review. The confirmed rejected field is beta
+`inUseSettings`. Build TypeScript and the bundled PowerShell reference now match the reviewed
+hosted contract: preserve absence/null or the typed three-Int32 object; reject malformed or
+unknown settings without printing values. Unsupported/unreadable settings use
+`ASSIGNMENT_SETTINGS_REVIEW_REQUIRED`, separately from expired deadlines, and cannot resume
+through deadline confirmation. Automatic updates hold without creating failed jobs.
+
+General settings saves preserve untouched live assignment settings, including in-use and
+auto-update values. Replacement validation still fails closed on unknown behavior. New groups
+use defaults rather than copying another group's in-use, restart or date settings.
+
+Three mechanisms remain distinct: Intune app-in-use handling, Intune restart grace/snooze,
+and toolkit postponement within the package. Assignment in-use values alone do not establish
+the app's complete in-use behavior. Current source app `installExperience.inUseBehavior`, live
+Graph write acceptance and the paired hosted release remain separate verification dependencies.
+
+The workspace links attempts using exact tenant, family and source/result app identity, not
+display names. Archived attempts remain read-only audit evidence without restoring history
+cards. Version in Intune, latest packaging attempt, installation counts and the signed-in
+account's future policy are separate. Per-computer installed versions are not collected here.
+Account/tenant changes use separate installation-result and saved-config query cache keys.
 
 Rendered screens and route/script tests use isolated synthetic responses and harmless fixtures. They do not establish new Windows prompt behavior or successful Intune delivery. Prior local startup proof is separate from the pending scoped pilot. No time picker, dual cutoff, restart fallback, production flag change or broader pilot scope is introduced.
 
