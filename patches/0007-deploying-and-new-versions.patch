@@ -13,10 +13,10 @@ index 764cbe59e..abc7c643f 100644
        logLabel="Uploads"
 diff --git a/app/(app)/dashboard/uploads/page.test.ts b/app/(app)/dashboard/uploads/page.test.ts
 new file mode 100644
-index 0000000..c112fd2
+index 000000000..b042f1e1f
 --- /dev/null
 +++ b/app/(app)/dashboard/uploads/page.test.ts
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,134 @@
 +// @vitest-environment happy-dom
 +import { act,createElement,type ReactNode } from 'react';
 +import { createRoot,type Root } from 'react-dom/client';
@@ -80,7 +80,7 @@ index 0000000..c112fd2
 + expect(document.querySelectorAll('h3')).toHaveLength(0);
 +});
 +it('does not offer clearing or dismissal of another owner’s cancelled job',async()=>{
-+ state.jobs=[job('cancelled','other')];await render();await act(async()=>button('All in tenant').click());
++ state.jobs=[job('cancelled','other')];await render();
 + expect(button('Clear history')).toBeUndefined();expect(button('Dismiss')).toBeUndefined();
 +});
 +
@@ -119,9 +119,40 @@ index 0000000..c112fd2
 + expect(state.invalidate).not.toHaveBeenCalled();
 +});
 +
-+it('opens explicit tenant-history navigation in tenant scope while ignoring arbitrary scope values',async()=>{state.search='scope=tenant';await render();expect(button('All in tenant').getAttribute('aria-selected')).toBe('true');expect(state.fetch.mock.calls.some(([url])=>url==='/api/package?scope=tenant')).toBe(true);});
++// HRM item 105
++const listUrls=()=>state.fetch.mock.calls.map(([url])=>url as string).filter(url=>url.startsWith('/api/package?'));
++it.each(['','scope=tenant','scope=anything'])('opens on All in tenant for search "%s", so staff who deployed nothing still see the tenant list',async search=>{
++ state.search=search;state.jobs=[job('deployed','other')];await render();
++ expect(button('All in tenant').getAttribute('aria-selected')).toBe('true');
++ expect(listUrls()).toEqual(['/api/package?scope=tenant&limit=50']);
++ expect([...document.querySelectorAll('h3')].map(e=>e.textContent)).toEqual(['deployed example']);
++});
++it('opens the signed-in user\u2019s own list only when the link asks for it, and points an empty one at All in tenant',async()=>{
++ state.search='scope=mine';await render();
++ expect(button('My deployments').getAttribute('aria-selected')).toBe('true');
++ expect(listUrls()).toEqual(['/api/package?limit=50']);
++ expect(document.body.textContent).toContain('No deployments yet');
++});
++it('loads older deployments 50 at a time and restarts at 50 when the scope changes',async()=>{
++ const all=Array.from({length:120},(_,n)=>({...job('deployed','other'),id:'job-'+n}));
++ const original=state.fetch.getMockImplementation()!;
++ state.fetch.mockImplementation(async(url:string,init?:RequestInit)=>{
++  if(!url.startsWith('/api/package?'))return original(url,init);
++  const limit=Number(new URL(url,'http://localhost').searchParams.get('limit'));
++  return Response.json({jobs:all.slice(0,limit),hasMore:all.length>limit});
++ });
++ await render();
++ expect(document.querySelectorAll('h3')).toHaveLength(50);
++ await act(async()=>button('Show older deployments').click());
++ expect(document.querySelectorAll('h3')).toHaveLength(100);
++ await act(async()=>button('Show older deployments').click());
++ expect(document.querySelectorAll('h3')).toHaveLength(120);
++ expect(button('Show older deployments')).toBeUndefined();
++ await act(async()=>button('My deployments').click());
++ expect(listUrls()).toEqual(['/api/package?scope=tenant&limit=50','/api/package?scope=tenant&limit=100','/api/package?scope=tenant&limit=150','/api/package?limit=50']);
++});
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index 93f7400..7b7172a 100644
+index 93f7400e8..1024c6986 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
 @@ -1,5 +1,11 @@
@@ -144,7 +175,17 @@ index 93f7400..7b7172a 100644
    qa_candidate_id?: string | null;
    qa_requested_at?: string | null;
    qa_completed_at?: string | null;
-@@ -125,17 +132,15 @@ export default function UploadsPage() {
+@@ -106,6 +113,9 @@ function formatRelativeTime(dateStr: string): string {
+   return new Date(dateStr).toLocaleDateString();
+ }
+ 
++// HRM item 105: deployments load 50 at a time.
++const DEPLOYMENT_PAGE_SIZE = 50;
++
+ export default function UploadsPage() {
+   const searchParams = useSearchParams();
+   const router = useRouter();
+@@ -125,18 +135,23 @@ export default function UploadsPage() {
    // Get job IDs and status filter from URL params
    const highlightedJobIds = searchParams.get('jobs')?.split(',') || [];
    const urlStatus = searchParams.get('status');
@@ -158,16 +199,34 @@ index 93f7400..7b7172a 100644
    // 'mine' shows the signed-in user's deployments; 'tenant' shows everyone's in
    // the tenant so a team can avoid deploying the same app twice.
 -  const [viewScope, setViewScope] = useState<'mine' | 'tenant'>('mine');
-+  const [viewScope, setViewScope] = useState<'mine' | 'tenant'>(() => searchParams.get('scope') === 'tenant' ? 'tenant' : 'mine');
++  // HRM item 105: the page opens on everyone's deployments. It used to open on 'mine', which
++  // is an empty list for staff who have not deployed anything themselves. ?scope=mine still
++  // opens the signed-in user's own list.
++  const [viewScope, setViewScope] = useState<'mine' | 'tenant'>(() => searchParams.get('scope') === 'mine' ? 'mine' : 'tenant');
++  // How many deployments to load; "Show older deployments" adds 50 more.
++  const [jobLimit, setJobLimit] = useState(DEPLOYMENT_PAGE_SIZE);
++  const [hasMoreJobs, setHasMoreJobs] = useState(false);
++  const [isLoadingMore, setIsLoadingMore] = useState(false);
  
    const jobsRequest = useRef<AbortController | null>(null);
+-  useEffect(() => () => { jobsRequest.current?.abort(); jobsRequest.current = null; }, [viewScope, isMspUser, selectedTenantId, user?.id, user?.tenantId]);
 +  // HRM patch 0049: when a watched job finishes, refresh App updates, Home and Inventory straight away.
 +  const queryClient = useQueryClient();
 +  const lastJobs = useRef<PackagingJob[]>([]);
-   useEffect(() => () => { jobsRequest.current?.abort(); jobsRequest.current = null; }, [viewScope, isMspUser, selectedTenantId, user?.id, user?.tenantId]);
++  useEffect(() => () => { jobsRequest.current?.abort(); jobsRequest.current = null; }, [viewScope, jobLimit, isMspUser, selectedTenantId, user?.id, user?.tenantId]);
  
    const fetchJobs = useCallback(async (showRefreshing = false) => {
-@@ -184,7 +189,12 @@ export default function UploadsPage() {
+     if (!user?.id || jobsRequest.current) return;
+@@ -156,7 +171,7 @@ export default function UploadsPage() {
+         setSessionExpired(true);
+         return;
+       }
+-      const url = viewScope === 'tenant' ? '/api/package?scope=tenant' : '/api/package';
++      const url = `/api/package?${viewScope === 'tenant' ? 'scope=tenant&' : ''}limit=${jobLimit}`;
+       const response = await fetch(url, {
+         signal: controller.signal,
+         headers: {
+@@ -184,7 +199,13 @@ export default function UploadsPage() {
  
        const data = await response.json();
        if (controller.signal.aborted) return;
@@ -178,19 +237,23 @@ index 93f7400..7b7172a 100644
 +      }
 +      lastJobs.current = nextJobs;
 +      setJobs(nextJobs);
++      setHasMoreJobs(data.hasMore === true);
        setError(null);
        setSessionExpired(false);
      } catch (err) {
-@@ -198,7 +208,7 @@ export default function UploadsPage() {
+@@ -196,9 +217,10 @@ export default function UploadsPage() {
+         jobsRequest.current = null;
+         setIsLoading(false);
          setIsRefreshing(false);
++        setIsLoadingMore(false);
        }
      }
 -  }, [user?.id, getAccessToken, viewScope, isMspUser, selectedTenantId]);
-+  }, [user?.id, getAccessToken, viewScope, isMspUser, selectedTenantId, queryClient]);
++  }, [user?.id, getAccessToken, viewScope, jobLimit, isMspUser, selectedTenantId, queryClient]);
  
    // Initial load
    useEffect(() => {
-@@ -209,7 +219,7 @@ export default function UploadsPage() {
+@@ -209,7 +231,7 @@ export default function UploadsPage() {
    // background poll less often and a manual refresh remains available.
    useEffect(() => {
      const hasActiveJobs = jobs.some((job) =>
@@ -199,7 +262,23 @@ index 93f7400..7b7172a 100644
      );
  
      if (!hasActiveJobs || sessionExpired) return;
-@@ -238,25 +248,21 @@ export default function UploadsPage() {
+@@ -234,29 +256,37 @@ export default function UploadsPage() {
+     }
+   };
+ 
++  const handleScopeChange = (scope: 'mine' | 'tenant') => {
++    if (scope === viewScope) return;
++    setJobLimit(DEPLOYMENT_PAGE_SIZE);
++    setHasMoreJobs(false);
++    setViewScope(scope);
++  };
++
++  const handleShowOlder = () => {
++    setIsLoadingMore(true);
++    setJobLimit(current => current + DEPLOYMENT_PAGE_SIZE);
++  };
++
+   const handleRefresh = () => {
      fetchJobs(true);
    };
  
@@ -236,7 +315,7 @@ index 93f7400..7b7172a 100644
  
      // Fire the API call in the background
      try {
-@@ -278,13 +284,15 @@ export default function UploadsPage() {
+@@ -278,13 +308,15 @@ export default function UploadsPage() {
          throw new Error(`Failed to cancel job (${response.status})`);
        }
  
@@ -256,7 +335,7 @@ index 93f7400..7b7172a 100644
      }
    };
  
-@@ -300,7 +308,7 @@ export default function UploadsPage() {
+@@ -300,7 +332,7 @@ export default function UploadsPage() {
            'Content-Type': 'application/json',
            Authorization: `Bearer ${accessToken}`,
          },
@@ -265,7 +344,7 @@ index 93f7400..7b7172a 100644
        });
  
        if (!response.ok) {
-@@ -312,6 +320,7 @@ export default function UploadsPage() {
+@@ -312,6 +344,7 @@ export default function UploadsPage() {
          throw new Error(`Failed to clear history (${response.status})`);
        }
  
@@ -273,7 +352,7 @@ index 93f7400..7b7172a 100644
        await fetchJobs();
      } catch (err) {
        console.error('Failed to clear history:', err);
-@@ -363,35 +372,18 @@ export default function UploadsPage() {
+@@ -363,35 +396,18 @@ export default function UploadsPage() {
      }
    };
  
@@ -316,7 +395,7 @@ index 93f7400..7b7172a 100644
            description={<T>Monitor your package deployments to Intune</T>}
          />
          <SkeletonGrid count={4} columns={4} variant="stat" />
-@@ -408,14 +400,14 @@ export default function UploadsPage() {
+@@ -408,14 +424,14 @@ export default function UploadsPage() {
      <div className="space-y-6">
        {/* Header */}
        <PageHeader
@@ -334,7 +413,7 @@ index 93f7400..7b7172a 100644
                <AlertDialog>
                  <AlertDialogTrigger asChild>
                    <Button
-@@ -428,20 +420,20 @@ export default function UploadsPage() {
+@@ -428,20 +444,20 @@ export default function UploadsPage() {
                      ) : (
                        <Trash2 className="w-4 h-4 mr-2" />
                      )}
@@ -360,7 +439,7 @@ index 93f7400..7b7172a 100644
                      </AlertDialogAction>
                    </AlertDialogFooter>
                  </AlertDialogContent>
-@@ -485,7 +477,7 @@ export default function UploadsPage() {
+@@ -485,7 +501,7 @@ export default function UploadsPage() {
                variant="outline"
                className="border-status-warning/30 text-status-warning hover:bg-status-warning/10 flex-shrink-0"
              >
@@ -369,7 +448,39 @@ index 93f7400..7b7172a 100644
              </Button>
            </motion.div>
          )}
-@@ -583,15 +575,13 @@ export default function UploadsPage() {
+@@ -555,16 +571,16 @@ export default function UploadsPage() {
+         initial={{ opacity: 0 }}
+         animate={{ opacity: 1 }}
+         transition={{ delay: 0.15 }}
+-        className="flex items-center gap-2"
++        className="flex flex-wrap items-center gap-2"
+         role="tablist"
+         aria-label="Choose whose deployments to show"
+       >
+-        {(['mine', 'tenant'] as const).map((scope) => (
++        {(['tenant', 'mine'] as const).map((scope) => (
+           <button
+             key={scope}
+             role="tab"
+             aria-selected={viewScope === scope}
+-            onClick={() => setViewScope(scope)}
++            onClick={() => handleScopeChange(scope)}
+             className={cn(
+               'px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:outline-none',
+               viewScope === scope
+@@ -575,6 +591,11 @@ export default function UploadsPage() {
+             {scope === 'mine' ? <T>My deployments</T> : <T>All in tenant</T>}
+           </button>
+         ))}
++        {hasMoreJobs && (
++          <p className="text-sm text-text-muted" role="status">
++            <T>Newest <Var>{jobs.length}</Var> loaded. Counts and filters cover these only.</T>
++          </p>
++        )}
+       </motion.div>
+ 
+       {/* Filters */}
+@@ -583,15 +604,13 @@ export default function UploadsPage() {
          animate={{ opacity: 1 }}
          transition={{ delay: 0.2 }}
          className="flex flex-wrap gap-2"
@@ -388,7 +499,7 @@ index 93f7400..7b7172a 100644
              onClick={() => setFilter(f)}
              className={cn(
                'px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:outline-none',
-@@ -600,7 +590,7 @@ export default function UploadsPage() {
+@@ -600,7 +619,7 @@ export default function UploadsPage() {
                  : 'bg-overlay/5 text-text-secondary hover:text-text-primary hover:bg-overlay/10 border border-overlay/5'
              )}
            >
@@ -397,30 +508,43 @@ index 93f7400..7b7172a 100644
            </button>
          ))}
        </motion.div>
-@@ -609,18 +599,18 @@ export default function UploadsPage() {
+@@ -609,21 +628,25 @@ export default function UploadsPage() {
        {filteredJobs.length === 0 ? (
          <AnimatedEmptyState
            icon={Upload}
 -          title={filter === 'all' ? <T>No uploads yet</T> : <T>No {filter} uploads</T>}
 +          title={filter === 'all' ? <T>No deployments yet</T> : <T>No {filter} deployments</T>}
            description={
-             filter === 'all'
+-            filter === 'all'
 -              ? <T>Add packages from the App Catalog to get started</T>
 -              : <T>You have no {filter} uploads to display</T>
-+              ? <T>Add packages from the App catalog to get started</T>
-+              : <T>There are no {filter} deployments to show</T>
++            filter !== 'all'
++              ? hasMoreJobs ? <T>None among the deployments loaded so far. Show older deployments to look further back.</T> : <T>There are no {filter} deployments to show</T>
++              : viewScope === 'mine'
++                ? <T>You have not started a deployment. Deployments by other staff are under All in tenant.</T>
++                : <T>Add packages from the App catalog to get started</T>
            }
            color="cyan"
            showOrbs={filter === 'all'}
            action={
-             filter === 'all'
-               ? {
+-            filter === 'all'
+-              ? {
 -                  label: <T>Browse App Catalog</T>,
-+                  label: <T>Browse App catalog</T>,
-                   onClick: () => router.push('/dashboard/apps'),
-                 }
-               : undefined
-@@ -653,6 +643,7 @@ export default function UploadsPage() {
+-                  onClick: () => router.push('/dashboard/apps'),
+-                }
+-              : undefined
++            filter !== 'all'
++              ? undefined
++              : viewScope === 'mine'
++                ? { label: <T>Show all in tenant</T>, onClick: () => handleScopeChange('tenant') }
++                : {
++                    label: <T>Browse App catalog</T>,
++                    onClick: () => router.push('/dashboard/apps'),
++                  }
+           }
+         />
+       ) : (
+@@ -653,11 +676,22 @@ export default function UploadsPage() {
                  onRedeploy={handleRedeploy}
                  isRedeploying={redeployingJobId === job.id}
                  showOwner={viewScope === 'tenant'}
@@ -428,7 +552,22 @@ index 93f7400..7b7172a 100644
                />
              ))}
            </AnimatePresence>
-@@ -671,6 +662,7 @@ function UploadJobCard({
+         </motion.div>
+       )}
++
++      {/* HRM item 105: older deployments, 50 at a time */}
++      {hasMoreJobs && (
++        <div className="flex flex-col items-center gap-2 pt-2">
++          <Button onClick={handleShowOlder} disabled={isLoadingMore} variant="outline" className="border-overlay/10 text-text-secondary hover:bg-overlay/5">
++            {isLoadingMore && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
++            <T>Show older deployments</T>
++          </Button>
++        </div>
++      )}
+     </div>
+   );
+ }
+@@ -671,6 +705,7 @@ function UploadJobCard({
    onRedeploy,
    isRedeploying,
    showOwner,
@@ -436,7 +575,7 @@ index 93f7400..7b7172a 100644
  }: {
    job: PackagingJob;
    index: number;
-@@ -680,6 +672,7 @@ function UploadJobCard({
+@@ -680,6 +715,7 @@ function UploadJobCard({
    onRedeploy: (job: PackagingJob, forceCreate?: boolean) => void;
    isRedeploying?: boolean;
    showOwner?: boolean;
@@ -444,7 +583,7 @@ index 93f7400..7b7172a 100644
  }) {
    const prefersReducedMotion = useReducedMotion();
  
-@@ -725,7 +718,8 @@ function UploadJobCard({
+@@ -725,7 +761,8 @@ function UploadJobCard({
      },
      uploading: {
        icon: Upload,
@@ -454,7 +593,7 @@ index 93f7400..7b7172a 100644
        color: 'text-accent-violet',
        bg: 'bg-accent-violet/10',
        border: 'border-l-accent-violet',
-@@ -760,21 +754,22 @@ function UploadJobCard({
+@@ -760,21 +797,22 @@ function UploadJobCard({
      },
      duplicate_skipped: {
        icon: AlertCircle,
@@ -483,7 +622,7 @@ index 93f7400..7b7172a 100644
  
    const itemVariants = {
      hidden: { opacity: 0, y: prefersReducedMotion ? 0 : 20 },
-@@ -819,9 +814,9 @@ function UploadJobCard({
+@@ -819,9 +857,9 @@ function UploadJobCard({
                className="absolute inset-0 rounded-xl"
                animate={{
                  boxShadow: [
@@ -496,7 +635,7 @@ index 93f7400..7b7172a 100644
                  ],
                }}
                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-@@ -833,7 +828,7 @@ function UploadJobCard({
+@@ -833,7 +871,7 @@ function UploadJobCard({
          <div className="flex-1 min-w-0">
            <div className="flex items-start justify-between gap-4">
              <div>
@@ -505,7 +644,7 @@ index 93f7400..7b7172a 100644
                <p className="text-text-secondary text-sm mt-0.5">
                  {job.publisher}
                  {job.app_source !== 'store' && job.installer_type && (
-@@ -864,10 +859,8 @@ function UploadJobCard({
+@@ -864,10 +902,8 @@ function UploadJobCard({
                        {assignment.type === 'allUsers' && <Users className="w-3 h-3" />}
                        {assignment.type === 'allDevices' && <Monitor className="w-3 h-3" />}
                        {assignment.type === 'group' && <UserCircle className="w-3 h-3" />}
@@ -518,7 +657,7 @@ index 93f7400..7b7172a 100644
                      </span>
                    ))}
                  </div>
-@@ -900,21 +893,21 @@ function UploadJobCard({
+@@ -900,21 +936,21 @@ function UploadJobCard({
                    <AlertDialogContent>
                      <AlertDialogHeader>
                        <AlertDialogTitle>
@@ -544,7 +683,7 @@ index 93f7400..7b7172a 100644
                        </AlertDialogAction>
                      </AlertDialogFooter>
                    </AlertDialogContent>
-@@ -1004,7 +997,9 @@ function UploadJobCard({
+@@ -1004,7 +1040,9 @@ function UploadJobCard({
            )}
  
            {/* Retry button for failures */}
@@ -554,7 +693,7 @@ index 93f7400..7b7172a 100644
                !isIntuneApprovalFailure(job) && (
              <div className="mt-3">
                <Button
-@@ -1044,6 +1039,48 @@ function UploadJobCard({
+@@ -1044,6 +1082,48 @@ function UploadJobCard({
            {job.status === 'duplicate_skipped' && (() => {
              const details = job.error_details as Record<string, unknown> | undefined;
              const existingVersion = details?.existingVersion ? String(details.existingVersion) : null;
@@ -603,7 +742,7 @@ index 93f7400..7b7172a 100644
              return (
              <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
                <div className="flex items-start gap-2">
-@@ -1053,7 +1090,7 @@ function UploadJobCard({
+@@ -1053,7 +1133,7 @@ function UploadJobCard({
                      <T>Duplicate app already exists in Intune</T>
                    </p>
                    <p className="text-status-warning/70 text-xs mt-1">
@@ -612,7 +751,7 @@ index 93f7400..7b7172a 100644
                      {existingVersion && (
                        <span> <T>Existing version: <Var>{existingVersion}</Var></T></span>
                      )}
-@@ -1108,6 +1145,7 @@ function UploadJobCard({
+@@ -1108,6 +1188,7 @@ function UploadJobCard({
              ) : null;
            })()}
  
@@ -620,7 +759,7 @@ index 93f7400..7b7172a 100644
            {/* Success - deployed to Intune */}
            {job.intune_app_url && job.status !== 'duplicate_skipped' && (
              <div className="mt-4 p-3 bg-status-success/[0.05] border border-status-success/10 rounded-lg">
-@@ -1118,7 +1156,7 @@ function UploadJobCard({
+@@ -1118,7 +1199,7 @@ function UploadJobCard({
                  className="inline-flex items-center gap-2 text-accent-cyan hover:text-accent-cyan-bright text-sm font-medium transition-colors"
                >
                  <ExternalLink className="w-4 h-4" />
@@ -1016,7 +1155,7 @@ index 000000000..092115fb3
 +}
 diff --git a/app/api/hrm/replacement-deadline-review/route.test.ts b/app/api/hrm/replacement-deadline-review/route.test.ts
 new file mode 100644
-index 0000000..c91110a
+index 000000000..c91110a39
 --- /dev/null
 +++ b/app/api/hrm/replacement-deadline-review/route.test.ts
 @@ -0,0 +1,50 @@
@@ -1072,7 +1211,7 @@ index 0000000..c91110a
 +});
 diff --git a/app/api/hrm/replacement-deadline-review/route.ts b/app/api/hrm/replacement-deadline-review/route.ts
 new file mode 100644
-index 0000000..5524805
+index 000000000..55248051e
 --- /dev/null
 +++ b/app/api/hrm/replacement-deadline-review/route.ts
 @@ -0,0 +1,38 @@
@@ -1465,7 +1604,7 @@ index d29f428c0..dac880c43 100644
  export async function POST(request: NextRequest) {
    try {
 diff --git a/app/api/package/route.test.ts b/app/api/package/route.test.ts
-index b68952f05..1c42323e9 100644
+index b68952f05..5eaa0467d 100644
 --- a/app/api/package/route.test.ts
 +++ b/app/api/package/route.test.ts
 @@ -178,7 +178,7 @@ describe('GET /api/package (userId listing)', () => {
@@ -1477,7 +1616,7 @@ index b68952f05..1c42323e9 100644
          getByUserId: getByUserIdMock,
          getByTenantId: getByTenantIdMock,
          getById: getByIdMock,
-@@ -218,6 +218,28 @@ describe('GET /api/package (userId listing)', () => {
+@@ -218,6 +218,54 @@ describe('GET /api/package (userId listing)', () => {
      expect(enrichQaMock).toHaveBeenNthCalledWith(2, [own]);
    });
  
@@ -1492,10 +1631,36 @@ index b68952f05..1c42323e9 100644
 +    expect(mine.jobs.map((job: PackagingJob) => job.user_id)).toEqual([staff]);
 +    const all = await (await GET(new NextRequest('http://localhost/api/package?scope=tenant&tenantId=foreign-tenant', {headers: {'X-MSP-Tenant-Id': 'foreign-tenant'}}))).json();
 +    expect(all.jobs.map((job: PackagingJob) => job.id)).toEqual(['owner-job', 'colleague-job']);
-+    expect(getByTenantIdMock).toHaveBeenCalledWith('fixture-tenant', 50);
++    expect(getByTenantIdMock).toHaveBeenCalledWith('fixture-tenant', 51);
++    expect(all.hasMore).toBe(false);
 +    expect(updateMock).not.toHaveBeenCalled();
 +    getByIdMock.mockResolvedValue(rows.find(row => row.user_id !== staff));
 +    expect((await GET(new NextRequest('http://localhost/api/package?jobId=other-owner'))).status).toBe(404);
++  });
++  it('pages past the first 50 for a colleague who owns none of the tenant jobs', async () => {
++    isSupabaseServerConfiguredMock.mockReturnValue(false);
++    parseAccessTokenMock.mockResolvedValue({userId: 'fixture-colleague', tenantId: 'fixture-tenant'});
++    const rows = Array.from({length: 120}, (_, n) => makeJob({id: `job-${n}`, user_id: 'fixture-owner', tenant_id: 'fixture-tenant', status: 'deployed'}));
++    getByTenantIdMock.mockImplementation(async (_tenant, limit) => rows.slice(0, limit));
++    getByUserIdMock.mockImplementation(async (_user, limit) => [].slice(0, limit));
++    const first = await (await GET(new NextRequest('http://localhost/api/package?scope=tenant'))).json();
++    expect(first.jobs).toHaveLength(50); expect(first.hasMore).toBe(true);
++    const second = await (await GET(new NextRequest('http://localhost/api/package?scope=tenant&limit=100'))).json();
++    expect(second.jobs).toHaveLength(100); expect(second.hasMore).toBe(true);
++    const all = await (await GET(new NextRequest('http://localhost/api/package?scope=tenant&limit=150'))).json();
++    expect(all.jobs).toHaveLength(120); expect(all.hasMore).toBe(false);
++    expect(getByTenantIdMock.mock.calls.map(call => call[0])).toEqual(['fixture-tenant', 'fixture-tenant', 'fixture-tenant']);
++    const mine = await (await GET(new NextRequest('http://localhost/api/package?limit=100'))).json();
++    expect(mine).toMatchObject({jobs: [], hasMore: false});
++    expect(getByUserIdMock).toHaveBeenCalledWith('fixture-colleague', 101);
++  });
++  it.each(['0', '-5', 'abc', '1.5', ''])('falls back to 50 for limit=%s and never exceeds the ceiling', async value => {
++    isSupabaseServerConfiguredMock.mockReturnValue(false);
++    getByTenantIdMock.mockResolvedValue([]);
++    await GET(new NextRequest(`http://localhost/api/package?scope=tenant&limit=${value}`));
++    expect(getByTenantIdMock).toHaveBeenLastCalledWith(expect.any(String), 51);
++    await GET(new NextRequest('http://localhost/api/package?scope=tenant&limit=999999'));
++    expect(getByTenantIdMock).toHaveBeenLastCalledWith(expect.any(String), 2001);
 +  });
 +  it('denied staff cannot read tenant jobs', async () => {
 +    parseAccessTokenMock.mockResolvedValue(null);
@@ -1506,7 +1671,7 @@ index b68952f05..1c42323e9 100644
    it('marks stale intermediate jobs as failed and returns the corrected status', async () => {
      const staleJob = makeJob({
        id: 'job-stale',
-@@ -400,7 +422,7 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -400,7 +448,7 @@ describe('POST /api/package (workflow dispatch)', () => {
      delete process.env.QA_MAINTENANCE_MODE;
      delete process.env.QA_DEFERRED_CUSTOMER_UPLOADS_UNTIL;
      getDatabaseMock.mockReturnValue({
@@ -1515,7 +1680,7 @@ index b68952f05..1c42323e9 100644
          create: createMock,
          update: updateMock,
          getApprovalFailures: getApprovalFailuresMock,
-@@ -606,6 +628,47 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -606,6 +654,47 @@ describe('POST /api/package (workflow dispatch)', () => {
      expect(job.package_config.psadtConfig).toMatchObject({customDetection:true,detectionRules:rules});
    });
  
@@ -1563,7 +1728,7 @@ index b68952f05..1c42323e9 100644
    it('returns an actionable conflict for removed versions before creating or dispatching jobs', async () => {
      getLiveInstallersMock.mockResolvedValueOnce([]);
      const response = await POST(new NextRequest('http://localhost:3000/api/package', {
-@@ -979,7 +1042,7 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -979,7 +1068,7 @@ describe('POST /api/package (workflow dispatch)', () => {
      expect(updateMock).toHaveBeenCalledOnce();
      expect(updateMock.mock.calls[0][1].status).toBe('awaiting_qa');
    });
@@ -1572,7 +1737,7 @@ index b68952f05..1c42323e9 100644
      const item = { ...makeWin32Item(), forceCreate: false };
      triggerPackagingWorkflowMock.mockRejectedValueOnce(new WorkflowDispatchUnconfirmedError(503, Date.now(), 'A'.repeat(64)));
      const response = await POST(new NextRequest('http://localhost:3000/api/package', {
-@@ -988,11 +1051,11 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -988,11 +1077,11 @@ describe('POST /api/package (workflow dispatch)', () => {
      }));
      expect(await response.json()).toMatchObject({ jobs: [{ status: 'awaiting_qa' }] });
      expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ package_config: expect.objectContaining({ forceCreate: false }) }));
@@ -1586,7 +1751,7 @@ index b68952f05..1c42323e9 100644
    });
    it('still reports other dispatched jobs when saving a capacity hold fails', async () => {
      triggerPackagingWorkflowMock.mockRejectedValueOnce(new WorkflowDispatchRateLimitError(429,
-@@ -2417,7 +2480,7 @@ describe('POST /api/package (curated licence attestation)', () => {
+@@ -2417,7 +2506,7 @@ describe('POST /api/package (curated licence attestation)', () => {
      acrobatItem = cart(0);
      chromeItem = cart(1, CURATED_APPS[0]);
      getDatabaseMock.mockReturnValue({
@@ -1596,7 +1761,7 @@ index b68952f05..1c42323e9 100644
          get: vi.fn(async (tenantId: string, id: string, version: string) => acceptances.has(`${tenantId}|${id}|${version}`)
            ? { id: 'acceptance', tenant_id: tenantId, app_id: acrobat.id, attestation_id: id, attestation_version: version,
 diff --git a/app/api/package/route.ts b/app/api/package/route.ts
-index 6137d71cc..57177be03 100644
+index 6137d71cc..a80351206 100644
 --- a/app/api/package/route.ts
 +++ b/app/api/package/route.ts
 @@ -1,4 +1,8 @@
@@ -1744,8 +1909,26 @@ index 6137d71cc..57177be03 100644
                  error_message: dispatchError,
                  completed_at: reputationHold ? null : new Date().toISOString(),
                };
-@@ -1137,12 +1209,16 @@ export async function GET(request: NextRequest) {
+@@ -1022,6 +1094,9 @@ export async function POST(request: NextRequest) {
+ 
+ // Cap read-side healing per request to keep the GET fast
+ const STALE_HEAL_BATCH_SIZE = 25;
++// HRM item 105: Deployments loads 50 at a time, up to this many in one list.
++const JOB_LIST_PAGE_SIZE = 50;
++const MAX_JOB_LIST_LIMIT = 2000;
+ 
+ /**
+  * Mark jobs stuck in intermediate states beyond the stale timeout as failed.
+@@ -1135,29 +1210,41 @@ export async function GET(request: NextRequest) {
+     // scope=tenant shows every user's deployments in the tenant (so a team on
+     // one tenant can see each other's IntuneGet apps and avoid duplicates).
      const scope = searchParams.get('scope');
++    // HRM item 105: the list is no longer fixed at the newest 50. The page asks for
++    // more as staff choose "Show older deployments"; anything else gets the first 50.
++    const requestedLimit = Number(searchParams.get('limit'));
++    const limit = Number.isInteger(requestedLimit) && requestedLimit >= 1
++      ? Math.min(requestedLimit, MAX_JOB_LIST_LIMIT)
++      : JOB_LIST_PAGE_SIZE;
      if (scope === 'tenant') {
        const mspTenantId = request.headers.get('X-MSP-Tenant-Id');
 -      const { tenantId, errorResponse } = await resolveTargetTenantId({
@@ -1767,9 +1950,30 @@ index 6137d71cc..57177be03 100644
        if (errorResponse) {
          return errorResponse;
        }
+ 
+-      const tenantJobs = await db.jobs.getByTenantId(tenantId, 50);
+-      return NextResponse.json({ jobs: await enrichCustomerQaStatus(tenantJobs), scope: 'tenant' });
++      // One extra row tells the page whether older deployments remain.
++      const tenantRows = await db.jobs.getByTenantId(tenantId, limit + 1);
++      return NextResponse.json({ jobs: await enrichCustomerQaStatus(tenantRows.slice(0, limit)), scope: 'tenant', hasMore: tenantRows.length > limit });
+     }
+ 
+-    const jobs = await db.jobs.getByUserId(user.userId, 50);
++    const rows = await db.jobs.getByUserId(user.userId, limit + 1);
++    const jobs = rows.slice(0, limit);
+ 
+     // Self-heal jobs stuck in intermediate states (safety net for
+     // deployments where the cleanup cron is not running)
+     const healedJobs = await healStaleJobs(db, jobs);
+ 
+-    return NextResponse.json({ jobs: await enrichCustomerQaStatus(healedJobs) });
++    return NextResponse.json({ jobs: await enrichCustomerQaStatus(healedJobs), hasMore: rows.length > limit });
+   } catch (err) {
+     console.error('[Package] Failed to fetch jobs:', err);
+     const detail = !isSupabaseServerConfigured() && err instanceof Error ? err.message : null;
 diff --git a/app/api/packager/jobs/deadline.test.ts b/app/api/packager/jobs/deadline.test.ts
 new file mode 100644
-index 0000000..2cbefdd
+index 000000000..2cbefddd3
 --- /dev/null
 +++ b/app/api/packager/jobs/deadline.test.ts
 @@ -0,0 +1,14 @@
@@ -1800,7 +2004,7 @@ index b2e79aca9..c21043bf1 100644
    tenant_id: 'tenant-1',
    winget_id: 'Test.App',
 diff --git a/app/api/packager/jobs/route.ts b/app/api/packager/jobs/route.ts
-index 9452411..7ef9205 100644
+index 9452411cf..7ef9205ae 100644
 --- a/app/api/packager/jobs/route.ts
 +++ b/app/api/packager/jobs/route.ts
 @@ -1,3 +1,5 @@
@@ -2155,7 +2359,7 @@ index cfc35553c..4a0da91f6 100644
    });
  });
 diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
-index 68bc640..4ca4ba6 100644
+index 68bc640bf..4ca4ba64e 100644
 --- a/components/CartItemConfig.tsx
 +++ b/components/CartItemConfig.tsx
 @@ -1,6 +1,13 @@
@@ -3749,7 +3953,7 @@ index 9957a5ab1..58b850fde 100644
                  {errors.silentSwitches && (
                    <p className="text-xs text-red-500 mt-1">{errors.silentSwitches}</p>
 diff --git a/components/ErrorDisplay.test.ts b/components/ErrorDisplay.test.ts
-index 43ef55e..4225423 100644
+index 43ef55e76..0d0bd5fa8 100644
 --- a/components/ErrorDisplay.test.ts
 +++ b/components/ErrorDisplay.test.ts
 @@ -2,6 +2,7 @@ import { createElement, type ReactNode } from 'react';
@@ -3771,7 +3975,7 @@ index 43ef55e..4225423 100644
 +  });
 +  it('keeps Help explicit about the history window and assignment-review uncertainty', () => {
 +    const reports = HELP_SECTIONS.find(section => section.id === 'reports')!;
-+    expect(reports.points.join(' ')).toContain('newest 50 unarchived records before filtering');
++    expect(reports.points.join(' ')).toContain('Counts and status filters cover only what is loaded');
 +    const support = HELP_SECTIONS.find(section => section.id === 'support')!;
 +    expect(support.points.join(' ')).toContain('without proving an expired deadline');
 +  });
@@ -3815,7 +4019,7 @@ index 43ef55e..4225423 100644
    });
  });
 diff --git a/components/ErrorDisplay.tsx b/components/ErrorDisplay.tsx
-index 086e99f..4c0514b 100644
+index 086e99f85..4c0514bca 100644
 --- a/components/ErrorDisplay.tsx
 +++ b/components/ErrorDisplay.tsx
 @@ -96,7 +96,10 @@ const errorCodeMessages: Record<string, string> = {
@@ -3864,7 +4068,7 @@ index 086e99f..4c0514b 100644
  
        {/* Hash mismatch details */}
 diff --git a/components/PackageConfig.custom-detection.test.ts b/components/PackageConfig.custom-detection.test.ts
-index 9007629..c1472c8 100644
+index 90076292c..c1472c85b 100644
 --- a/components/PackageConfig.custom-detection.test.ts
 +++ b/components/PackageConfig.custom-detection.test.ts
 @@ -20,11 +20,15 @@ const manifestState = vi.hoisted(() => ({
@@ -3922,7 +4126,7 @@ index 9007629..c1472c8 100644
  });
 diff --git a/components/PackageConfig.layout.test.ts b/components/PackageConfig.layout.test.ts
 new file mode 100644
-index 0000000..b25e489
+index 000000000..b25e4899e
 --- /dev/null
 +++ b/components/PackageConfig.layout.test.ts
 @@ -0,0 +1,135 @@
@@ -4062,7 +4266,7 @@ index 0000000..b25e489
 +
 +it('renders a legacy partial saved snapshot without inventing or mutating its saved settings',async()=>{const partial={...deployed,psadtConfig:{deployMode:'Silent',allowDefer:true,deferTimes:3}};const original=JSON.stringify(partial);await render({isDeployed:true,deployedConfig:partial});expect(text()).toContain('Saved question settings are inactive');expect(JSON.stringify(partial)).toBe(original);await act(async()=>button('App handling and restart')!.click());expect(text()).toContain('No processes configured');await act(async()=>button('Add')!.click());expect(text()).not.toContain('No processes configured');});
 diff --git a/components/PackageConfig.recovery.test.ts b/components/PackageConfig.recovery.test.ts
-index f08f394..2336759 100644
+index f08f394ac..2336759bb 100644
 --- a/components/PackageConfig.recovery.test.ts
 +++ b/components/PackageConfig.recovery.test.ts
 @@ -15,11 +15,15 @@ vi.hoisted(() => {
@@ -4109,7 +4313,7 @@ index f08f394..2336759 100644
      await act(async () => add.click());
      expect(useCartStore.getState().items).toEqual([]);
 diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
-index eea1131..2f30f2d 100644
+index eea1131fe..2f30f2db6 100644
 --- a/components/PackageConfig.tsx
 +++ b/components/PackageConfig.tsx
 @@ -1,5 +1,12 @@
@@ -6812,7 +7016,7 @@ index 5d02b3a3d..248c2c265 100644
          return 'Queued';
        default:
 diff --git a/hooks/useAnalytics.ts b/hooks/useAnalytics.ts
-index ace1720ff..04859a25f 100644
+index ace1720ff..b42a52a8d 100644
 --- a/hooks/useAnalytics.ts
 +++ b/hooks/useAnalytics.ts
 @@ -10,7 +10,7 @@ export interface RecentActivityItem {
@@ -6824,6 +7028,64 @@ index ace1720ff..04859a25f 100644
    intuneAppUrl?: string;
    deployedBy?: string | null;
  }
+@@ -62,6 +62,7 @@ export interface AnalyticsSummary {
+ }
+ 
+ export interface AnalyticsData {
++  scope?: 'mine' | 'tenant';
+   summary: AnalyticsSummary;
+   dailyDeployments: DailyDeployment[];
+   topApps: TopApp[];
+@@ -115,20 +116,24 @@ export function useDashboardStats(scope: 'mine' | 'tenant' = 'mine') {
+   return query;
+ }
+ 
+-export function useAnalytics(days: number = 30) {
+-  const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
++// HRM item 105: 'tenant' reports on every staff member's deployments in the tenant.
++export function useAnalytics(days: number = 30, scope: 'mine' | 'tenant' = 'mine') {
++  const { getAccessToken, isAuthenticated, user } = useMicrosoftAuth();
++  const { isMspUser, selectedTenantId } = useMspOptional();
++  const tenantKey = scope === 'mine' ? 'personal' : isMspUser ? selectedTenantId || 'primary' : user?.tenantId;
+ 
+   return useQuery<AnalyticsData>({
+-    queryKey: ['analytics', 'full', days],
++    queryKey: ['analytics', 'full', days, scope, tenantKey, user?.id],
+     queryFn: async () => {
+       const token = await getAccessToken();
+       if (!token) {
+         throw new Error('Not authenticated');
+       }
+ 
+-      const response = await fetch(`/api/analytics?days=${days}`, {
++      const response = await fetch(`/api/analytics?days=${days}&scope=${scope}`, {
+         headers: {
+           Authorization: `Bearer ${token}`,
++          ...(scope === 'tenant' && isMspUser && selectedTenantId ? { 'X-MSP-Tenant-Id': selectedTenantId } : {}),
+         },
+       });
+ 
+@@ -145,16 +150,18 @@ export function useAnalytics(days: number = 30) {
+ 
+ export function useExportAnalytics() {
+   const { getAccessToken } = useMicrosoftAuth();
++  const { isMspUser, selectedTenantId } = useMspOptional();
+ 
+-  const exportCSV = async (days: number = 30) => {
++  const exportCSV = async (days: number = 30, scope: 'mine' | 'tenant' = 'mine') => {
+     const token = await getAccessToken();
+     if (!token) {
+       throw new Error('Not authenticated');
+     }
+ 
+-    const response = await fetch(`/api/analytics/export?days=${days}`, {
++    const response = await fetch(`/api/analytics/export?days=${days}&scope=${scope}`, {
+       headers: {
+         Authorization: `Bearer ${token}`,
++        ...(scope === 'tenant' && isMspUser && selectedTenantId ? { 'X-MSP-Tenant-Id': selectedTenantId } : {}),
+       },
+     });
+ 
 diff --git a/hooks/useNewVersionPrefill.ts b/hooks/useNewVersionPrefill.ts
 new file mode 100644
 index 000000000..aa092588b
@@ -6994,7 +7256,7 @@ index 000000000..ea607693c
 +});
 diff --git a/lib/hrm/__tests__/dispatch-failure.test.ts b/lib/hrm/__tests__/dispatch-failure.test.ts
 new file mode 100644
-index 0000000..35d15bb
+index 000000000..35d15bb56
 --- /dev/null
 +++ b/lib/hrm/__tests__/dispatch-failure.test.ts
 @@ -0,0 +1,16 @@
@@ -7163,7 +7425,7 @@ index 000000000..d6ee8f0e8
 +});
 diff --git a/lib/hrm/__tests__/replacement-deadlines.test.ts b/lib/hrm/__tests__/replacement-deadlines.test.ts
 new file mode 100644
-index 0000000..edc84bf
+index 000000000..edc84bf3a
 --- /dev/null
 +++ b/lib/hrm/__tests__/replacement-deadlines.test.ts
 @@ -0,0 +1,18 @@
@@ -7329,7 +7591,7 @@ index 000000000..c4ad1c9ab
 +}
 diff --git a/lib/hrm/dispatch-failure.ts b/lib/hrm/dispatch-failure.ts
 new file mode 100644
-index 0000000..cdc4f75
+index 000000000..cdc4f75ad
 --- /dev/null
 +++ b/lib/hrm/dispatch-failure.ts
 @@ -0,0 +1,16 @@
@@ -7542,7 +7804,7 @@ index 000000000..818619504
 +}
 diff --git a/lib/hrm/replacement-deadlines.ts b/lib/hrm/replacement-deadlines.ts
 new file mode 100644
-index 0000000..3d4f5b8
+index 000000000..3d4f5b8cb
 --- /dev/null
 +++ b/lib/hrm/replacement-deadlines.ts
 @@ -0,0 +1,18 @@

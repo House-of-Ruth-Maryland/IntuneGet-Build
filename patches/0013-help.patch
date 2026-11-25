@@ -11,7 +11,7 @@ index 000000000..ceaaa2f16
 +}
 diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
 new file mode 100644
-index 000000000..472408086
+index 000000000..cc226d110
 --- /dev/null
 +++ b/components/hrm/help/HelpVisual.tsx
 @@ -0,0 +1,88 @@
@@ -32,7 +32,7 @@ index 000000000..472408086
 +  settings: { label: 'Settings', href: '/dashboard/settings' },
 +  server: { label: 'Home', href: '/dashboard' },
 +  support: { label: 'HRM Support', href: HRM_SUPPORT_URL },
-+  reports: { primary: 'Activity', pages: ['Deployments', 'Reports'], label: 'Reports', href: '/dashboard/reports', heading: 'My deployment reports' },
++  reports: { primary: 'Activity', pages: ['Deployments', 'Reports'], label: 'Reports', href: '/dashboard/reports', heading: 'Deployment reports' },
 +};
 +
 +/** Primary navigation; secondary pages stay inside Apps and Activity. */
@@ -105,7 +105,7 @@ index 000000000..472408086
 +}
 diff --git a/components/hrm/help/HelpWorkspace.test.ts b/components/hrm/help/HelpWorkspace.test.ts
 new file mode 100644
-index 000000000..64581ff7d
+index 000000000..b756dbdef
 --- /dev/null
 +++ b/components/hrm/help/HelpWorkspace.test.ts
 @@ -0,0 +1,166 @@
@@ -191,8 +191,8 @@ index 000000000..64581ff7d
 +  window.history.replaceState(null, '', '/dashboard/help#reports');
 +  await act(async () => root.render(createElement(HelpWorkspace)));
 +  visual = document.querySelector('[aria-label^="Visual reference:"]')!;
-+  expect(visual.getAttribute('aria-label')).toContain('My deployment reports');
-+  expect(visual.textContent).toContain('My deployment reports');
++  expect(visual.getAttribute('aria-label')).toContain('Deployment reports');
++  expect(visual.textContent).toContain('Deployment reports');
 +  expect(visual.textContent).toContain('Reports');
 +});
 +it('places App updates steps in the status strip and Edit publishing window, and Home steps in Needs attention (HRM patch 0058)', async () => {
@@ -402,7 +402,7 @@ index 000000000..9ac6c1c4e
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 0000000..32e4d81
+index 000000000..f38dc2a3e
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -0,0 +1,222 @@
@@ -550,7 +550,7 @@ index 0000000..32e4d81
 +    for (const shortcut of GO_TO_SHORTCUTS) expect(settings).toContain(`${shortcut.key.toUpperCase()} ${shortcut.name}`);
 +    for (const group of HRM_NAV_LAYOUT) if (group.label) expect(settings).toContain(`${group.label} (`);
 +    expect(settings).not.toMatch(/Management|Analytics|Shortcuts card|Review updates/);
-+    for (const [id, fact] of [['installation-timing', 'Install dates under Actions'], ['updating', 'Deploy new version under Actions'], ['updating', 'Find in App catalog under Actions'], ['rollback', 'Under Actions, find Previous version'], ['retire', 'the last item under Actions'], ['reports', 'My deployment reports']]) {
++    for (const [id, fact] of [['installation-timing', 'Install dates under Actions'], ['updating', 'Deploy new version under Actions'], ['updating', 'Find in App catalog under Actions'], ['rollback', 'Under Actions, find Previous version'], ['retire', 'the last item under Actions'], ['reports', 'My deployment reports'], ['reports', 'Deployment reports'], ['reports', 'Show older deployments'], ['reports', 'Show all in tenant']]) {
 +      expect(HELP_SECTIONS.find((s) => s.id === id)!.points.join(' '), id).toContain(fact);
 +    }
 +    expect(HELP_SECTIONS.find((s) => s.id === 'installation-timing')!.points.join(' ')).toContain('reloads the whole app from Intune');
@@ -833,10 +833,10 @@ index 000000000..3328aa1a6
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 0000000..ad43055
+index 000000000..195aef7cf
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,587 @@
+@@ -0,0 +1,592 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -1403,12 +1403,17 @@ index 0000000..ad43055
 +  {
 +    id: 'reports',
 +    title: 'Reports',
-+    uiLabels: ['Reports', 'My deployment reports', 'Deployments', 'All in tenant', 'Failed', 'Cancelled', 'Dismiss', 'Clear cancelled history', 'Completed', 'All', 'Active'],
++    uiLabels: ['Reports', 'Deployment reports', 'My deployment reports', 'Export CSV', 'Deployments', 'All in tenant', 'My deployments', 'Show all in tenant', 'Show older deployments', 'Failed', 'Cancelled', 'Dismiss', 'Clear cancelled history', 'Completed', 'All', 'Active'],
 +    points: [
-+      'My deployment reports shows only deployments you started. In Deployments, All in tenant includes other owners. Each scope loads its newest 50 unarchived records before filtering by status. Inventory lists current apps beyond that history window. Failed excludes Cancelled deployments.',
++      'Reports opens on All in tenant with the heading Deployment reports, covering deployments started by anyone in your tenant. Choose My deployments to see My deployment reports, which counts only deployments you started.',
++      'Reports counts up to 5,000 deployments in the chosen date range. Export CSV follows the chosen scope. An All in tenant export adds a Deployed By column.',
++      'Deployments opens on All in tenant, which lists deployments started by all staff in your tenant. Choose My deployments for those you started. If you have started none, press Show all in tenant.',
++      'Deployments loads the newest 50. Show older deployments, at the end of the list, loads 50 more, up to 2,000. Counts and status filters cover only what is loaded. Changing between All in tenant and My deployments starts again at 50.',
++      'Dismissed and cleared deployments are not listed in either scope. Inventory lists current apps whatever Deployments shows. Failed excludes Cancelled deployments.',
++      'On Home, the deployment statistics also open on All in tenant. Choose My deployments there to count only your own.',
 +      'Dismiss hides one of your finished deployments. Clear cancelled history hides your cancellations; Completed and Failed clear their outcomes. All clears your finished history. Active has no clear action. Audit records stay.',
 +    ],
-+    links: [{ label: 'Open Deployments', href: '/dashboard/uploads' }],
++    links: [{ label: 'Open Reports', href: '/dashboard/reports' }, { label: 'Open Deployments', href: '/dashboard/uploads' }],
 +  },
 +  {
 +    id: 'support',
@@ -1426,10 +1431,10 @@ index 0000000..ad43055
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 0000000..bf797ff
+index 000000000..be8712dc4
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
-@@ -0,0 +1,403 @@
+@@ -0,0 +1,404 @@
 +/** Task-first Help. Detailed rules remain in help-content; indexes are zero-based. */
 +export type HelpScreen = 'catalog' | 'deployment-list' | 'updates' | 'inventory' | 'deployments' | 'discovered' | 'settings' | 'server' | 'support' | 'reports';
 +export type HelpCategory = 'deploy' | 'updates' | 'devices' | 'troubleshoot' | 'settings';
@@ -1803,11 +1808,12 @@ index 0000000..bf797ff
 +  },
 +  {
 +    id: 'reports', category: 'devices', title: 'Review deployment results and history',
-+    summary: 'Check deployment trends, distinguish failed and cancelled outcomes, and hide only the finished history you own.', keywords: ['reports', 'trends', 'all in tenant', 'history', 'staff', 'failed', 'cancelled', 'dismiss', 'clear history'],
-+    start: { label: 'Open Activity, then Reports', href: '/dashboard/reports' }, before: ['Reports includes only deployments you started. Deployments loads the newest 50 unarchived records in the selected scope before filtering.', 'Dismiss and clear-history controls are available only for your finished deployments.'],
++    summary: 'Check deployment trends for your tenant or yourself, distinguish failed and cancelled outcomes, and hide only the finished history you own.', keywords: ['reports', 'trends', 'all in tenant', 'my deployments', 'show older deployments', 'export CSV', 'deployed by', 'history', 'staff', 'failed', 'cancelled', 'dismiss', 'clear history'],
++    start: { label: 'Open Activity, then Reports', href: '/dashboard/reports' }, before: ['Reports and Deployments open on All in tenant. Choose My deployments for only those you started.', 'Dismiss and clear-history controls are available only for your finished deployments.'],
 +    steps: [
-+      step('Read your report', 'Open Activity, then Reports. My deployment reports shows the outcomes and trends for deployments you started.', 'reports', 'My deployment reports', 'The report’s personal scope is clear.'),
-+      step('Choose whose history to view', 'Open Deployments to inspect recorded outcomes. Choose All in tenant when you need deployments started by other staff.', 'deployments', 'All in tenant', 'Deployments shows the selected personal or tenant-wide scope.'),
++      step('Read the report', 'Open Activity, then Reports. Deployment reports shows outcomes and trends for deployments started by anyone in your tenant. Choose My deployments to count only yours.', 'reports', 'Deployment reports', 'The heading names whose deployments are counted.'),
++      step('Choose whose history to view', 'Open Deployments. It opens on All in tenant, listing deployments started by all staff. Choose My deployments for those you started.', 'deployments', 'All in tenant', 'Deployments lists the chosen scope, newest first.'),
++      step('Load older deployments', 'When older deployments remain, press Show older deployments at the end of the list to load 50 more. Counts and status filters cover only the loaded deployments.', 'deployments', 'Show older deployments', 'Older deployments join the list, counts and filters.'),
 +      step('Separate failed and cancelled outcomes', 'Choose Failed for failures, including failed installation checks. Choose Cancelled for cancellations; these are not counted as Failed.', 'deployments', 'Cancelled', 'Cancelled deployments have their own outcome instead of appearing as failures.'),
 +      step('Dismiss one finished deployment', 'For one of your finished deployments, press Dismiss and confirm. This hides the card without deleting its deployment audit or update records.', 'deployments', 'Dismiss', 'Your finished deployment is hidden; other staff’s deployments are unchanged.'),
 +      step('Clear the matching history', 'Choose Completed, Failed or Cancelled, then clear that history. All clears your finished history. Active has no clear action.', 'deployments', 'Clear cancelled history', 'Only your matching finished deployments are hidden; audit and update records remain.'),
@@ -1815,8 +1821,8 @@ index 0000000..bf797ff
 +    success: 'You can distinguish failed and cancelled outcomes and hide only the finished history you own, with audit records preserved.',
 +    caution: 'History controls do not stop active deployments or hide other staff’s records. Deployment trends describe deployment outcomes, not proof of installation on each computer.',
 +    related: ['install-results', 'app-activity', 'support'],
-+    troubleshoot: [{ problem: 'Another staff member’s deployment is absent', action: 'Use All in tenant in Deployments; Reports is scoped to your own deployments.' }, { problem: 'There is no clear-history action', action: 'Active has no clear action. Choose a finished-outcome filter with at least one of your own deployments; other staff’s history cannot be cleared.' }],
-+    referenceGroups: [reference('Personal reports, outcomes and history controls', [0, 1])],
++    troubleshoot: [{ problem: 'Another staff member’s deployment is absent', action: 'Choose All in tenant in Deployments or Reports. For an older one, press Show older deployments. Dismissed and cleared deployments stay hidden.' }, { problem: 'A count or status filter in Deployments looks too low', action: 'Counts and filters cover only the loaded deployments. Press Show older deployments until the button no longer shows.' }, { problem: 'There is no clear-history action', action: 'Active has no clear action. Choose a finished-outcome filter with at least one of your own deployments; other staff’s history cannot be cleared.' }],
++    referenceGroups: [reference('Report scope and export', [0, 1]), reference('Deployments scope and older history', [2, 3, 5]), reference('Outcomes and history controls', [4, 6])],
 +  },
 +  {
 +    id: 'support', category: 'troubleshoot', title: 'Investigate a failed deployment',
