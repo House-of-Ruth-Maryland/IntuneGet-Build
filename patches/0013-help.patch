@@ -402,7 +402,7 @@ index 000000000..9ac6c1c4e
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 0000000..32e4d81
+index 000000000..32e4d81de
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -0,0 +1,222 @@
@@ -833,10 +833,10 @@ index 000000000..3328aa1a6
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 0000000..ad43055
+index 000000000..5a041289a
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,587 @@
+@@ -0,0 +1,592 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -855,7 +855,7 @@ index 0000000..ad43055
 +export const HELP_SECTIONS: HelpSection[] = [
 +  {
 +    id: 'install-settings', title: 'Installation settings',
-+    uiLabels: ['Installation and staff experience', 'Toolkit windows', 'No toolkit windows', 'No questions; status windows allowed', 'Ask when needed (automatic)', 'Staff experience', 'App setup and checks', 'App handling and restart', 'Disk space check', 'Postponement', 'Toolkit messages and appearance', 'Package restart countdown', 'Use installer return codes', 'Save to Deployment list'],
++    uiLabels: ['Installation and staff experience', 'Toolkit windows', 'No toolkit windows', 'No questions; status windows allowed', 'Ask when needed (automatic)', 'Staff experience', 'App setup and checks', 'App handling and restart', 'Disk space check', 'Postponement', 'Offer timed reminders', 'Toolkit messages and appearance', 'Package restart countdown', 'Use installer return codes', 'Save to Deployment list'],
 +    flow: ['Choose toolkit windows', 'Review background checks', 'Read Staff experience', 'Save to Deployment list'],
 +    points: [
 +      'In the app configuration or Edit settings, open Installation and staff experience. Toolkit windows controls the wrapper around the installer. The vendor installer still follows its configured command and switches; Intune notifications are separate.',
@@ -864,7 +864,12 @@ index 0000000..ad43055
 +      'Ask when needed (automatic) lets the toolkit check the signed-in session, setup state and running apps. It may run silently when nobody can answer or the configured apps are not running. It is not the vendor installer choosing.',
 +      'Changing Toolkit windows keeps saved values. Toolkit messages and appearance shows applicable controls only. Staff experience identifies inactive choices; switching back restores their controls and values.',
 +      'Under App setup and checks, App handling and restart manages listed apps; Disk space check runs before installation, even without toolkit windows. Leave its minimum blank for package source size. Insufficient space stops installation.',
-+      'Postponement needs interactive mode. Use an attempt count with either days or a date. Combining both time limits is rejected because the toolkit stores one deadline. Saved inactive values remain. Employee scheduling and bounded restart fallback are unavailable.',
++      'Postponement needs Ask when needed. Use a count with either days or a date. The standard toolkit stores one deadline, so combining both is rejected. A free time picker and a bounded restart fallback are unavailable.',
++      'Offer timed reminders appears under Postponement only after the paired packaging workflow is verified for this server. Until then it is hidden and off. With it on, days and a date can be combined, and the earlier limit wins.',
++      'Timed reminders support machine-wide MSI and EXE apps with automatic detection. Deployment is refused for Curated apps, apps with setup profiles and the local packager. With restart Beta, the setting stays saved and inactive.',
++      'Staff see Install now, Remind me in an hour and Tomorrow, which means 9 a.m. on that computer. A reminder button appears only while the count and time limits allow it. Only reminder choices use the count.',
++      'The computer keeps the next reminder time across retries and restarts. Until then, attempts return Retry and the app is not marked installed. Intune asks again at its first attempt after that time, so offline computers are asked later.',
++      'Silent attempts ask nothing and install unless a reminder is waiting. The reminder window closes after 10 minutes with Retry and uses no count. Once the count or time limit is reached, the next attempt installs without offering a reminder.',
 +      'Use installer return codes follows installer results and Intune assignment settings. Package restart countdown is separate: it can restart after installation without a reboot-required result, including silently when nobody is signed in.',
 +      'The local packager does not generate branding, status messages or package restart countdowns and suppresses Intune restarts. Its automatic mode is unavailable here. If capabilities cannot be verified, sign in and reload; unsupported controls remain hidden.',
 +      'Read Staff experience before Save to Deployment list or Add to Deployment list. Saving a draft does not change a deployed package. Current-copy groups and categories use Save to Intune; packaged installer changes require deployment again.',
@@ -1112,7 +1117,7 @@ index 0000000..ad43055
 +  {
 +    id: 'automatic-installation-policy',
 +    title: 'Installation timing for automatic updates',
-+    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Next automatic update', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Installation timing', 'Edit shared policy', 'Edit next rollout', 'Review next rollout', 'Review current copy and install dates', 'Search', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot'],
++    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Next automatic update', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Installation timing', 'Edit shared policy', 'Edit next rollout', 'Review next rollout', 'Review current copy and install dates', 'Search', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot', 'Offer timed reminders'],
 +    flow: ['Open app workspace', 'Review current saved version', 'Edit next rollout', 'Review saved rule', 'Save for this app'],
 +    points: [
 +      'In App updates or Deployments, press Open app workspace. Inventory opens the selected app, with Install results above Current release and Next automatic update. The app title on an App updates card also opens this workspace.',
@@ -1122,8 +1127,8 @@ index 0000000..ad43055
 +      'Under Installation timing, choose Let users install now or postpone and Days users can postpone. Save for this app saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
 +      'Use each app’s saved settings preserves existing configurations and is the default; restart Beta is off by default. It does not mean silent installation. Install automatically is separate. Current and queued packages keep their settings.',
 +      'Postponement starts at each computer’s first install attempt, not when the server finds or deploys a version. Offline computers start later. After expiry, the next Intune attempt enforces installation, without an exact appointment.',
-+      'Postponement uses the installer toolkit. Prompts may be skipped when nobody is signed in or no app needs closing. Retry and reminder times follow Intune attempts, not an employee-selected time.',
-+      'An employee time picker, absolute release cutoff and bounded startup fallback are unavailable. What employees see describes the saved installer experience; it does not schedule installation or save employee choices.',
++      'Postponement uses the installer toolkit. Prompts may be skipped when nobody is signed in or no app needs closing. Retry times follow Intune attempts. Staff pick a reminder time only in a package saved with Offer timed reminders.',
++      'A free employee time picker, absolute release cutoff and bounded startup fallback are unavailable. What employees see describes the saved installer experience; it does not schedule installation or save employee choices.',
 +      'Ordinary rules affect future automatic packages; manual updates and ordinary pilots keep their reviewed settings. Restart Beta requires an enabled validated startup workflow, holds broad automatic updates and requires Start restart Beta pilot. Saving a rule never starts deployment or rewrites a current package.',
 +      'Current release shows Who gets it, Install behavior, Restart after installation and What employees see. Install dates edits this copy. Expand Timing and policy details for timing limits, or App activity for recorded changes.',
 +      'Update history records packaging and deployment. Deployed to Intune means the app reached Intune, not that computers installed it. The workspace shows live aggregate results and their last check time.',
@@ -1426,7 +1431,7 @@ index 0000000..ad43055
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 0000000..bf797ff
+index 000000000..28d046d5a
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,403 @@
@@ -1463,7 +1468,7 @@ index 0000000..bf797ff
 +  {
 +    id: 'install-settings', category: 'deploy', title: 'Choose installation settings',
 +    summary: 'Separate installer commands, toolkit questions, background checks and restart handling before saving a deployment.',
-+    keywords: ['silent', 'NonInteractive', 'Auto', 'installer decides', 'progress only', 'Nothing it installs silently', 'More settings', 'What staff see during install', 'Letting staff postpone', 'toolkit windows', 'postponement', 'disk space', 'restart countdown', 'inactive settings'],
++    keywords: ['silent', 'NonInteractive', 'Auto', 'installer decides', 'progress only', 'Nothing it installs silently', 'More settings', 'What staff see during install', 'Letting staff postpone', 'toolkit windows', 'postponement', 'timed reminders', 'remind me in an hour', 'tomorrow', 'disk space', 'restart countdown', 'inactive settings'],
 +    start: catalog, before: ['Know whether the app needs running programs closed.', 'Review the vendor installer command separately from toolkit windows.'],
 +    steps: [
 +      step('Choose toolkit windows', 'Open the app configuration and choose Toolkit windows. This controls the toolkit, not the vendor installer switches.', 'catalog', 'Toolkit windows', 'Only settings supported by this mode and packaging service are offered.'),
@@ -1474,7 +1479,7 @@ index 0000000..bf797ff
 +    caution: 'A package restart countdown can restart even when the installer did not request it. Check before enabling it.',
 +    related: ['deploying', 'automatic-installation-policy', 'installation-timing'],
 +    troubleshoot: [{ problem: 'Controls are missing', action: 'Check Toolkit windows and the packaging service. Inactive settings are kept; local packaging does not support every toolkit feature.' }],
-+    referenceGroups: [reference('Toolkit modes and retained values', [0, 1, 2, 3, 4]), reference('Checks, postponement and restarts', [5, 6, 7]), reference('Packaging support and saving', [8, 9])],
++    referenceGroups: [reference('Toolkit modes and retained values', [0, 1, 2, 3, 4]), reference('Checks, postponement and restarts', [5, 6, 12]), reference('Timed reminders', [7, 8, 9, 10, 11]), reference('Packaging support and saving', [13, 14])],
 +  },
 +  {
 +    id: 'deploying', category: 'deploy', title: 'Deploy an app',
@@ -1616,7 +1621,7 @@ index 0000000..bf797ff
 +      step('Check a deployed release', 'In Update history, expand the deployed version and read Installation policy for this release. Its install results show there and in Inventory.', 'updates', 'Installation policy for this release', 'You can separate a package’s saved rule from install results on computers.'),
 +    ],
 +    success: 'Next automatic update reflects the saved policy; the current copy and its live results remain separately visible.',
-+    caution: 'Postponement starts at each computer’s first install attempt and isn’t reported in Update history. Employee choose time, an absolute cutoff and bounded startup fallback are unavailable; What employees see describes the saved installer experience.',
++    caution: 'Postponement starts at each computer’s first install attempt and isn’t reported in Update history. A free employee time picker, an absolute cutoff and bounded startup fallback are unavailable; What employees see describes the saved installer experience.',
 +    related: ['update-schedule', 'installation-timing', 'startup-beta'],
 +    troubleshoot: [{ problem: 'An existing package did not change', action: 'Policy edits do not change queued or deployed packages. Check the release’s saved policy.' }, { problem: 'You need installation only after restart', action: 'Save the per-app startup Beta target, then use Start restart Beta pilot; saving alone does not deploy.', guide: 'startup-beta' }],
 +    referenceGroups: [reference('App workspace, scope and saving', [0, 1, 2, 3, 4, 5, 9, 10]), reference('Postponement and prompts on computers', [6, 7, 8]), reference('Deployed release evidence and other timing controls', [11, 12, 13, 14])],
