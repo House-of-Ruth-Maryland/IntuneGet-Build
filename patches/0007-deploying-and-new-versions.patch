@@ -2155,7 +2155,7 @@ index cfc35553c..4a0da91f6 100644
    });
  });
 diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
-index 68bc640bf..1bc658631 100644
+index 68bc640..4ca4ba6 100644
 --- a/components/CartItemConfig.tsx
 +++ b/components/CartItemConfig.tsx
 @@ -1,6 +1,13 @@
@@ -2212,6 +2212,33 @@ index 68bc640bf..1bc658631 100644
    const [processesError, setProcessesError] = useState<string | null>(null);
  
    const modalRef = useFocusTrap<HTMLDivElement>();
+@@ -181,7 +203,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+     setConfig((prev) => ({
+       ...prev,
+       processesToClose: [
+-        ...prev.processesToClose,
++        ...(prev.processesToClose || []),
+         { name: '', description: '' },
+       ],
+     }));
+@@ -191,7 +213,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+     setProcessesError(null);
+     setConfig((prev) => ({
+       ...prev,
+-      processesToClose: prev.processesToClose.filter((_, i) => i !== index),
++      processesToClose: (prev.processesToClose || []).filter((_, i) => i !== index),
+     }));
+   };
+ 
+@@ -199,7 +221,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+     setProcessesError(null);
+     setConfig((prev) => ({
+       ...prev,
+-      processesToClose: prev.processesToClose.map((p, i) =>
++      processesToClose: (prev.processesToClose || []).map((p, i) =>
+         i === index ? { ...p, ...updates } : p
+       ),
+     }));
 @@ -236,6 +258,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
    };
  
@@ -2504,7 +2531,18 @@ index 68bc640bf..1bc658631 100644
                        </label>
                        <button
                          onClick={addProcess}
-@@ -592,6 +645,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -583,15 +636,16 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+                       </button>
+                     </div>
+                     <div className="space-y-2">
+-                      {config.processesToClose.length === 0 ? (
++                      {(config.processesToClose || []).length === 0 ? (
+                         <p className="text-text-muted text-sm italic">No processes configured</p>
+                       ) : (
+-                        config.processesToClose.map((process, index) => (
++                        (config.processesToClose || []).map((process, index) => (
+                           <div key={index} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                             <input
                                type="text"
                                value={process.name}
                                onChange={(e) => updateProcess(index, { name: e.target.value })}
@@ -3826,7 +3864,7 @@ index 086e99f..4c0514b 100644
  
        {/* Hash mismatch details */}
 diff --git a/components/PackageConfig.custom-detection.test.ts b/components/PackageConfig.custom-detection.test.ts
-index 90076292c..92d125609 100644
+index 9007629..c1472c8 100644
 --- a/components/PackageConfig.custom-detection.test.ts
 +++ b/components/PackageConfig.custom-detection.test.ts
 @@ -20,11 +20,15 @@ const manifestState = vi.hoisted(() => ({
@@ -3860,7 +3898,7 @@ index 90076292c..92d125609 100644
  
  async function save() {
 -  await click(buttonWithText('Add to Selection'));
-+  await click(buttonWithText('Add to deployment'));
++  await click(buttonWithText('Add to Deployment list'));
    return useCartStore.getState().items[0] as Win32CartItem | undefined;
  }
  
@@ -3884,10 +3922,10 @@ index 90076292c..92d125609 100644
  });
 diff --git a/components/PackageConfig.layout.test.ts b/components/PackageConfig.layout.test.ts
 new file mode 100644
-index 000000000..c38902c7e
+index 0000000..b25e489
 --- /dev/null
 +++ b/components/PackageConfig.layout.test.ts
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,135 @@
 +// @vitest-environment happy-dom
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { act, createElement } from 'react';
@@ -4021,8 +4059,10 @@ index 000000000..c38902c7e
 +    expect(useCartStore.getState().items[0]).toMatchObject({ forceCreate: true, replacesIntuneAppId: '00000000-0000-0000-0000-00000000000a' });
 +  });
 +});
++
++it('renders a legacy partial saved snapshot without inventing or mutating its saved settings',async()=>{const partial={...deployed,psadtConfig:{deployMode:'Silent',allowDefer:true,deferTimes:3}};const original=JSON.stringify(partial);await render({isDeployed:true,deployedConfig:partial});expect(text()).toContain('Saved question settings are inactive');expect(JSON.stringify(partial)).toBe(original);await act(async()=>button('App handling and restart')!.click());expect(text()).toContain('No processes configured');await act(async()=>button('Add')!.click());expect(text()).not.toContain('No processes configured');});
 diff --git a/components/PackageConfig.recovery.test.ts b/components/PackageConfig.recovery.test.ts
-index f08f394ac..bb3d784a4 100644
+index f08f394..2336759 100644
 --- a/components/PackageConfig.recovery.test.ts
 +++ b/components/PackageConfig.recovery.test.ts
 @@ -15,11 +15,15 @@ vi.hoisted(() => {
@@ -4046,7 +4086,7 @@ index f08f394ac..bb3d784a4 100644
        deployedConfig: { ...oldItem, version: '3.0' }, onClose: vi.fn(),
      })));
 -    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Selection'))!;
-+    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to deployment'))!;
++    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Deployment list'))!;
      expect(add.disabled).toBe(false);
      await act(async () => add.click());
      expect(useCartStore.getState().items[0]).toMatchObject({ version: 'v3.0', installerUrl: installer.url });
@@ -4055,7 +4095,7 @@ index f08f394ac..bb3d784a4 100644
      })));
      expect(useCartStore.getState().items[0].version).toBe('1.0');
 -    const save = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Update Selection'))!;
-+    const save = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Update in deployment'))!;
++    const save = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Save to Deployment list'))!;
      expect(save.disabled).toBe(false);
      await act(async () => save.click());
      expect(useCartStore.getState().items).toHaveLength(1);
@@ -4064,12 +4104,12 @@ index f08f394ac..bb3d784a4 100644
      })));
      expect(document.querySelector('[role="alert"]')?.textContent).toContain('no longer available');
 -    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Selection'))!;
-+    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to deployment'))!;
++    const add = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Add to Deployment list'))!;
      expect(add.disabled).toBe(true);
      await act(async () => add.click());
      expect(useCartStore.getState().items).toEqual([]);
 diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
-index eea1131fe..81c49e2b8 100644
+index eea1131..2f30f2d 100644
 --- a/components/PackageConfig.tsx
 +++ b/components/PackageConfig.tsx
 @@ -1,5 +1,12 @@
@@ -4188,7 +4228,7 @@ index eea1131fe..81c49e2b8 100644
    // Installers always arrive for the package's default (latest) version. When the
    // user selects a different version we must re-fetch so the installer URL/SHA
    // (which flow straight into the cart item) match the chosen version rather than
-@@ -334,6 +355,12 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -334,9 +355,15 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
        nestedInstallerType: selectedInstaller.nestedInstallerType,
      });
    const customDetectionActive = config.customDetection === true && customDetectionSupported;
@@ -4200,7 +4240,20 @@ index eea1131fe..81c49e2b8 100644
 +  });
    const lastCustomRulesRef = useRef<DetectionRule[] | null>(null);
    useEffect(() => {
-     if (customDetectionActive) lastCustomRulesRef.current = config.detectionRules;
+-    if (customDetectionActive) lastCustomRulesRef.current = config.detectionRules;
++    if (customDetectionActive) lastCustomRulesRef.current = config.detectionRules || [];
+   }, [customDetectionActive, config.detectionRules]);
+   const availableArchitectures = [...new Set(effectiveInstallers.map((i) => i.architecture))];
+   const availableVersions = versions.length > 0 ? versions : (pkg.versions ?? []);
+@@ -443,7 +470,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+       lastCustomRulesRef.current = rules;
+       setConfig((prev) => ({ ...prev, customDetection: true, detectionRules: rules }));
+     } else {
+-      lastCustomRulesRef.current = config.detectionRules;
++      lastCustomRulesRef.current = config.detectionRules || [];
+       setConfig((prev) => {
+         const { customDetection: _customDetection, ...rest } = prev;
+         return rest;
 @@ -453,6 +480,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
  
    const handleAddToCart = async () => {
@@ -4245,6 +4298,33 @@ index eea1131fe..81c49e2b8 100644
        setSettingsSuccess(true);
        setTimeout(() => onClose(), 1200);
      } catch (err) {
+@@ -598,7 +636,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     setConfig((prev) => ({
+       ...prev,
+       processesToClose: [
+-        ...prev.processesToClose,
++        ...(prev.processesToClose || []),
+         { name: '', description: '' },
+       ],
+     }));
+@@ -608,7 +646,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     setProcessesError(null);
+     setConfig((prev) => ({
+       ...prev,
+-      processesToClose: prev.processesToClose.filter((_, i) => i !== index),
++      processesToClose: (prev.processesToClose || []).filter((_, i) => i !== index),
+     }));
+   };
+ 
+@@ -616,7 +654,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     setProcessesError(null);
+     setConfig((prev) => ({
+       ...prev,
+-      processesToClose: prev.processesToClose.map((p, i) =>
++      processesToClose: (prev.processesToClose || []).map((p, i) =>
+         i === index ? { ...p, ...updates } : p
+       ),
+     }));
 @@ -695,18 +733,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                <div className="flex items-start gap-3 p-3 bg-accent-cyan/10 border border-accent-cyan/20 rounded-lg">
                  <RefreshCw className="w-5 h-5 text-accent-cyan flex-shrink-0 mt-0.5" />
@@ -4439,7 +4519,7 @@ index eea1131fe..81c49e2b8 100644
 +                  )}
 +                  {customDetectionActive ? (
 +                    <CustomDetectionEditor
-+                      rules={config.detectionRules}
++                      rules={config.detectionRules || []}
 +                      onChange={(detectionRules) => {
 +                        setCustomDetectionErrors([]);
 +                        lastCustomRulesRef.current = detectionRules;
@@ -4448,10 +4528,10 @@ index eea1131fe..81c49e2b8 100644
 +                      errors={customDetectionErrors}
 +                    />
 +                  ) : <>
-+                  {config.detectionRules.length === 0 ? (
++                  {(config.detectionRules || []).length === 0 ? (
 +                    <p className="text-text-muted text-sm italic">No detection rules configured</p>
 +                  ) : (
-+                    config.detectionRules.map((rule, index) => (
++                    (config.detectionRules || []).map((rule, index) => (
 +                      <div key={index} className="bg-bg-elevated/50 rounded-lg p-3">
 +                        <div className="flex items-center gap-2 mb-2">
 +                          <span className="px-2 py-0.5 bg-accent-cyan/10 text-accent-cyan text-xs font-medium rounded uppercase">
@@ -4582,7 +4662,18 @@ index eea1131fe..81c49e2b8 100644
                        </label>
                        <button
                          onClick={addProcess}
-@@ -1101,6 +1238,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1092,15 +1229,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+                       </button>
+                     </div>
+                     <div className="space-y-2">
+-                      {config.processesToClose.length === 0 ? (
++                      {(config.processesToClose || []).length === 0 ? (
+                         <p className="text-text-muted text-sm italic">No processes configured</p>
+                       ) : (
+-                        config.processesToClose.map((process, index) => (
++                        (config.processesToClose || []).map((process, index) => (
+                           <div key={index} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                             <input
                                type="text"
                                value={process.name}
                                onChange={(e) => updateProcess(index, { name: e.target.value })}
@@ -4724,7 +4815,7 @@ index eea1131fe..81c49e2b8 100644
                        value={config.windowLocation || 'Default'}
                        onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
                        className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-@@ -1210,70 +1371,249 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1210,71 +1371,250 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        <option value="Center">Center</option>
                        <option value="Top">Top</option>
                        <option value="Bottom">Bottom</option>
@@ -4857,6 +4948,9 @@ index eea1131fe..81c49e2b8 100644
 -                      <div>
 -                        <label className="block text-sm font-medium text-text-secondary mb-2">
 -                          Deferral days limit (optional)
+-                        </label>
+-                        <input
+-                          type="number"
 +                  {/* Custom Install Command */}
 +                  <div>
 +                    <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -4994,8 +5088,7 @@ index eea1131fe..81c49e2b8 100644
 +                      {!config.deferByDaysOnly && <div>
 +                        <label htmlFor="package-defer-count" className="block text-sm font-medium text-text-secondary mb-2">
 +                          Maximum postponements
-                         </label>
--                        <input
++                        </label>
 +                        <input id="package-defer-count"
 +                          type="number"
 +                          min="0"
@@ -5012,9 +5105,10 @@ index eea1131fe..81c49e2b8 100644
 +                          Deferral days limit (optional)
 +                        </label>
 +                        <input id="package-defer-days"
-                           type="number"
++                          type="number"
                            min="1"
                            max="365"
+                           value={config.deferDays || ''}
 @@ -1282,50 +1622,35 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            placeholder="No limit"
                            className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
@@ -5187,11 +5281,12 @@ index eea1131fe..81c49e2b8 100644
                            </span>
                          </div>
 -                        <p className="text-text-muted text-xs mt-1">Time before restart when user cannot dismiss the dialog</p>
--                      </div>
--                    </div>
--                  )}
--                </div>
--              </ConfigSection>}
++                        <p className="text-text-muted text-xs mt-1">Time before the restart when staff can't close the dialog</p>
+                       </div>
+                     </div>
+                   )}
+                 </div>
+               </ConfigSection>}
 -
 -              {/* Disk Space Check (advanced only, win32 only) */}
 -              {!isStoreApp && (visibleSections === null || visibleSections.includes('diskspace')) && <ConfigSection
@@ -5224,13 +5319,12 @@ index eea1131fe..81c49e2b8 100644
 -                          className="w-32 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
 -                        />
 -                        <span className="text-text-muted text-sm">MB</span>
-+                        <p className="text-text-muted text-xs mt-1">Time before the restart when staff can't close the dialog</p>
-                       </div>
+-                      </div>
 -                      <p className="text-text-muted text-xs mt-1">Leave empty to auto-detect from installer size</p>
-                     </div>
-                   )}
-                 </div>
-               </ConfigSection>}
+-                    </div>
+-                  )}
+-                </div>
+-              </ConfigSection>}
 -
 -              {/* Detection Rules (quick + advanced, win32 only) */}
 -              {!isStoreApp && (visibleSections === null || visibleSections.includes('detection')) && <ConfigSection
@@ -5633,7 +5727,7 @@ index eea1131fe..81c49e2b8 100644
                  <>
                    <Plus className="w-5 h-5 mr-2" />
 -                  {replaceCartItemId ? 'Update Selection' : 'Add to Selection'}
-+                  {replaceCartItemId ? 'Update in deployment' : 'Add to deployment'}
++                  {replaceCartItemId ? 'Save to Deployment list' : 'Add to Deployment list'}
                  </>
                )}
              </Button>

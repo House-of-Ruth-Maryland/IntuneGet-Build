@@ -1122,19 +1122,19 @@ index 000000000..50bdd42af
 +}
 diff --git a/components/hrm/AppWorkspace.test.ts b/components/hrm/AppWorkspace.test.ts
 new file mode 100644
-index 0000000..b7d73fb
+index 0000000..b0db401
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.test.ts
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,54 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot } from 'react-dom/client';
 +import { afterEach, expect, it, vi } from 'vitest';
-+const state = vi.hoisted(() => ({ otherTenant: false, policyTenant:'own', defer:false, attempt:null as any }));
++const state = vi.hoisted(() => ({ otherTenant: false, policyTenant:'own',policyError:false, defer:false, attempt:null as any }));
 +vi.mock('@/hooks/use-inventory', () => ({ useInventoryIcon: () => ({data:null}), useAppDetails: () => ({ data: { app: { id: 'one', displayName: 'Fixture app', displayVersion: '1', installExperience: { deviceRestartBehavior: 'suppress' } } } }) }));
 +vi.mock('@/hooks/useAppInsights', () => ({ useAppInsights: () => ({ data: { appId:'one',family:'Vendor.App',latestAttempt:state.attempt,snapshot: { appId: 'one', wingetId: 'Vendor.App' } } }) }));
 +vi.mock('@/hooks/use-deployed-config', () => ({ useDeployedConfig: () => ({ deployedConfig: { psadtConfig: { deployMode: 'Silent',allowDefer:state.defer,deferTimes:3 } } }) }));
-+vi.mock('@/hooks/use-updates', () => ({ useUpdatePolicies: () => ({ data: { policies: [{ id: 'policy',tenant_id:state.policyTenant, winget_id: 'Vendor.App', policy_type: 'auto_update' }] } }) }));
++vi.mock('@/hooks/use-updates', () => ({ useUpdatePolicies: () => ({error:state.policyError?Error('read failed'):null, data: { policies: [{ id: 'policy',tenant_id:state.policyTenant, winget_id: 'Vendor.App', policy_type: 'auto_update' }] } }) }));
 +vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { shared: { mode: 'prompt', days: 3 }, exceptions: [] } }) }));
 +vi.mock('@/hooks/useMspOptional', () => ({ useMspOptional: () => ({ isMspUser: true, selectedTenantId: state.otherTenant ? 'other' : 'own' }) }));
 +vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ account: { tenantId: 'own' } }) }));
@@ -1149,7 +1149,7 @@ index 0000000..b7d73fb
 +vi.mock('@/hooks/usePilots', () => ({ usePilots: () => ({ data: { supported: true, pilots: [] } }) }));
 +import { AppWorkspace } from './AppWorkspace';
 +(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-+afterEach(() => { document.body.innerHTML = ''; state.otherTenant = false;state.policyTenant='own';state.defer=false;state.attempt=null; });
++afterEach(() => { document.body.innerHTML = ''; state.otherTenant = false;state.policyTenant='own';state.policyError=false;state.defer=false;state.attempt=null; });
 +it('shows current and next scopes, outcomes first and effective rules without speculative controls', async () => {
 +  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
 +  await act(async () => root.render(createElement(AppWorkspace, { appId: 'one' })));
@@ -1178,9 +1178,11 @@ index 0000000..b7d73fb
 +it('keeps a healthy current copy alongside failed newer and archived attempt evidence, with inactive saved deferrals',async()=>{state.defer=true;state.attempt={id:'attempt-v2',version:'2',status:'failed',createdAt:'2026-01-02T00:00:00Z',archived:true,owned:false,errorCode:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',errorMessage:'Unsupported assignment settings.'};const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Version 2');expect(node.textContent).toContain('Installed10');expect(node.textContent).toContain('Archived from deployment history');expect(node.textContent).toContain('Version in Intune');expect(node.textContent).toContain('Saved postponement is inactive');expect(node.textContent).not.toContain('The installer may ask employees');await act(async()=>root.unmount());});
 +
 +it('does not show a same-family policy from a different tenant',async()=>{state.policyTenant='foreign';const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Your update policy: Not reported');expect(node.textContent).not.toContain('Edit next rollout');await act(async()=>root.unmount());});
++
++it('does not describe a policy read failure as no active policy',async()=>{state.policyError=true;const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Could not read your update policy');expect(node.textContent).not.toContain('No automatic update policy is active');expect(node.textContent).not.toContain('Edit next rollout');await act(async()=>root.unmount());});
 diff --git a/components/hrm/AppWorkspace.tsx b/components/hrm/AppWorkspace.tsx
 new file mode 100644
-index 0000000..b27a765
+index 0000000..1cca1c1
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.tsx
 @@ -0,0 +1,102 @@
@@ -1248,7 +1250,7 @@ index 0000000..b27a765
 +    <header className="flex flex-wrap items-center gap-4">
 +      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-overlay/10 bg-bg-elevated">{icon.data?.icon?.value && !iconFailed ? <img onError={() => setIconFailed(true)} src={`data:${icon.data.icon.type || 'image/png'};base64,${icon.data.icon.value}`} alt={app.displayName} className="h-10 w-10 object-contain" /> : <AppIcon packageId={family || app.displayName} packageName={app.displayName} size="xl" className="h-12 w-12" />}</div>
 +      <div className="min-w-0"><h1 className="break-words text-2xl font-semibold text-text-primary">{app.displayName}</h1><p className="mt-1 text-sm text-text-secondary">App workspace · {app.displayVersion || 'Version unavailable'}</p></div>
-+      {ownTenant && automatic && family && <InstallationPolicyPanel apps={policy ? [policy] : []} appId={family} intuneAppId={appId} compact />}
++      {ownTenant && automatic && family && !policies.error && !insights.error && <InstallationPolicyPanel apps={policy ? [policy] : []} appId={family} intuneAppId={appId} compact />}
 +    </header>
 +    {ownTenant && <LatestAppAttempt attempt={insights.data?.appId === appId ? insights.data.latestAttempt : null} loading={insights.isLoading} error={Boolean(insights.error)} supported={insights.data?.supported} />}
 +    <section className={section} aria-label="Current release outcomes">{ownTenant ? <InstallStatusBar appId={appId} compact /> : <p>Install results are available only for your signed-in tenant.</p>}</section>
@@ -1270,8 +1272,8 @@ index 0000000..b27a765
 +      </section>
 +      <section className={section} aria-labelledby="next-rollout">
 +        <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="next-rollout" className="scroll-mt-24 text-lg font-semibold text-text-primary">Next automatic update</h2><span className="rounded-md bg-overlay/5 px-2 py-1 text-xs text-text-secondary">Saved settings</span></div>
-+        {ownTenant && <p className="text-sm text-text-secondary">Your update policy: {policy ? ({auto_update:'Auto-update',notify:'Notify only',ignore:'Ignore',pin_version:'Pin version'} as const)[policy.policy_type] : 'Not reported'}. Policy settings shown here belong to your account.</p>}
-+        {!ownTenant ? <p className="text-sm text-text-secondary">Automatic installation policies are available only for your signed-in tenant.</p> : policies.isLoading || insights.isLoading ? <p role="status">Loading next rollout settings…</p> : !family ? <p className="text-sm text-text-secondary">No verified IntuneGet app mapping. Next rollout settings are unavailable.</p> : !automatic ? <p className="text-sm text-text-secondary">No automatic update policy is active for your account here. Review this app in App updates.</p> : <dl className="space-y-3 text-sm">
++        {ownTenant && <p className="text-sm text-text-secondary">Your update policy: {policies.error ? 'Unavailable' : policy ? ({auto_update:'Auto-update',notify:'Notify only',ignore:'Ignore',pin_version:'Pin version'} as const)[policy.policy_type] : 'Not reported'}. Policy settings shown here belong to your account.</p>}
++        {!ownTenant ? <p className="text-sm text-text-secondary">Automatic installation policies are available only for your signed-in tenant.</p> : policies.isLoading || insights.isLoading ? <p role="status">Loading next rollout settings…</p> : policies.error ? <p role="alert">Could not read your update policy. Refresh before editing.</p> : !family ? <p className="text-sm text-text-secondary">No verified IntuneGet app mapping. Next rollout settings are unavailable.</p> : !automatic ? <p className="text-sm text-text-secondary">No automatic update policy is active for your account here. Review this app in App updates.</p> : <dl className="space-y-3 text-sm">
 +          <div><dt className="font-medium text-text-primary">Automatic updates</dt><dd className="mt-1 text-text-secondary">{policy?.is_enabled ? effective?.policy.mode === 'restart' ? 'On · broad updates held for restart Beta pilot' : 'On' : 'Off'}</dd></div>
 +          <div><dt className="font-medium text-text-primary">Effective install rule</dt><dd className="mt-1 text-text-secondary">{nextSummary}{' · '}<span className="ml-2 text-xs text-text-muted">{effective?.source}</span></dd></div>
 +          <div><dt className="font-medium text-text-primary">Who gets it</dt><dd className="mt-1 text-text-secondary">{effective?.policy.mode === 'restart' ? effective.policy.restartPilot ? `${effective.policy.restartPilot.groupName} · Required pilot only` : 'Choose a pilot group in Edit next rollout.' : savedGroups.length ? savedGroups.join(', ') : 'No saved assignment targets reported. Review groups before deployment.'}</dd></div>

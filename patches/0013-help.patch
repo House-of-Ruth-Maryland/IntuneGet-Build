@@ -833,7 +833,7 @@ index 000000000..3328aa1a6
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 0000000..472ede7
+index 0000000..5e30910
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
 @@ -0,0 +1,587 @@
@@ -867,16 +867,16 @@ index 0000000..472ede7
 +      'Postponement needs interactive mode. Use an attempt count with either days or a date. Combining both time limits is rejected because the toolkit stores one deadline. Saved inactive values remain. Employee scheduling and bounded restart fallback are unavailable.',
 +      'Use installer return codes follows installer results and Intune assignment settings. Package restart countdown is separate: it can restart after installation without a reboot-required result, including silently when nobody is signed in.',
 +      'The local packager does not generate branding, status messages or package restart countdowns and suppresses Intune restarts. Its automatic mode is unavailable here. If capabilities cannot be verified, sign in and reload; unsupported controls remain hidden.',
-+      'Read Staff experience before Save to Deployment list or Add to deployment. Saving a draft does not change a deployed package. Current-copy groups and categories use Save to Intune; packaged installer changes require deployment again.',
++      'Read Staff experience before Save to Deployment list or Add to Deployment list. Saving a draft does not change a deployed package. Current-copy groups and categories use Save to Intune; packaged installer changes require deployment again.',
 +    ],
 +    links: [{ label: 'Open App catalog', href: '/dashboard/apps' }, { label: 'Automatic installation guide', href: '/dashboard/help#automatic-installation-policy' }],
 +  },
 +  {
 +    id: 'deploying',
 +    title: 'Deploying an app',
-+    uiLabels: ['App catalog', 'Who gets it', 'When a new version comes out', 'Notify only', 'Auto-update', 'Ignore', 'Add to deployment', 'Deployment list', 'Deploy to Intune', 'Edit settings', 'Save to Deployment list', 'Clear list', 'Add a second copy anyway', 'Second copy', 'Previous copy', 'Replaces current copy', 'Deploy now', 'App setup and checks', 'Toolkit messages and appearance', 'Inventory', 'Keep this copy', 'Delete from Intune', 'Save to Intune', 'New computer setup', 'Deploy again', 'Apps', 'Details', 'Curated'],
++    uiLabels: ['App catalog', 'Who gets it', 'When a new version comes out', 'Notify only', 'Auto-update', 'Ignore', 'Add to Deployment list', 'Deployment list', 'Deploy to Intune', 'Edit settings', 'Save to Deployment list', 'Clear list', 'Add a second copy anyway', 'Second copy', 'Previous copy', 'Replaces current copy', 'Deploy now', 'App setup and checks', 'Toolkit messages and appearance', 'Inventory', 'Keep this copy', 'Delete from Intune', 'Save to Intune', 'New computer setup', 'Deploy again', 'Apps', 'Details', 'Curated'],
 +    points: [
-+      'Find the app in App catalog. Choose Who gets it, then Notify only, Auto-update or Ignore under When a new version comes out. Press Add to deployment.',
++      'Find the app in App catalog. Choose Who gets it, then Notify only, Auto-update or Ignore under When a new version comes out. Press Add to Deployment list.',
 +      'Open the Deployment list with the round button at the bottom right of the page, which shows how many apps it holds. Then press Deploy to Intune.',
 +      'A review shows what will happen in Intune for each app, which groups get it and anything to check, such as no groups or a second copy.',
 +      'In the review, press Deploy now to start the deployment, or Change to fix an app first.',
@@ -1426,7 +1426,7 @@ index 0000000..472ede7
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 0000000..e866b45
+index 0000000..bf797ff
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,403 @@
@@ -1482,7 +1482,7 @@ index 0000000..e866b45
 +    start: catalog, before: ['Know which device or user group should receive the app.', 'Use Available only with a user group.'],
 +    steps: [
 +      step('Choose the app', 'Find the app in App catalog and open its deployment configuration.', 'catalog', 'App catalog', 'The app’s configuration opens on the right.'),
-+      step('Choose who gets it', 'Under Who gets it, choose groups and Required or Available. Set When a new version comes out, then press Add to deployment.', 'catalog', 'Who gets it', 'The app is saved in the Deployment list; computers have not changed.'),
++      step('Choose who gets it', 'Under Who gets it, choose groups and Required or Available. Set When a new version comes out, then press Add to Deployment list.', 'catalog', 'Who gets it', 'The app is saved in the Deployment list; computers have not changed.'),
 +      step('Check the list', 'Open the round Deployment list button. Use the pencil to edit an app, then Save to Deployment list.', 'deployment-list', 'Edit settings', 'The list shows the intended version and groups.'),
 +      step('Review and deploy', 'Press Deploy to Intune. Check every app’s groups and replacement behavior, then press Deploy now.', 'deployment-list', 'Deploy now', 'Packaging starts; follow the job in Deployments.'),
 +      step('Check install results', 'After the deployment finishes, open the app in Inventory. Read Install results, or press Check installs now to read them from Intune.', 'inventory', 'Inventory', 'Deploying to Intune and installing on computers are checked separately.'),
