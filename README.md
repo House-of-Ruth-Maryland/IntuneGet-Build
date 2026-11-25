@@ -238,9 +238,10 @@ Until November 2026 the build used 60 smaller patches, one per change. They were
 
 ### Replacement deadline review (item80)
 
-The local review change pauses replacement packaging for explicit IT confirmation of expired
-required deadlines. It requires the paired private workflow change; production remains pinned
-to hrm33 and install choices and pilot defaults are unchanged. See
+Replacement review pauses packaging for explicit IT confirmation of expired required deadlines.
+It requires the compatible private workflow and enabled capability; releasing the application
+does not enable that capability or change install choices or pilot targets. `deploy/version`
+records the production image target; verify the running version with the deploy status. See
 [behavior, validation and release prerequisites](docs/replacement-deadline-hold.md).
 
 ### Installation settings and existing assignments
