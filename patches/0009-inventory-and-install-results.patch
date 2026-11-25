@@ -3275,7 +3275,7 @@ index 000000000..526eb10da
 +}
 diff --git a/lib/hrm/app-insights-store.ts b/lib/hrm/app-insights-store.ts
 new file mode 100644
-index 0000000..52fe673
+index 0000000..03cafd3
 --- /dev/null
 +++ b/lib/hrm/app-insights-store.ts
 @@ -0,0 +1,114 @@
@@ -3302,15 +3302,15 @@ index 0000000..52fe673
 +    latestAttempt(tenant: string, appId: string, winget: string, userId: string) {
 +      // Exact copy association, never display name or family alone. Archived
 +      // attempts remain audit evidence, without restoring their history card.
-+      const row = getDb().prepare(`SELECT id, version, status, created_at, archived_at, user_id, error_code, error_message
++      const row = getDb().prepare(`SELECT id, version, status, created_at, archived_at, user_id, is_auto_update, error_code, error_message
 +        FROM packaging_jobs WHERE tenant_id = ? AND lower(winget_id) = lower(?) AND
 +        (lower(intune_app_id) = lower(?) OR CASE WHEN json_valid(package_config) THEN
 +          lower(json_extract(package_config, '$.replacesIntuneAppId')) = lower(?) OR
 +          lower(json_extract(package_config, '$.sourceIntuneAppId')) = lower(?) ELSE 0 END)
 +        ORDER BY created_at DESC, id DESC LIMIT 1`).get(tenant, winget, appId, appId, appId) as {
-+          id:string;version:string;status:string;created_at:string;archived_at:string|null;user_id:string;error_code:string|null;error_message:string|null
++          id:string;version:string;status:string;created_at:string;archived_at:string|null;user_id:string;is_auto_update:number|null;error_code:string|null;error_message:string|null
 +        } | undefined;
-+      return row ? { id:row.id, version:row.version, status:row.status, createdAt:row.created_at, archived:Boolean(row.archived_at), owned:row.user_id===userId, errorCode:row.error_code, errorMessage:row.error_message } : null;
++      return row ? { id:row.id, version:row.version, status:row.status, createdAt:row.created_at, archived:Boolean(row.archived_at), owned:row.user_id===userId, automatic:Boolean(row.is_auto_update), errorCode:row.error_code, errorMessage:row.error_message } : null;
 +    },
 +    observe(tenant: string, observation: AppObservation, actor = 'Observed in Intune', knownChange = false) {
 +      const db = getDb();
@@ -3395,7 +3395,7 @@ index 0000000..52fe673
 +export type AppInsightsStore = ReturnType<typeof createAppInsightsStore>;
 diff --git a/lib/hrm/app-insights.ts b/lib/hrm/app-insights.ts
 new file mode 100644
-index 0000000..ae6a1f2
+index 0000000..e1ecba4
 --- /dev/null
 +++ b/lib/hrm/app-insights.ts
 @@ -0,0 +1,63 @@
@@ -3410,7 +3410,7 @@ index 0000000..ae6a1f2
 +  change: AssignmentChange | null; revision: number; reviewedRevision: number;
 +}
 +export interface AppActivity { id: string; at: string; title: string; detail: string; actor: string; appId: string }
-+export interface AppAttempt { id: string; version: string; status: string; createdAt: string; archived: boolean; owned: boolean; errorCode: string | null; errorMessage: string | null }
++export interface AppAttempt { id: string; version: string; status: string; createdAt: string; archived: boolean; owned: boolean; automatic?: boolean; errorCode: string | null; errorMessage: string | null }
 +export interface AppInsights { supported: boolean; snapshot: AppSnapshot | null; activity: AppActivity[]; appId?: string; family?: string | null; latestAttempt?: AppAttempt | null }
 +export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 +

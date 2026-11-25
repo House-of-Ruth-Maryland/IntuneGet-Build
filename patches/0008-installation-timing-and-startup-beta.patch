@@ -4493,7 +4493,7 @@ index 0000000..fc1de29
 +}
 diff --git a/components/hrm/LatestAppAttempt.tsx b/components/hrm/LatestAppAttempt.tsx
 new file mode 100644
-index 0000000..c2b6122
+index 0000000..c51d570
 --- /dev/null
 +++ b/components/hrm/LatestAppAttempt.tsx
 @@ -0,0 +1,16 @@
@@ -4506,7 +4506,7 @@ index 0000000..c2b6122
 +    <h2 className="text-lg font-semibold text-text-primary">Latest deployment attempt</h2>
 +    {loading ? <p role="status">Loading deployment attempt…</p> : error ? <p role="alert">Could not read deployment attempts. Refresh before relying on this history.</p> : supported === false ? <p>Attempt history is unavailable on this database.</p> : !attempt ? <p className="text-sm text-text-secondary">No recorded attempt is linked to this exact Intune copy.</p> : <>
 +      <p className="text-sm text-text-primary">Version {attempt.version} · {attempt.status.replaceAll('_', ' ')} · {new Date(attempt.createdAt).toLocaleString(undefined,{timeZoneName:'short'})}</p>
-+      <p className="text-xs text-text-muted" title={attempt.id}>Support ID: {attempt.id.slice(0, 8)} · {attempt.owned ? 'Started by you' : 'Started by another authorized staff member'}</p>
++      <p className="text-xs text-text-muted" title={attempt.id}>Support ID: {attempt.id.slice(0, 8)} · {attempt.automatic ? 'Automatic update' : 'Deployment attempt'} · {attempt.owned ? 'Your record' : 'Another account’s record'}</p>
 +      {(attempt.errorCode || attempt.errorMessage) && <p className="break-words text-sm text-status-warning">{attempt.errorCode && <span className="font-mono">{attempt.errorCode}: </span>}{attempt.errorMessage}</p>}
 +      <p className="text-sm text-text-secondary">A package attempt is separate from the version in Intune and reported installations below.</p>
 +      {attempt.archived ? <p className="text-sm text-text-secondary">Archived from deployment history. Retained here as audit evidence; no retry is started.</p> : <Link href={`/dashboard/uploads?scope=${attempt.owned ? 'mine' : 'tenant'}`} className="text-sm text-accent-cyan hover:underline">{attempt.owned ? 'Open your recent deployment history' : 'Open recent tenant history'}</Link>}

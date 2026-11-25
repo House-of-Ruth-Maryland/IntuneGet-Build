@@ -3839,10 +3839,10 @@ index 000000000..84423e037
 +}
 diff --git a/lib/hrm/__tests__/app-attempts.test.ts b/lib/hrm/__tests__/app-attempts.test.ts
 new file mode 100644
-index 0000000..784667d
+index 0000000..12b44b3
 --- /dev/null
 +++ b/lib/hrm/__tests__/app-attempts.test.ts
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,25 @@
 +import {beforeEach,afterEach,it,expect} from 'vitest';
 +import Database from 'better-sqlite3';
 +import {runSqliteMigrations} from '@/lib/db/sqlite-migrations';
@@ -3859,6 +3859,7 @@ index 0000000..784667d
 + const result=store.latestAttempt('tenant',A,'Example.App','colleague')!;
 + expect(result).toMatchObject({id:'02',version:'2',status:'failed',archived:true,owned:false});
 + expect(store.latestAttempt('tenant',A,'Example.App','owner')?.owned).toBe(true);
++ db.prepare('UPDATE packaging_jobs SET is_auto_update=1 WHERE id=?').run('02');expect(store.latestAttempt('tenant',A,'Example.App','owner')?.automatic).toBe(true);
 + expect(db.prepare('SELECT count(*) AS n FROM packaging_jobs').get()).toEqual({n:2});
 +});
 +it('rejects foreign tenants, other copies of the same family, same names and malformed configuration',()=>{
