@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add opt-in timed reminders for staff postponement. When the paired workflow is verified, Ask when needed can offer Install now, Remind me in an hour, and Tomorrow at 9 a.m. local time if the saved day, date and count limits allow. Only those reminder choices count. The next time is kept on that computer for that package across retries and restarts. Waiting returns Retry and does not mark the app installed. The control stays hidden and packaging rejects the option until `HRM_TIMED_SNOOZE_CAPABILITY=timed-snooze-v1`. Defaults are unchanged. A Windows pilot is still required; no live install was run.
+
 - Item 105: Deployments, Reports and Home's deployment statistics open on All in tenant, so staff
   who have not deployed anything themselves see the tenant's deployments instead of an empty
   page. Deployments loads 50 at a time with Show older deployments (up to 2,000) in place of a

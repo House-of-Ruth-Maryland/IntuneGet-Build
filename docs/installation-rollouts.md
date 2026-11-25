@@ -16,7 +16,9 @@ Restart grace applies after installation and does not postpone installation.
 The next automatic rule can inherit shared settings or use an app override. Existing mode keeps
 saved app behavior; Silent suppresses postponement prompts; Prompt uses the existing PSADT
 per-device deferral clock. The employee preview describes the effective rule briefly. It offers
-no speculative time picker, dual cutoff or restart fallback. These employee choices remain deferred.
+no free time picker or bounded restart fallback. Offer timed reminders is a separate package
+choice, hidden until the paired workflow is verified. It adds Remind me in an hour and Tomorrow
+at 9 a.m. local time only when the saved day, date and count limits still allow them.
 
 ## Paired packaging capabilities
 

@@ -2359,7 +2359,7 @@ index cfc35553c..4a0da91f6 100644
    });
  });
 diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
-index 68bc640bf..4ca4ba64e 100644
+index 68bc640bf..4660290ee 100644
 --- a/components/CartItemConfig.tsx
 +++ b/components/CartItemConfig.tsx
 @@ -1,6 +1,13 @@
@@ -2888,7 +2888,7 @@ index 68bc640bf..4ca4ba64e 100644
                        value={config.windowLocation || 'Default'}
                        onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
                        className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-@@ -701,124 +778,336 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -701,124 +778,342 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        <option value="Center">Center</option>
                        <option value="Top">Top</option>
                        <option value="Bottom">Bottom</option>
@@ -3251,6 +3251,12 @@ index 68bc640bf..4ca4ba64e 100644
 +
 +                  {config.allowDefer && (
 +                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
++                      {(packagingCapabilities.timedSnooze || config.timedSnooze) && <ToggleOption
++                        label="Offer timed reminders"
++                        description="Staff choose Install now, Remind me in an hour or Tomorrow (9 a.m. on that computer) while the count and time limits allow. Only reminder choices use the count. A day limit and a date can be combined; the earlier one wins. While a reminder is waiting, attempts return Retry and the app is not marked installed. Silent attempts ask nothing. Machine-wide MSI and EXE apps with automatic detection only, not Curated apps or apps with setup profiles."
++                        checked={config.timedSnooze === true}
++                        onChange={checked => updateConfig({ timedSnooze: checked })}
++                      />}
 +                      {!config.deferByDaysOnly && <div>
 +                        <label htmlFor="cart-defer-count" className="block text-sm font-medium text-text-secondary mb-2">
 +                          Maximum postponements
@@ -3315,7 +3321,7 @@ index 68bc640bf..4ca4ba64e 100644
  
                    {config.progressDialog?.enabled && (
                      <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
-@@ -849,7 +1138,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -849,7 +1144,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                          >
                            <option value="Default">Default</option>
                            <option value="Center">Center</option>
@@ -3324,7 +3330,7 @@ index 68bc640bf..4ca4ba64e 100644
                          </select>
                        </div>
                      </div>
-@@ -956,10 +1245,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -956,10 +1251,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    </div>
                  </div>
                </ConfigSection>}
@@ -3338,7 +3344,7 @@ index 68bc640bf..4ca4ba64e 100644
                  icon={<MessageSquare className="w-4 h-4" />}
                  expanded={expandedSection === 'prompts'}
                  onToggle={() => toggleSection('prompts')}
-@@ -1032,10 +1321,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1032,10 +1327,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                  }}
                                  className="w-full px-2 py-1.5 bg-bg-elevated border border-overlay/15 rounded text-text-primary text-sm"
                                >
@@ -3353,7 +3359,7 @@ index 68bc640bf..4ca4ba64e 100644
                                </select>
                              </div>
                              <div>
-@@ -1087,7 +1376,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1087,7 +1382,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                            </div>
                            <div className="grid grid-cols-3 gap-2">
                              <div>
@@ -3362,7 +3368,7 @@ index 68bc640bf..4ca4ba64e 100644
                                <input
                                  type="text"
                                  value={prompt.buttonLeftText || ''}
-@@ -1101,7 +1390,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1101,7 +1396,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                />
                              </div>
                              <div>
@@ -3371,7 +3377,7 @@ index 68bc640bf..4ca4ba64e 100644
                                <input
                                  type="text"
                                  value={prompt.buttonMiddleText || ''}
-@@ -1115,7 +1404,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1115,7 +1410,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                />
                              </div>
                              <div>
@@ -3380,7 +3386,7 @@ index 68bc640bf..4ca4ba64e 100644
                                <input
                                  type="text"
                                  value={prompt.buttonRightText || ''}
-@@ -1163,18 +1452,18 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1163,18 +1458,18 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    )}
                  </div>
                </ConfigSection>}
@@ -3404,7 +3410,7 @@ index 68bc640bf..4ca4ba64e 100644
                      checked={config.restartPrompt?.enabled || false}
                      onChange={(checked) => updateConfig({
                        restartPrompt: { ...config.restartPrompt, enabled: checked, countdownSeconds: config.restartPrompt?.countdownSeconds || 600, countdownNoHideSeconds: config.restartPrompt?.countdownNoHideSeconds || 60 }
-@@ -1206,7 +1495,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1206,7 +1501,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        </div>
                        <div>
                          <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -3413,7 +3419,7 @@ index 68bc640bf..4ca4ba64e 100644
                          </label>
                          <div className="flex items-center gap-3">
                            <input
-@@ -1229,123 +1518,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1229,123 +1524,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    )}
                  </div>
                </ConfigSection>}
@@ -3540,7 +3546,7 @@ index 68bc640bf..4ca4ba64e 100644
                  icon={<Palette className="w-4 h-4" />}
                  expanded={expandedSection === 'branding'}
                  onToggle={() => toggleSection('branding')}
-@@ -1364,18 +1540,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1364,18 +1546,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                      />
                    </div>
  
@@ -3560,7 +3566,7 @@ index 68bc640bf..4ca4ba64e 100644
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
-@@ -1392,7 +1557,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1392,7 +1563,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -3569,7 +3575,7 @@ index 68bc640bf..4ca4ba64e 100644
                      </label>
                      <input
                        type="text"
-@@ -1446,146 +1611,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1446,146 +1617,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    </div>
                  </div>
                </ConfigSection>}
@@ -3717,7 +3723,7 @@ index 68bc640bf..4ca4ba64e 100644
              </div>
            </div>
          </div>
-@@ -1613,7 +1640,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1613,7 +1646,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                ) : (
                  <>
                    <Check className="w-4 h-4 mr-2" />
@@ -3726,7 +3732,7 @@ index 68bc640bf..4ca4ba64e 100644
                  </>
                )}
              </Button>
-@@ -1631,14 +1658,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1631,14 +1664,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
              </AlertDialogDescription>
            </AlertDialogHeader>
            <AlertDialogFooter>
@@ -3743,7 +3749,7 @@ index 68bc640bf..4ca4ba64e 100644
              </AlertDialogAction>
            </AlertDialogFooter>
          </AlertDialogContent>
-@@ -1655,22 +1682,48 @@ interface ConfigSectionProps {
+@@ -1655,22 +1688,48 @@ interface ConfigSectionProps {
    expanded: boolean;
    onToggle: () => void;
    children: React.ReactNode;
@@ -3801,7 +3807,7 @@ index 68bc640bf..4ca4ba64e 100644
      </div>
    );
  }
-@@ -1683,15 +1736,22 @@ interface ToggleOptionProps {
+@@ -1683,15 +1742,22 @@ interface ToggleOptionProps {
  }
  
  function ToggleOption({ label, description, checked, onChange }: ToggleOptionProps) {
@@ -3829,7 +3835,7 @@ index 68bc640bf..4ca4ba64e 100644
          >
            <div
              className={cn(
-@@ -1699,12 +1759,12 @@ function ToggleOption({ label, description, checked, onChange }: ToggleOptionPro
+@@ -1699,12 +1765,12 @@ function ToggleOption({ label, description, checked, onChange }: ToggleOptionPro
                checked ? 'translate-x-5' : 'translate-x-1'
              )}
            />
@@ -4313,7 +4319,7 @@ index f08f394ac..2336759bb 100644
      await act(async () => add.click());
      expect(useCartStore.getState().items).toEqual([]);
 diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
-index eea1131fe..2f30f2db6 100644
+index eea1131fe..40ba6d7fe 100644
 --- a/components/PackageConfig.tsx
 +++ b/components/PackageConfig.tsx
 @@ -1,5 +1,12 @@
@@ -5019,7 +5025,7 @@ index eea1131fe..2f30f2db6 100644
                        value={config.windowLocation || 'Default'}
                        onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
                        className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-@@ -1210,71 +1371,250 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1210,71 +1371,256 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        <option value="Center">Center</option>
                        <option value="Top">Top</option>
                        <option value="Bottom">Bottom</option>
@@ -5288,6 +5294,12 @@ index eea1131fe..2f30f2db6 100644
 +
 +                  {config.allowDefer && (
 +                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
++                      {(packagingCapabilities.timedSnooze || config.timedSnooze) && <ToggleOption
++                        label="Offer timed reminders"
++                        description="Staff choose Install now, Remind me in an hour or Tomorrow (9 a.m. on that computer) while the count and time limits allow. Only reminder choices use the count. A day limit and a date can be combined; the earlier one wins. While a reminder is waiting, attempts return Retry and the app is not marked installed. Silent attempts ask nothing. Machine-wide MSI and EXE apps with automatic detection only, not Curated apps or apps with setup profiles."
++                        checked={config.timedSnooze === true}
++                        onChange={checked => updateConfig({ timedSnooze: checked })}
++                      />}
 +                      {/* Maximum Deferrals */}
 +                      {!config.deferByDaysOnly && <div>
 +                        <label htmlFor="package-defer-count" className="block text-sm font-medium text-text-secondary mb-2">
@@ -5313,7 +5325,7 @@ index eea1131fe..2f30f2db6 100644
                            min="1"
                            max="365"
                            value={config.deferDays || ''}
-@@ -1282,50 +1622,35 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1282,50 +1628,35 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            placeholder="No limit"
                            className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
                          />
@@ -5373,7 +5385,7 @@ index eea1131fe..2f30f2db6 100644
                  icon={<Bell className="w-4 h-4" />}
                  expanded={expandedSection === 'progress'}
                  onToggle={() => toggleSection('progress')}
-@@ -1370,7 +1695,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1370,7 +1701,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                          >
                            <option value="Default">Default</option>
                            <option value="Center">Center</option>
@@ -5382,7 +5394,7 @@ index eea1131fe..2f30f2db6 100644
                          </select>
                        </div>
                      </div>
-@@ -1477,10 +1802,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1477,10 +1808,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    </div>
                  </div>
                </ConfigSection>}
@@ -5396,7 +5408,7 @@ index eea1131fe..2f30f2db6 100644
                  icon={<MessageSquare className="w-4 h-4" />}
                  expanded={expandedSection === 'prompts'}
                  onToggle={() => toggleSection('prompts')}
-@@ -1507,7 +1832,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1507,7 +1838,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        className="text-accent-cyan hover:text-accent-cyan-dim text-sm flex items-center gap-1"
                      >
                        <Plus className="w-4 h-4" />
@@ -5405,7 +5417,7 @@ index eea1131fe..2f30f2db6 100644
                      </button>
                    </div>
  
-@@ -1553,10 +1878,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1553,10 +1884,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                  }}
                                  className="w-full px-2 py-1.5 bg-bg-elevated border border-overlay/15 rounded text-text-primary text-sm"
                                >
@@ -5420,7 +5432,7 @@ index eea1131fe..2f30f2db6 100644
                                </select>
                              </div>
                              <div>
-@@ -1608,7 +1933,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1608,7 +1939,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            </div>
                            <div className="grid grid-cols-3 gap-2">
                              <div>
@@ -5429,7 +5441,7 @@ index eea1131fe..2f30f2db6 100644
                                <input
                                  type="text"
                                  value={prompt.buttonLeftText || ''}
-@@ -1622,7 +1947,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1622,7 +1953,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                />
                              </div>
                              <div>
@@ -5438,7 +5450,7 @@ index eea1131fe..2f30f2db6 100644
                                <input
                                  type="text"
                                  value={prompt.buttonMiddleText || ''}
-@@ -1636,7 +1961,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1636,7 +1967,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                />
                              </div>
                              <div>
@@ -5447,7 +5459,7 @@ index eea1131fe..2f30f2db6 100644
                                <input
                                  type="text"
                                  value={prompt.buttonRightText || ''}
-@@ -1684,18 +2009,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1684,18 +2015,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    )}
                  </div>
                </ConfigSection>}
@@ -5471,7 +5483,7 @@ index eea1131fe..2f30f2db6 100644
                      checked={config.restartPrompt?.enabled || false}
                      onChange={(checked) => updateConfig({
                        restartPrompt: { ...config.restartPrompt, enabled: checked, countdownSeconds: config.restartPrompt?.countdownSeconds || 600, countdownNoHideSeconds: config.restartPrompt?.countdownNoHideSeconds || 60 }
-@@ -1728,7 +2053,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1728,7 +2059,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        </div>
                        <div>
                          <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -5480,7 +5492,7 @@ index eea1131fe..2f30f2db6 100644
                          </label>
                          <div className="flex items-center gap-3">
                            <input
-@@ -1746,204 +2071,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1746,204 +2077,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                              {config.restartPrompt?.countdownNoHideSeconds || 60}s
                            </span>
                          </div>
@@ -5689,7 +5701,7 @@ index eea1131fe..2f30f2db6 100644
                  icon={<Palette className="w-4 h-4" />}
                  expanded={expandedSection === 'branding'}
                  onToggle={() => toggleSection('branding')}
-@@ -1962,18 +2099,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1962,18 +2105,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                      />
                    </div>
  
@@ -5709,7 +5721,7 @@ index eea1131fe..2f30f2db6 100644
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
-@@ -1990,7 +2116,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1990,7 +2122,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -5718,7 +5730,7 @@ index eea1131fe..2f30f2db6 100644
                      </label>
                      <input
                        type="text"
-@@ -2044,140 +2170,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2044,140 +2176,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    </div>
                  </div>
                </ConfigSection>}
@@ -5860,7 +5872,7 @@ index eea1131fe..2f30f2db6 100644
  
              </div>
            </div>
-@@ -2193,7 +2187,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2193,7 +2193,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
            {settingsSuccess && (
              <div className="flex items-center gap-2 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-400">
                <Check className="w-4 h-4" />
@@ -5869,7 +5881,7 @@ index eea1131fe..2f30f2db6 100644
              </div>
            )}
            {settingsError && (
-@@ -2204,11 +2198,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2204,11 +2204,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
            )}
            {canUpdateSettings ? (
              <div className="space-y-2">
@@ -5882,7 +5894,7 @@ index eea1131fe..2f30f2db6 100644
                <div className="flex gap-3">
                  <Button
                    onClick={handleUpdateSettings}
-@@ -2223,17 +2213,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2223,17 +2219,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    {isUpdating ? (
                      <>
                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
@@ -5903,7 +5915,7 @@ index eea1131fe..2f30f2db6 100644
                      </>
                    )}
                  </Button>
-@@ -2255,7 +2245,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2255,7 +2251,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    ) : (
                      <>
                        <RefreshCw className="w-5 h-5 mr-2" />
@@ -5912,7 +5924,7 @@ index eea1131fe..2f30f2db6 100644
                      </>
                    )}
                  </Button>
-@@ -2275,19 +2265,19 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2275,19 +2271,19 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                {isAddingToCart ? (
                  <>
                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
@@ -5935,7 +5947,7 @@ index eea1131fe..2f30f2db6 100644
                  </>
                )}
              </Button>
-@@ -2305,14 +2295,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2305,14 +2301,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              </AlertDialogDescription>
            </AlertDialogHeader>
            <AlertDialogFooter>
@@ -5952,7 +5964,7 @@ index eea1131fe..2f30f2db6 100644
              </AlertDialogAction>
            </AlertDialogFooter>
          </AlertDialogContent>
-@@ -2329,30 +2319,45 @@ interface ConfigSectionProps {
+@@ -2329,30 +2325,45 @@ interface ConfigSectionProps {
    expanded: boolean;
    onToggle: () => void;
    children: React.ReactNode;
@@ -6007,7 +6019,7 @@ index eea1131fe..2f30f2db6 100644
            {children}
          </div>
        )}
-@@ -2466,7 +2471,7 @@ function DetectionRuleDisplay({ rule }: { rule: DetectionRule }) {
+@@ -2466,7 +2477,7 @@ function DetectionRuleDisplay({ rule }: { rule: DetectionRule }) {
        <div className="space-y-1 text-xs">
          {m.productCode && (
            <div className="flex gap-2">
