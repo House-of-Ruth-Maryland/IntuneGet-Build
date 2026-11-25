@@ -27,16 +27,18 @@ after the final read remains an ordinary Graph concurrency limitation.
 
 ## Release path
 
-These paired review branches are published, but nothing is merged, deployed or enabled in production. The production
-pin remains hrm33. This review branch is reconstructed from current main (merged but undeployed v0.8.6) plus item80 only; item91 remains in its original local workspace. Do not release this tree as an implicit version upgrade.
-An authorized release must first select an hrm33 backport or approve the integration separately,
-then publish the matching private `IntuneGet-Workflows` admission/helper changes, deploy the
-matching app and any local packager, and verify the effective workflow revision. Preserve all
-existing feature flags, saved install choices and explicit pilot targeting.
+On November 25, 2026, David approved v0.8.6 with Curated publishing paused when current-hold
+verification is unavailable. App PR99 and the factual Help correction PR100 were released as
+v0.8.6-hrm.4 through [Deploy PR101](https://github.com/House-of-Ruth-Maryland/IntuneGet-Build/pull/101).
+The compatible private workflow was checked separately. Assignment-review and restart Beta
+capabilities remained disabled, and existing settings and explicit pilot targeting were preserved.
+Application release does not itself enable a workflow-dependent capability or establish live
+Graph write acceptance. Future activation requires its own readiness review and authorization.
+`deploy/version` records the image target; deploy status and the running digest establish delivery.
 
 Local validation covers real application functions and extracted hosted steps with harmless
 fixtures and mocked Graph; it does not prove Intune delivery or device installation. The
-full app suite has an unchanged VirusTotal-hold test failure also reproduced on the exact
-pre-item-80 source. Resolve or separately accept that test failure before any release decision.
+initial item80 review reported a VirusTotal-hold baseline failure; that historical run was not
+release sign-off. The later PR99 and PR100 full regression checks passed before this release.
 
 Paired review: [app PR97](https://github.com/House-of-Ruth-Maryland/IntuneGet-Build/pull/97) and [workflow PR4](https://github.com/House-of-Ruth-Maryland/IntuneGet-Workflows/pull/4).

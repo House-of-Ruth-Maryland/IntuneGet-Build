@@ -296,7 +296,7 @@ index bade6e949..4ae2d3a75 100644
          toastOptions={{
            className: 'bg-bg-surface border border-overlay/10 text-text-primary',
 diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
-index 24e1de8db..aa04ffa82 100644
+index 24e1de8db..b707bfc80 100644
 --- a/app/(app)/dashboard/page.tsx
 +++ b/app/(app)/dashboard/page.tsx
 @@ -10,11 +10,9 @@ import {
@@ -325,7 +325,13 @@ index 24e1de8db..aa04ffa82 100644
  
  function getTimeBasedGreeting(): React.ReactNode {
    const hour = new Date().getHours();
-@@ -40,7 +40,10 @@ export default function DashboardPage() {
+@@ -36,11 +36,15 @@ function getTimeBasedGreeting(): React.ReactNode {
+ 
+ export default function DashboardPage() {
+   const { user } = useMicrosoftAuth();
+-  const [statisticsScope, setStatisticsScope] = useState<'mine' | 'tenant'>('mine');
++  // HRM item 105: opens on the tenant's numbers, like Deployments and Reports.
++  const [statisticsScope, setStatisticsScope] = useState<'mine' | 'tenant'>('tenant');
    const { isMspUser } = useMspOptional();
    const { data: stats, isLoading: statsLoading, isError: statsError } = useDashboardStats(statisticsScope);
    const { errorType } = useOnboardingStatus();
@@ -337,7 +343,7 @@ index 24e1de8db..aa04ffa82 100644
    const [mounted, setMounted] = useState(false);
    const [greeting, setGreeting] = useState<React.ReactNode>(<T>Welcome back</T>);
  
-@@ -49,10 +52,6 @@ export default function DashboardPage() {
+@@ -49,10 +53,6 @@ export default function DashboardPage() {
      setGreeting(getTimeBasedGreeting());
    }, []);
  
@@ -348,7 +354,7 @@ index 24e1de8db..aa04ffa82 100644
    // Build attention items
    const attentionItems = useMemo(() => {
      const items: Array<{
-@@ -65,19 +64,106 @@ export default function DashboardPage() {
+@@ -65,19 +65,106 @@ export default function DashboardPage() {
        color: 'error' | 'warning' | 'cyan';
      }> = [];
  
@@ -461,7 +467,7 @@ index 24e1de8db..aa04ffa82 100644
  
      if (errorType === 'network_error' || errorType === 'missing_credentials') {
        items.push({
-@@ -85,7 +171,7 @@ export default function DashboardPage() {
+@@ -85,7 +172,7 @@ export default function DashboardPage() {
          icon: KeyRound,
          title: <T>Connection issue detected</T>,
          description: errorType === 'missing_credentials'
@@ -470,7 +476,7 @@ index 24e1de8db..aa04ffa82 100644
            : <T>Unable to verify organization setup. Check your connection.</T>,
          href: '/dashboard/settings',
          actionLabel: <T>Settings</T>,
-@@ -94,14 +180,14 @@ export default function DashboardPage() {
+@@ -94,14 +181,14 @@ export default function DashboardPage() {
      }
  
      return items;
@@ -487,7 +493,7 @@ index 24e1de8db..aa04ffa82 100644
          gradient
          gradientColors="cyan"
        />
-@@ -112,10 +198,13 @@ export default function DashboardPage() {
+@@ -112,10 +199,13 @@ export default function DashboardPage() {
        {/* Non-blocking nudge to re-consent for the assignment-filters permission */}
        <FilterPermissionNudge />
  
@@ -505,7 +511,7 @@ index 24e1de8db..aa04ffa82 100644
              {attentionItems.map((item) => {
                const colorMap = {
                  error: {
-@@ -142,35 +231,67 @@ export default function DashboardPage() {
+@@ -142,35 +232,67 @@ export default function DashboardPage() {
                  >
                    <div className="flex items-center justify-between gap-4">
                      <div className="flex items-center gap-3 min-w-0">
@@ -571,9 +577,10 @@ index 24e1de8db..aa04ffa82 100644
  
        {/* Stat cards */}
        <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Deployment statistics scope">
-         <Button variant={statisticsScope === 'mine' ? 'default' : 'outline'} aria-pressed={statisticsScope === 'mine'} onClick={() => setStatisticsScope('mine')}><T>My deployments</T></Button>
+-        <Button variant={statisticsScope === 'mine' ? 'default' : 'outline'} aria-pressed={statisticsScope === 'mine'} onClick={() => setStatisticsScope('mine')}><T>My deployments</T></Button>
          <Button variant={statisticsScope === 'tenant' ? 'default' : 'outline'} aria-pressed={statisticsScope === 'tenant'} onClick={() => setStatisticsScope('tenant')}><T>All in tenant</T></Button>
 -        <p className="text-sm text-text-muted">{statisticsScope === 'tenant' ? <T>Activity for the selected tenant</T> : isMspUser ? <T>Across all your tenants</T> : <T>Your deployment activity</T>}</p>
++        <Button variant={statisticsScope === 'mine' ? 'default' : 'outline'} aria-pressed={statisticsScope === 'mine'} onClick={() => setStatisticsScope('mine')}><T>My deployments</T></Button>
 +        <p className="text-sm text-text-muted">{statisticsScope === 'tenant' ? <T>Activity for everyone in your tenant</T> : isMspUser ? <T>Across all your tenants</T> : <T>Your deployment activity</T>}</p>
        </div>
        {statsError ? <div role="alert" className="text-status-error"><T>Unable to load deployment statistics. Please try again.</T></div> : <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -583,7 +590,7 @@ index 24e1de8db..aa04ffa82 100644
            value={stats?.totalDeployed ?? 0}
            icon={Package}
            color="cyan"
-@@ -179,7 +300,7 @@ export default function DashboardPage() {
+@@ -179,7 +301,7 @@ export default function DashboardPage() {
            delay={1}
          />
          <StatCard
@@ -592,7 +599,7 @@ index 24e1de8db..aa04ffa82 100644
            value={stats?.thisMonth ?? 0}
            icon={Upload}
            color="success"
-@@ -219,156 +340,6 @@ export default function DashboardPage() {
+@@ -219,156 +341,6 @@ export default function DashboardPage() {
            {stats.perUser.length === 0 && <p className="text-text-muted"><T>No deployment activity in this tenant.</T></p>}
          </section>
        )}
@@ -749,7 +756,7 @@ index 24e1de8db..aa04ffa82 100644
      </div>
    );
  }
-@@ -447,33 +418,3 @@ function StatCard({
+@@ -447,33 +419,3 @@ function StatCard({
  
    return content;
  }
@@ -784,50 +791,105 @@ index 24e1de8db..aa04ffa82 100644
 -  return content;
 -}
 diff --git a/app/(app)/dashboard/reports/page.tsx b/app/(app)/dashboard/reports/page.tsx
-index 648e311ff..a5489fbdb 100644
+index 648e311ff..f3992e9a2 100644
 --- a/app/(app)/dashboard/reports/page.tsx
 +++ b/app/(app)/dashboard/reports/page.tsx
-@@ -56,12 +56,15 @@ export default function ReportsPage() {
+@@ -18,14 +18,17 @@ import { PageHeader, AnimatedStatCard, StatCardGrid, SkeletonGrid, AnimatedEmpty
+ export default function ReportsPage() {
+   const [days, setDays] = useState(30);
+   const [isExporting, setIsExporting] = useState(false);
+-  const { data, isLoading, error, refetch, isFetching } = useAnalytics(days);
++  // HRM item 105: Reports opens on everyone's deployments in the tenant, like Deployments,
++  // so staff who started none themselves don't land on an empty report.
++  const [scope, setScope] = useState<'mine' | 'tenant'>('tenant');
++  const { data, isLoading, error, refetch, isFetching } = useAnalytics(days, scope);
+   const { exportCSV } = useExportAnalytics();
+   const prefersReducedMotion = useReducedMotion();
+ 
+   const handleExport = async () => {
+     setIsExporting(true);
+     try {
+-      await exportCSV(days);
++      await exportCSV(days, scope);
+     } catch (err) {
+       console.error('Export failed:', err);
+     } finally {
+@@ -56,13 +59,39 @@ export default function ReportsPage() {
      }
    };
  
-+  // HRM patch 0036: /api/analytics counts only the signed-in user's jobs (jobs.getByUserId),
-+  // so the page says so instead of reading like a server-wide report. HRM patch 0053: the title
-+  // says so too ("My deployment reports"); the sidebar keeps the short name Reports.
++  // HRM patch 0036 and item 105: the title and description say whose deployments are counted.
++  // The sidebar keeps the short name Reports.
++  const title = scope === 'tenant' ? <T>Deployment reports</T> : <T>My deployment reports</T>;
++  const description = scope === 'tenant'
++    ? <T>Deployments started by anyone in your tenant, with results and trends.</T>
++    : <T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>;
++  const scopeToggle = (
++    <div className="flex items-center gap-2" role="group" aria-label="Choose whose deployments to report on">
++      {(['tenant', 'mine'] as const).map((option) => (
++        <button
++          key={option}
++          type="button"
++          aria-pressed={scope === option}
++          onClick={() => setScope(option)}
++          className={`px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:outline-none ${
++            scope === option
++              ? 'bg-overlay/10 text-text-primary border border-accent-cyan/30'
++              : 'bg-overlay/5 text-text-secondary hover:text-text-primary hover:bg-overlay/10 border border-overlay/5'
++          }`}
++        >
++          {option === 'tenant' ? <T>All in tenant</T> : <T>My deployments</T>}
++        </button>
++      ))}
++    </div>
++  );
    if (isLoading) {
      return (
        <div className="space-y-6">
          <PageHeader
 -          title={<T>Reports & Analytics</T>}
 -          description={<T>Track your deployment performance and trends</T>}
-+          title={<T>My deployment reports</T>}
-+          description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
++          title={title}
++          description={description}
          />
++        {scopeToggle}
          <SkeletonGrid count={4} columns={4} variant="stat" />
          <div className="grid gap-6 lg:grid-cols-2">
-@@ -76,8 +79,8 @@ export default function ReportsPage() {
+           <div className="glass-light rounded-xl p-6 border border-overlay/5 h-64 animate-pulse" />
+@@ -76,9 +105,10 @@ export default function ReportsPage() {
      return (
        <div className="space-y-6">
          <PageHeader
 -          title={<T>Reports & Analytics</T>}
 -          description={<T>Track your deployment performance and trends</T>}
-+          title={<T>My deployment reports</T>}
-+          description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
++          title={title}
++          description={description}
          />
++        {scopeToggle}
          <AnimatedEmptyState
            icon={AlertTriangle}
-@@ -100,8 +103,8 @@ export default function ReportsPage() {
+           title="Failed to load analytics"
+@@ -100,8 +130,8 @@ export default function ReportsPage() {
      <div className="space-y-6">
        {/* Header */}
        <PageHeader
 -        title={<T>Reports & Analytics</T>}
 -        description={<T>Track your deployment performance and trends</T>}
-+        title={<T>My deployment reports</T>}
-+        description={<T>Deployments you started, with results and trends. Deployments by other staff are not included.</T>}
++        title={title}
++        description={description}
          gradient
          gradientColors="mixed"
          actions={
-@@ -153,7 +156,7 @@ export default function ReportsPage() {
+@@ -132,6 +162,8 @@ export default function ReportsPage() {
+         }
+       />
+ 
++      {scopeToggle}
++
+       {/* Date Range Picker */}
+       <motion.div
+         variants={itemVariants}
+@@ -153,7 +185,7 @@ export default function ReportsPage() {
        {/* Summary Stats */}
        <StatCardGrid columns={4}>
          <AnimatedStatCard
@@ -836,7 +898,7 @@ index 648e311ff..a5489fbdb 100644
            value={summary?.totalJobs || 0}
            icon={Package}
            color="cyan"
-@@ -194,7 +197,7 @@ export default function ReportsPage() {
+@@ -194,7 +226,7 @@ export default function ReportsPage() {
            variants={itemVariants}
            className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
          >
@@ -845,7 +907,7 @@ index 648e311ff..a5489fbdb 100644
            <SuccessRateChart
              completed={summary?.completedJobs || 0}
              failed={summary?.failedJobs || 0}
-@@ -208,7 +211,7 @@ export default function ReportsPage() {
+@@ -208,7 +240,7 @@ export default function ReportsPage() {
            className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
          >
            <h2 className="text-lg font-semibold text-text-primary mb-4">
@@ -854,7 +916,7 @@ index 648e311ff..a5489fbdb 100644
            </h2>
            <DeploymentsLineChart data={data?.dailyDeployments || []} />
          </motion.div>
-@@ -222,7 +225,7 @@ export default function ReportsPage() {
+@@ -222,7 +254,7 @@ export default function ReportsPage() {
          className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
        >
          <h2 className="text-lg font-semibold text-text-primary mb-4">
@@ -863,7 +925,7 @@ index 648e311ff..a5489fbdb 100644
          </h2>
          <TopAppsChart data={data?.topApps || []} />
        </motion.div>
-@@ -234,7 +237,7 @@ export default function ReportsPage() {
+@@ -234,7 +266,7 @@ export default function ReportsPage() {
          animate="visible"
          className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
        >
