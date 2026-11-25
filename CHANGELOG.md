@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Describe unavailable Curated verification without assuming the integration is undeployed.
+
 - Connect exact-copy deployment attempts, installation evidence and account-scoped update
   policy, retaining archived attempts as read-only audit evidence and fixing scoped links.
 - Preserve in-use and automatic-update assignment settings on general saves; align replacement
