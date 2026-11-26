@@ -4,7 +4,7 @@ Home, Apps, Updates, Activity and Settings are the primary navigation. Apps reta
 App catalog and Discovered apps; Activity retains Deployments and Reports. Existing routes,
 bookmarks, permissions and keyboard/search aliases remain available. App names open the workspace;
 Details opens the existing Inventory dialog. The workspace separates install results, the current
-release, the next automatic update and secondary activity/details. Edit next rollout changes saved
+release, the next automatic update and secondary activity/details. Change how it installs (Future updates) changes saved
 future settings; it does not queue a job or edit the current copy. Unsaved changes stay in the editor.
 
 Current release shows the actual selected version, assignments, install dates, recorded installer
@@ -27,6 +27,35 @@ matching packaging code has been reviewed, delivered and verified; no client req
 |---|---|---|
 | HRM_ASSIGNMENT_REVIEW_CAPABILITY | preserve-settings-v1 | Offers read-only single/bulk review and enables assignment-date checks for new replacement jobs |
 | HRM_STARTUP_PILOT_CAPABILITY | natural-boot-v1 | Allows the app-scoped restart Beta alongside existing GitHub, package, group and account checks |
+| HRM_DEPLOY_DATES_CAPABILITY | assignment-dates-v1 | Offers install dates (Available from, Must install by, time zone, restart grace period) for the groups of a new Win32 deployment in the deploy form |
+
+Set `HRM_DEPLOY_DATES_CAPABILITY` only after the private packaging workflow has this build's
+`package-intunewin.yml` "Apply assignments" step and `Preserve-AssignmentSettings.ps1` (with
+`Get-IntuneGetDeployTiming`). An older workflow would ignore the dates and assign the groups as
+soon as possible, which is why the server refuses dates until the setting is present. The local
+packager needs no setting. Without it the deploy form shows no date fields and says to set dates
+afterwards with Install dates.
+
+## Item 122: first use on a real tenant
+
+Edit groups and install dates in the deploy form were tested against fake Intune responses, in unit
+tests and in a browser. These points depend on how Intune itself answers and need one check on a
+test group in the real tenant before relying on them:
+
+- **Switch Required and Available.** The switch adds the new assignment for the group before it
+  removes the old one, so the group is never left with none. That needs Intune to accept, for a
+  moment, the same group as both Required and Available. If Intune refuses, the panel says
+  "Nothing was removed" and the group is unchanged; report it rather than working around it.
+- **Remove a group.** One `DELETE` of that group's assignment. Confirm in Intune that only that
+  group went and the others kept their dates and filters.
+- **Settings carried by a switch.** Confirm a switched group still shows its filter, notifications,
+  restart grace period and app in use settings in Intune, and that Intune accepted them for the new
+  intent.
+- **Install dates on a new deployment.** Deploy a test app to a test group with Available from and
+  Must install by set, and confirm the dates and time zone in Intune match the deploy review. Then
+  deploy one with a restart grace period (restart handling set to return codes or forced).
+- **On a computer.** That Windows waits for Available from and enforces Must install by is Intune's
+  behavior and was not tested here.
 
 Without the assignment capability the existing manual/bulk flow is preserved. With it, review shows
 version, saved or Curated settings, live assignment intent and group-paired dates. Empty live groups
@@ -57,8 +86,9 @@ validation. No startup deadline fallback, shutdown installation or before-sign-i
 
 ## Discovery and publishing
 
-Settings > App updates > Check for new app versions describes catalog discovery at 3:30 a.m. and
-3:30 p.m. Eastern. Updates reports last-check evidence and the next expected check; expected cadence
+App updates' New version checks row states catalog discovery at 3:30 AM and 3:30 PM, Maryland
+time, fixed on the server (Settings lists it under Not set on this page). It reports last-check
+evidence and the next expected check; expected cadence
 does not prove timer execution. When can IntuneGet send automatic updates to Intune? controls the
 separate automatic publishing window. Device installation follows assignments and installer behavior.
 

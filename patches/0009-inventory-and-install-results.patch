@@ -1,5 +1,5 @@
 diff --git a/app/(app)/dashboard/inventory/page.tsx b/app/(app)/dashboard/inventory/page.tsx
-index d4fb43f0f..e10dbe537 100644
+index d4fb43f0f..5d2c214bc 100644
 --- a/app/(app)/dashboard/inventory/page.tsx
 +++ b/app/(app)/dashboard/inventory/page.tsx
 @@ -1,12 +1,14 @@
@@ -33,7 +33,7 @@ index d4fb43f0f..e10dbe537 100644
 +    <div className="space-y-6">
 +      <PageHeader
 +        title={<T>Inventory</T>}
-+        description={<T>Win32 applications deployed in your Intune tenant</T>}
++        description={<T>Win32 apps in your Intune tenant. Open an app to change who gets it, its install dates and its future updates.</T>}
 +      />
 +      <SkeletonGrid count={4} columns={4} variant="stat" />
 +      <SkeletonGrid count={6} columns={3} variant="content" />
@@ -97,6 +97,15 @@ index d4fb43f0f..e10dbe537 100644
    }
  
    if (error) {
+@@ -179,7 +204,7 @@ export default function InventoryPage() {
+       <div className="space-y-6">
+         <PageHeader
+           title={<T>Inventory</T>}
+-          description={<T>Win32 applications deployed in your Intune tenant</T>}
++          description={<T>Win32 apps in your Intune tenant. Open an app to change who gets it, its install dates and its future updates.</T>}
+         />
+         <AnimatedEmptyState
+           icon={AlertCircle}
 @@ -187,7 +212,7 @@ export default function InventoryPage() {
            description={error.message}
            color="neutral"
@@ -106,7 +115,14 @@ index d4fb43f0f..e10dbe537 100644
              onClick: () => refetch(),
              variant: 'secondary'
            }}
-@@ -208,7 +233,7 @@ export default function InventoryPage() {
+@@ -202,13 +227,13 @@ export default function InventoryPage() {
+       {/* Header */}
+       <PageHeader
+         title={<T>Inventory</T>}
+-        description={<T>Win32 applications deployed in your Intune tenant</T>}
++        description={<T>Win32 apps in your Intune tenant. Open an app to change who gets it, its install dates and its future updates.</T>}
+         gradient
+         gradientColors="mixed"
          actions={
            <Button
              variant="ghost"
@@ -211,7 +227,7 @@ index 000000000..06a5e72c5
 +}
 diff --git a/app/api/hrm/app-insights/route.test.ts b/app/api/hrm/app-insights/route.test.ts
 new file mode 100644
-index 0000000..eda0662
+index 000000000..eda0662c3
 --- /dev/null
 +++ b/app/api/hrm/app-insights/route.test.ts
 @@ -0,0 +1,61 @@
@@ -278,7 +294,7 @@ index 0000000..eda0662
 +});
 diff --git a/app/api/hrm/app-insights/route.ts b/app/api/hrm/app-insights/route.ts
 new file mode 100644
-index 0000000..fee0063
+index 000000000..fee006324
 --- /dev/null
 +++ b/app/api/hrm/app-insights/route.ts
 @@ -0,0 +1,36 @@
@@ -437,215 +453,6 @@ index 000000000..2b3dc11ca
 +    return reply({ error: "Couldn't check install results. The last results are kept. Try again in 5 minutes." }, 500);
 +  }
 +}
-diff --git a/app/api/intune/apps/[id]/route.ts b/app/api/intune/apps/[id]/route.ts
-index 40eb97483..401ac1edd 100644
---- a/app/api/intune/apps/[id]/route.ts
-+++ b/app/api/intune/apps/[id]/route.ts
-@@ -99,6 +99,14 @@ export async function GET(
-     }
- 
-     const appData = await appResponse.json();
-+    // HRM patch 0025: Inventory lists Win32 apps only, so a linked id for any
-+    // other app type gets the same answer as an unknown one.
-+    if (appData['@odata.type'] && appData['@odata.type'] !== '#microsoft.graph.win32LobApp') {
-+      return NextResponse.json(
-+        { error: 'App not found' },
-+        { status: 404 }
-+      );
-+    }
-     let assignments: IntuneAppAssignment[] = [];
- 
-     if (assignmentsResponse.ok) {
-diff --git a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
-index 7dd46a6..3147ac7 100644
---- a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
-+++ b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
-@@ -1,32 +1,33 @@
--import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
- import { NextRequest } from 'next/server';
- import { randomUUID } from 'node:crypto';
- 
- const state = vi.hoisted(() => {
-   vi.stubEnv('DATABASE_PATH', ':memory:');
-   vi.stubEnv('DATABASE_MODE', 'sqlite');
--  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false };
-+  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false,real:false,live:[] as unknown[] };
- });
- vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.authenticated
-   ? { userId: 'fixture-owner', tenantId: 'fixture-tenant' } : null }));
- vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
- vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'fixture-token' }));
--vi.mock('@/lib/intune-api', () => ({
-+vi.mock('@/lib/intune-api', async () => {const actual=await vi.importActual<typeof import('@/lib/intune-api')>('@/lib/intune-api');return ({
-+  getAppAssignments: async () => state.live,
-   getApp: async () => ({ displayName: 'Fixture app', rules: [] }),
--  convertToGraphAssignments: (assignments: unknown) => assignments,
-+  convertToGraphAssignments: (assignments: unknown) => state.real ? actual.convertToGraphAssignments(assignments as never) : assignments,
-   assignToGroups: async (...args: unknown[]) => {
-     await state.assign(...args);
-     if (state.graphFails) throw new Error('Fixture Graph failure');
-   },
-   syncAppCategories: state.categories, setAppRules: vi.fn(),
--}));
-+});});
- vi.mock('@/lib/requirement-rules', () => ({ buildCartItemRequirementRules: () => undefined }));
- vi.mock('@/lib/db', async () => {
-   const { sqliteDb } = await vi.importActual<typeof import('@/lib/db/sqlite')>('@/lib/db/sqlite');
-   return { getDatabase: () => sqliteDb, isSqliteMode: () => true };
- });
- 
--import { sqliteDb, closeSqliteDb, sqliteDeployedConfig } from '@/lib/db/sqlite';
-+import { sqliteDb, closeSqliteDb, sqliteDeployedConfig, sqliteAppInsights } from '@/lib/db/sqlite';
- import { PATCH } from './route';
- import { GET } from '../../deployed/config/route';
- 
-@@ -45,9 +46,34 @@ const create = async (overrides: Record<string, unknown> = {}) => {
- };
- 
- describe('deployed settings persistence with SQLite', () => {
--  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false; });
-+  it('preserves in-use, automatic-update and unknown untouched settings for both groups through the real converter and save entry point',async()=>{
-+    await create();state.real=true;
-+    const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222';
-+    state.live=[a,b].map((groupId,index)=>({id:`live-${index}`,intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId},settings:{'@odata.type':'#microsoft.graph.win32LobAppAssignmentSettings',notifications:'showAll',inUseSettings:index?null:{countdownMinutes:15,minutesBetweenDeferrals:60,numberOfDeferrals:3},autoUpdateSettings:{autoUpdateSupersededAppsState:'enabled'},futureBehavior:{keep:true}}}));
-+    vi.stubGlobal('fetch',vi.fn(async()=>Response.json({value:[]})));
-+    const response=await call({wingetId:'Fixture.App',assignments:[a,b].map(groupId=>({type:'group',groupId,intent:'required'}))});
-+    expect(response.status).toBe(200);
-+    const sent=state.assign.mock.calls[0][2];expect(sent).toHaveLength(2);
-+    for(let i=0;i<2;i++){expect(sent[i].settings).toMatchObject((state.live[i] as any).settings);expect(sent[i].target.groupId).toBe([a,b][i]);}
-+  });
-+  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false;state.real=false;state.live=[]; });
-+  afterEach(() => vi.unstubAllGlobals());
-   afterAll(() => { closeSqliteDb(); vi.unstubAllEnvs(); });
- 
-+  it('records before and after groups with the known IntuneGet actor', async () => {
-+    const appId = '11111111-1111-4111-8111-111111111111';
-+    const job = await create({ intune_app_id: appId });
-+    await sqliteDb.uploadHistory.create({ user_id: 'fixture-owner', intune_tenant_id: 'fixture-tenant', winget_id: 'Fixture.App',
-+      intune_app_id: appId, packaging_job_id: job.id, version: '1', display_name: 'Fixture app' });
-+    let current = [{ intent: 'required', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } }];
-+    vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('/assignments') ? { value: current } : { id: appId, displayVersion: '1' })));
-+    state.assign.mockImplementationOnce(() => { current = [{ intent: 'available', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } }]; });
-+    expect((await call(undefined, appId)).status).toBe(200);
-+    const events = sqliteAppInsights.activity('fixture-tenant', 'Fixture.App');
-+    expect(events.some((e) => e.title === 'Groups or assignment settings changed' && e.actor === 'Saved in IntuneGet by a staff member')).toBe(true);
-+    expect(sqliteAppInsights.alerts('fixture-tenant')).toEqual([]);
-+  });
-+
-   it('persists the edited assignment intent and preserves other configuration', async () => {
-     const job = await create();
-     expect((await call()).status).toBe(200);
-diff --git a/app/api/intune/apps/[id]/settings/route.ts b/app/api/intune/apps/[id]/settings/route.ts
-index 30c19873e..32a29f291 100644
---- a/app/api/intune/apps/[id]/settings/route.ts
-+++ b/app/api/intune/apps/[id]/settings/route.ts
-@@ -1,3 +1,4 @@
-+import { preserveTiming } from '@/lib/hrm/app-timing';
- /**
-  * Intune App Settings API Route
-  * Updates assignments and categories on an existing Intune app without repackaging
-@@ -5,11 +6,13 @@
- 
- import { NextRequest, NextResponse } from 'next/server';
- import { getServerClientOrNull } from '@/lib/supabase';
--import { getDatabase } from '@/lib/db';
-+import { checkAppInsights } from '@/lib/hrm/app-insights-check';
-+import { getDatabase, isSqliteMode } from '@/lib/db';
- import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
- import { getServicePrincipalToken } from '@/lib/intune/graph-client';
- import {
-   getApp,
-+  getAppAssignments,
-   assignToGroups,
-   convertToGraphAssignments,
-   syncAppCategories,
-@@ -77,6 +80,13 @@ export async function PATCH(
-       );
-     }
- 
-+    if (process.env.DATABASE_MODE?.toLowerCase() === 'sqlite') {
-+      const { sqlitePilotRollouts, sqliteRetirements } = await import('@/lib/db/sqlite');
-+      if ([intuneAppId].some((id) => sqlitePilotRollouts.holdsApp(tenantId,id))) return NextResponse.json({ error: 'This app is part of an active pilot. Review it in App updates first.' },{ status: 409 });
-+      // HRM patch 0038: Save to Intune would undo the Uninstall groups of an app being retired.
-+      if (sqliteRetirements.holdsApp(tenantId, intuneAppId)) return NextResponse.json({ error: 'This app is being retired. Cancel retiring it in Inventory first.' },{ status: 409 });
-+    }
-+
-     // Verify the app still exists in Intune
-     const existingApp = await getApp(graphToken, intuneAppId);
- 
-@@ -112,8 +122,20 @@ export async function PATCH(
-       );
-     }
- 
-+    const captureGroups = async (knownChange: boolean) => {
-+      if (!isSqliteMode()) return;
-+      try {
-+        const { sqliteAppInsights } = await import('@/lib/db/sqlite');
-+        await checkAppInsights(sqliteAppInsights, { tenantId, appId: intuneAppId,
-+          token: async () => graphToken, knownChange,
-+          actor: knownChange ? `Saved in IntuneGet by ${user.userEmail || 'a staff member'}` : undefined });
-+      } catch { /* Optional activity must never prevent saving Intune settings. */ }
-+    };
-+    const liveAssignments = assignments ? await getAppAssignments(graphToken, intuneAppId) : [];
-+    if (assignments) await captureGroups(false);
-     // Apply assignments
-     if (assignments) {
-+      const graphAssignments = preserveTiming(convertToGraphAssignments(assignments), liveAssignments);
-       const productCode = existingApp.msiInformation?.productCode;
-       const requirementRules = buildCartItemRequirementRules(
-         existingApp.displayName,
-@@ -134,8 +156,8 @@ export async function PATCH(
-         ]);
-       }
- 
--      const graphAssignments = convertToGraphAssignments(assignments);
-       await assignToGroups(graphToken, intuneAppId, graphAssignments);
-+      await captureGroups(true);
-     }
- 
-     // Sync categories
-diff --git a/app/api/intune/apps/[id]/win32-only.test.ts b/app/api/intune/apps/[id]/win32-only.test.ts
-new file mode 100644
-index 000000000..dd2461b5c
---- /dev/null
-+++ b/app/api/intune/apps/[id]/win32-only.test.ts
-@@ -0,0 +1,35 @@
-+import { NextRequest } from 'next/server';
-+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-+const mocks = vi.hoisted(() => ({ auth: vi.fn(), token: vi.fn() }));
-+vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
-+vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: mocks.token }));
-+vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
-+vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: vi.fn() }));
-+import { GET } from './route';
-+
-+// HRM patch 0025: Inventory links open Win32 apps only; any other app type reads as not found.
-+const id = '11111111-1111-4111-8111-111111111111';
-+const request = () => new NextRequest(`http://localhost/api/intune/apps/${id}`);
-+const params = { params: Promise.resolve({ id }) };
-+const graph = (type: string) => vi.fn(async (url: string) =>
-+  Response.json(url.endsWith('/assignments') ? { value: [] } : { '@odata.type': type, id, displayName: 'Fixture' }));
-+beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'user', tenantId: 'self' }); mocks.token.mockResolvedValue('token'); });
-+afterEach(() => vi.unstubAllGlobals());
-+
-+describe('app details for linked ids', () => {
-+  it('returns a Win32 app', async () => {
-+    vi.stubGlobal('fetch', graph('#microsoft.graph.win32LobApp'));
-+    const response = await GET(request(), params);
-+    expect(response.status).toBe(200);
-+    expect((await response.json()).app.displayName).toBe('Fixture');
-+  });
-+
-+  it('answers App not found for other app types', async () => {
-+    for (const type of ['#microsoft.graph.iosStoreApp', '#microsoft.graph.winGetApp', '#microsoft.graph.officeSuiteApp']) {
-+      vi.stubGlobal('fetch', graph(type));
-+      const response = await GET(request(), params);
-+      expect(response.status).toBe(404);
-+      expect(await response.json()).toEqual({ error: 'App not found' });
-+    }
-+  });
-+});
 diff --git a/components/dashboard/animations/SlidePanel.test.ts b/components/dashboard/animations/SlidePanel.test.ts
 new file mode 100644
 index 000000000..f74b6b387
@@ -743,7 +550,7 @@ index 000000000..f74b6b387
 +  expect(document.getElementById('review')).not.toBeNull();
 +});
 diff --git a/components/dashboard/animations/SlidePanel.tsx b/components/dashboard/animations/SlidePanel.tsx
-index c81730df4..701c5576c 100644
+index c81730df4..7951d0488 100644
 --- a/components/dashboard/animations/SlidePanel.tsx
 +++ b/components/dashboard/animations/SlidePanel.tsx
 @@ -1,62 +1,42 @@
@@ -819,7 +626,7 @@ index c81730df4..701c5576c 100644
    showOverlay = true,
    closeOnOverlayClick = true,
    closeOnEscape = true,
-@@ -65,290 +45,103 @@ export function SlidePanel({
+@@ -65,290 +45,105 @@ export function SlidePanel({
    headerClassName,
    contentClassName,
    header,
@@ -900,7 +707,9 @@ index c81730df4..701c5576c 100644
 +      }}
 +    >
 +      <Dialog.Portal>
-+        {showOverlay && <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />}
++        {/* HRM: a side panel dims the page lightly and does not blur it (same as ui/dialog's side
++            panels), so the page stays readable, also when a second panel opens from this one. */}
++        {showOverlay && <Dialog.Overlay className={side === 'bottom' ? 'fixed inset-0 z-50 bg-black/50' : 'fixed inset-0 z-50 bg-black/30'} />}
 +        <Dialog.Content
 +          asChild
 +          {...(!description ? { 'aria-describedby': undefined } : {})}
@@ -1272,10 +1081,10 @@ index 000000000..a0136363a
 +});
 diff --git a/components/hrm/AppGroupsLine.tsx b/components/hrm/AppGroupsLine.tsx
 new file mode 100644
-index 000000000..fd1ad23a7
+index 000000000..f32c15e0e
 --- /dev/null
 +++ b/components/hrm/AppGroupsLine.tsx
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,59 @@
 +'use client';
 +
 +// HRM patch 0023: which groups an Intune app is assigned to, in one line, read live from Intune.
@@ -1320,8 +1129,10 @@ index 000000000..fd1ad23a7
 +    );
 +  }
 +  const labels = assignments.map((a) => {
-+    const target = assignmentTargetLabel(a.target, app.assignmentGroupNames, app.assignmentGroupLookupFailures).replace(/^Group: /, '');
-+    return `${target} · ${INTENT[a.intent] ?? a.intent}`;
++    const label = assignmentTargetLabel(a.target, app.assignmentGroupNames, app.assignmentGroupLookupFailures);
++    // An exclusion is Excluded, not Required: Intune stores an intent for it that means nothing to staff.
++    if (label.startsWith('Excluded group: ')) return `${label.slice('Excluded group: '.length)} · Excluded`;
++    return `${label.replace(/^Group: /, '')} · ${INTENT[a.intent] ?? a.intent}`;
 +  });
 +  return (
 +    <p className="flex items-start gap-1.5 text-xs text-text-secondary">
@@ -1739,7 +1550,7 @@ index 267d2600e..d702001b5 100644
    );
  });
 diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
-index 5e9631f0e..3dea1f77a 100644
+index 5e9631f0e..bc0d9aec0 100644
 --- a/components/inventory/InventoryAppDetails.tsx
 +++ b/components/inventory/InventoryAppDetails.tsx
 @@ -1,7 +1,17 @@
@@ -1892,7 +1703,7 @@ index 5e9631f0e..3dea1f77a 100644
                  Description
                </h4>
                <p className="text-sm text-text-secondary leading-relaxed">{app.description}</p>
-@@ -138,19 +184,31 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -138,23 +184,37 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
            {/* Commands */}
            <div className="space-y-4">
              {app.installCommandLine && (
@@ -1929,7 +1740,29 @@ index 5e9631f0e..3dea1f77a 100644
                </h4>
                <div className="space-y-2">
                  {app.assignments.map((assignment) => {
-@@ -189,7 +247,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+                   const intentInfo = getAssignmentIntent(assignment.intent);
++                  // HRM: an exclusion is Excluded, not Required.
++                  const excluded = String(assignment.target['@odata.type']).includes('exclusionGroup');
+                   return (
+                     <div
+                       key={assignment.id}
+@@ -173,12 +233,12 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+                               assignment.target,
+                               app.assignmentGroupNames,
+                               app.assignmentGroupLookupFailures
+-                            )}
++                            ).replace(/^Excluded group: /, 'Group: ')}
+                           </p>
+                         </div>
+                       </div>
+-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${intentInfo.className}`}>
+-                        {intentInfo.label}
++                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${excluded ? 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300' : intentInfo.className}`}>
++                        {excluded ? 'Excluded' : intentInfo.label}
+                       </span>
+                     </div>
+                   );
+@@ -189,7 +249,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
  
            {/* Metadata Grid */}
            <div>
@@ -1938,7 +1771,7 @@ index 5e9631f0e..3dea1f77a 100644
                Details
              </h4>
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-@@ -210,12 +268,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -210,12 +270,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                />
                <MetadataItem
                  icon={User}
@@ -2028,7 +1861,7 @@ index eba518fc0..ab871da75 100644
    );
  });
 diff --git a/components/inventory/assignment-group-labels.test.ts b/components/inventory/assignment-group-labels.test.ts
-index b19c39912..ad36b4c35 100644
+index b19c39912..ba0b1a177 100644
 --- a/components/inventory/assignment-group-labels.test.ts
 +++ b/components/inventory/assignment-group-labels.test.ts
 @@ -1,9 +1,15 @@
@@ -2056,6 +1889,17 @@ index b19c39912..ad36b4c35 100644
  }
  describe('actual inventory assignment rendering',()=>{
    it('shows a resolved assignment name',async()=>{expect(await render(false,'Fixture Group')).toContain('Group: Fixture Group');expect(fetch).not.toHaveBeenCalled();});
+@@ -22,8 +28,8 @@ describe('actual inventory assignment rendering',()=>{
+     expect(await render(false,undefined,'not_found')).toContain('Group: 11111111... (group deleted or not found)');
+     expect(document.querySelector('[title="11111111-1111-4111-8111-111111111111"]')).not.toBeNull();
+     await act(async()=>root.unmount());document.body.innerHTML='';
+-    expect(await render(true,undefined,'access_denied')).toContain('Excluded group: 11111111... (no permission to read group name)');
++    expect(await render(true,undefined,'access_denied')).toContain('Group: 11111111... (no permission to read group name)');
+   });
+-  it('identifies excluded groups',async()=>{expect(await render(true,'Finance')).toContain('Excluded group: Finance');});
++  it('identifies excluded groups',async()=>{const text=await render(true,'Finance');expect(text).toContain('Group: FinanceExcluded');expect(text).not.toContain('Required');});
+   it('renders group names as text',async()=>{expect(await render(false,'<img src=x onerror=alert(1)>')).toContain('<img src=x onerror=alert(1)>');expect(document.querySelector('img')).toBeNull();});
+ });
 diff --git a/components/inventory/inventory-app-actions.test.ts b/components/inventory/inventory-app-actions.test.ts
 new file mode 100644
 index 000000000..d1581a5f1
@@ -2344,7 +2188,7 @@ index 000000000..afc4388f4
 +}
 diff --git a/hooks/useInstallStatus.ts b/hooks/useInstallStatus.ts
 new file mode 100644
-index 0000000..914f69f
+index 000000000..914f69f5b
 --- /dev/null
 +++ b/hooks/useInstallStatus.ts
 @@ -0,0 +1,95 @@
@@ -3275,7 +3119,7 @@ index 000000000..526eb10da
 +}
 diff --git a/lib/hrm/app-insights-store.ts b/lib/hrm/app-insights-store.ts
 new file mode 100644
-index 0000000..03cafd3
+index 000000000..03cafd398
 --- /dev/null
 +++ b/lib/hrm/app-insights-store.ts
 @@ -0,0 +1,114 @@
@@ -3395,7 +3239,7 @@ index 0000000..03cafd3
 +export type AppInsightsStore = ReturnType<typeof createAppInsightsStore>;
 diff --git a/lib/hrm/app-insights.ts b/lib/hrm/app-insights.ts
 new file mode 100644
-index 0000000..e1ecba4
+index 000000000..e0fa1c869
 --- /dev/null
 +++ b/lib/hrm/app-insights.ts
 @@ -0,0 +1,63 @@
@@ -3450,7 +3294,7 @@ index 0000000..e1ecba4
 +    const options = describeSettings(r.settings);
 +    return {
 +      key: JSON.stringify(stable({ intent: r.intent, target: { ...target, groupId: id || undefined, targetType: type }, settings: r.settings ?? null })),
-+      label: `${excluded ? 'Excluded ' : ''}${name} · ${intent}${filter}${options ? ` · ${options}` : ''}`,
++      label: `${name} · ${excluded ? 'Excluded' : intent}${filter}${options ? ` · ${options}` : ''}`,
 +      installs: !excluded && (r.intent === 'required' || r.intent === 'available' || r.intent === 'availableWithoutEnrollment'),
 +    };
 +  });
@@ -4140,7 +3984,7 @@ index 000000000..07785bd56
 +}
 diff --git a/hooks/__tests__/app-evidence-scope.test.ts b/hooks/__tests__/app-evidence-scope.test.ts
 new file mode 100644
-index 0000000..cd977cd
+index 000000000..cd977cd7b
 --- /dev/null
 +++ b/hooks/__tests__/app-evidence-scope.test.ts
 @@ -0,0 +1,13 @@
@@ -4157,3 +4001,244 @@ index 0000000..cd977cd
 + expect(first[0]).not.toEqual(colleague[0]);expect(first[1]).not.toEqual(colleague[1]);expect(colleague[0]).not.toEqual(other[0]);expect(colleague[1]).not.toEqual(other[1]);
 + expect(installStatusKey('copy','first','tenant-a')).not.toEqual(installStatusKey('other-copy','first','tenant-a'));
 +});
+diff --git a/app/api/intune/apps/[id]/route.ts b/app/api/intune/apps/[id]/route.ts
+index 40eb97483..401ac1edd 100644
+--- a/app/api/intune/apps/[id]/route.ts
++++ b/app/api/intune/apps/[id]/route.ts
+@@ -99,6 +99,14 @@ export async function GET(
+     }
+ 
+     const appData = await appResponse.json();
++    // HRM patch 0025: Inventory lists Win32 apps only, so a linked id for any
++    // other app type gets the same answer as an unknown one.
++    if (appData['@odata.type'] && appData['@odata.type'] !== '#microsoft.graph.win32LobApp') {
++      return NextResponse.json(
++        { error: 'App not found' },
++        { status: 404 }
++      );
++    }
+     let assignments: IntuneAppAssignment[] = [];
+ 
+     if (assignmentsResponse.ok) {
+diff --git a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
+index 7dd46a659..3147ac76c 100644
+--- a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
++++ b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
+@@ -1,32 +1,33 @@
+-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
++import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { NextRequest } from 'next/server';
+ import { randomUUID } from 'node:crypto';
+ 
+ const state = vi.hoisted(() => {
+   vi.stubEnv('DATABASE_PATH', ':memory:');
+   vi.stubEnv('DATABASE_MODE', 'sqlite');
+-  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false };
++  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false,real:false,live:[] as unknown[] };
+ });
+ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.authenticated
+   ? { userId: 'fixture-owner', tenantId: 'fixture-tenant' } : null }));
+ vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
+ vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'fixture-token' }));
+-vi.mock('@/lib/intune-api', () => ({
++vi.mock('@/lib/intune-api', async () => {const actual=await vi.importActual<typeof import('@/lib/intune-api')>('@/lib/intune-api');return ({
++  getAppAssignments: async () => state.live,
+   getApp: async () => ({ displayName: 'Fixture app', rules: [] }),
+-  convertToGraphAssignments: (assignments: unknown) => assignments,
++  convertToGraphAssignments: (assignments: unknown) => state.real ? actual.convertToGraphAssignments(assignments as never) : assignments,
+   assignToGroups: async (...args: unknown[]) => {
+     await state.assign(...args);
+     if (state.graphFails) throw new Error('Fixture Graph failure');
+   },
+   syncAppCategories: state.categories, setAppRules: vi.fn(),
+-}));
++});});
+ vi.mock('@/lib/requirement-rules', () => ({ buildCartItemRequirementRules: () => undefined }));
+ vi.mock('@/lib/db', async () => {
+   const { sqliteDb } = await vi.importActual<typeof import('@/lib/db/sqlite')>('@/lib/db/sqlite');
+   return { getDatabase: () => sqliteDb, isSqliteMode: () => true };
+ });
+ 
+-import { sqliteDb, closeSqliteDb, sqliteDeployedConfig } from '@/lib/db/sqlite';
++import { sqliteDb, closeSqliteDb, sqliteDeployedConfig, sqliteAppInsights } from '@/lib/db/sqlite';
+ import { PATCH } from './route';
+ import { GET } from '../../deployed/config/route';
+ 
+@@ -45,9 +46,34 @@ const create = async (overrides: Record<string, unknown> = {}) => {
+ };
+ 
+ describe('deployed settings persistence with SQLite', () => {
+-  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false; });
++  it('preserves in-use, automatic-update and unknown untouched settings for both groups through the real converter and save entry point',async()=>{
++    await create();state.real=true;
++    const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222';
++    state.live=[a,b].map((groupId,index)=>({id:`live-${index}`,intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId},settings:{'@odata.type':'#microsoft.graph.win32LobAppAssignmentSettings',notifications:'showAll',inUseSettings:index?null:{countdownMinutes:15,minutesBetweenDeferrals:60,numberOfDeferrals:3},autoUpdateSettings:{autoUpdateSupersededAppsState:'enabled'},futureBehavior:{keep:true}}}));
++    vi.stubGlobal('fetch',vi.fn(async()=>Response.json({value:[]})));
++    const response=await call({wingetId:'Fixture.App',assignments:[a,b].map(groupId=>({type:'group',groupId,intent:'required'}))});
++    expect(response.status).toBe(200);
++    const sent=state.assign.mock.calls[0][2];expect(sent).toHaveLength(2);
++    for(let i=0;i<2;i++){expect(sent[i].settings).toMatchObject((state.live[i] as any).settings);expect(sent[i].target.groupId).toBe([a,b][i]);}
++  });
++  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false;state.real=false;state.live=[]; });
++  afterEach(() => vi.unstubAllGlobals());
+   afterAll(() => { closeSqliteDb(); vi.unstubAllEnvs(); });
+ 
++  it('records before and after groups with the known IntuneGet actor', async () => {
++    const appId = '11111111-1111-4111-8111-111111111111';
++    const job = await create({ intune_app_id: appId });
++    await sqliteDb.uploadHistory.create({ user_id: 'fixture-owner', intune_tenant_id: 'fixture-tenant', winget_id: 'Fixture.App',
++      intune_app_id: appId, packaging_job_id: job.id, version: '1', display_name: 'Fixture app' });
++    let current = [{ intent: 'required', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } }];
++    vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('/assignments') ? { value: current } : { id: appId, displayVersion: '1' })));
++    state.assign.mockImplementationOnce(() => { current = [{ intent: 'available', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } }]; });
++    expect((await call(undefined, appId)).status).toBe(200);
++    const events = sqliteAppInsights.activity('fixture-tenant', 'Fixture.App');
++    expect(events.some((e) => e.title === 'Groups or assignment settings changed' && e.actor === 'Saved in IntuneGet by a staff member')).toBe(true);
++    expect(sqliteAppInsights.alerts('fixture-tenant')).toEqual([]);
++  });
++
+   it('persists the edited assignment intent and preserves other configuration', async () => {
+     const job = await create();
+     expect((await call()).status).toBe(200);
+diff --git a/app/api/intune/apps/[id]/settings/route.ts b/app/api/intune/apps/[id]/settings/route.ts
+index 30c19873e..32a29f291 100644
+--- a/app/api/intune/apps/[id]/settings/route.ts
++++ b/app/api/intune/apps/[id]/settings/route.ts
+@@ -1,3 +1,4 @@
++import { preserveTiming } from '@/lib/hrm/app-timing';
+ /**
+  * Intune App Settings API Route
+  * Updates assignments and categories on an existing Intune app without repackaging
+@@ -5,11 +6,13 @@
+ 
+ import { NextRequest, NextResponse } from 'next/server';
+ import { getServerClientOrNull } from '@/lib/supabase';
+-import { getDatabase } from '@/lib/db';
++import { checkAppInsights } from '@/lib/hrm/app-insights-check';
++import { getDatabase, isSqliteMode } from '@/lib/db';
+ import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
+ import { getServicePrincipalToken } from '@/lib/intune/graph-client';
+ import {
+   getApp,
++  getAppAssignments,
+   assignToGroups,
+   convertToGraphAssignments,
+   syncAppCategories,
+@@ -77,6 +80,13 @@ export async function PATCH(
+       );
+     }
+ 
++    if (process.env.DATABASE_MODE?.toLowerCase() === 'sqlite') {
++      const { sqlitePilotRollouts, sqliteRetirements } = await import('@/lib/db/sqlite');
++      if ([intuneAppId].some((id) => sqlitePilotRollouts.holdsApp(tenantId,id))) return NextResponse.json({ error: 'This app is part of an active pilot. Review it in App updates first.' },{ status: 409 });
++      // HRM patch 0038: Save to Intune would undo the Uninstall groups of an app being retired.
++      if (sqliteRetirements.holdsApp(tenantId, intuneAppId)) return NextResponse.json({ error: 'This app is being retired. Cancel retiring it in Inventory first.' },{ status: 409 });
++    }
++
+     // Verify the app still exists in Intune
+     const existingApp = await getApp(graphToken, intuneAppId);
+ 
+@@ -112,8 +122,20 @@ export async function PATCH(
+       );
+     }
+ 
++    const captureGroups = async (knownChange: boolean) => {
++      if (!isSqliteMode()) return;
++      try {
++        const { sqliteAppInsights } = await import('@/lib/db/sqlite');
++        await checkAppInsights(sqliteAppInsights, { tenantId, appId: intuneAppId,
++          token: async () => graphToken, knownChange,
++          actor: knownChange ? `Saved in IntuneGet by ${user.userEmail || 'a staff member'}` : undefined });
++      } catch { /* Optional activity must never prevent saving Intune settings. */ }
++    };
++    const liveAssignments = assignments ? await getAppAssignments(graphToken, intuneAppId) : [];
++    if (assignments) await captureGroups(false);
+     // Apply assignments
+     if (assignments) {
++      const graphAssignments = preserveTiming(convertToGraphAssignments(assignments), liveAssignments);
+       const productCode = existingApp.msiInformation?.productCode;
+       const requirementRules = buildCartItemRequirementRules(
+         existingApp.displayName,
+@@ -134,8 +156,8 @@ export async function PATCH(
+         ]);
+       }
+ 
+-      const graphAssignments = convertToGraphAssignments(assignments);
+       await assignToGroups(graphToken, intuneAppId, graphAssignments);
++      await captureGroups(true);
+     }
+ 
+     // Sync categories
+diff --git a/app/api/intune/apps/[id]/win32-only.test.ts b/app/api/intune/apps/[id]/win32-only.test.ts
+new file mode 100644
+index 000000000..dd2461b5c
+--- /dev/null
++++ b/app/api/intune/apps/[id]/win32-only.test.ts
+@@ -0,0 +1,35 @@
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), token: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: mocks.token }));
++vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
++vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: vi.fn() }));
++import { GET } from './route';
++
++// HRM patch 0025: Inventory links open Win32 apps only; any other app type reads as not found.
++const id = '11111111-1111-4111-8111-111111111111';
++const request = () => new NextRequest(`http://localhost/api/intune/apps/${id}`);
++const params = { params: Promise.resolve({ id }) };
++const graph = (type: string) => vi.fn(async (url: string) =>
++  Response.json(url.endsWith('/assignments') ? { value: [] } : { '@odata.type': type, id, displayName: 'Fixture' }));
++beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'user', tenantId: 'self' }); mocks.token.mockResolvedValue('token'); });
++afterEach(() => vi.unstubAllGlobals());
++
++describe('app details for linked ids', () => {
++  it('returns a Win32 app', async () => {
++    vi.stubGlobal('fetch', graph('#microsoft.graph.win32LobApp'));
++    const response = await GET(request(), params);
++    expect(response.status).toBe(200);
++    expect((await response.json()).app.displayName).toBe('Fixture');
++  });
++
++  it('answers App not found for other app types', async () => {
++    for (const type of ['#microsoft.graph.iosStoreApp', '#microsoft.graph.winGetApp', '#microsoft.graph.officeSuiteApp']) {
++      vi.stubGlobal('fetch', graph(type));
++      const response = await GET(request(), params);
++      expect(response.status).toBe(404);
++      expect(await response.json()).toEqual({ error: 'App not found' });
++    }
++  });
++});
+diff --git a/lib/intune/assignment-group-names.test.ts b/lib/intune/assignment-group-names.test.ts
+index 851c281fe..f2546c3f8 100644
+--- a/lib/intune/assignment-group-names.test.ts
++++ b/lib/intune/assignment-group-names.test.ts
+@@ -50,7 +50,8 @@ describe('assignment group name resolution',()=>{
+     expect(assignmentTargetLabel(assignment().target)).toBe('Group: 11111111... (name unavailable)');
+     expect(assignmentTargetLabel(assignment().target,{},{[id]:'not_found'})).toBe('Group: 11111111... (group deleted or not found)');
+     expect(assignmentTargetLabel(assignment(id.toUpperCase(),true).target,{},{[id]:'access_denied'})).toBe('Excluded group: 11111111... (no permission to read group name)');
+-    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'})).toBe('All Devices');
+-    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allUsersAssignmentTarget'})).toBe('All Users');
++    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'})).toBe('All devices');
++    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allUsersAssignmentTarget'})).toBe('All users');
++    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.groupAssignmentTarget'})).toBe('Unknown group');
+   });
+ });
+diff --git a/lib/intune/assignment-group-names.ts b/lib/intune/assignment-group-names.ts
+index 2c3370e23..8b5ee681e 100644
+--- a/lib/intune/assignment-group-names.ts
++++ b/lib/intune/assignment-group-names.ts
+@@ -60,9 +60,9 @@ export function assignmentTargetLabel(
+   failures: Partial<Record<string, AssignmentGroupLookupFailure>> = {},
+ ): string {
+   const type = target['@odata.type'];
+-  if (type?.includes('allDevices')) return 'All Devices';
+-  if (type?.includes('allUsers')) return 'All Users';
+-  if (!target.groupId) return 'Unknown Target';
++  if (type?.includes('allDevices')) return 'All devices';
++  if (type?.includes('allUsers')) return 'All users';
++  if (!target.groupId) return 'Unknown group';
+   const excluded = type === '#microsoft.graph.exclusionGroupAssignmentTarget';
+   const prefix = excluded ? 'Excluded group' : 'Group';
+   const id = target.groupId.toLowerCase();

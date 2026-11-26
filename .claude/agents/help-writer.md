@@ -97,8 +97,12 @@ Use these exactly; sentence case, as the screen shows them.
 | Installation and staff experience (app configuration: toolkit windows and effective staff summary) | Installation timing (for app configuration), installer decides |
 | App setup and checks (app configuration: background actions and package settings) | More settings |
 | Toolkit messages and appearance (app configuration: applicable toolkit presentation) | What staff see during install |
-| Installation timing (App updates card: prompts, postponement and startup install built into the package) | Device installation, Install behaviour, Installation behavior |
-| Install dates (panel opened from Inventory app details and App updates cards: one group's dates and restart grace for a copy already in Intune) | Availability and deadline, Installation timing (for that panel), timing |
+| How automatic updates install (App updates row and its panel; How it installs and Change how it installs in the app workspace: prompts, postponement and startup install built into the package) | Installation timing, Edit next rollout, Device installation, Install behaviour, Installation behavior |
+| Future updates (app workspace card for saved future-update settings) | Next automatic update, next rollout |
+| Edit groups (app workspace button and panel: add a group, remove a group, or switch a group between Required and Available on the copy in Intune) | Edit assignments, Add a group (as the button or panel name; "Add a group" is only the section inside Edit groups) |
+| App updates (the page and its sidebar entry) | Updates (as the page's name) |
+| New version checks (the fixed 3:30 checks) | Check for new app versions, discovery |
+| Install dates (panel opened from Inventory app details and App updates cards: one group's dates and restart grace for a copy already in Intune; also the per-group line and fields under Who gets it in the deploy form, for a new deployment) | Availability and deadline, Installation timing (for that panel), timing, schedule (for these dates) |
 | Group (in Install dates) | assignment |
 | Each computer's own clock | Device local time |
 | Update history (App updates tab) | Publishing history |

@@ -1604,7 +1604,7 @@ index d29f428c0..dac880c43 100644
  export async function POST(request: NextRequest) {
    try {
 diff --git a/app/api/package/route.test.ts b/app/api/package/route.test.ts
-index b68952f05..5eaa0467d 100644
+index b68952f05..de8bd280e 100644
 --- a/app/api/package/route.test.ts
 +++ b/app/api/package/route.test.ts
 @@ -178,7 +178,7 @@ describe('GET /api/package (userId listing)', () => {
@@ -1728,7 +1728,109 @@ index b68952f05..5eaa0467d 100644
    it('returns an actionable conflict for removed versions before creating or dispatching jobs', async () => {
      getLiveInstallersMock.mockResolvedValueOnce([]);
      const response = await POST(new NextRequest('http://localhost:3000/api/package', {
-@@ -979,7 +1068,7 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -829,6 +918,101 @@ describe('POST /api/package (workflow dispatch)', () => {
+     expect(triggerPackagingWorkflowMock.mock.calls[0][0].relationships).toBeUndefined();
+   });
+ 
++  // HRM: Update only on a Store app would install everywhere, so the server refuses it.
++  it.each([
++    [[{ type: 'group', groupId: 'fake-group', groupName: 'Pilot computers', intent: 'updateOnly' }]],
++    [[{ type: 'allDevices', intent: 'required' }, { type: 'allUsers', intent: 'updateOnly' }]],
++  ])('refuses Update only on a Store app before anything starts: %j', async (assignments) => {
++    const response = await POST(new NextRequest('http://localhost:3000/api/package', { method: 'POST', headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
++      body: JSON.stringify({ items: [{ appSource: 'store', wingetId: '9NBLGGH4NNS1', packageIdentifier: '9NBLGGH4NNS1', displayName: 'Example Store App', publisher: 'Example', version: 'latest', installExperience: 'system', assignments }] }) }));
++    expect(response.status).toBe(400);
++    expect((await response.json()).message).toBe('Store apps cannot be Update only. Choose Required, Available or Uninstall.');
++    expect(createMock).not.toHaveBeenCalled(); expect(triggerPackagingWorkflowMock).not.toHaveBeenCalled();
++  });
++  it('still accepts Update only on a Win32 app', async () => {
++    const response = await POST(new NextRequest('http://localhost:3000/api/package', { method: 'POST', headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
++      body: JSON.stringify({ items: [makeWin32Item({ assignments: [{ type: 'group', groupId: 'fake-group', intent: 'updateOnly' }] })] }) }));
++    expect(response.status).toBe(200);
++  });
++
++  // HRM: install dates set in the deploy form (item 122). Fake groups only.
++  describe('install dates from the deploy form', () => {
++    const time = { useLocalTime: true, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: '2026-12-05T17:00:00Z' };
++    const grace = { gracePeriodInMinutes: 1440, countdownDisplayBeforeRestartInMinutes: 15, restartNotificationSnoozeDurationInMinutes: 240 };
++    const group = (over: Record<string, unknown> = {}) => ({ type: 'group', groupId: 'fake-group', groupName: 'Pilot computers', intent: 'required', ...over });
++    const post = (item: Record<string, unknown>) => POST(new NextRequest('http://localhost:3000/api/package', {
++      method: 'POST', headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [makeWin32Item(item)] }),
++    }));
++    const nothingStarted = () => { expect(createMock).not.toHaveBeenCalled(); expect(triggerPackagingWorkflowMock).not.toHaveBeenCalled(); };
++    afterEach(() => vi.unstubAllEnvs());
++
++    it('sends groups exactly as before when no date is set, whether or not the server offers dates', async () => {
++      for (const capability of ['', 'assignment-dates-v1']) {
++        vi.stubEnv('HRM_DEPLOY_DATES_CAPABILITY', capability); triggerPackagingWorkflowMock.mockClear();
++        expect((await post({ assignments: [group()] })).status).toBe(200);
++        expect(triggerPackagingWorkflowMock.mock.calls[0][0].assignments).toBe(JSON.stringify([group()]));
++      }
++    });
++    it('passes valid dates and a grace period to the workflow unchanged', async () => {
++      vi.stubEnv('HRM_DEPLOY_DATES_CAPABILITY', 'assignment-dates-v1');
++      const assignments = [group({ installTimeSettings: time, restartSettings: grace }), group({ groupId: 'fake-b', groupName: 'All staff computers', intent: 'available', installTimeSettings: { ...time, deadlineDateTime: null } }), group({ groupId: 'fake-c' })];
++      const response = await post({ assignments, psadtConfig: { restartBehavior: 'Prompt' } });
++      expect(response.status).toBe(200);
++      expect(JSON.parse(triggerPackagingWorkflowMock.mock.calls[0][0].assignments)).toEqual(assignments);
++    });
++    it('refuses dates on a hosted server whose workflow is not attested to apply them', async () => {
++      const response = await post({ assignments: [group({ installTimeSettings: time })] });
++      expect(response.status).toBe(400);
++      expect((await response.json()).message).toContain('cannot apply install dates during a deployment');
++      nothingStarted();
++    });
++    it.each([
++      ['a deadline before availability', [group({ installTimeSettings: { ...time, deadlineDateTime: '2026-11-30T09:00:00Z' } })], { restartBehavior: 'Prompt' }, 'Pilot computers: The installation deadline must be at or after availability.'],
++      ['a deadline on an Available group', [group({ intent: 'available', installTimeSettings: time })], undefined, 'Only Required groups can have an installation deadline.'],
++      ['a date with an offset', [group({ installTimeSettings: { ...time, startDateTime: '2026-12-01T09:00:00+02:00' } })], undefined, 'Enter valid Available from and Must install by dates.'],
++      ['an impossible date', [group({ installTimeSettings: { ...time, startDateTime: '2026-02-30T09:00:00Z' } })], undefined, 'Enter valid Available from and Must install by dates.'],
++      ['an extra timing field', [group({ installTimeSettings: { ...time, surprise: 1 } })], undefined, 'Enter valid Available from and Must install by dates.'],
++      ['dates on an Uninstall group', [group({ intent: 'uninstall', installTimeSettings: time })], undefined, 'Only Required and Available groups can have install dates.'],
++      ['dates on an exclusion', [group({ type: 'exclusionGroup', installTimeSettings: time })], undefined, 'Excluded groups cannot have install dates.'],
++      ['a grace period when restarts are suppressed', [group({ restartSettings: grace })], { restartBehavior: 'Suppress' }, 'A restart grace period needs'],
++      ['a grace period with no restart setting', [group({ restartSettings: grace })], undefined, 'A restart grace period needs'],
++      ['a grace period over 14 days', [group({ restartSettings: { ...grace, gracePeriodInMinutes: 20161 } })], { restartBehavior: 'Force' }, 'Use whole minutes'],
++      ['a bad second group', [group({ installTimeSettings: time }), group({ groupName: 'All staff computers', restartSettings: { ...grace, countdownDisplayBeforeRestartInMinutes: 0 } })], { restartBehavior: 'Force' }, 'All staff computers: Use whole minutes'],
++    ])('refuses %s before any job or workflow run', async (_name, assignments, psadtConfig, message) => {
++      vi.stubEnv('HRM_DEPLOY_DATES_CAPABILITY', 'assignment-dates-v1');
++      const response = await post({ assignments, ...(psadtConfig ? { psadtConfig } : {}) });
++      expect(response.status).toBe(400);
++      const body = await response.json();
++      expect(body.error).toBe('Invalid install dates'); expect(body.message).toContain(message);
++      nothingStarted();
++    });
++    it('refuses a whole batch when one item has bad dates', async () => {
++      vi.stubEnv('HRM_DEPLOY_DATES_CAPABILITY', 'assignment-dates-v1');
++      const response = await POST(new NextRequest('http://localhost:3000/api/package', { method: 'POST', headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
++        body: JSON.stringify({ items: [makeWin32Item({ assignments: [group()] }), makeWin32Item({ wingetId: 'Test.Other', assignments: [group({ installTimeSettings: { ...time, startDateTime: 'tomorrow' } })] })] }) }));
++      expect(response.status).toBe(400); nothingStarted();
++    });
++    it('accepts dates for the local packager without the attestation, but never a grace period', async () => {
++      isSupabaseServerConfiguredMock.mockReturnValue(false);
++      getFeatureFlagsMock.mockReturnValue({ pipeline: true, localPackager: true });
++      const dated = [group({ installTimeSettings: time })];
++      expect((await post({ assignments: dated })).status).toBe(200);
++      expect(createMock.mock.calls[0][0].package_config.assignments).toEqual(dated);
++      createMock.mockClear();
++      const refused = await post({ assignments: [group({ restartSettings: grace })], psadtConfig: { restartBehavior: 'Force' } });
++      expect(refused.status).toBe(400); expect((await refused.json()).message).toContain('A restart grace period needs');
++      expect(createMock).not.toHaveBeenCalled();
++    });
++    it('refuses dates on a Store app', async () => {
++      vi.stubEnv('HRM_DEPLOY_DATES_CAPABILITY', 'assignment-dates-v1');
++      const response = await POST(new NextRequest('http://localhost:3000/api/package', { method: 'POST', headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
++        body: JSON.stringify({ items: [{ appSource: 'store', wingetId: '9NBLGGH4NNS1', packageIdentifier: '9NBLGGH4NNS1', displayName: 'Example Store App', publisher: 'Example', version: 'latest', installExperience: 'system', assignments: [group({ installTimeSettings: time })] }] }) }));
++      expect(response.status).toBe(400);
++      expect((await response.json()).message).toBe('Install dates can be set for Win32 apps only.');
++      nothingStarted();
++    });
++  });
++
+   function postSingleItem() {
+     return POST(new NextRequest('http://localhost:3000/api/package', {
+       method: 'POST',
+@@ -979,7 +1163,7 @@ describe('POST /api/package (workflow dispatch)', () => {
      expect(updateMock).toHaveBeenCalledOnce();
      expect(updateMock.mock.calls[0][1].status).toBe('awaiting_qa');
    });
@@ -1737,7 +1839,7 @@ index b68952f05..5eaa0467d 100644
      const item = { ...makeWin32Item(), forceCreate: false };
      triggerPackagingWorkflowMock.mockRejectedValueOnce(new WorkflowDispatchUnconfirmedError(503, Date.now(), 'A'.repeat(64)));
      const response = await POST(new NextRequest('http://localhost:3000/api/package', {
-@@ -988,11 +1077,11 @@ describe('POST /api/package (workflow dispatch)', () => {
+@@ -988,11 +1172,11 @@ describe('POST /api/package (workflow dispatch)', () => {
      }));
      expect(await response.json()).toMatchObject({ jobs: [{ status: 'awaiting_qa' }] });
      expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ package_config: expect.objectContaining({ forceCreate: false }) }));
@@ -1751,7 +1853,7 @@ index b68952f05..5eaa0467d 100644
    });
    it('still reports other dispatched jobs when saving a capacity hold fails', async () => {
      triggerPackagingWorkflowMock.mockRejectedValueOnce(new WorkflowDispatchRateLimitError(429,
-@@ -2417,7 +2506,7 @@ describe('POST /api/package (curated licence attestation)', () => {
+@@ -2417,7 +2601,7 @@ describe('POST /api/package (curated licence attestation)', () => {
      acrobatItem = cart(0);
      chromeItem = cart(1, CURATED_APPS[0]);
      getDatabaseMock.mockReturnValue({
@@ -1761,7 +1863,7 @@ index b68952f05..5eaa0467d 100644
          get: vi.fn(async (tenantId: string, id: string, version: string) => acceptances.has(`${tenantId}|${id}|${version}`)
            ? { id: 'acceptance', tenant_id: tenantId, app_id: acrobat.id, attestation_id: id, attestation_version: version,
 diff --git a/app/api/package/route.ts b/app/api/package/route.ts
-index 6137d71cc..a80351206 100644
+index 6137d71cc..6bf01aedd 100644
 --- a/app/api/package/route.ts
 +++ b/app/api/package/route.ts
 @@ -1,4 +1,8 @@
@@ -1773,7 +1875,7 @@ index 6137d71cc..a80351206 100644
  import { CuratedCatalogError, isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
  import { reconcileCuratedCartItem } from '@/lib/curated-catalog/server';
  import { findCuratedApp } from '@/lib/curated-catalog/definitions';
-@@ -20,6 +24,9 @@ import {
+@@ -20,15 +24,20 @@ import {
    type WorkflowInputs,
  } from '@/lib/github-actions';
  import { getAppConfig } from '@/lib/config';
@@ -1782,8 +1884,20 @@ index 6137d71cc..a80351206 100644
 +import { removalOf, removalBlockReason, removalGroupProblems, removalDetectionRules, removalUninstallCommand, removalDisplayName } from '@/lib/hrm/removal';
  import { parseAccessToken } from '@/lib/auth-utils';
  import { getFeatureFlags } from '@/lib/features';
++import { deployDatesAttested } from '@/lib/hrm/packaging-capabilities';
++import { deployDateProblems, deployDatesAvailable, deployGraceSupported, hasDeployDates } from '@/lib/hrm/deploy-dates';
  import { isValidInstallerUrl, isValidSha256 } from '@/lib/custom-app';
-@@ -198,6 +205,12 @@ export async function POST(request: NextRequest) {
+ import { verifyTenantConsent } from '@/lib/msp/consent-verification';
+ import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
+ import { checkStoredConsent } from '@/lib/msp/consent-cache';
+ import { extractSilentSwitches } from '@/lib/msp/silent-switches';
+ import { buildIntuneAppDescription } from '@/lib/intune-description';
+-import { sanitizeAssignmentsForDispatch } from '@/lib/assignment-intents';
++import { sanitizeAssignmentsForDispatch, hasUpdateOnly, STORE_UPDATE_ONLY_PROBLEM } from '@/lib/assignment-intents';
+ import { acquireGraphToken } from '@/lib/graph-token';
+ import { findPendingApprovalBlocks } from '@/lib/intune-approval-guard';
+ import { deployStoreApp } from '@/lib/store-app-deploy';
+@@ -198,6 +207,28 @@ export async function POST(request: NextRequest) {
        if (psadtConfig !== undefined && (psadtConfig === null || typeof psadtConfig !== 'object' || Array.isArray(psadtConfig))) {
          return NextResponse.json({ error: 'Invalid PSADT settings' }, { status: 400 });
        }
@@ -1793,10 +1907,26 @@ index 6137d71cc..a80351206 100644
 +        const problem = isStoreCartItem(item) ? 'The startup installer Beta does not support Store apps.' : startupInstallationProblem({ installScope: item.installScope, installerType: item.installerType, customDetection: item.psadtConfig?.customDetection, relationships: item.relationships, espProfiles: item.espProfiles, removal: !!item.hrmRemoval });
 +        if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 +      }
++      // HRM: Update only needs a Win32 requirement rule. A Store app has none, so it is refused rather
++      // than installed on every computer in the group.
++      if (isStoreCartItem(item) && hasUpdateOnly((item as unknown as { assignments?: unknown }).assignments)) {
++        return NextResponse.json({ error: 'Update only is not available for Store apps', message: STORE_UPDATE_ONLY_PROBLEM }, { status: 400 });
++      }
++      // HRM: install dates set in the deploy form. Checked here whatever the browser sent, by the
++      // same rules the packager and the hosted workflow apply. A server whose packaging would
++      // ignore the dates refuses them, so a dated group is never assigned as soon as possible.
++      const itemAssignments = (item as unknown as { assignments?: unknown }).assignments;
++      if (Array.isArray(itemAssignments) && itemAssignments.some(hasDeployDates)) {
++        const packagingPath = getFeatureFlags().localPackager ? 'local' : 'github';
++        if (isStoreCartItem(item)) return NextResponse.json({ error: 'Install dates are not available', message: 'Install dates can be set for Win32 apps only.' }, { status: 400 });
++        if (!deployDatesAvailable(packagingPath, deployDatesAttested())) return NextResponse.json({ error: 'Install dates are not available', message: 'This server cannot apply install dates during a deployment. Remove the dates, deploy, then set them with Install dates in the app workspace.' }, { status: 400 });
++        const dateProblems = deployDateProblems(itemAssignments, deployGraceSupported(packagingPath, (psadtConfig as { restartBehavior?: unknown } | undefined)?.restartBehavior));
++        if (dateProblems.length > 0) return NextResponse.json({ error: 'Invalid install dates', message: dateProblems.join(' ') }, { status: 400 });
++      }
        const flag = (item as unknown as { psadtConfig?: { customDetection?: unknown } }).psadtConfig?.customDetection;
        if (flag !== undefined && typeof flag !== 'boolean') {
          return NextResponse.json({ error: 'Invalid custom detection setting' }, { status: 400 });
-@@ -210,11 +223,54 @@ export async function POST(request: NextRequest) {
+@@ -210,11 +241,54 @@ export async function POST(request: NextRequest) {
        } else if (isStoreCartItem(item) && (item as unknown as { psadtConfig?: { customDetection?: boolean } }).psadtConfig?.customDetection) {
          return NextResponse.json({ error: 'Custom detection is not supported for Store apps' }, { status: 400 });
        }
@@ -1851,7 +1981,7 @@ index 6137d71cc..a80351206 100644
      // This checkpoint precedes every Store/Win32 insert and curated QA demand.
      // Neither request-level nor item-level forceCreate bypasses approval safety.
      // Check the stored canonical ID and any legacy submitted casing before demand.
-@@ -431,6 +487,17 @@ export async function POST(request: NextRequest) {
+@@ -431,6 +505,17 @@ export async function POST(request: NextRequest) {
        if (item.psadtConfig?.customDetection && !canUseCustomDetection(item)) {
          return NextResponse.json({ error: 'Custom detection is not supported for this resolved installer' }, { status: 400 });
        }
@@ -1869,7 +1999,7 @@ index 6137d71cc..a80351206 100644
      }
  
      // Enforce installer health before creating job rows. Work in pairs to
-@@ -861,7 +928,12 @@ export async function POST(request: NextRequest) {
+@@ -861,7 +946,12 @@ export async function POST(request: NextRequest) {
                  ? JSON.stringify(item.relationships)
                  : undefined,
                installScope: item.installScope,
@@ -1883,7 +2013,7 @@ index 6137d71cc..a80351206 100644
                qaOverride: item.sourceType === 'curated' ? false : isQaMaintenanceMode() || item.qaOverride,
                sourceType: item.sourceType,
                curatedReleaseId: item.curatedReleaseId,
-@@ -917,9 +989,8 @@ export async function POST(request: NextRequest) {
+@@ -917,9 +1007,8 @@ export async function POST(request: NextRequest) {
                let retryWriteFailed = false;
                const held = await db.jobs.update(dispatch.jobId, {
                  ...rateHold,
@@ -1895,7 +2025,7 @@ index 6137d71cc..a80351206 100644
                }, {
                  status: 'queued', github_run_id: null, callback_run_id: null, cancelled_at: null, archived_at: null,
                }).catch(() => {
-@@ -950,9 +1021,10 @@ export async function POST(request: NextRequest) {
+@@ -950,9 +1039,10 @@ export async function POST(request: NextRequest) {
                  status: reputationHold ? 'awaiting_qa' : 'failed',
                  status_message: reputationHold ? dispatchError : null,
                  progress_percent: 0,
@@ -1909,7 +2039,7 @@ index 6137d71cc..a80351206 100644
                  error_message: dispatchError,
                  completed_at: reputationHold ? null : new Date().toISOString(),
                };
-@@ -1022,6 +1094,9 @@ export async function POST(request: NextRequest) {
+@@ -1022,6 +1112,9 @@ export async function POST(request: NextRequest) {
  
  // Cap read-side healing per request to keep the GET fast
  const STALE_HEAL_BATCH_SIZE = 25;
@@ -1919,7 +2049,7 @@ index 6137d71cc..a80351206 100644
  
  /**
   * Mark jobs stuck in intermediate states beyond the stale timeout as failed.
-@@ -1135,29 +1210,41 @@ export async function GET(request: NextRequest) {
+@@ -1135,29 +1228,41 @@ export async function GET(request: NextRequest) {
      // scope=tenant shows every user's deployments in the tenant (so a team on
      // one tenant can see each other's IntuneGet apps and avoid duplicates).
      const scope = searchParams.get('scope');
@@ -2074,22 +2204,41 @@ index 9452411cf..7ef9205ae 100644
      // every deployment the local packager runs.
      if (status && status !== existingJob?.status) {
 diff --git a/components/AssignmentConfig.tsx b/components/AssignmentConfig.tsx
-index f1120662d..b1dbb72ad 100644
+index f1120662d..3f101b663 100644
 --- a/components/AssignmentConfig.tsx
 +++ b/components/AssignmentConfig.tsx
-@@ -29,17 +29,20 @@ interface AssignmentConfigProps {
+@@ -20,26 +20,39 @@ import { useMspOptional } from '@/hooks/useMspOptional';
+ import {
+   ASSIGNMENT_INTENT_OPTIONS,
+   buildGroupAssignment,
++  STORE_UPDATE_ONLY_PROBLEM,
+   type AssignmentIntent,
+ } from '@/lib/assignment-intents';
+ import type { PackageAssignment } from '@/types/upload';
++import { TimingFields } from '@/components/hrm/TimingFields';
++import { canHaveDeployDates, deployFormProblem, describeDeployDates, fitDeployDates, hasDeployDates, stripDeployDates, type DeployDatesForm } from '@/lib/hrm/deploy-dates';
+ import type { EntraIDGroup, IntuneAssignmentFilter } from '@/types/intune';
+ 
+ interface AssignmentConfigProps {
    assignments: PackageAssignment[];
    onChange: (assignments: PackageAssignment[]) => void;
    supportsAutoUpdateSuperseded?: boolean;
 +  /** HRM patch 0040: a removal: every group is Uninstall and groups can't be turned off */
 +  removalOnly?: boolean;
++  /**
++   * HRM: install dates for a new deployment. Omitted: not shown (Store apps, removals). With
++   * available false, only the note is shown and no dates can be set.
++   */
++  installDates?: DeployDatesForm;
++  /** HRM: a Microsoft Store app. Update only is not offered, because Intune cannot limit a Store app to computers that already have it. */
++  storeApp?: boolean;
  }
  
 -export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSuperseded = false }: AssignmentConfigProps) {
 -  const [enabled, setEnabled] = useState(() => assignments.length > 0);
-+export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSuperseded = false, removalOnly = false }: AssignmentConfigProps) {
++export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSuperseded = false, removalOnly = false, installDates, storeApp = false }: AssignmentConfigProps) {
 +  const [enabled, setEnabled] = useState(() => removalOnly || assignments.length > 0);
-+  const intentOptions = removalOnly ? ASSIGNMENT_INTENT_OPTIONS.filter((o) => o.value === 'uninstall') : ASSIGNMENT_INTENT_OPTIONS;
++  const intentOptions = removalOnly ? ASSIGNMENT_INTENT_OPTIONS.filter((o) => o.value === 'uninstall') : storeApp ? ASSIGNMENT_INTENT_OPTIONS.filter((o) => o.value !== 'updateOnly') : ASSIGNMENT_INTENT_OPTIONS;
    const [searchQuery, setSearchQuery] = useState('');
    const [searchResults, setSearchResults] = useState<EntraIDGroup[]>([]);
    const [isSearching, setIsSearching] = useState(false);
@@ -2101,7 +2250,72 @@ index f1120662d..b1dbb72ad 100644
  
    // Filter state
    const [availableFilters, setAvailableFilters] = useState<IntuneAssignmentFilter[]>([]);
-@@ -165,7 +168,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -47,6 +60,8 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+   const [filtersLoaded, setFiltersLoaded] = useState(false);
+   const [filtersError, setFiltersError] = useState<string | null>(null);
+   const [expandedFilterRow, setExpandedFilterRow] = useState<number | null>(null);
++  // HRM: the row whose install dates are open. Rows that already have dates stay readable when closed.
++  const [expandedDatesRow, setExpandedDatesRow] = useState<number | null>(null);
+ 
+   const { getAccessToken } = useMicrosoftAuth();
+   const { isMspUser, selectedTenantId } = useMspOptional();
+@@ -63,6 +78,14 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+   // Check if specific assignment types are present
+   const hasAllDevices = assignments.some((a) => a.type === 'allDevices');
+   const hasAllUsers = assignments.some((a) => a.type === 'allUsers');
++  // HRM: the hint under the quick picks states each pick's type as its row has it now, so it stays
++  // true after the row is switched (for example All devices changed from Required to Available).
++  const quickPickHint = (['allDevices', 'allUsers'] as const).flatMap((type) => {
++    const row = assignments.find((a) => a.type === type);
++    if (!row) return [];
++    const label = row.intent === 'available' ? 'Available in Company Portal' : ASSIGNMENT_INTENT_OPTIONS.find((o) => o.value === row.intent)?.label ?? row.intent;
++    return [`${label} for all ${type === 'allDevices' ? 'devices' : 'users'}`];
++  }).map((part, index) => (index === 0 ? part : part.charAt(0).toLowerCase() + part.slice(1))).join(', ');
+ 
+   // Fetch assignment filters on first interaction
+   const loadFilters = useCallback(async () => {
+@@ -92,12 +115,12 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+         // an error masquerade as an empty filter list.
+         const data = await response.json().catch(() => ({}));
+         setFiltersError(
+-          data.error || `Failed to load assignment filters (${response.status})`
++          data.error || `Filters could not be loaded (${response.status}). Close group settings and open them again.`
+         );
+       }
+     } catch (err) {
+       console.error('Failed to load assignment filters:', err);
+-      setFiltersError('Failed to load assignment filters. Please try again.');
++      setFiltersError('Filters could not be loaded. Close group settings and open them again.');
+     } finally {
+       setIsLoadingFilters(false);
+     }
+@@ -117,7 +140,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+       try {
+         const accessToken = await getAccessToken();
+         if (!accessToken) {
+-          setSearchError('Not authenticated');
++          setSearchError('Sign in again, then search for the group.');
+           return;
+         }
+ 
+@@ -133,14 +156,14 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+ 
+         if (!response.ok) {
+           const data = await response.json();
+-          throw new Error(data.error || 'Failed to search groups');
++          throw new Error(data.error || 'Groups could not be searched. Try again.');
+         }
+ 
+         const data = await response.json();
+         setSearchResults(data.groups || []);
+       } catch (err) {
+         console.error('Group search error:', err);
+-        setSearchError(err instanceof Error ? err.message : 'Search failed');
++        setSearchError(err instanceof Error ? err.message : 'Groups could not be searched. Try again.');
+         setSearchResults([]);
+       } finally {
+         setIsSearching(false);
+@@ -165,7 +188,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
      if (hasAllDevices) {
        onChange(assignments.filter((a) => a.type !== 'allDevices'));
      } else {
@@ -2110,7 +2324,7 @@ index f1120662d..b1dbb72ad 100644
      }
    };
  
-@@ -174,7 +177,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -174,7 +197,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
      if (hasAllUsers) {
        onChange(assignments.filter((a) => a.type !== 'allUsers'));
      } else {
@@ -2119,13 +2333,51 @@ index f1120662d..b1dbb72ad 100644
      }
    };
  
-@@ -309,8 +312,13 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -214,8 +237,10 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+   // Update assignment intent
+   const updateIntent = (index: number, intent: AssignmentIntent) => {
+     const updated = [...assignments];
+-    updated[index] = { ...updated[index], intent, ...(intent !== 'available' ? { autoUpdateSupersededApps: false } : {}) };
++    // HRM: dates stay only where the new choice allows them (no deadline on Available, none on Uninstall or Update only).
++    updated[index] = fitDeployDates({ ...updated[index], intent, ...(intent !== 'available' ? { autoUpdateSupersededApps: false } : {}) });
+     onChange(updated);
++    if (expandedDatesRow === index && !canHaveDeployDates(updated[index])) setExpandedDatesRow(null);
+   };
+ 
+   // Update assignment filter
+@@ -266,6 +291,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+   // Remove an assignment
+   const removeAssignment = (index: number) => {
+     onChange(assignments.filter((_, i) => i !== index));
++    if (expandedDatesRow !== null) setExpandedDatesRow(expandedDatesRow === index ? null : expandedDatesRow > index ? expandedDatesRow - 1 : expandedDatesRow);
+     if (expandedFilterRow !== null) {
+       if (expandedFilterRow === index) {
+         setExpandedFilterRow(null);
+@@ -279,13 +305,13 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+   const getTargetDisplay = (assignment: PackageAssignment): string => {
+     switch (assignment.type) {
+       case 'allUsers':
+-        return 'All Users';
++        return 'All users';
+       case 'allDevices':
+-        return 'All Devices';
++        return 'All devices';
+       case 'group':
+-        return assignment.groupName || 'Unknown Group';
++        return assignment.groupName || 'Unknown group';
+       case 'exclusionGroup':
+-        return assignment.groupName || 'Unknown Group';
++        return assignment.groupName || 'Unknown group';
+       default:
+         return 'Unknown';
+     }
+@@ -309,8 +335,13 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
  
    return (
      <div className="space-y-4">
 +      {removalOnly && (
 +        <p className="rounded-lg border border-status-error/30 bg-status-error/5 p-3 text-sm text-text-secondary">
-+          This is a removal, so every group is set to Uninstall. Devices in these groups that have the app remove it.
++          This is a removal, so every group is set to Uninstall. Intune removes the app from computers in these groups that have it.
 +        </p>
 +      )}
        {/* Enable/Disable Toggle */}
@@ -2134,7 +2386,7 @@ index f1120662d..b1dbb72ad 100644
          <button
            type="button"
            onClick={handleToggle}
-@@ -323,12 +331,12 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -323,12 +354,12 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
            )}
            <div className="flex-1 text-left">
              <p className={cn('text-sm font-medium', enabled ? 'text-text-primary' : 'text-text-muted')}>
@@ -2146,11 +2398,11 @@ index f1120662d..b1dbb72ad 100644
 -                ? 'Assignments will be applied when deployed'
 -                : 'Deploy without assignments - configure later in Intune'}
 +                ? 'These groups get the app when it deploys'
-+                : 'Deploy without groups and add them later in Intune'}
++                : (installDates ? 'Deploy without groups. Add them later with Edit groups in the app workspace.' : 'Deploy without groups and add them later in Intune')}
              </p>
            </div>
          </button>
-@@ -340,7 +348,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -340,7 +371,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
            {/* Quick Assignment Buttons */}
            <div>
              <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -2159,17 +2411,32 @@ index f1120662d..b1dbb72ad 100644
              </label>
              <div className="grid grid-cols-2 gap-2">
                <button
-@@ -371,17 +379,21 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -354,7 +385,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                 )}
+               >
+                 <Monitor className="w-4 h-4" />
+-                <span>All Devices</span>
++                <span>All devices</span>
+               </button>
+               <button
+                 type="button"
+@@ -367,21 +398,22 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                 )}
+               >
+                 <Users className="w-4 h-4" />
+-                <span>All Users</span>
++                <span>All users</span>
                </button>
              </div>
              <p className="text-text-muted text-xs mt-2">
+-              {hasAllDevices && hasAllUsers && 'Required for all devices, available for all users'}
+-              {hasAllDevices && !hasAllUsers && 'Required for all devices in tenant'}
+-              {!hasAllDevices && hasAllUsers && 'Available in Company Portal for all users'}
+-              {!hasAllDevices && !hasAllUsers && 'Select targets above or add groups below'}
 +              {removalOnly ? (
-+                hasAllDevices || hasAllUsers ? 'Uninstalls it wherever it is found on these targets' : 'Select targets above or add groups below'
++                hasAllDevices || hasAllUsers ? 'Uninstalls it wherever it is found' : 'Choose one above or add groups below'
 +              ) : (<>
-               {hasAllDevices && hasAllUsers && 'Required for all devices, available for all users'}
-               {hasAllDevices && !hasAllUsers && 'Required for all devices in tenant'}
-               {!hasAllDevices && hasAllUsers && 'Available in Company Portal for all users'}
-               {!hasAllDevices && !hasAllUsers && 'Select targets above or add groups below'}
++              {quickPickHint || 'Choose one above or add groups below'}
 +              </>)}
              </p>
            </div>
@@ -2182,7 +2449,18 @@ index f1120662d..b1dbb72ad 100644
              </label>
  
              {/* Include/Exclude Mode Toggle */}
-@@ -437,7 +449,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -412,8 +444,8 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+               </button>
+               <span className="text-text-muted text-xs ml-2">
+                 {assignmentMode === 'exclude'
+-                  ? 'Groups will be excluded from the assignment'
+-                  : 'Groups will be included in the assignment'}
++                  ? (removalOnly ? 'Groups you add are left out of the removal' : 'Groups you add do not get the app')
++                  : (removalOnly ? 'Groups you add have the app removed' : 'Groups you add get the app')}
+               </span>
+             </div>
+ 
+@@ -437,7 +469,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
                          getIntentColor(newGroupIntent)
                        )}
                      >
@@ -2191,7 +2469,7 @@ index f1120662d..b1dbb72ad 100644
                          <option
                            key={option.value}
                            value={option.value}
-@@ -451,7 +463,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -451,7 +483,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
                    </div>
                  </div>
                  <p className="text-text-muted text-xs mt-1">
@@ -2200,16 +2478,149 @@ index f1120662d..b1dbb72ad 100644
                  </p>
                </div>
              )}
-@@ -601,7 +613,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -467,7 +499,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                     setShowDropdown(true);
+                   }}
+                   onFocus={() => setShowDropdown(true)}
+-                  placeholder="Search Entra ID groups..."
++                  placeholder="Search Entra groups"
+                   className={cn(
+                     'w-full pl-10 pr-10 py-2.5 bg-bg-elevated border rounded-lg text-text-primary text-sm placeholder-text-muted focus:outline-none',
+                     assignmentMode === 'exclude'
+@@ -487,7 +519,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                     <div className="px-4 py-3 text-red-400 text-sm">{searchError}</div>
+                   ) : searchResults.length === 0 ? (
+                     <div className="px-4 py-3 text-text-muted text-sm">
+-                      {isSearching ? 'Searching...' : 'No groups found'}
++                      {isSearching ? 'Searching…' : 'No groups found'}
+                     </div>
+                   ) : (
+                     searchResults.map((group) => {
+@@ -539,7 +571,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+           {assignments.length > 0 && (
+             <div>
+               <label className="block text-sm font-medium text-text-secondary mb-2">
+-                Configured Assignments ({assignments.length})
++                Groups ({assignments.length})
+               </label>
+               <div className="space-y-2">
+                 {assignments.map((assignment, index) => {
+@@ -584,7 +616,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                             'text-xs',
+                             isExclusion ? 'text-red-400/70' : 'text-text-muted'
+                           )}>
+-                            {isExclusion ? 'Excluded' : assignment.type === 'group' ? 'Included' : assignment.type === 'allUsers' ? 'All Users' : assignment.type === 'allDevices' ? 'All Devices' : assignment.type}
++                            {isExclusion ? (removalOnly ? 'Left out of the removal' : 'Does not get the app') : assignment.type === 'group' ? 'Entra group' : assignment.type === 'allUsers' || assignment.type === 'allDevices' ? 'Quick pick' : assignment.type}
+                           </p>
+                         </div>
+ 
+@@ -601,7 +633,8 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
                                  getIntentColor(assignment.intent)
                                )}
                              >
 -                              {ASSIGNMENT_INTENT_OPTIONS.map((option) => (
++                              {storeApp && assignment.intent === 'updateOnly' && <option value="updateOnly" disabled className="bg-bg-elevated text-text-primary">Update only (not for Store apps)</option>}
 +                              {intentOptions.map((option) => (
                                  <option
                                    key={option.value}
                                    value={option.value}
-@@ -761,7 +773,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -643,8 +676,8 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                             assignment.filterId
+                               ? `Filter: ${assignment.filterName}`
+                               : isExclusion
+-                              ? 'Add filter'
+-                              : 'Assignment settings (filter, notifications, priority)'
++                              ? 'Add a filter'
++                              : 'Group settings (filter, notifications, download priority)'
+                           }
+                         >
+                           <SlidersHorizontal className="w-4 h-4" />
+@@ -654,12 +687,54 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                         <button
+                           type="button"
+                           onClick={() => removeAssignment(index)}
++                          aria-label={`Remove ${getTargetDisplay(assignment)} from this deployment`}
+                           className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
+                         >
+                           <X className="w-4 h-4" />
+                         </button>
+                       </div>
+ 
++                      {/* HRM: install dates for this group. Nothing set means as soon as possible. */}
++                      {installDates && (canHaveDeployDates(assignment) || hasDeployDates(assignment)) && (() => {
++                        const summary = describeDeployDates(assignment);
++                        const problem = deployFormProblem(assignment, installDates);
++                        const open = expandedDatesRow === index && installDates.available && canHaveDeployDates(assignment);
++                        const name = getTargetDisplay(assignment);
++                        return (
++                          <div className="space-y-3 border-t border-overlay/10 px-3 py-2.5" data-install-dates-row>
++                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
++                              <p className={cn('min-w-0 basis-full text-xs text-text-secondary', !summary && 'sm:basis-0 sm:flex-1')}>
++                                <span className="font-medium text-text-primary">Install dates: </span>
++                                {summary ? summary.charAt(0).toUpperCase() + summary.slice(1) : 'As soon as possible'}
++                              </p>
++                              {installDates.available && canHaveDeployDates(assignment) && (
++                                <button type="button" aria-expanded={open} aria-label={`${open ? 'Hide install dates' : hasDeployDates(assignment) ? 'Change install dates' : 'Set install dates'} for ${name}`} onClick={() => setExpandedDatesRow(open ? null : index)} className="rounded border border-overlay/15 px-2.5 py-1.5 text-xs font-medium text-text-primary hover:bg-overlay/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">
++                                  {open ? 'Hide install dates' : hasDeployDates(assignment) ? 'Change install dates' : 'Set install dates'}
++                                </button>
++                              )}
++                              {hasDeployDates(assignment) && (
++                                <button type="button" aria-label={`Remove install dates for ${name}`} onClick={() => { onChange(assignments.map((row, rowIndex) => rowIndex === index ? stripDeployDates(row) : row)); setExpandedDatesRow(null); }} className="rounded border border-overlay/15 px-2.5 py-1.5 text-xs font-medium text-text-primary hover:bg-overlay/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">
++                                  Remove install dates
++                                </button>
++                              )}
++                            </div>
++                            {problem && <p role="alert" className="text-xs font-medium text-status-error">{problem}</p>}
++                            {open && (
++                              <div className="space-y-4 rounded-lg border border-overlay/10 bg-bg-elevated/40 p-3">
++                                <TimingFields
++                                  value={{ installTimeSettings: assignment.installTimeSettings ?? null, restartSettings: assignment.restartSettings ?? null }}
++                                  onChange={(next) => onChange(assignments.map((row, rowIndex) => rowIndex === index ? { ...row, installTimeSettings: next.installTimeSettings, restartSettings: next.restartSettings } : row))}
++                                  intent={assignment.intent}
++                                  restartSupported={installDates.graceSupported}
++                                  restartUnsupportedNote={installDates.graceNote}
++                                />
++                                <p className="text-xs text-text-muted">These dates are for this deployment only. Later versions keep the dates the group has in Intune. Change them afterwards with Install dates in the app workspace.</p>
++                              </div>
++                            )}
++                          </div>
++                        );
++                      })()}
++
+                       {/* Filter indicator row */}
+                       {assignment.filterId && expandedFilterRow !== index && (
+                         <div className="px-3 pb-2 flex items-center gap-2">
+@@ -678,6 +753,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                           <button
+                             type="button"
+                             onClick={() => updateFilter(index, null)}
++                            aria-label={`Remove the filter from ${getTargetDisplay(assignment)}`}
+                             className="text-text-muted hover:text-red-400 transition-colors ml-auto"
+                           >
+                             <X className="w-3 h-3" />
+@@ -691,18 +767,18 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+                           {/* Assignment filter */}
+                           <div className="space-y-1.5">
+                             <label className="block text-xs font-medium text-text-secondary">
+-                              Assignment filter
++                              Filter
+                             </label>
+                             {isLoadingFilters ? (
+                               <div className="flex items-center gap-2 text-text-muted text-xs py-1">
+                                 <Loader2 className="w-3 h-3 animate-spin" />
+-                                Loading filters...
++                                Loading filters…
+                               </div>
+                             ) : filtersError ? (
+                               <p className="text-amber-400 text-xs py-1">{filtersError}</p>
+                             ) : availableFilters.length === 0 ? (
+                               <p className="text-text-muted text-xs py-1">
+-                                No assignment filters available in this tenant.
++                                No filters in this tenant. Filters are made in Intune.
+                               </p>
+                             ) : (
+                               <div className="flex items-center gap-2">
+@@ -761,7 +837,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
                                )}
                                <div className="space-y-1.5">
                                  <label className="block text-xs font-medium text-text-secondary">
@@ -2218,7 +2629,7 @@ index f1120662d..b1dbb72ad 100644
                                  </label>
                                  <select
                                    value={assignment.notifications || 'showAll'}
-@@ -781,7 +793,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+@@ -781,7 +857,7 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
  
                                <div className="space-y-1.5">
                                  <label className="block text-xs font-medium text-text-secondary">
@@ -2227,6 +2638,54 @@ index f1120662d..b1dbb72ad 100644
                                  </label>
                                  <select
                                    value={assignment.deliveryOptimizationPriority || 'notConfigured'}
+@@ -808,21 +884,27 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+             </div>
+           )}
+ 
+-          {/* Update Only Info Banner */}
+-          {assignments.some((a) => a.intent === 'updateOnly') && (
++          {/* HRM: where install dates are set when this form does not offer them */}
++          {installDates && !installDates.available && installDates.note && assignments.some(canHaveDeployDates) && (
++            <p className="text-xs text-text-muted" data-install-dates-note>{installDates.note}</p>
++          )}
++
++          {/* Update only info banner */}
++          {storeApp && assignments.some((a) => a.intent === 'updateOnly') && (
++            <p role="alert" className="text-xs font-medium text-status-error" data-store-update-only>{STORE_UPDATE_ONLY_PROBLEM}</p>
++          )}
++          {!storeApp && assignments.some((a) => a.intent === 'updateOnly') && (
+             <div className="p-3 bg-amber-500/10 rounded-lg border border-amber-500/20 space-y-2">
+               <p className="text-amber-400 text-sm">
+-                <span className="font-medium">Update Only:</span>{' '}
+-                The app will only install on devices where it is already detected.
+-                Devices without the app will be skipped.
++                <span className="font-medium">Update only:</span>{' '}
++                The app installs only on computers that already have it. Computers without it are skipped.
+               </p>
+               {assignments.some((a) => a.intent !== 'updateOnly') && (
+                 <p className="text-amber-400 text-sm">
+                   <span className="font-medium">Warning:</span>{' '}
+-                  Requirement rules apply to the entire app, not individual assignments.
+-                  Mixing &quot;Update Only&quot; with other intents will gate all assignments
+-                  behind the existence check. Consider using &quot;Update Only&quot; for all
+-                  assignments or none.
++                  The already-installed check applies to the whole app, not to one group.
++                  With Update only on any group, Required and Available groups also get the app only on computers that already have it.
++                  Use Update only for every group that gets the app, or for none.
+                 </p>
+               )}
+             </div>
+@@ -832,8 +914,8 @@ export function AssignmentConfig({ assignments, onChange, supportsAutoUpdateSupe
+           {assignments.length === 0 && (
+             <div className="p-4 bg-bg-elevated/30 rounded-lg border border-overlay/[0.07] text-center">
+               <p className="text-text-muted text-sm">
+-                Select a quick assignment option or search for groups above.
+-                Groups can be added as Required, Available in Company Portal, or Uninstall.
++                Choose a quick pick or search for a group above.
++                {removalOnly ? ' Every group is set to Uninstall.' : storeApp ? ' Each group is Required, Available or Uninstall.' : ' Each group is Required, Available, Uninstall or Update only.'}
+               </p>
+             </div>
+           )}
 diff --git a/components/CartItemConfig.advanced.test.ts b/components/CartItemConfig.advanced.test.ts
 index 67179d7a2..e8a3db3fa 100644
 --- a/components/CartItemConfig.advanced.test.ts
@@ -2359,10 +2818,10 @@ index cfc35553c..4a0da91f6 100644
    });
  });
 diff --git a/components/CartItemConfig.tsx b/components/CartItemConfig.tsx
-index 68bc640bf..4ca4ba64e 100644
+index 68bc640bf..207e55c4c 100644
 --- a/components/CartItemConfig.tsx
 +++ b/components/CartItemConfig.tsx
-@@ -1,6 +1,13 @@
+@@ -1,6 +1,15 @@
  'use client';
  
 -import { useEffect, useRef, useState } from 'react';
@@ -2371,13 +2830,15 @@ index 68bc640bf..4ca4ba64e 100644
 +import { settingsSummaries } from '@/lib/hrm/settings-summary';
 +import { installExperience, installSettingsProblem } from '@/lib/hrm/install-experience';
 +import { usePackagingCapabilities } from '@/hooks/usePackagingCapabilities';
++import { deployDatesForm, deployFormProblems } from '@/lib/hrm/deploy-dates';
++import { hasUpdateOnly } from '@/lib/assignment-intents';
 +import { InstallExperienceSummary, ToolkitModePicker } from '@/components/hrm/InstallExperienceSummary';
 +
 +import { useEffect, useId, useRef, useState } from 'react';
  import {
    ArrowUpCircle,
    X,
-@@ -89,6 +96,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -89,6 +98,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
    const isWin32 = isWin32CartItem(item);
    const isCurated = isWin32 && item.sourceType === 'curated';
    const isEditableWin32 = isWin32 && !isCurated;
@@ -2386,7 +2847,7 @@ index 68bc640bf..4ca4ba64e 100644
    const [curatedSettingsMode, setCuratedSettingsMode] = useState<'tested-defaults' | 'custom'>(
      isCurated ? item.curatedSettingsMode || 'custom' : 'custom'
    );
-@@ -106,6 +115,13 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -106,6 +117,15 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
    const [config, setConfig] = useState<PSADTConfig>(() =>
      isWin32 ? { ...item.psadtConfig } : ({} as PSADTConfig)
    );
@@ -2396,11 +2857,13 @@ index 68bc640bf..4ca4ba64e 100644
 +    ? testedCuratedSettings({ ...DEFAULT_PSADT_CONFIG, detectionRules: isWin32 ? item.detectionRules : [] }, config)
 +    : config;
 +  const experience = installExperience(experienceConfig, packagingPath);
++  // HRM: install dates for a new Win32 deployment (not Store apps, not removals).
++  const installDates = isWin32 && !removal ? deployDatesForm(packagingCapabilities, experienceConfig.restartBehavior) : undefined;
 +
    const [assignments, setAssignments] = useState<PackageAssignment[]>(
      item.assignments || []
    );
-@@ -135,8 +151,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -135,8 +155,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
    );
  
    // UI state
@@ -2416,7 +2879,7 @@ index 68bc640bf..4ca4ba64e 100644
    const [processesError, setProcessesError] = useState<string | null>(null);
  
    const modalRef = useFocusTrap<HTMLDivElement>();
-@@ -181,7 +203,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -181,7 +207,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
      setConfig((prev) => ({
        ...prev,
        processesToClose: [
@@ -2425,7 +2888,7 @@ index 68bc640bf..4ca4ba64e 100644
          { name: '', description: '' },
        ],
      }));
-@@ -191,7 +213,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -191,7 +217,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
      setProcessesError(null);
      setConfig((prev) => ({
        ...prev,
@@ -2434,7 +2897,7 @@ index 68bc640bf..4ca4ba64e 100644
      }));
    };
  
-@@ -199,7 +221,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -199,7 +225,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
      setProcessesError(null);
      setConfig((prev) => ({
        ...prev,
@@ -2443,10 +2906,15 @@ index 68bc640bf..4ca4ba64e 100644
          i === index ? { ...p, ...updates } : p
        ),
      }));
-@@ -236,6 +258,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -236,6 +262,15 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
    };
  
    const handleSave = async () => {
++    // HRM: dates the server would refuse are fixed here, beside the group they belong to.
++    if (deployFormProblems(assignments, installDates).length > 0 || (isStore && hasUpdateOnly(assignments))) {
++      setExpandedSection('assignment');
++      return;
++    }
 +    if (isWin32 && installSettingsProblem(experienceConfig, packagingPath)) {
 +      modalRef.current?.querySelector<HTMLElement>('[data-install-settings-problem]')?.focus();
 +      return;
@@ -2454,16 +2922,20 @@ index 68bc640bf..4ca4ba64e 100644
      if (isCurated) {
        // PSADT behaviour may be customised; the server verifies a changed
        // execution configuration in the QA VM before its first deployment.
-@@ -331,7 +357,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -331,9 +366,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
    };
  
    return (
 -    <div className="fixed inset-0 z-[60] overflow-hidden">
 +    <div className="fixed inset-0 z-[60] overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="cart-settings-title">
        {/* Backdrop */}
-       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={requestClose} />
+-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={requestClose} />
++      {/* HRM: no colour of its own. This panel opens over the Deployment list, which already dims the page. */}
++      <div className="absolute inset-0" onClick={requestClose} />
  
-@@ -345,7 +371,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+       {/* Modal */}
+       <div ref={modalRef} className="absolute right-0 top-0 bottom-0 w-full max-w-xl bg-bg-surface border-l border-overlay/10 shadow-2xl overflow-hidden flex flex-col">
+@@ -345,7 +381,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                  <Settings className="w-5 h-5 text-blue-400" />
                </div>
                <div>
@@ -2472,7 +2944,7 @@ index 68bc640bf..4ca4ba64e 100644
                  <p className="text-text-muted text-sm">{item.displayName}</p>
                  <p className="text-text-muted text-xs font-mono mt-1">{item.wingetId}</p>
                </div>
-@@ -380,7 +406,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -380,7 +416,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        <p className="text-text-primary font-medium">{item.architecture}</p>
                      </div>
                      <div>
@@ -2481,7 +2953,7 @@ index 68bc640bf..4ca4ba64e 100644
                        <p className="text-text-primary font-medium uppercase">{item.installerType}</p>
                      </div>
                    </>
-@@ -397,10 +423,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -397,10 +433,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                </p>
              </div>
  
@@ -2494,7 +2966,7 @@ index 68bc640bf..4ca4ba64e 100644
                  <div className="flex gap-2">
                    {(['user', 'system'] as const).map((exp) => (
                      <button
-@@ -413,7 +439,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -413,7 +449,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                            : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
                        )}
                      >
@@ -2503,7 +2975,7 @@ index 68bc640bf..4ca4ba64e 100644
                      </button>
                    ))}
                  </div>
-@@ -426,20 +452,27 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -426,20 +462,27 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                <label className="flex items-start gap-2 text-sm text-text-primary">
                  <input type="radio" name="curated-settings" checked={curatedSettingsMode === 'tested-defaults'}
                    onChange={() => setCuratedSettingsMode('tested-defaults')} className="mt-1" />
@@ -2536,7 +3008,7 @@ index 68bc640bf..4ca4ba64e 100644
                      return (
                        <button
                          key={scope}
-@@ -460,93 +493,113 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -460,93 +503,115 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
              )}
  
              <div className="border-t border-overlay/10 pt-6">
@@ -2597,6 +3069,8 @@ index 68bc640bf..4ca4ba64e 100644
 +                  onChange={setAssignments}
 +                  supportsAutoUpdateSuperseded={!isStore && !removal}
 +                  removalOnly={removal}
++                  installDates={installDates}
++                  storeApp={isStore}
 +                />
 +              </ConfigSection>
 +              {/* App Updates (win32 only) */}
@@ -2619,7 +3093,7 @@ index 68bc640bf..4ca4ba64e 100644
 -
 +              {isWin32 && !removal && <section aria-label="Installation and staff experience" className="mb-6 space-y-4">
 +                <h3 className="text-sm font-semibold text-text-primary">Installation and staff experience</h3>
-+                  <p className="text-xs text-text-muted">These settings are packaged with this version. Future automatic updates use Edit next rollout in the app workspace.</p>
++                  <p className="text-xs text-text-muted">These settings are packaged with this version. Future automatic updates use Change how it installs in the app workspace.</p>
 +                  {canEditExecution && (packagingCapabilities.startupBeta || config.installAfterRestartBeta) && <StartupInstallChoice value={config.installAfterRestartBeta === true} problem={startupInstallationProblem({ installScope: selectedScope, installerType: isWin32 ? item.installerType : '', customDetection: config.customDetection, relationships, espProfiles, removal })} onChange={value => updateConfig({ installAfterRestartBeta: value, ...(value ? { deployMode: 'Silent', allowDefer: false, restartBehavior: 'Suppress' } : {}) })} />}
 +                  {canEditExecution && <ToolkitModePicker config={config} path={packagingPath} onChange={deployMode => updateConfig({ deployMode })} />}
 +                  <InstallExperienceSummary config={experienceConfig} path={packagingPath} />
@@ -2717,7 +3191,7 @@ index 68bc640bf..4ca4ba64e 100644
                      checked={config.verifyInstall || false}
                      onChange={(checked) => updateConfig({ verifyInstall: checked })}
                    />
-@@ -554,7 +607,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -554,7 +619,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    {/* Detection Marker Registry Path: curated detection is fixed to the signed release. */}
                    {!isCurated && <div>
                      <label className="block text-sm font-medium text-text-secondary mb-1.5">
@@ -2726,7 +3200,7 @@ index 68bc640bf..4ca4ba64e 100644
                      </label>
                      <input
                        type="text"
-@@ -572,7 +625,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -572,7 +637,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    <div>
                      <div className="flex items-center justify-between mb-2">
                        <label className="block text-sm font-medium text-text-secondary">
@@ -2735,7 +3209,7 @@ index 68bc640bf..4ca4ba64e 100644
                        </label>
                        <button
                          onClick={addProcess}
-@@ -583,15 +636,16 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -583,15 +648,16 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        </button>
                      </div>
                      <div className="space-y-2">
@@ -2754,7 +3228,7 @@ index 68bc640bf..4ca4ba64e 100644
                                placeholder="Process name (e.g., chrome)"
                                className={cn(
                                  'flex-1 px-3 py-2 bg-bg-elevated border rounded-lg text-text-primary text-sm',
-@@ -604,10 +658,12 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -604,10 +670,12 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                type="text"
                                value={process.description}
                                onChange={(e) => updateProcess(index, { description: e.target.value })}
@@ -2767,7 +3241,7 @@ index 68bc640bf..4ca4ba64e 100644
                                onClick={() => removeProcess(index)}
                                className="text-text-muted hover:text-red-400 transition-colors"
                              >
-@@ -622,58 +678,79 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -622,58 +690,79 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                      </div>
                    </div>
  
@@ -2869,7 +3343,7 @@ index 68bc640bf..4ca4ba64e 100644
                        checked={config.persistPrompt || false}
                        onChange={(checked) => updateConfig({ persistPrompt: checked })}
                      />
-@@ -685,14 +762,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -685,14 +774,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        checked={config.minimizeWindows || false}
                        onChange={(checked) => updateConfig({ minimizeWindows: checked })}
                      />
@@ -2888,7 +3362,7 @@ index 68bc640bf..4ca4ba64e 100644
                        value={config.windowLocation || 'Default'}
                        onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
                        className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-@@ -701,124 +778,336 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -701,139 +790,351 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        <option value="Center">Center</option>
                        <option value="Top">Top</option>
                        <option value="Bottom">Bottom</option>
@@ -3053,6 +3527,21 @@ index 68bc640bf..4ca4ba64e 100644
 -                      progressDialog: { ...config.progressDialog, enabled: checked }
 -                    })}
 -                  />
+-
+-                  {config.progressDialog?.enabled && (
+-                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
+-                      <div>
+-                        <label className="block text-sm font-medium text-text-secondary mb-2">
+-                          Status message (optional)
+-                        </label>
+-                        <input
+-                          type="text"
+-                          value={config.progressDialog?.statusMessage || ''}
+-                          onChange={(e) => updateConfig({
+-                            progressDialog: { ...config.progressDialog, enabled: true, statusMessage: e.target.value || undefined }
+-                          })}
+-                          placeholder="Installing application..."
+-                          className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
 +                  {/* Custom Description */}
 +                  <div>
 +                    <label htmlFor="cart-description-override" className="block text-sm font-medium text-text-secondary mb-2">
@@ -3312,10 +3801,25 @@ index 68bc640bf..4ca4ba64e 100644
 +                      progressDialog: { ...config.progressDialog, enabled: checked }
 +                    })}
 +                  />
- 
-                   {config.progressDialog?.enabled && (
-                     <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
-@@ -849,7 +1138,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
++
++                  {config.progressDialog?.enabled && (
++                    <div className="ml-6 border-l-2 border-overlay/15 pl-4 space-y-4">
++                      <div>
++                        <label className="block text-sm font-medium text-text-secondary mb-2">
++                          Status message (optional)
++                        </label>
++                        <input
++                          type="text"
++                          value={config.progressDialog?.statusMessage || ''}
++                          onChange={(e) => updateConfig({
++                            progressDialog: { ...config.progressDialog, enabled: true, statusMessage: e.target.value || undefined }
++                          })}
++                          placeholder="Installing application..."
++                          className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
+                         />
+                       </div>
+                       <div>
+@@ -849,7 +1150,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                          >
                            <option value="Default">Default</option>
                            <option value="Center">Center</option>
@@ -3324,7 +3828,7 @@ index 68bc640bf..4ca4ba64e 100644
                          </select>
                        </div>
                      </div>
-@@ -956,10 +1245,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -956,10 +1257,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    </div>
                  </div>
                </ConfigSection>}
@@ -3338,7 +3842,7 @@ index 68bc640bf..4ca4ba64e 100644
                  icon={<MessageSquare className="w-4 h-4" />}
                  expanded={expandedSection === 'prompts'}
                  onToggle={() => toggleSection('prompts')}
-@@ -1032,10 +1321,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1032,10 +1333,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                  }}
                                  className="w-full px-2 py-1.5 bg-bg-elevated border border-overlay/15 rounded text-text-primary text-sm"
                                >
@@ -3353,7 +3857,7 @@ index 68bc640bf..4ca4ba64e 100644
                                </select>
                              </div>
                              <div>
-@@ -1087,7 +1376,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1087,7 +1388,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                            </div>
                            <div className="grid grid-cols-3 gap-2">
                              <div>
@@ -3362,7 +3866,7 @@ index 68bc640bf..4ca4ba64e 100644
                                <input
                                  type="text"
                                  value={prompt.buttonLeftText || ''}
-@@ -1101,7 +1390,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1101,7 +1402,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                />
                              </div>
                              <div>
@@ -3371,7 +3875,7 @@ index 68bc640bf..4ca4ba64e 100644
                                <input
                                  type="text"
                                  value={prompt.buttonMiddleText || ''}
-@@ -1115,7 +1404,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1115,7 +1416,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                                />
                              </div>
                              <div>
@@ -3380,7 +3884,7 @@ index 68bc640bf..4ca4ba64e 100644
                                <input
                                  type="text"
                                  value={prompt.buttonRightText || ''}
-@@ -1163,18 +1452,18 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1163,18 +1464,18 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    )}
                  </div>
                </ConfigSection>}
@@ -3404,7 +3908,7 @@ index 68bc640bf..4ca4ba64e 100644
                      checked={config.restartPrompt?.enabled || false}
                      onChange={(checked) => updateConfig({
                        restartPrompt: { ...config.restartPrompt, enabled: checked, countdownSeconds: config.restartPrompt?.countdownSeconds || 600, countdownNoHideSeconds: config.restartPrompt?.countdownNoHideSeconds || 60 }
-@@ -1206,7 +1495,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1206,7 +1507,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                        </div>
                        <div>
                          <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -3413,7 +3917,7 @@ index 68bc640bf..4ca4ba64e 100644
                          </label>
                          <div className="flex items-center gap-3">
                            <input
-@@ -1229,123 +1518,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1229,123 +1530,10 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    )}
                  </div>
                </ConfigSection>}
@@ -3540,7 +4044,7 @@ index 68bc640bf..4ca4ba64e 100644
                  icon={<Palette className="w-4 h-4" />}
                  expanded={expandedSection === 'branding'}
                  onToggle={() => toggleSection('branding')}
-@@ -1364,18 +1540,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1364,18 +1552,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                      />
                    </div>
  
@@ -3560,7 +4064,7 @@ index 68bc640bf..4ca4ba64e 100644
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
-@@ -1392,7 +1557,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1392,7 +1569,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -3569,7 +4073,7 @@ index 68bc640bf..4ca4ba64e 100644
                      </label>
                      <input
                        type="text"
-@@ -1446,146 +1611,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1446,146 +1623,8 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                    </div>
                  </div>
                </ConfigSection>}
@@ -3717,7 +4221,7 @@ index 68bc640bf..4ca4ba64e 100644
              </div>
            </div>
          </div>
-@@ -1613,7 +1640,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1613,7 +1652,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                ) : (
                  <>
                    <Check className="w-4 h-4 mr-2" />
@@ -3726,7 +4230,7 @@ index 68bc640bf..4ca4ba64e 100644
                  </>
                )}
              </Button>
-@@ -1631,14 +1658,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
+@@ -1631,14 +1670,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
              </AlertDialogDescription>
            </AlertDialogHeader>
            <AlertDialogFooter>
@@ -3743,7 +4247,7 @@ index 68bc640bf..4ca4ba64e 100644
              </AlertDialogAction>
            </AlertDialogFooter>
          </AlertDialogContent>
-@@ -1655,22 +1682,48 @@ interface ConfigSectionProps {
+@@ -1655,22 +1694,48 @@ interface ConfigSectionProps {
    expanded: boolean;
    onToggle: () => void;
    children: React.ReactNode;
@@ -3801,7 +4305,7 @@ index 68bc640bf..4ca4ba64e 100644
      </div>
    );
  }
-@@ -1683,15 +1736,22 @@ interface ToggleOptionProps {
+@@ -1683,15 +1748,22 @@ interface ToggleOptionProps {
  }
  
  function ToggleOption({ label, description, checked, onChange }: ToggleOptionProps) {
@@ -3829,7 +4333,7 @@ index 68bc640bf..4ca4ba64e 100644
          >
            <div
              className={cn(
-@@ -1699,12 +1759,12 @@ function ToggleOption({ label, description, checked, onChange }: ToggleOptionPro
+@@ -1699,12 +1771,12 @@ function ToggleOption({ label, description, checked, onChange }: ToggleOptionPro
                checked ? 'translate-x-5' : 'translate-x-1'
              )}
            />
@@ -3848,7 +4352,7 @@ index 68bc640bf..4ca4ba64e 100644
    );
  }
 diff --git a/components/CustomAppModal.tsx b/components/CustomAppModal.tsx
-index 9957a5ab1..58b850fde 100644
+index 9957a5ab1..a18bf63e1 100644
 --- a/components/CustomAppModal.tsx
 +++ b/components/CustomAppModal.tsx
 @@ -20,10 +20,13 @@ import {
@@ -3922,6 +4426,15 @@ index 9957a5ab1..58b850fde 100644
          ),
        });
        toast.success(`${item.displayName} added`, {
+@@ -179,7 +188,7 @@ export function CustomAppModal({ onClose }: CustomAppModalProps) {
+   return (
+     <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="custom-app-title">
+       {/* Backdrop */}
+-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
++      <div className="absolute inset-0 bg-black/30" onClick={onClose} aria-hidden="true" />
+ 
+       {/* Modal */}
+       <div ref={modalRef} className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/10 shadow-2xl overflow-hidden flex flex-col animate-slide-in-right">
 @@ -191,8 +200,12 @@ export function CustomAppModal({ onClose }: CustomAppModalProps) {
                  <FilePlus2 className="w-6 h-6 text-accent-cyan" />
                </div>
@@ -4313,10 +4826,10 @@ index f08f394ac..2336759bb 100644
      await act(async () => add.click());
      expect(useCartStore.getState().items).toEqual([]);
 diff --git a/components/PackageConfig.tsx b/components/PackageConfig.tsx
-index eea1131fe..2f30f2db6 100644
+index eea1131fe..ddee1a32f 100644
 --- a/components/PackageConfig.tsx
 +++ b/components/PackageConfig.tsx
-@@ -1,5 +1,12 @@
+@@ -1,5 +1,14 @@
  'use client';
  
 +import { StartupInstallChoice } from '@/components/hrm/StartupInstallChoice';
@@ -4324,12 +4837,14 @@ index eea1131fe..2f30f2db6 100644
 +import { settingsSummaries } from '@/lib/hrm/settings-summary';
 +import { installExperience, installSettingsProblem } from '@/lib/hrm/install-experience';
 +import { usePackagingCapabilities } from '@/hooks/usePackagingCapabilities';
++import { deployDatesForm, deployFormProblems, stripDeployDates } from '@/lib/hrm/deploy-dates';
++import { hasUpdateOnly } from '@/lib/assignment-intents';
 +import { InstallExperienceSummary, ToolkitModePicker } from '@/components/hrm/InstallExperienceSummary';
 +
  import { useState, useEffect, useRef, useMemo, useId } from 'react';
  import {
    ArrowUpCircle,
-@@ -21,8 +28,6 @@ import {
+@@ -21,8 +30,6 @@ import {
    Clock,
    FolderTree,
    Palette,
@@ -4338,7 +4853,7 @@ index eea1131fe..2f30f2db6 100644
    Globe,
    Search,
    Shield,
-@@ -66,6 +71,8 @@ import { DEFAULT_PSADT_CONFIG, getDefaultProcessesToClose, sanitizeProcessesToCl
+@@ -66,6 +73,8 @@ import { DEFAULT_PSADT_CONFIG, getDefaultProcessesToClose, sanitizeProcessesToCl
  import { useCartStore, createStoreCartItem } from '@/stores/cart-store';
  import { useUserSettings } from '@/components/providers/UserSettingsProvider';
  import { useUpdateAppSettings } from '@/hooks/use-update-app-settings';
@@ -4347,7 +4862,7 @@ index eea1131fe..2f30f2db6 100644
  import { useFocusTrap } from '@/hooks/use-focus-trap';
  import { generateDetectionRules, generateInstallCommand, generateUninstallCommand } from '@/lib/detection-rules';
  import { INTUNE_APP_SOURCE_MARKER } from '@/lib/intune-description';
-@@ -205,6 +212,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -205,10 +214,21 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
      () => stripSourceMarker(deployedConfig?.description ?? pkg.description ?? '')
    );
  
@@ -4356,9 +4871,23 @@ index eea1131fe..2f30f2db6 100644
 +  const experience = installExperience(config, packagingPath);
 +
    // Assignment configuration state - pre-fill from deployed config
-   const [assignments, setAssignments] = useState<PackageAssignment[]>(
-     deployedConfig?.assignments || []
-@@ -221,6 +232,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+-  const [assignments, setAssignments] = useState<PackageAssignment[]>(
+-    deployedConfig?.assignments || []
+-  );
++  // HRM: install dates belong to the deployment they were set for, so an earlier deployment's
++  // dates are not filled in again.
++  const [deployedAssignments] = useState<PackageAssignment[]>(() => (deployedConfig?.assignments || []).map(stripDeployDates));
++  const [assignments, setAssignments] = useState<PackageAssignment[]>(deployedAssignments);
++  // HRM: install dates are offered for a new Win32 deployment. A deployed app's dates are changed
++  // with Install dates in the app workspace, because Save to Intune here keeps them as they are.
++  const installDates = isStoreApp ? undefined : isDeployed
++    ? { available: false, graceSupported: false, note: 'Install dates of a deployed app are changed with Install dates in the app workspace.' }
++    : deployDatesForm(packagingCapabilities, config.restartBehavior);
++  const installDateProblems = deployFormProblems(assignments, installDates);
+   const [categories, setCategories] = useState<IntuneAppCategorySelection[]>(
+     deployedConfig?.categories || []
+   );
+@@ -221,6 +241,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
    const [updatePolicy, setUpdatePolicy] = useState<CartUpdatePolicyValue>(
      deployedConfig?.updatePolicy
    );
@@ -4369,7 +4898,7 @@ index eea1131fe..2f30f2db6 100644
    const { settings: userSettings } = useUserSettings();
    const [carryOverAssignments, setCarryOverAssignments] = useState<boolean>(
      deployedConfig?.assignmentMigration?.carryOverAssignments ??
-@@ -228,16 +243,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -228,16 +252,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
    );
  
    // UI state
@@ -4390,7 +4919,7 @@ index eea1131fe..2f30f2db6 100644
  
    // Cart store
    const addItemToStore = useCartStore((state) => state.addItem);
-@@ -257,7 +270,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -257,17 +279,23 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
    // Change detection: categorize modifications as Graph-patchable vs requires-redeploy
    const changeState = useMemo(() => {
      if (!isDeployed || !deployedConfig) {
@@ -4399,7 +4928,10 @@ index eea1131fe..2f30f2db6 100644
      }
  
      // Graph-patchable: assignments + categories
-@@ -267,7 +280,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+     const hasAssignmentChanges =
+-      JSON.stringify(assignments) !== JSON.stringify(deployedConfig.assignments || []);
++      JSON.stringify(assignments) !== JSON.stringify(deployedAssignments);
+     const hasCategoryChanges =
        JSON.stringify(categories) !== JSON.stringify(deployedConfig.categories || []);
      const hasEspChanges =
        JSON.stringify(espProfiles) !== JSON.stringify(deployedConfig.espProfiles || []);
@@ -4414,7 +4946,7 @@ index eea1131fe..2f30f2db6 100644
  
      // Redeploy-required: version, architecture, scope, locale, PSADT config
      const hasVersionChange = selectedVersion !== deployedConfig.version;
-@@ -283,12 +302,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -283,12 +311,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
      const deployedDescription = stripSourceMarker(deployedConfig.description ?? pkg.description ?? '');
      const hasDescriptionChange = description.trim() !== deployedDescription.trim();
      const hasRedeployChanges =
@@ -4425,14 +4957,14 @@ index eea1131fe..2f30f2db6 100644
 -    return { hasGraphChanges, hasRedeployChanges };
 -  }, [isDeployed, deployedConfig, assignments, categories, espProfiles,
 +    return { hasGraphChanges, hasRedeployChanges, hasPolicyChange, hasIntuneChanges: hasAssignmentChanges || hasCategoryChanges };
-+  }, [isDeployed, deployedConfig, assignments, categories, espProfiles, relationships, updatePolicy, initialUpdatePolicy,
++  }, [isDeployed, deployedConfig, deployedAssignments, assignments, categories, espProfiles, relationships, updatePolicy, initialUpdatePolicy,
        selectedVersion, selectedArch, selectedScope, selectedLocale, config, description, pkg.description]);
  
 +
    // Installers always arrive for the package's default (latest) version. When the
    // user selects a different version we must re-fetch so the installer URL/SHA
    // (which flow straight into the cart item) match the chosen version rather than
-@@ -334,9 +355,15 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -334,9 +364,15 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
        nestedInstallerType: selectedInstaller.nestedInstallerType,
      });
    const customDetectionActive = config.customDetection === true && customDetectionSupported;
@@ -4449,7 +4981,7 @@ index eea1131fe..2f30f2db6 100644
    }, [customDetectionActive, config.detectionRules]);
    const availableArchitectures = [...new Set(effectiveInstallers.map((i) => i.architecture))];
    const availableVersions = versions.length > 0 ? versions : (pkg.versions ?? []);
-@@ -443,7 +470,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -443,7 +479,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
        lastCustomRulesRef.current = rules;
        setConfig((prev) => ({ ...prev, customDetection: true, detectionRules: rules }));
      } else {
@@ -4458,7 +4990,7 @@ index eea1131fe..2f30f2db6 100644
        setConfig((prev) => {
          const { customDetection: _customDetection, ...rest } = prev;
          return rest;
-@@ -453,6 +480,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -453,6 +489,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
  
    const handleAddToCart = async () => {
      if (addedToCartSuccess) return;
@@ -4466,10 +4998,16 @@ index eea1131fe..2f30f2db6 100644
 +      modalRef.current?.querySelector<HTMLElement>('[data-install-settings-problem]')?.focus();
 +      return;
 +    }
++
++    // HRM: dates the server would refuse are fixed here, beside the group they belong to.
++    if (installDateProblems.length > 0 || (isStoreApp && hasUpdateOnly(assignments))) {
++      setExpandedSection('assignment');
++      return;
++    }
  
      // Store apps don't need an installer
      if (!isStoreApp && !selectedInstaller) return;
-@@ -562,6 +593,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -562,6 +608,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                  }
                : undefined,
            ...(isDeployed ? { forceCreate: true } : {}),
@@ -4478,7 +5016,7 @@ index eea1131fe..2f30f2db6 100644
          });
        }
        setAddedToCartSuccess(true);
-@@ -577,12 +610,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -577,12 +625,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
      setSettingsError(null);
      setSettingsSuccess(false);
      try {
@@ -4502,7 +5040,7 @@ index eea1131fe..2f30f2db6 100644
        setSettingsSuccess(true);
        setTimeout(() => onClose(), 1200);
      } catch (err) {
-@@ -598,7 +636,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -598,7 +651,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
      setConfig((prev) => ({
        ...prev,
        processesToClose: [
@@ -4511,7 +5049,7 @@ index eea1131fe..2f30f2db6 100644
          { name: '', description: '' },
        ],
      }));
-@@ -608,7 +646,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -608,7 +661,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
      setProcessesError(null);
      setConfig((prev) => ({
        ...prev,
@@ -4520,7 +5058,7 @@ index eea1131fe..2f30f2db6 100644
      }));
    };
  
-@@ -616,7 +654,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -616,7 +669,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
      setProcessesError(null);
      setConfig((prev) => ({
        ...prev,
@@ -4529,7 +5067,16 @@ index eea1131fe..2f30f2db6 100644
          i === index ? { ...p, ...updates } : p
        ),
      }));
-@@ -695,18 +733,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -655,7 +708,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+   return (
+     <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="package-config-title">
+       {/* Backdrop */}
+-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={requestClose} aria-hidden="true" />
++      <div className="absolute inset-0 bg-black/30" onClick={requestClose} aria-hidden="true" />
+ 
+       {/* Modal */}
+       <div
+@@ -695,18 +748,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                <div className="flex items-start gap-3 p-3 bg-accent-cyan/10 border border-accent-cyan/20 rounded-lg">
                  <RefreshCw className="w-5 h-5 text-accent-cyan flex-shrink-0 mt-0.5" />
                  <div className="text-sm">
@@ -4555,7 +5102,7 @@ index eea1131fe..2f30f2db6 100644
                    </p>
                  </div>
                </div>
-@@ -716,7 +754,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -716,7 +769,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              {isStoreApp && (
                <div className="flex items-center gap-2 px-3 py-2 bg-violet-500/10 border border-violet-500/20 rounded-lg">
                  <Store className="w-4 h-4 text-violet-400" />
@@ -4564,7 +5111,7 @@ index eea1131fe..2f30f2db6 100644
                  <span className="text-xs text-violet-400/70 ml-auto font-mono">{pkg.packageIdentifier || pkg.id}</span>
                </div>
              )}
-@@ -724,7 +762,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -724,7 +777,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              {/* Store App: Install Experience */}
              {isStoreApp && (
                <div>
@@ -4573,7 +5120,7 @@ index eea1131fe..2f30f2db6 100644
                  <div className="flex gap-2">
                    {(['user', 'system'] as const).map((exp) => (
                      <button
-@@ -737,7 +775,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -737,7 +790,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
                        )}
                      >
@@ -4582,7 +5129,7 @@ index eea1131fe..2f30f2db6 100644
                      </button>
                    ))}
                  </div>
-@@ -758,7 +796,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -758,7 +811,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                  {/* PackageFamilyName */}
                  {storeManifest.packageFamilyName && (
                    <div>
@@ -4591,7 +5138,7 @@ index eea1131fe..2f30f2db6 100644
                      <div className="px-3 py-2 bg-bg-elevated border border-overlay/10 rounded-lg">
                        <code className="text-xs text-text-secondary font-mono break-all">{storeManifest.packageFamilyName}</code>
                      </div>
-@@ -768,7 +806,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -768,7 +821,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                  {/* Supported Architectures */}
                  {storeManifest.architectures.length > 0 && (
                    <div>
@@ -4600,7 +5147,7 @@ index eea1131fe..2f30f2db6 100644
                      <div className="flex flex-wrap gap-1.5">
                        {storeManifest.architectures.map((arch) => (
                          <span
-@@ -970,13 +1008,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -970,13 +1023,13 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
  
              {/* Install Scope */}
              <div>
@@ -4616,7 +5163,7 @@ index eea1131fe..2f30f2db6 100644
                    const isAvailable = scopeIsAvailable(scope);
  
                    return (
-@@ -992,7 +1030,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -992,7 +1045,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            : 'bg-bg-elevated border-overlay/15 text-text-primary hover:border-overlay/20'
                        )}
                      >
@@ -4625,7 +5172,7 @@ index eea1131fe..2f30f2db6 100644
                      </button>
                    );
                  })}
-@@ -1001,78 +1039,177 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1001,78 +1054,179 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              </>)}
  
              <div className="border-t border-overlay/10 pt-6">
@@ -4672,6 +5219,8 @@ index eea1131fe..2f30f2db6 100644
 +                  assignments={assignments}
 +                  onChange={setAssignments}
 +                  supportsAutoUpdateSuperseded={!isStoreApp}
++                  installDates={installDates}
++                  storeApp={isStoreApp}
 +                />
 +              </ConfigSection>}
 +              {/* App Updates (quick + advanced, win32 only) */}
@@ -4695,7 +5244,7 @@ index eea1131fe..2f30f2db6 100644
  
 +              {!isStoreApp && <section aria-label="Installation and staff experience" className="mb-6 space-y-4">
 +                <h3 className="text-sm font-semibold text-text-primary">Installation and staff experience</h3>
-+                  <p className="text-xs text-text-muted">These settings are packaged with this version. Future automatic updates use Edit next rollout in the app workspace.</p>
++                  <p className="text-xs text-text-muted">These settings are packaged with this version. Future automatic updates use Change how it installs in the app workspace.</p>
 +                  {(packagingCapabilities.startupBeta || config.installAfterRestartBeta) && <StartupInstallChoice value={config.installAfterRestartBeta === true} problem={startupInstallationProblem({ installScope: selectedScope, installerType: selectedInstaller?.type, customDetection: config.customDetection, relationships, espProfiles })} onChange={value => updateConfig({ installAfterRestartBeta: value, ...(value ? { deployMode: 'Silent', allowDefer: false, restartBehavior: 'Suppress' } : {}) })} />}
 +                  <ToolkitModePicker config={config} path={packagingPath} onChange={deployMode => updateConfig({ deployMode })} />
 +                  <InstallExperienceSummary config={config} path={packagingPath} />
@@ -4857,7 +5406,7 @@ index eea1131fe..2f30f2db6 100644
                      checked={config.verifyInstall || false}
                      onChange={(checked) => updateConfig({ verifyInstall: checked })}
                    />
-@@ -1081,7 +1218,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1081,7 +1235,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    <div>
                      <div className="flex items-center justify-between mb-2">
                        <label className="block text-sm font-medium text-text-secondary">
@@ -4866,7 +5415,7 @@ index eea1131fe..2f30f2db6 100644
                        </label>
                        <button
                          onClick={addProcess}
-@@ -1092,15 +1229,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1092,15 +1246,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        </button>
                      </div>
                      <div className="space-y-2">
@@ -4885,7 +5434,7 @@ index eea1131fe..2f30f2db6 100644
                                placeholder="Process name (e.g., chrome)"
                                className={cn(
                                  'flex-1 px-3 py-2 bg-bg-elevated border rounded-lg text-text-primary text-sm',
-@@ -1113,10 +1251,12 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1113,10 +1268,12 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                type="text"
                                value={process.description}
                                onChange={(e) => updateProcess(index, { description: e.target.value })}
@@ -4898,7 +5447,7 @@ index eea1131fe..2f30f2db6 100644
                                onClick={() => removeProcess(index)}
                                className="text-text-muted hover:text-red-400 transition-colors"
                              >
-@@ -1131,58 +1271,79 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1131,58 +1288,79 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                      </div>
                    </div>
  
@@ -5000,7 +5549,7 @@ index eea1131fe..2f30f2db6 100644
                        checked={config.persistPrompt || false}
                        onChange={(checked) => updateConfig({ persistPrompt: checked })}
                      />
-@@ -1194,14 +1355,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1194,14 +1372,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        checked={config.minimizeWindows || false}
                        onChange={(checked) => updateConfig({ minimizeWindows: checked })}
                      />
@@ -5019,7 +5568,7 @@ index eea1131fe..2f30f2db6 100644
                        value={config.windowLocation || 'Default'}
                        onChange={(e) => updateConfig({ windowLocation: e.target.value as DialogPosition })}
                        className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
-@@ -1210,71 +1371,250 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1210,70 +1388,249 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        <option value="Center">Center</option>
                        <option value="Top">Top</option>
                        <option value="Bottom">Bottom</option>
@@ -5151,10 +5700,6 @@ index eea1131fe..2f30f2db6 100644
 -                      {/* Deferral Days */}
 -                      <div>
 -                        <label className="block text-sm font-medium text-text-secondary mb-2">
--                          Deferral days limit (optional)
--                        </label>
--                        <input
--                          type="number"
 +                  {/* Custom Install Command */}
 +                  <div>
 +                    <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -5306,14 +5851,14 @@ index eea1131fe..2f30f2db6 100644
 +                      {/* Deferral Days */}
 +                      <div>
 +                        <label htmlFor="package-defer-days" className="block text-sm font-medium text-text-secondary mb-2">
-+                          Deferral days limit (optional)
-+                        </label>
+                           Deferral days limit (optional)
+                         </label>
+-                        <input
 +                        <input id="package-defer-days"
-+                          type="number"
+                           type="number"
                            min="1"
                            max="365"
-                           value={config.deferDays || ''}
-@@ -1282,50 +1622,35 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1282,50 +1639,35 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            placeholder="No limit"
                            className="w-24 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm"
                          />
@@ -5373,7 +5918,7 @@ index eea1131fe..2f30f2db6 100644
                  icon={<Bell className="w-4 h-4" />}
                  expanded={expandedSection === 'progress'}
                  onToggle={() => toggleSection('progress')}
-@@ -1370,7 +1695,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1370,7 +1712,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                          >
                            <option value="Default">Default</option>
                            <option value="Center">Center</option>
@@ -5382,7 +5927,7 @@ index eea1131fe..2f30f2db6 100644
                          </select>
                        </div>
                      </div>
-@@ -1477,10 +1802,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1477,10 +1819,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    </div>
                  </div>
                </ConfigSection>}
@@ -5396,7 +5941,7 @@ index eea1131fe..2f30f2db6 100644
                  icon={<MessageSquare className="w-4 h-4" />}
                  expanded={expandedSection === 'prompts'}
                  onToggle={() => toggleSection('prompts')}
-@@ -1507,7 +1832,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1507,7 +1849,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        className="text-accent-cyan hover:text-accent-cyan-dim text-sm flex items-center gap-1"
                      >
                        <Plus className="w-4 h-4" />
@@ -5405,7 +5950,7 @@ index eea1131fe..2f30f2db6 100644
                      </button>
                    </div>
  
-@@ -1553,10 +1878,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1553,10 +1895,10 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                  }}
                                  className="w-full px-2 py-1.5 bg-bg-elevated border border-overlay/15 rounded text-text-primary text-sm"
                                >
@@ -5420,7 +5965,7 @@ index eea1131fe..2f30f2db6 100644
                                </select>
                              </div>
                              <div>
-@@ -1608,7 +1933,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1608,7 +1950,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                            </div>
                            <div className="grid grid-cols-3 gap-2">
                              <div>
@@ -5429,7 +5974,7 @@ index eea1131fe..2f30f2db6 100644
                                <input
                                  type="text"
                                  value={prompt.buttonLeftText || ''}
-@@ -1622,7 +1947,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1622,7 +1964,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                />
                              </div>
                              <div>
@@ -5438,7 +5983,7 @@ index eea1131fe..2f30f2db6 100644
                                <input
                                  type="text"
                                  value={prompt.buttonMiddleText || ''}
-@@ -1636,7 +1961,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1636,7 +1978,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                                />
                              </div>
                              <div>
@@ -5447,7 +5992,7 @@ index eea1131fe..2f30f2db6 100644
                                <input
                                  type="text"
                                  value={prompt.buttonRightText || ''}
-@@ -1684,18 +2009,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1684,18 +2026,18 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    )}
                  </div>
                </ConfigSection>}
@@ -5471,7 +6016,7 @@ index eea1131fe..2f30f2db6 100644
                      checked={config.restartPrompt?.enabled || false}
                      onChange={(checked) => updateConfig({
                        restartPrompt: { ...config.restartPrompt, enabled: checked, countdownSeconds: config.restartPrompt?.countdownSeconds || 600, countdownNoHideSeconds: config.restartPrompt?.countdownNoHideSeconds || 60 }
-@@ -1728,7 +2053,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1728,7 +2070,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                        </div>
                        <div>
                          <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -5480,7 +6025,7 @@ index eea1131fe..2f30f2db6 100644
                          </label>
                          <div className="flex items-center gap-3">
                            <input
-@@ -1746,204 +2071,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1746,204 +2088,16 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                              {config.restartPrompt?.countdownNoHideSeconds || 60}s
                            </span>
                          </div>
@@ -5689,7 +6234,7 @@ index eea1131fe..2f30f2db6 100644
                  icon={<Palette className="w-4 h-4" />}
                  expanded={expandedSection === 'branding'}
                  onToggle={() => toggleSection('branding')}
-@@ -1962,18 +2099,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1962,18 +2116,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                      />
                    </div>
  
@@ -5709,7 +6254,7 @@ index eea1131fe..2f30f2db6 100644
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
-@@ -1990,7 +2116,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -1990,7 +2133,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
  
                    <div>
                      <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -5718,7 +6263,7 @@ index eea1131fe..2f30f2db6 100644
                      </label>
                      <input
                        type="text"
-@@ -2044,140 +2170,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2044,140 +2187,8 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    </div>
                  </div>
                </ConfigSection>}
@@ -5860,7 +6405,7 @@ index eea1131fe..2f30f2db6 100644
  
              </div>
            </div>
-@@ -2193,7 +2187,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2193,7 +2204,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
            {settingsSuccess && (
              <div className="flex items-center gap-2 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-400">
                <Check className="w-4 h-4" />
@@ -5869,7 +6414,7 @@ index eea1131fe..2f30f2db6 100644
              </div>
            )}
            {settingsError && (
-@@ -2204,11 +2198,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2204,11 +2215,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
            )}
            {canUpdateSettings ? (
              <div className="space-y-2">
@@ -5882,7 +6427,7 @@ index eea1131fe..2f30f2db6 100644
                <div className="flex gap-3">
                  <Button
                    onClick={handleUpdateSettings}
-@@ -2223,17 +2213,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2223,17 +2230,17 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    {isUpdating ? (
                      <>
                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
@@ -5903,7 +6448,7 @@ index eea1131fe..2f30f2db6 100644
                      </>
                    )}
                  </Button>
-@@ -2255,7 +2245,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2255,7 +2262,7 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                    ) : (
                      <>
                        <RefreshCw className="w-5 h-5 mr-2" />
@@ -5912,7 +6457,7 @@ index eea1131fe..2f30f2db6 100644
                      </>
                    )}
                  </Button>
-@@ -2275,19 +2265,19 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2275,19 +2282,19 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                {isAddingToCart ? (
                  <>
                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
@@ -5935,7 +6480,7 @@ index eea1131fe..2f30f2db6 100644
                  </>
                )}
              </Button>
-@@ -2305,14 +2295,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
+@@ -2305,14 +2312,14 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
              </AlertDialogDescription>
            </AlertDialogHeader>
            <AlertDialogFooter>
@@ -5952,7 +6497,7 @@ index eea1131fe..2f30f2db6 100644
              </AlertDialogAction>
            </AlertDialogFooter>
          </AlertDialogContent>
-@@ -2329,30 +2319,45 @@ interface ConfigSectionProps {
+@@ -2329,30 +2336,45 @@ interface ConfigSectionProps {
    expanded: boolean;
    onToggle: () => void;
    children: React.ReactNode;
@@ -6007,7 +6552,7 @@ index eea1131fe..2f30f2db6 100644
            {children}
          </div>
        )}
-@@ -2466,7 +2471,7 @@ function DetectionRuleDisplay({ rule }: { rule: DetectionRule }) {
+@@ -2466,7 +2488,7 @@ function DetectionRuleDisplay({ rule }: { rule: DetectionRule }) {
        <div className="space-y-1 text-xs">
          {m.productCode && (
            <div className="flex gap-2">
@@ -6134,7 +6679,7 @@ index 7a6edf5c0..15baee731 100644
      expect(button('Deploy to Intune').disabled).toBe(true);
      expect(button('Review current version')).toBeDefined();
 diff --git a/components/UploadCart.tsx b/components/UploadCart.tsx
-index 5078f56a0..bb6834e61 100644
+index 5078f56a0..ce9aed547 100644
 --- a/components/UploadCart.tsx
 +++ b/components/UploadCart.tsx
 @@ -1,4 +1,7 @@
@@ -6293,6 +6838,15 @@ index 5078f56a0..bb6834e61 100644
            className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-accent-cyan hover:bg-accent-cyan-dim text-white shadow-lg transition-all hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base"
          >
            <ShoppingCart className="w-5 h-5" />
+@@ -353,7 +369,7 @@ export function UploadCart() {
+         <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="cart-title">
+           {/* Backdrop with blur */}
+           <div
+-            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
++            className="absolute inset-0 bg-black/30 animate-fade-in"
+             onClick={closeCart}
+             aria-hidden="true"
+           />
 @@ -365,7 +381,7 @@ export function UploadCart() {
                <div className="flex items-center gap-3">
                  <ShoppingCart className="w-5 h-5 text-accent-cyan" />
@@ -7154,7 +7708,7 @@ index 798b70a16..b29d92ba9 100644
    return { ...counts, recentActivity, ...(includeUsers ? { perUser: [...users.values()].sort((a, b) => a.userEmail.localeCompare(b.userEmail)) } : {}) };
 diff --git a/lib/hrm/__tests__/deploy-review.test.ts b/lib/hrm/__tests__/deploy-review.test.ts
 new file mode 100644
-index 000000000..45238f50f
+index 000000000..ca0619e1c
 --- /dev/null
 +++ b/lib/hrm/__tests__/deploy-review.test.ts
 @@ -0,0 +1,53 @@
@@ -7187,7 +7741,7 @@ index 000000000..45238f50f
 +
 +  it('counts only excluded groups as no groups', () => {
 +    const row = reviewRow({ ...base, assignments: [{ type: 'exclusionGroup', groupId: 'g2', groupName: 'Lab', intent: 'required' }] } as CartItem);
-+    expect(row.groups).toBe('Not Lab');
++    expect(row.groups).toBe('Lab · Excluded');
 +    expect(row.warnings[0]).toContain('No groups');
 +  });
 +
@@ -7449,10 +8003,10 @@ index 000000000..edc84bf3a
 +});
 diff --git a/lib/hrm/deploy-review.ts b/lib/hrm/deploy-review.ts
 new file mode 100644
-index 000000000..ed76e5448
+index 000000000..a5297e299
 --- /dev/null
 +++ b/lib/hrm/deploy-review.ts
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,94 @@
 +/**
 + * HRM patch 0025: what Deploy to Intune is about to do, one line per app.
 + * Plain words, worked out from the cart item only (no network).
@@ -7460,6 +8014,7 @@ index 000000000..ed76e5448
 +
 +import type { CartItem, PackageAssignment } from '@/types/upload';
 +import { removalGroupProblems, removalOf } from './removal';
++import { describeDeployDates } from './deploy-dates';
 +
 +export interface ReviewRow {
 +  id: string;
@@ -7485,14 +8040,18 @@ index 000000000..ed76e5448
 +function target(a: PackageAssignment): string {
 +  if (a.type === 'allDevices') return 'All devices';
 +  if (a.type === 'allUsers') return 'All users';
-+  const name = a.groupName || 'a group';
-+  return a.type === 'exclusionGroup' ? `Not ${name}` : name;
++  return a.groupName || 'a group';
 +}
 +
 +export function describeAssignments(assignments: PackageAssignment[] | undefined): string {
 +  const list = assignments ?? [];
 +  if (list.length === 0) return 'No groups';
-+  return list.map((a) => (a.type === 'exclusionGroup' ? target(a) : `${target(a)} · ${INTENT[a.intent] ?? a.intent}`)).join(', ');
++  // Install dates set in the deploy form are part of what is about to happen, so the review states them.
++  return list.map((a) => {
++    if (a.type === 'exclusionGroup') return `${target(a)} · Excluded`;
++    const dates = describeDeployDates(a);
++    return `${target(a)} · ${INTENT[a.intent] ?? a.intent}${dates ? ` (${dates})` : ''}`;
++  }).join(', ');
 +}
 +
 +export function reviewRow(item: CartItem): ReviewRow {
@@ -7697,10 +8256,10 @@ index 000000000..5eb8d95b4
 +}
 diff --git a/lib/hrm/new-version.ts b/lib/hrm/new-version.ts
 new file mode 100644
-index 000000000..818619504
+index 000000000..f73787f8d
 --- /dev/null
 +++ b/lib/hrm/new-version.ts
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,103 @@
 +/**
 + * HRM patch 0015: deploying a new version of a custom app.
 + *
@@ -7710,6 +8269,7 @@ index 000000000..818619504
 + * groups, and the Intune app the new version should supersede.
 + */
 +
++import { stripDeployDates } from './deploy-dates';
 +import type { PackagingJob } from '@/lib/db/types';
 +import type { CustomAppInput, CustomInstallerType } from '@/lib/custom-app';
 +import type { PackageAssignment } from '@/types/upload';
@@ -7756,7 +8316,8 @@ index 000000000..818619504
 +export function newVersionPrefill(job: PackagingJob): NewVersionPrefill {
 +  const config = (job.package_config ?? {}) as Record<string, unknown>;
 +  const type = (job.installer_type ?? 'exe') as CustomInstallerType;
-+  const assignments = Array.isArray(config.assignments) ? (config.assignments as PackageAssignment[]) : [];
++  // Dates set for the earlier deployment are not carried into the new version's form.
++  const assignments = Array.isArray(config.assignments) ? (config.assignments as PackageAssignment[]).map(stripDeployDates) : [];
 +  return {
 +    jobId: job.id,
 +    previousVersion: job.version,
@@ -7868,10 +8429,21 @@ index ec5f597ad..59f16e8b9 100644
      maxProgress: 90,
    },
 diff --git a/types/upload.ts b/types/upload.ts
-index 66c59c9e6..4c591d070 100644
+index 66c59c9e6..93841fe9e 100644
 --- a/types/upload.ts
 +++ b/types/upload.ts
-@@ -137,6 +137,10 @@ export interface PackageConfiguration {
+@@ -112,6 +112,10 @@ export interface PackageAssignment {
+   deliveryOptimizationPriority?: 'notConfigured' | 'foreground';  // DO download priority (Win32 only)
+   // Opt in only for Available Win32 include assignments. Omitted or false stays off.
+   autoUpdateSupersededApps?: boolean;
++  // HRM: install dates for a new Win32 deployment (Required and Available include groups only).
++  // Omitted or null = as soon as possible. Same shape the Install dates panel saves to Intune.
++  installTimeSettings?: { useLocalTime: boolean; startDateTime: string | null; deadlineDateTime: string | null } | null;
++  restartSettings?: { gracePeriodInMinutes: number; countdownDisplayBeforeRestartInMinutes: number; restartNotificationSnoozeDurationInMinutes: number } | null;
+ }
+ 
+ export interface IntuneAppCategorySelection {
+@@ -137,6 +141,10 @@ export interface PackageConfiguration {
  
  // Base fields shared by all cart item types
  interface CartItemBase {
@@ -7882,7 +8454,7 @@ index 66c59c9e6..4c591d070 100644
    id: string; // Unique cart item ID
    wingetId: string;
    // How the item was added to the cart; absent = winget catalog
-@@ -161,6 +165,8 @@ interface CartItemBase {
+@@ -161,6 +169,8 @@ interface CartItemBase {
  
    // Redeploy flag - skip duplicate detection during deployment
    forceCreate?: boolean;
@@ -7891,7 +8463,7 @@ index 66c59c9e6..4c591d070 100644
  
    // Explicit acknowledgement of a failed QA result for this exact version.
    qaOverride?: boolean;
-@@ -178,6 +184,9 @@ interface CartItemBase {
+@@ -178,6 +188,9 @@ interface CartItemBase {
      removeAssignmentsFromPreviousApp: boolean;
    };
  
@@ -7901,7 +8473,7 @@ index 66c59c9e6..4c591d070 100644
    // Cart metadata
    addedAt: string;
  }
-@@ -190,6 +199,8 @@ export interface Win32CartItem extends CartItemBase {
+@@ -190,6 +203,8 @@ export interface Win32CartItem extends CartItemBase {
    // Server-set audit snapshot of the tenant's licence acceptance (curated apps)
    curatedLicenceAcceptance?: CuratedLicenceAcceptanceSnapshot;
    localeCode?: string; // Selected locale for language variant packages
@@ -7910,3 +8482,473 @@ index 66c59c9e6..4c591d070 100644
    architecture: WingetArchitecture;
    installScope: WingetScope;
    installerType: WingetInstallerType;
+diff --git a/components/AssignmentConfig.dates.test.ts b/components/AssignmentConfig.dates.test.ts
+new file mode 100644
+index 000000000..8642554d4
+--- /dev/null
++++ b/components/AssignmentConfig.dates.test.ts
+@@ -0,0 +1,129 @@
++// @vitest-environment happy-dom
++// Install dates in the deploy form's group list. Fake groups only.
++import { act, createElement, useState } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, expect, it, vi } from 'vitest';
++vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ getAccessToken: async () => 'token' }) }));
++vi.mock('@/hooks/useMspOptional', () => ({ useMspOptional: () => ({ isMspUser: false, selectedTenantId: null }) }));
++import { AssignmentConfig } from './AssignmentConfig';
++import type { PackageAssignment } from '@/types/upload';
++import type { DeployDatesForm } from '@/lib/hrm/deploy-dates';
++
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++let root: Root; let latest: PackageAssignment[];
++const ON: DeployDatesForm = { available: true, graceSupported: true, graceNote: 'grace note', note: 'set them afterwards' };
++const pilot: PackageAssignment = { type: 'group', groupId: 'g1', groupName: 'Pilot computers', intent: 'required' };
++const staff: PackageAssignment = { type: 'group', groupId: 'g2', groupName: 'All staff computers', intent: 'available', filterId: 'f1', filterName: 'Laptops', filterType: 'include', notifications: 'showReboot' };
++const kiosks: PackageAssignment = { type: 'exclusionGroup', groupId: 'g3', groupName: 'Kiosks', intent: 'required' };
++
++afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; });
++async function render(initial: PackageAssignment[], installDates?: DeployDatesForm, extra: Record<string, unknown> = {}) {
++  latest = initial;
++  function Host() { const [value, setValue] = useState(initial); latest = value; return createElement(AssignmentConfig, { assignments: value, onChange: setValue, installDates, ...extra }); }
++  const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
++  await act(async () => root.render(createElement(Host)));
++}
++const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label || b.textContent === label);
++const click = async (label: string) => act(async () => { expect(button(label), label).toBeDefined(); button(label)!.click(); });
++const field = (label: string) => document.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${label}"]`);
++async function type(label: string, value: string) {
++  const input = field(label)!; expect(input, label).not.toBeNull();
++  await act(async () => {
++    Object.getOwnPropertyDescriptor(input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value);
++    input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
++  });
++}
++const rows = () => [...document.querySelectorAll('[data-install-dates-row]')].map(r => r.textContent!);
++
++it('starts every group as soon as possible and changes nothing until a date is set', async () => {
++  await render([pilot, staff, kiosks], ON);
++  expect(rows()).toHaveLength(2); // the exclusion has no dates
++  for (const text of rows()) expect(text).toContain('Install dates: As soon as possible');
++  expect(document.body.textContent).not.toContain('Available from');
++  await click('Set install dates for Pilot computers');
++  // Opening the fields is not a change: nothing is sent unless the admin enters something.
++  expect(latest).toEqual([pilot, staff, kiosks]);
++  await click('Hide install dates for Pilot computers');
++  expect(latest).toEqual([pilot, staff, kiosks]);
++});
++it('uses the Install dates panel names and hover explanations, with Must install by for Required only', async () => {
++  await render([pilot, staff], ON);
++  await click('Set install dates for Pilot computers');
++  for (const label of ['Time zone', 'Available from', 'Must install by', 'Restart grace period']) expect(field(label), label).not.toBeNull();
++  expect(document.body.textContent).toContain("Each computer's own clock");
++  expect(document.body.textContent).toContain('Intune calls this the installation deadline.');
++  expect([...document.querySelectorAll('[data-install-dates-row] [tabindex="0"]')].map(e => e.textContent)).toEqual(expect.arrayContaining(['Available from', 'Must install by', 'Restart grace period']));
++  await click('Set install dates for All staff computers');
++  expect(field('Available from')).not.toBeNull();
++  expect(field('Must install by')).toBeNull();
++});
++it('saves dates on the chosen group only and leaves every other field of every group alone', async () => {
++  await render([pilot, staff, kiosks], ON);
++  await click('Set install dates for Pilot computers');
++  await type('Time zone', 'device'); await type('Available from', '2026-12-01T09:00'); await type('Must install by', '2026-12-05T17:00');
++  expect(latest).toEqual([{ ...pilot, installTimeSettings: { useLocalTime: true, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: '2026-12-05T17:00:00Z' }, restartSettings: null }, staff, kiosks]);
++  expect(rows()[0]).toContain("Install dates: Available from Dec 1, 2026, 9:00 AM, must install by Dec 5, 2026, 5:00 PM, each computer's own clock");
++  expect(document.querySelector('[role="alert"]')).toBeNull();
++  await click('Remove install dates for Pilot computers');
++  expect(latest).toEqual([pilot, staff, kiosks]);
++});
++it('refuses a deadline before availability beside the group, and clears when fixed', async () => {
++  await render([pilot], ON);
++  await click('Set install dates for Pilot computers');
++  await type('Available from', '2026-12-05T17:00'); await type('Must install by', '2026-12-01T09:00');
++  expect(document.querySelector('[role="alert"]')!.textContent).toBe('The installation deadline must be at or after availability.');
++  await type('Must install by', '2026-12-05T17:00');
++  expect(document.querySelector('[role="alert"]')).toBeNull();
++});
++it('validates the restart grace period minutes', async () => {
++  await render([pilot], ON);
++  await click('Set install dates for Pilot computers');
++  await act(async () => (field('Restart grace period') as HTMLInputElement).click());
++  expect(latest[0].restartSettings).toEqual({ gracePeriodInMinutes: 1440, countdownDisplayBeforeRestartInMinutes: 15, restartNotificationSnoozeDurationInMinutes: 240 });
++  for (const bad of ['0', '20161', '1.5', '']) { await type('Grace period (minutes)', bad); expect(document.querySelector('[role="alert"]')!.textContent, bad).toContain('Use whole minutes'); }
++  await type('Grace period (minutes)', '20160');
++  expect(document.querySelector('[role="alert"]')).toBeNull();
++  await type('Countdown (minutes)', '20161');
++  expect(document.querySelector('[role="alert"]')!.textContent).toContain('Use whole minutes');
++});
++it('does not offer a grace period where the deployment never restarts, and says why', async () => {
++  await render([pilot], { ...ON, graceSupported: false });
++  await click('Set install dates for Pilot computers');
++  expect((field('Restart grace period') as HTMLInputElement).disabled).toBe(true);
++  expect(document.body.textContent).toContain('grace note');
++});
++it('drops a deadline when the group becomes Available and all dates when it becomes Uninstall', async () => {
++  const dated = { ...pilot, installTimeSettings: { useLocalTime: false, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: '2026-12-05T17:00:00Z' } };
++  await render([dated], ON);
++  const intent = () => [...document.querySelectorAll('select')].find(s => s.id !== 'assignment-new-group-intent' && [...s.options].some(o => o.value === 'uninstall'))!;
++  const choose = async (value: string) => act(async () => { intent().value = value; intent().dispatchEvent(new Event('change', { bubbles: true })); });
++  await choose('available');
++  expect(latest[0].installTimeSettings).toEqual({ useLocalTime: false, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: null });
++  await choose('uninstall');
++  expect(latest[0]).toEqual({ ...pilot, intent: 'uninstall', autoUpdateSupersededApps: false });
++  expect(rows()).toEqual([]);
++});
++it('shows no date fields on a server that cannot apply them, only where to set them', async () => {
++  await render([pilot], { available: false, graceSupported: false, note: 'set them afterwards' });
++  expect(button('Set install dates for Pilot computers')).toBeUndefined();
++  expect(document.querySelector('[data-install-dates-note]')!.textContent).toBe('set them afterwards');
++});
++it('lets dates that cannot be applied be removed', async () => {
++  const dated = { ...pilot, installTimeSettings: { useLocalTime: false, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: null } };
++  await render([dated], { available: false, graceSupported: false });
++  expect(document.querySelector('[role="alert"]')!.textContent).toContain('cannot apply install dates');
++  await click('Remove install dates for Pilot computers');
++  expect(latest).toEqual([pilot]);
++});
++it('shows nothing about dates for Store apps and removals', async () => {
++  await render([pilot]);
++  expect(rows()).toEqual([]);
++  expect(document.body.textContent).not.toContain('Install dates');
++});
++it('keeps the open dates on the right group when an earlier group is removed', async () => {
++  await render([pilot, { ...staff, intent: 'required' }], ON);
++  await click('Set install dates for All staff computers');
++  await click('Remove Pilot computers from this deployment');
++  expect(latest).toHaveLength(1);
++  expect(button('Hide install dates for All staff computers')).toBeDefined();
++});
+diff --git a/components/CartItemConfig.dates.test.ts b/components/CartItemConfig.dates.test.ts
+new file mode 100644
+index 000000000..c33d10f6f
+--- /dev/null
++++ b/components/CartItemConfig.dates.test.ts
+@@ -0,0 +1,76 @@
++// @vitest-environment happy-dom
++// The deployment list form will not save install dates the server would refuse. Fake data only.
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, expect, it, vi } from 'vitest';
++const state = vi.hoisted(() => {
++  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
++  return { capabilities: { path: 'github', startupBeta: false, deployDates: true }, props: null as null | { assignments: unknown[]; onChange: (next: unknown[]) => void; installDates?: Record<string, unknown> } };
++});
++vi.mock('@/hooks/usePackagingCapabilities', () => ({ usePackagingCapabilities: () => state.capabilities }));
++vi.mock('@/components/providers/UserSettingsProvider', () => ({ useUserSettings: () => ({ settings: {} }) }));
++vi.mock('@/components/AssignmentConfig', () => ({ AssignmentConfig: (props: typeof state.props) => { state.props = props; return null; } }));
++vi.mock('@/components/CategoryConfig', () => ({ CategoryConfig: () => null }));
++vi.mock('@/components/DependencyConfig', () => ({ DependencyConfig: () => null }));
++vi.mock('@/components/EspProfileSelector', () => ({ EspProfileSelector: () => null }));
++vi.mock('@/components/updates/CartUpdatePolicyPicker', () => ({ CartUpdatePolicyPicker: () => null }));
++import { CartItemConfig } from './CartItemConfig';
++import { useCartStore } from '@/stores/cart-store';
++import { DEFAULT_PSADT_CONFIG } from '@/types/psadt';
++import type { Win32CartItem } from '@/types/upload';
++
++let root: Root; const onClose = vi.fn();
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++afterEach(async () => { await act(async () => root?.unmount()); document.body.innerHTML = ''; onClose.mockClear(); state.capabilities = { path: 'github', startupBeta: false, deployDates: true }; });
++const item = (over: Partial<Win32CartItem> = {}): Win32CartItem => ({
++  id: 'example', addedAt: '2026-11-26', appSource: 'win32', wingetId: 'Example.App', displayName: 'Example App', publisher: 'Example', version: '1.0',
++  architecture: 'x64', installScope: 'machine', installerType: 'wix', installerUrl: 'https://example.test/app.msi', installerSha256: 'a'.repeat(64),
++  installCommand: 'msiexec /i "app.msi" /qn', uninstallCommand: 'msiexec /x "{GUID}" /qn', detectionRules: [], psadtConfig: structuredClone(DEFAULT_PSADT_CONFIG), ...over,
++});
++async function render(cart: Win32CartItem) {
++  useCartStore.setState({ items: [cart] });
++  const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
++  await act(async () => root.render(createElement(CartItemConfig, { item: cart, onClose })));
++}
++const save = () => act(async () => [...document.querySelectorAll('button')].find(b => b.textContent?.includes('Save to Deployment list'))!.click());
++const saved = () => useCartStore.getState().items[0] as Win32CartItem;
++const group = (over: Record<string, unknown> = {}) => ({ type: 'group', groupId: 'g1', groupName: 'Pilot computers', intent: 'required', ...over });
++const time = { useLocalTime: true, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: '2026-12-05T17:00:00Z' };
++const grace = { gracePeriodInMinutes: 1440, countdownDisplayBeforeRestartInMinutes: 15, restartNotificationSnoozeDurationInMinutes: 240 };
++
++it('offers dates on a server that applies them, and a grace period only when Intune may restart', async () => {
++  await render(item());
++  expect(state.props!.installDates).toMatchObject({ available: true, graceSupported: false });
++  await act(async () => root.unmount());
++  await render(item({ psadtConfig: { ...structuredClone(DEFAULT_PSADT_CONFIG), restartBehavior: 'Prompt' } }));
++  expect(state.props!.installDates).toMatchObject({ available: true, graceSupported: true });
++});
++it('offers no date fields while the server cannot apply them', async () => {
++  state.capabilities = { path: 'github', startupBeta: false, deployDates: false };
++  await render(item());
++  expect(state.props!.installDates).toMatchObject({ available: false });
++});
++it('saves valid dates with the group and closes', async () => {
++  await render(item());
++  await act(async () => state.props!.onChange([group({ installTimeSettings: time })]));
++  await save();
++  expect(saved().assignments).toEqual([group({ installTimeSettings: time })]);
++  expect(onClose).toHaveBeenCalledTimes(1);
++});
++it.each([
++  ['a deadline before availability', group({ installTimeSettings: { ...time, deadlineDateTime: '2026-11-30T09:00:00Z' } })],
++  ['a grace period while restarts are suppressed', group({ restartSettings: grace })],
++  ['an emptied minutes box', group({ installTimeSettings: time, restartSettings: { ...grace, gracePeriodInMinutes: NaN } })],
++])('keeps the form open and the saved item unchanged for %s', async (_name, bad) => {
++  await render(item({ assignments: [group()] as Win32CartItem['assignments'] }));
++  await act(async () => state.props!.onChange([bad]));
++  await save();
++  expect(onClose).not.toHaveBeenCalled();
++  expect(saved().assignments).toEqual([group()]);
++});
++it('saves a group with no dates exactly as before', async () => {
++  await render(item());
++  await act(async () => state.props!.onChange([group()]));
++  await save();
++  expect(saved().assignments).toEqual([group()]);
++});
+diff --git a/components/AssignmentConfig.auto-update.test.ts b/components/AssignmentConfig.auto-update.test.ts
+index 8d69b6c46..9a3511181 100644
+--- a/components/AssignmentConfig.auto-update.test.ts
++++ b/components/AssignmentConfig.auto-update.test.ts
+@@ -13,7 +13,7 @@ async function render(a:PackageAssignment[],supported=true) {
+   vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({filters:[]})})));
+   const node=document.createElement('div');document.body.append(node);root=createRoot(node);const change=vi.fn();
+   await act(async()=>root.render(createElement(AssignmentConfig,{assignments:a,onChange:change,supportsAutoUpdateSuperseded:supported})));
+-  const settings=[...document.querySelectorAll('button')].find(b=>b.title.startsWith('Assignment settings'));
++  const settings=[...document.querySelectorAll('button')].find(b=>b.title.startsWith('Group settings'));
+   if(settings)await act(async()=>settings.click());
+   return change;
+ }
+diff --git a/components/AssignmentConfig.intent.test.ts b/components/AssignmentConfig.intent.test.ts
+index b55a2566e..707991de5 100644
+--- a/components/AssignmentConfig.intent.test.ts
++++ b/components/AssignmentConfig.intent.test.ts
+@@ -1,5 +1,5 @@
+ // @vitest-environment happy-dom
+-import { act, createElement } from 'react';
++import { act, createElement, useState } from 'react';
+ import { createRoot, type Root } from 'react-dom/client';
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ vi.mock('@/hooks/useMicrosoftAuth', () => ({
+@@ -27,11 +27,11 @@ afterEach(async () => {
+   vi.unstubAllGlobals();
+ });
+ 
+-async function render(assignments: PackageAssignment[], onChange: (next: PackageAssignment[]) => void) {
++async function render(assignments: PackageAssignment[], onChange: (next: PackageAssignment[]) => void, removalOnly = false) {
+   const node = document.createElement('div');
+   document.body.append(node);
+   root = createRoot(node);
+-  await act(async () => root.render(createElement(AssignmentConfig, { assignments, onChange })));
++  await act(async () => root.render(createElement(AssignmentConfig, { assignments, onChange, removalOnly })));
+ }
+ 
+ const intentSelect = () =>
+@@ -46,7 +46,7 @@ async function chooseIntent(value: string) {
+ }
+ 
+ async function searchAndPickGroup() {
+-  const input = document.querySelector<HTMLInputElement>('input[placeholder="Search Entra ID groups..."]')!;
++  const input = document.querySelector<HTMLInputElement>('input[placeholder="Search Entra groups"]')!;
+   await act(async () => {
+     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+     setValue.call(input, 'Finance');
+@@ -63,7 +63,7 @@ async function searchAndPickGroup() {
+ }
+ 
+ describe('AssignmentConfig intent for new groups', () => {
+-  it('offers Required, Available, Uninstall and Update Only before a group is added', async () => {
++  it('offers Required, Available, Uninstall and Update only before a group is added', async () => {
+     await render([{ type: 'allDevices', intent: 'required' }], vi.fn());
+ 
+     const select = intentSelect();
+@@ -82,7 +82,7 @@ describe('AssignmentConfig intent for new groups', () => {
+     await render([{ type: 'allDevices', intent: 'required' }], onChange);
+ 
+     await chooseIntent('available');
+-    expect(document.body.textContent).toContain('Users can install it themselves from Company Portal.');
++    expect(document.body.textContent).toContain('Staff can install the app from Company Portal.');
+     await searchAndPickGroup();
+ 
+     expect(onChange).toHaveBeenLastCalledWith([
+@@ -122,4 +122,86 @@ describe('AssignmentConfig intent for new groups', () => {
+       { type: 'exclusionGroup', intent: 'required', groupId: 'group-1', groupName: 'Finance Users' },
+     ]);
+   });
++
++  it('says which groups Update only also limits, only when it is mixed with other groups', async () => {
++    await render([{ type: 'allDevices', intent: 'updateOnly' }], vi.fn());
++    expect(document.body.textContent).toContain('The app installs only on computers that already have it.');
++    expect(document.body.textContent).not.toContain('Warning:');
++    await act(async () => root.unmount());
++    document.body.innerHTML = '';
++
++    await render([{ type: 'allDevices', intent: 'updateOnly' }, { type: 'allUsers', intent: 'available' }], vi.fn());
++    expect(document.body.textContent).toContain('Required and Available groups also get the app only on computers that already have it.');
++  });
++
++  it('describes groups as removed from, not as getting the app, in a removal', async () => {
++    await render([{ type: 'exclusionGroup', intent: 'required', groupId: 'group-1', groupName: 'Example group' }], vi.fn(), true);
++    const text = document.body.textContent!;
++    expect(text).toContain('Groups you add have the app removed');
++    expect(text).toContain('Left out of the removal');
++    expect(text).not.toContain('Groups you add get the app');
++    expect(text).not.toContain('Does not get the app');
++    expect(document.querySelector('button[aria-label="Remove Example group from this deployment"]')).not.toBeNull();
++  });
++
++  it('names the filter remove button and says an empty removal is all Uninstall', async () => {
++    await render([{ type: 'allDevices', intent: 'required', filterId: 'filter-1', filterName: 'Example filter' }], vi.fn());
++    expect(document.querySelector('button[aria-label="Remove the filter from All devices"]')).not.toBeNull();
++    await act(async () => root.unmount());
++    document.body.innerHTML = '';
++
++    await render([], vi.fn(), true);
++    expect(document.body.textContent).toContain('Choose a quick pick or search for a group above. Every group is set to Uninstall.');
++  });
++
++  // HRM: a Store app has no requirement rule, so Update only would install on every computer in the group.
++  it('does not offer Update only for a Store app, when adding a group or on a row', async () => {
++    const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
++    await act(async () => root.render(createElement(AssignmentConfig, { assignments: [{ type: 'allDevices', intent: 'required' }], onChange: vi.fn(), storeApp: true })));
++    const selects = [...document.querySelectorAll('select')];
++    expect(selects.length).toBe(2);
++    for (const select of selects) expect([...select.options].map((o) => o.value)).toEqual(['required', 'available', 'uninstall']);
++    expect(document.body.textContent).not.toContain('Update only');
++  });
++  it('flags a saved Update only group on a Store app and lets it be changed, never chosen again', async () => {
++    const onChange = vi.fn();
++    const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
++    await act(async () => root.render(createElement(AssignmentConfig, { assignments: [{ type: 'group', groupId: 'g1', groupName: 'Pilot computers', intent: 'updateOnly' }], onChange, storeApp: true })));
++    expect(document.querySelector('[data-store-update-only]')!.textContent).toBe('Store apps cannot be Update only. Choose Required, Available or Uninstall.');
++    // The Win32 explanation of Update only is not shown: it would not be true here.
++    expect(document.body.textContent).not.toContain('only on computers that already have it');
++    const row = [...document.querySelectorAll('select')].find((s) => s.id !== 'assignment-new-group-intent')!;
++    expect(row.querySelector<HTMLOptionElement>('option[value="updateOnly"]')!.disabled).toBe(true);
++    await act(async () => { row.value = 'required'; row.dispatchEvent(new Event('change', { bubbles: true })); });
++    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ intent: 'required' })]);
++  });
++  it('still offers Update only for a Win32 app', async () => {
++    await render([{ type: 'allDevices', intent: 'required' }], vi.fn());
++    expect([...intentSelect()!.options].map((o) => o.value)).toContain('updateOnly');
++  });
++
++  // HRM: the quick pick hint follows its row.
++  it('states each quick pick with the type its row has now', async () => {
++    const hint = () => [...document.querySelectorAll('p')].find((p) => /for all (devices|users)|Choose one above/.test(p.textContent ?? ''))!.textContent;
++    const node = document.createElement('div'); document.body.append(node); root = createRoot(node);
++    function Host() { const [value, setValue] = useState<PackageAssignment[]>([]); return createElement(AssignmentConfig, { assignments: value, onChange: setValue }); }
++    await act(async () => root.render(createElement(Host)));
++    const press = (name: string) => act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent === name || b.textContent?.startsWith(`${name}Deploy without`))!.click());
++    const rowSelect = (index: number) => [...document.querySelectorAll('select')].filter((s) => s.id !== 'assignment-new-group-intent')[index];
++    const choose = (index: number, value: string) => act(async () => { const select = rowSelect(index); select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
++    await press('Choose groups now');
++    expect(hint()).toBe('Choose one above or add groups below');
++    await press('All devices');
++    expect(hint()).toBe('Required for all devices');
++    await choose(0, 'available');
++    expect(hint()).toBe('Available in Company Portal for all devices');
++    await press('All users');
++    expect(hint()).toBe('Available in Company Portal for all devices, available in Company Portal for all users');
++    await choose(1, 'required'); await choose(0, 'uninstall');
++    expect(hint()).toBe('Uninstall for all devices, required for all users');
++    await choose(0, 'updateOnly');
++    expect(hint()).toBe('Update only for all devices, required for all users');
++    await press('All devices');
++    expect(hint()).toBe('Required for all users');
++  });
+ });
+diff --git a/lib/assignment-intents.ts b/lib/assignment-intents.ts
+index c37c2837a..6d7a91965 100644
+--- a/lib/assignment-intents.ts
++++ b/lib/assignment-intents.ts
+@@ -22,6 +22,15 @@ export function sanitizeAssignmentsForDispatch(
+ 
+ export type AssignmentIntent = PackageAssignment['intent'];
+ 
++/**
++ * HRM: Update only works through a Win32 requirement rule that checks the app is already installed.
++ * A Microsoft Store app has no requirement rules, so Update only would install on every computer in
++ * the group. It is not offered for Store apps and the server refuses it.
++ */
++export const STORE_UPDATE_ONLY_PROBLEM = 'Store apps cannot be Update only. Choose Required, Available or Uninstall.';
++export const hasUpdateOnly = (assignments: unknown): boolean =>
++  Array.isArray(assignments) && assignments.some((a) => !!a && typeof a === 'object' && (a as { intent?: unknown }).intent === 'updateOnly');
++
+ /**
+  * Intents an administrator can choose for an included target, in the order
+  * they are offered when adding a group and in each assignment row.
+@@ -34,22 +43,22 @@ export const ASSIGNMENT_INTENT_OPTIONS: ReadonlyArray<{
+   {
+     value: 'required',
+     label: 'Required',
+-    description: 'Installs automatically on targeted users or devices.',
++    description: 'Intune installs the app for the group without staff choosing it.',
+   },
+   {
+     value: 'available',
+     label: 'Available',
+-    description: 'Users can install it themselves from Company Portal.',
++    description: 'Staff can install the app from Company Portal.',
+   },
+   {
+     value: 'uninstall',
+     label: 'Uninstall',
+-    description: 'Removes the app from targeted users or devices.',
++    description: 'Intune removes the app for the group.',
+   },
+   {
+     value: 'updateOnly',
+-    label: 'Update Only',
+-    description: 'Updates the app only where it is already installed.',
++    label: 'Update only',
++    description: 'Intune installs the app only on computers that already have it.',
+   },
+ ];
+ 
+diff --git a/lib/store-app-deploy.ts b/lib/store-app-deploy.ts
+index 6cb2331ca..8fc9a345c 100644
+--- a/lib/store-app-deploy.ts
++++ b/lib/store-app-deploy.ts
+@@ -4,6 +4,7 @@
+  * Single API call - no packaging, no .intunewin, no GitHub Actions.
+  */
+ 
++import { hasUpdateOnly, STORE_UPDATE_ONLY_PROBLEM } from '@/lib/assignment-intents';
+ import type { StoreCartItem, PackageAssignment, IntuneAppCategorySelection } from '@/types/upload';
+ import type { EspProfileSelection } from '@/types/esp';
+ import { addAppToEspProfile } from '@/lib/esp-api';
+@@ -24,6 +25,8 @@ export async function deployStoreApp(
+   item: StoreCartItem,
+   accessToken: string
+ ): Promise<StoreDeployResult> {
++  // HRM: checked before anything is created in Intune, so a refused request leaves no app behind.
++  if (hasUpdateOnly(item.assignments)) throw new Error(STORE_UPDATE_ONLY_PROBLEM);
+   // Fetch icon as base64 if we have a Store CDN URL
+   const largeIcon = await fetchIconAsBase64(item.iconPath);
+ 
+@@ -126,8 +129,10 @@ async function applyStoreAssignments(
+         target.deviceAndAppManagementAssignmentFilterType = assignment.filterType || 'include';
+       }
+ 
+-      // Map updateOnly to required (same as Win32 path)
+-      const intent = assignment.intent === 'updateOnly' ? 'required' : assignment.intent;
++      // HRM: never turn Update only into Required here. A Store app has no requirement rule to hold it
++      // to computers that already have the app, so it would install on every computer in the group.
++      if (assignment.intent === 'updateOnly') throw new Error(STORE_UPDATE_ONLY_PROBLEM);
++      const intent = assignment.intent;
+ 
+       const graphAssignment: Record<string, unknown> = {
+         '@odata.type': '#microsoft.graph.mobileAppAssignment',
+diff --git a/lib/store-app-deploy.update-only.test.ts b/lib/store-app-deploy.update-only.test.ts
+new file mode 100644
+index 000000000..c7a09ce0b
+--- /dev/null
++++ b/lib/store-app-deploy.update-only.test.ts
+@@ -0,0 +1,13 @@
++// A Store app is never deployed with Update only turned into Required. Fake data; no network.
++import { afterEach, expect, it, vi } from 'vitest';
++import { deployStoreApp } from './store-app-deploy';
++import type { StoreCartItem } from '@/types/upload';
++
++afterEach(() => vi.unstubAllGlobals());
++it('refuses Update only before creating anything in Intune', async () => {
++  const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
++  const item = { id: 'store', addedAt: '2026-11-26', appSource: 'store', wingetId: '9NBLGGH4NNS1', packageIdentifier: '9NBLGGH4NNS1', displayName: 'Example Store App', publisher: 'Example', version: 'latest', installExperience: 'system',
++    assignments: [{ type: 'allDevices', intent: 'required' }, { type: 'group', groupId: 'fake-group', intent: 'updateOnly' }] } as unknown as StoreCartItem;
++  await expect(deployStoreApp(item, 'fixture-token')).rejects.toThrow('Store apps cannot be Update only. Choose Required, Available or Uninstall.');
++  expect(fetchMock).not.toHaveBeenCalled();
++});
