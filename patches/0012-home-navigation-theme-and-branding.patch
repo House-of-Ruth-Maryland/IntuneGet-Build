@@ -16,7 +16,7 @@ index 13c7c31f8..34e7b2627 100644
    );
  }
 diff --git a/app/(app)/dashboard/apps/page.tsx b/app/(app)/dashboard/apps/page.tsx
-index f818738c1..19b49e19f 100644
+index f818738c1..eedc84b27 100644
 --- a/app/(app)/dashboard/apps/page.tsx
 +++ b/app/(app)/dashboard/apps/page.tsx
 @@ -3,6 +3,7 @@
@@ -116,6 +116,15 @@ index f818738c1..19b49e19f 100644
                      </h2>
                    </div>
                    {!showSearchResults && (
+@@ -963,7 +972,7 @@ export default function AppCatalogPage() {
+             <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-labelledby="mobile-filters-title">
+               <button
+                 aria-label="Close filters"
+-                className="absolute inset-0 bg-black/45 backdrop-blur-sm"
++                className="absolute inset-0 bg-black/30"
+                 onClick={() => {
+                   setIsMobileFiltersOpen(false);
+                   mobileFilterTriggerRef.current?.focus();
 @@ -993,7 +1002,7 @@ export default function AppCatalogPage() {
        )}
  
@@ -125,6 +134,33 @@ index f818738c1..19b49e19f 100644
        )}
  
        {deploymentIntentId &&
+@@ -1005,7 +1014,7 @@ export default function AppCatalogPage() {
+             aria-modal="true"
+             aria-label="Loading selected catalog app"
+           >
+-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" aria-hidden="true" />
++            <div className="absolute inset-0 bg-black/30" aria-hidden="true" />
+             <div className="absolute bottom-0 right-0 top-0 flex w-full max-w-2xl items-center justify-center border-l border-overlay/5 bg-bg-surface shadow-2xl">
+               <div className="px-6 text-center" role="status" aria-live="polite">
+                 <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-accent-cyan motion-reduce:animate-none" aria-hidden="true" />
+@@ -1033,7 +1042,7 @@ export default function AppCatalogPage() {
+ 
+       {selectedPackage && ((isSelectedStoreApp && isLoadingStoreManifest) || (!isSelectedStoreApp && isLoadingInstallers) || (isSelectedDeployed && isLoadingDeployedConfig)) && (
+         <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="Loading package details">
+-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={handleCloseConfig} aria-hidden="true" />
++          <div className="absolute inset-0 bg-black/30" onClick={handleCloseConfig} aria-hidden="true" />
+           <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/5 shadow-2xl flex items-center justify-center animate-slide-in-right">
+             <div className="text-center">
+               <div className="relative">
+@@ -1048,7 +1057,7 @@ export default function AppCatalogPage() {
+ 
+       {selectedPackage && !isSelectedStoreApp && !isLoadingInstallers && selectedInstallers.length === 0 && (
+         <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="No installers found">
+-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={handleCloseConfig} aria-hidden="true" />
++          <div className="absolute inset-0 bg-black/30" onClick={handleCloseConfig} aria-hidden="true" />
+           <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/5 shadow-2xl flex items-center justify-center animate-slide-in-right">
+             <div className="text-center px-6">
+               <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-status-error/10 flex items-center justify-center">
 @@ -1089,7 +1098,7 @@ export default function AppCatalogPage() {
              onClick={handleSelectAllVisible}
              className="text-sm text-text-secondary hover:text-accent-cyan transition-colors whitespace-nowrap"
@@ -144,7 +180,7 @@ index f818738c1..19b49e19f 100644
              )}
            </button>
 diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
-index bade6e949..4ae2d3a75 100644
+index bade6e949..88c9337d7 100644
 --- a/app/(app)/dashboard/layout.tsx
 +++ b/app/(app)/dashboard/layout.tsx
 @@ -12,28 +12,33 @@ import {
@@ -233,9 +269,12 @@ index bade6e949..4ae2d3a75 100644
      return (
        <div className="min-h-screen flex items-center justify-center bg-bg-deepest">
          <div className="relative">
-@@ -162,14 +177,15 @@ export default function DashboardLayout({
+@@ -160,16 +175,17 @@ export default function DashboardLayout({
+         className="max-lg:!pl-0"
+       >
          {/* Top bar */}
-         <header className="sticky top-0 z-30 h-16 glass-light">
+-        <header className="sticky top-0 z-30 h-16 glass-light">
++        <header className="sticky top-0 z-30 h-16 glass-light !bg-bg-deepest">
            <div className="flex items-center justify-between h-full pl-14 pr-3 sm:pr-4 lg:px-6">
 -            {/* Command palette trigger */}
 +            {/* Command palette trigger. HRM patch 0036: called "Search" everywhere, with Ctrl or Cmd
@@ -935,7 +974,7 @@ index 648e311ff..f3992e9a2 100644
        </motion.div>
      </div>
 diff --git a/app/(app)/dashboard/settings/page.tsx b/app/(app)/dashboard/settings/page.tsx
-index fa4896636..0345f70c6 100644
+index fa4896636..a01c7bcc7 100644
 --- a/app/(app)/dashboard/settings/page.tsx
 +++ b/app/(app)/dashboard/settings/page.tsx
 @@ -1,4 +1,5 @@
@@ -1055,7 +1094,7 @@ index fa4896636..0345f70c6 100644
                    </motion.section>
  
 +                  {/* HRM patch 0051: these two switches only take effect in Supabase mode. */}
-+                  <VersionDiscoverySettings /><UpdateBehaviorSettings>
++                  <UpdateBehaviorSettings>
                    {/* Carry over assignments card */}
                    <motion.section
                      variants={itemVariants}
@@ -1072,7 +1111,7 @@ index fa4896636..0345f70c6 100644
                        </div>
                      </div>
                    </motion.section>
-+                  </UpdateBehaviorSettings>
++                  </UpdateBehaviorSettings><VersionDiscoverySettings />
                  </motion.div>
                </motion.div>
              )}
@@ -1728,7 +1767,7 @@ index 27c710577..776a9b69c 100644
        />
      </>
 diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
-index 33d0890cc..edf468227 100644
+index 33d0890cc..8d5173eb0 100644
 --- a/components/dashboard/CommandPalette.tsx
 +++ b/components/dashboard/CommandPalette.tsx
 @@ -2,8 +2,9 @@
@@ -1774,9 +1813,9 @@ index 33d0890cc..edf468227 100644
 +  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions automatic schedule publish delivery blackout pilot next rollout' },
 +  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'activity uploads deploy jobs status history' },
 +  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts my deployments' },
-+  { name: 'Check for new app versions', href: '/dashboard/settings#app-updates', icon: Settings, keywords: 'catalog discovery cadence check schedule 3:30 new versions' },
++  { name: 'New version checks', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'catalog discovery cadence check schedule 3:30 new versions' },
 +  { name: 'Automatic publishing window', href: '/dashboard/updates#automatic-updates', icon: ArrowUpCircle, keywords: 'automatic update delivery edit schedule refresh check for app updates when can intuneget send automatic updates to intune update schedule publishing window blackout pause' },
-+  { name: 'Installation timing guide', href: '/dashboard/help#automatic-installation-policy', icon: LifeBuoy, keywords: 'installation behavior behaviour employee choice postpone startup restart schedule next rollout' },
++  { name: 'How automatic updates install guide', href: '/dashboard/help#automatic-installation-policy', icon: LifeBuoy, keywords: 'installation behavior behaviour employee choice postpone startup restart schedule next rollout' },
 +  { name: 'Installation settings guide', href: '/dashboard/help#install-settings', icon: LifeBuoy, keywords: 'toolkit windows installer silent progress only installer decides more settings what staff see postpone deferral disk space restart countdown inactive settings' },
    { name: 'Settings', href: '/dashboard/settings', icon: Settings, keywords: 'settings preferences permissions' },
 +  { name: 'Help', href: '/dashboard/help', icon: LifeBuoy, keywords: 'help support how' },
@@ -1790,8 +1829,8 @@ index 33d0890cc..edf468227 100644
 +  const pathname = usePathname();
 +  const scopedApp = /^\/dashboard\/inventory\/([0-9a-f-]{36})$/i.exec(pathname ?? '')?.[1];
 +  const items = [...NAVIGATION_ITEMS, ...(scopedApp ? [
-+    { name: 'Review next rollout', href: `${pathname}#next-rollout`, icon: ArrowUpCircle, keywords: 'edit next rollout app exception shared installation timing policy employee postpone' },
-+    { name: 'Review current copy and install dates', href: `${pathname}#current-copy`, icon: Server, keywords: 'availability deadline restart grace saved current groups assignment' },
++    { name: 'Review future updates', href: `${pathname}#next-rollout`, icon: ArrowUpCircle, keywords: 'change how it installs edit next rollout app exception shared installation timing policy employee postpone' },
++    { name: 'Review current copy and install dates', href: `${pathname}#current-copy`, icon: Server, keywords: 'availability deadline restart grace saved current groups assignment edit groups add remove switch required available who gets it' },
 +  ] : [])];
    const [search, setSearch] = useState('');
 +  const modifierKey = useModifierKeyLabel();
@@ -1846,7 +1885,7 @@ index 33d0890cc..edf468227 100644
 +      onOpenChange={onOpenChange}
 +      label="Search"
 +      loop
-+      overlayClassName="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
++      overlayClassName="fixed inset-0 z-[60] bg-black/50"
 +      contentClassName="fixed inset-x-4 top-[20vh] z-[60] mx-auto max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden focus:outline-none"
 +      aria-describedby={undefined}
 +    >
@@ -1901,7 +1940,7 @@ index 33d0890cc..edf468227 100644
    );
  }
 diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
-index e941306a7..14d77f88f 100644
+index e941306a7..d909aaea7 100644
 --- a/components/dashboard/Sidebar.tsx
 +++ b/components/dashboard/Sidebar.tsx
 @@ -11,6 +11,7 @@ import {
@@ -2051,6 +2090,15 @@ index e941306a7..14d77f88f 100644
          aria-label="Open sidebar"
        >
          <Menu className="w-6 h-6" />
+@@ -270,7 +297,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+             animate={{ opacity: 1 }}
+             exit={{ opacity: 0 }}
+             transition={{ duration: 0.2 }}
+-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
++            className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+             onClick={closeMobile}
+           />
+         )}
 diff --git a/components/dashboard/SidebarUserSection.tsx b/components/dashboard/SidebarUserSection.tsx
 index d834efe1b..6a84253d2 100644
 --- a/components/dashboard/SidebarUserSection.tsx
@@ -2126,7 +2174,7 @@ index d834efe1b..6a84253d2 100644
              <T>Sign out</T>
 diff --git a/components/dashboard/__tests__/CommandPalette.test.ts b/components/dashboard/__tests__/CommandPalette.test.ts
 new file mode 100644
-index 000000000..8b49c3c3c
+index 000000000..1bbb7070d
 --- /dev/null
 +++ b/components/dashboard/__tests__/CommandPalette.test.ts
 @@ -0,0 +1,97 @@
@@ -2195,16 +2243,16 @@ index 000000000..8b49c3c3c
 +  // HRM patch 0053: pages in the sidebar's order, and the new G shortcuts listed.
 +  it('lists pages in sidebar order and shows the new G shortcuts', () => {
 +    const pages = [...document.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])')].map((el) => el.textContent);
-+    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'Check for new app versions', 'Automatic publishing window', 'Installation timing guide', 'Installation settings guide', 'Settings', 'Help']);
++    expect(pages).toEqual(['Home', 'App catalog', 'Inventory', 'Discovered apps', 'App updates', 'Deployments', 'Reports', 'New version checks', 'Automatic publishing window', 'How automatic updates install guide', 'Installation settings guide', 'Settings', 'Help']);
 +    const text = document.querySelector('[role="dialog"]')!.textContent;
 +    for (const hint of ['Go to App updates', 'Go to Discovered apps', 'Go to Help']) expect(text).toContain(hint);
 +  });
 +
 +  it('offers scoped review links only for a concrete app workspace', async () => {
-+    expect(document.body.textContent).not.toContain('Review next rollout');
++    expect(document.body.textContent).not.toContain('Review future updates');
 +    state.path = '/dashboard/inventory/11111111-1111-4111-8111-111111111111';
 +    await act(async () => root.render(createElement(CommandPalette, { open: true, onOpenChange })));
-+    const next = [...document.querySelectorAll<HTMLElement>('[cmdk-item]')].find(el => el.textContent === 'Review next rollout')!;
++    const next = [...document.querySelectorAll<HTMLElement>('[cmdk-item]')].find(el => el.textContent === 'Review future updates')!;
 +    expect(next.getAttribute('data-value')).toContain('edit next rollout');
 +    await act(async () => next.click());
 +    expect(push).toHaveBeenCalledWith(state.path + '#next-rollout');
@@ -3152,7 +3200,7 @@ index 000000000..0c2f46c2f
 +});
 diff --git a/lib/hrm/__tests__/navigation.test.ts b/lib/hrm/__tests__/navigation.test.ts
 new file mode 100644
-index 000000000..b69ba250e
+index 000000000..6e43ba1a6
 --- /dev/null
 +++ b/lib/hrm/__tests__/navigation.test.ts
 @@ -0,0 +1,83 @@
@@ -3177,7 +3225,7 @@ index 000000000..b69ba250e
 +    expect(groups.map(g => g.items.map(i => i.href))).toEqual([
 +      ['/dashboard', '/dashboard/inventory', '/dashboard/updates', '/dashboard/uploads', '/dashboard/settings'], ['/dashboard/help'],
 +    ]);
-+    expect(groups[0].items.map(i => i.name)).toEqual(['/dashboard', 'Apps', 'Updates', 'Activity', 'Settings']);
++    expect(groups[0].items.map(i => i.name)).toEqual(['/dashboard', 'Apps', 'App updates', 'Activity', 'Settings']);
 +    const hrefs = HRM_NAV_LAYOUT.flatMap(g => g.hrefs);
 +    expect(new Set(hrefs).size).toBe(hrefs.length);
 +  });
@@ -3494,20 +3542,21 @@ index 000000000..c9fc01031
 +}
 diff --git a/lib/hrm/navigation.ts b/lib/hrm/navigation.ts
 new file mode 100644
-index 000000000..23d48dae8
+index 000000000..08917ef4f
 --- /dev/null
 +++ b/lib/hrm/navigation.ts
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,43 @@
 +// HRM patch 0053: the sidebar's groups. Routes are unchanged; only the grouping and order are HRM's.
 +// Home on its own, then the pages grouped by job. Items not listed here (none
 +// today) are dropped rather than shown in a random place.
 +// HRM patch 0058 (David's choice 2B): every label groups more than one page. App updates sits with
-+// the apps it updates, and Help is unlabelled at the bottom, next to Settings.
++// the apps it updates, and Help is unlabelled at the bottom, next to Settings. The page is called
++// App updates everywhere, the sidebar included, so text that says "App updates" can be found.
 +export const HRM_NAV_LAYOUT: { label?: string; hrefs: string[] }[] = [
 +  { hrefs: ['/dashboard', '/dashboard/inventory', '/dashboard/updates', '/dashboard/uploads', '/dashboard/settings'] },
 +  { hrefs: ['/dashboard/help'] },
 +];
-+const PRIMARY_NAMES: Record<string, string> = { '/dashboard/inventory': 'Apps', '/dashboard/updates': 'Updates', '/dashboard/uploads': 'Activity', '/dashboard/settings': 'Settings' };
++const PRIMARY_NAMES: Record<string, string> = { '/dashboard/inventory': 'Apps', '/dashboard/updates': 'App updates', '/dashboard/uploads': 'Activity', '/dashboard/settings': 'Settings' };
 +export const APP_PAGES = [{ href: '/dashboard/inventory', name: 'Inventory' }, { href: '/dashboard/apps', name: 'App catalog' }, { href: '/dashboard/unmanaged', name: 'Discovered apps' }];
 +export const ACTIVITY_PAGES = [{ href: '/dashboard/uploads', name: 'Deployments' }, { href: '/dashboard/reports', name: 'Reports' }];
 +export function sectionPages(path: string) {

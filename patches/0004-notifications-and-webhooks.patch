@@ -480,10 +480,35 @@ index e3745b86d..986bf44d7 100644
                )}
              </Button>
 diff --git a/components/settings/WebhookFormModal.tsx b/components/settings/WebhookFormModal.tsx
-index 4c1fcf4f1..1f977f084 100644
+index 4c1fcf4f1..3e4f4da1c 100644
 --- a/components/settings/WebhookFormModal.tsx
 +++ b/components/settings/WebhookFormModal.tsx
-@@ -162,7 +162,7 @@ export function WebhookFormModal({
+@@ -1,6 +1,7 @@
+ 'use client';
+ 
+ import { useState, useEffect } from 'react';
++import { createPortal } from 'react-dom';
+ import { X, Loader2, Eye, EyeOff, Plus, Trash2 } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { Input } from '@/components/ui/input';
+@@ -149,11 +150,13 @@ export function WebhookFormModal({
+ 
+   if (!isOpen) return null;
+ 
+-  return (
+-    <div className="fixed inset-0 z-50 flex items-center justify-center">
++  // HRM: rendered at the page root. Inside the Settings card (which is animated) "fixed" was measured
++  // against the card, so the dialog and its backdrop covered only that card.
++  return createPortal(
++    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-label={initialData ? 'Edit webhook' : 'Add webhook'}>
+       {/* Backdrop */}
+       <div
+-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
++        className="absolute inset-0 bg-black/50"
+         onClick={onClose}
+       />
+ 
+@@ -162,7 +165,7 @@ export function WebhookFormModal({
          {/* Header */}
          <div className="flex items-center justify-between p-4 border-b border-overlay/5">
            <h2 className="text-lg font-semibold text-text-primary">
@@ -492,7 +517,7 @@ index 4c1fcf4f1..1f977f084 100644
            </h2>
            <button
              onClick={onClose}
-@@ -182,7 +182,7 @@ export function WebhookFormModal({
+@@ -182,7 +185,7 @@ export function WebhookFormModal({
              <Input
                value={formData.name}
                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -501,7 +526,7 @@ index 4c1fcf4f1..1f977f084 100644
                className="bg-bg-elevated border-overlay/10 text-text-primary"
              />
            </div>
-@@ -263,7 +263,7 @@ export function WebhookFormModal({
+@@ -263,7 +266,7 @@ export function WebhookFormModal({
              <div>
                <div className="flex items-center justify-between mb-2">
                  <label className="block text-sm font-medium text-text-primary">
@@ -510,7 +535,7 @@ index 4c1fcf4f1..1f977f084 100644
                  </label>
                  <Button
                    type="button"
-@@ -273,7 +273,7 @@ export function WebhookFormModal({
+@@ -273,7 +276,7 @@ export function WebhookFormModal({
                    className="border-overlay/10 text-xs"
                  >
                    <Plus className="w-3 h-3 mr-1" />
@@ -519,7 +544,7 @@ index 4c1fcf4f1..1f977f084 100644
                  </Button>
                </div>
  
-@@ -337,9 +337,9 @@ export function WebhookFormModal({
+@@ -337,15 +340,16 @@ export function WebhookFormModal({
                    Saving...
                  </>
                ) : initialData ? (
@@ -531,6 +556,14 @@ index 4c1fcf4f1..1f977f084 100644
                )}
              </Button>
            </div>
+         </form>
+       </div>
+-    </div>
++    </div>,
++    document.body
+   );
+ }
+ 
 diff --git a/components/settings/WebhookManager.tsx b/components/settings/WebhookManager.tsx
 index 5c95c6717..d1674eafc 100644
 --- a/components/settings/WebhookManager.tsx

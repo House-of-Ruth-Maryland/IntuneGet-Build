@@ -2,6 +2,70 @@
 
 ## Unreleased
 
+- One name per setting, and each screen says what it controls. The sidebar says App updates, like
+  the page and every link to it. Settings, General no longer shows read-only facts as cards: the
+  "App updates" and "Update behavior" cards are replaced by a plain "Not set on this page" list
+  that links to where each thing is changed. On the app page, "Next automatic update" is Future
+  updates, "Edit next rollout" is Change how it installs (beside the field it changes), "Edit
+  assignments" is Edit groups (see item 122 below), and Install dates sits beside the dates.
+  App updates' "Installation timing" row and its panel are How automatic updates install. The
+  Install dates panel shows the dates and Edit dates first, keeps its notes closed below them and
+  no longer repeats install results. Required, Available, Available from, Must install by and
+  Restart grace period explain themselves on hover or keyboard focus. Install after next
+  restart (Beta) is not listed where the server cannot run it. Fixes: opening Install dates from
+  Inventory app details no longer turns the page black, and cards no longer show through the page
+  header while scrolling. No server behavior changed. `docs/who-when-updates-map.md` maps where
+  groups, install dates, updates and postponement are set. Help updated by help-writer.
+
+- Item 122, Edit groups: the app page's group panel is now a full editor for any Win32 app in
+  Intune. Besides adding a group it removes a group and switches a group between Required and
+  Available, so the App catalog and Intune detours are gone. The button and panel are called Edit
+  groups everywhere. Every change is reviewed first ("Check this change": what changes, what a
+  switch keeps and does not keep, and which groups are not changed), then Save to Intune. The
+  server writes one group at a time and never the whole list, so every other group keeps its
+  filter, install dates, notifications and app in use settings exactly. A switch adds the new
+  assignment before it removes the old one and carries settings through the same allowlist as a
+  replacement (items 103 and 111); a group with settings IntuneGet does not know is not switched.
+  Removing the last group needs a ticked confirmation, in the panel and on the server. A repeated
+  or retried save adds no duplicate. Exclusions, Uninstall groups and groups from another
+  assignment are still changed in Intune only. Proven against fake Intune responses; the first
+  switch on HRM's tenant should be checked in Intune (`docs/installation-rollouts.md`, "Item 122:
+  first use on a real tenant").
+  Help updated by help-writer.
+
+- Item 122, install dates in the deploy form: under Who gets it, each Required or Available group
+  of a new Win32 deployment has Install dates (Available from, Must install by for Required
+  groups, time zone and restart grace period), with the same names, hover explanations and
+  validation as the Install dates panel. The default is still as soon as possible and nothing is
+  sent unless a date is set. The deploy review states the dates. The server refuses invalid dates
+  before any packaging starts, and the local packager and the bundled PowerShell
+  (`Get-IntuneGetDeployTiming`) apply the same rules and assign no group if a date cannot be
+  verified. Dates belong to that one deployment: they are not saved into automatic-update settings
+  or a later New version form. A grace period is offered only where the deployment lets Intune
+  restart. Hosted packaging offers the dates only after the private packaging workflow is updated
+  and the server has `HRM_DEPLOY_DATES_CAPABILITY=assignment-dates-v1`; until then the form says
+  to set dates afterwards, as before. Help updated by help-writer.
+
+- Item 122, review fixes: an excluded group reads "name · Excluded" on every screen (Edit groups,
+  the app page, Inventory details, Group changes to review, the deploy review and Deployments); it
+  used to read Required, or "Not name" in the deploy review. Every side panel (the deploy form,
+  the Deployment list and its Edit settings, the custom app form, the catalog loading panels, the
+  phone menu and filters) dims the page lightly without blur, and centred dialogs dim to half
+  without blur, so no panel turns the page near-black. The Add webhook dialog now covers the whole
+  page instead of only its card. The deploy form's group section is in sentence case and plain
+  words: "Groups (3)" for "Configured Assignments (3)", "All devices", "All users", "Update only",
+  and new option and error text. Help updated by help-writer.
+
+- Update only is no longer offered for Microsoft Store apps. It works through a Win32 requirement
+  rule that checks the app is already installed; a Store app has none, so the server used to turn
+  Update only into Required and install the app on every computer in the group. The deploy form now
+  offers Required, Available and Uninstall for Store apps, flags a Store item saved earlier with
+  Update only until it is changed, and the server refuses such a request before anything is created
+  in Intune. Win32 apps are unchanged. Edit settings no longer adds a second dim layer over the
+  Deployment list. The hint under the deploy form's quick picks now states each pick with the type
+  its row has (it kept saying "Required for all devices" after the row was switched). Help updated
+  by help-writer.
+
 - Item 105: Deployments, Reports and Home's deployment statistics open on All in tenant, so staff
   who have not deployed anything themselves see the tenant's deployments instead of an empty
   page. Deployments loads 50 at a time with Show older deployments (up to 2,000) in place of a
