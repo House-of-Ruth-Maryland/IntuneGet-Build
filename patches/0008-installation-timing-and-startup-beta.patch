@@ -1533,7 +1533,7 @@ index 000000000..114d53fed
 +});
 diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
 new file mode 100644
-index 000000000..f9ae221c4
+index 000000000..670b02588
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.tsx
 @@ -0,0 +1,126 @@
@@ -1589,7 +1589,7 @@ index 000000000..f9ae221c4
 +  const summaryPolicy = (appId ? exceptions.find(p => p.appId.toLowerCase() === appId.toLowerCase()) : undefined) ?? data?.shared;
 +  const sharedSummary = !summaryPolicy ? null : summaryPolicy.mode === 'existing' ? 'Use each app’s saved settings' : summaryPolicy.mode === 'prompt' ? `Users can postpone · ${summaryPolicy.days} days` : summaryPolicy.mode === 'restart' ? 'Install after next restart · Beta' : 'Install without postponement';
 +  const editor = <Dialog open={open} onOpenChange={value => { if (!action.isPending) { setOpen(value); if (value) choose(appId ?? ''); } }}>
-+        <DialogTrigger asChild><Button variant={compact ? 'outline' : 'ghost'} size="sm" className={compact ? undefined : 'h-7 whitespace-nowrap px-2 text-accent-cyan hover:text-accent-cyan'} disabled={!data?.shared}>{appId ? CHANGE_HOW_IT_INSTALLS : 'Edit shared policy'}</Button></DialogTrigger>
++        <DialogTrigger asChild><Button variant={compact ? 'outline' : 'ghost'} size="sm" className={compact ? undefined : 'h-7 whitespace-nowrap px-0 text-accent-cyan hover:bg-transparent hover:text-accent-cyan hover:underline'} disabled={!data?.shared}>{appId ? CHANGE_HOW_IT_INSTALLS : 'Edit shared policy'}</Button></DialogTrigger>
 +        <DialogContent side="right" onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }} hideCloseButton={action.isPending}>
 +          <DialogHeader className="pr-12"><DialogTitle>{HOW_UPDATES_INSTALL}</DialogTitle><DialogDescription>{selected ? `For ${selectedName} only. ` : 'Shared policy, for every app with Auto-update on. '}{effectiveMode === 'restart' ? 'Applies only to an explicitly started restart Beta pilot.' : 'Applies to future automatic packages.'} Current and queued packages stay unchanged.</DialogDescription></DialogHeader>
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
@@ -1654,7 +1654,7 @@ index 000000000..f9ae221c4
 +  const { data } = useInstallationPolicy();
 +  if (!data?.shared) return null;
 +  const exception = data.exceptions?.find(p => p.appId.toLowerCase() === appId.toLowerCase());
-+  return <p className="mt-2 text-xs text-text-secondary"><span className="font-medium">{exception ? 'App exception' : 'Shared policy'}:</span> {installationPolicySummary(exception ?? data.shared)}. Applies to the next automatic release.</p>;
++  return <p className="pl-5 text-xs text-text-secondary"><span className="font-medium">{exception ? 'App exception' : 'Shared policy'}:</span> {installationPolicySummary(exception ?? data.shared)}. Applies to the next automatic release.</p>;
 +}
 +
 +function RestartPilotStart({ wingetId, appId, groupId, groupName }: { wingetId: string; appId: string; groupId: string; groupName: string }) {
@@ -1776,7 +1776,7 @@ index 000000000..0b8ff074b
 +});
 diff --git a/components/hrm/StartupInstallations.tsx b/components/hrm/StartupInstallations.tsx
 new file mode 100644
-index 000000000..713204fb9
+index 000000000..564afd476
 --- /dev/null
 +++ b/components/hrm/StartupInstallations.tsx
 @@ -0,0 +1,108 @@
@@ -1857,10 +1857,10 @@ index 000000000..713204fb9
 +  const shown = hasPackages(data) || startupNeedsAttention(data);
 +  return <>
 +    <span id="startup-installations" className="block scroll-mt-24" aria-hidden="true" />
-+    {shown && <section aria-label={`${STARTUP_INSTALL_RESULTS} · Beta`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
++    {shown && <section aria-label={`${STARTUP_INSTALL_RESULTS} · Beta`} className="mt-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-overlay/10 pt-3 text-sm">
 +      <h3 className="whitespace-nowrap font-medium text-text-primary">{STARTUP_INSTALL_RESULTS} (Beta):</h3>
 +      <span className="text-text-secondary">{summaryText(data, isLoading)}</span>
-+      <Button variant="ghost" size="sm" className="h-7 whitespace-nowrap px-2 text-accent-cyan hover:text-accent-cyan" onClick={() => setOpen(true)}>Open</Button>
++      <Button variant="ghost" size="sm" className="h-7 whitespace-nowrap px-0 text-accent-cyan hover:bg-transparent hover:text-accent-cyan hover:underline" onClick={() => setOpen(true)}>Open</Button>
 +    </section>}
 +    <Dialog open={open} onOpenChange={close}>
 +      <DialogContent side="right">

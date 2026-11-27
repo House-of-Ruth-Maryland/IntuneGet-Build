@@ -16,7 +16,7 @@ index 7987a53b6..5b0d405c9 100644
    );
  }
 diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
-index b5d2996a2..18cba9e52 100644
+index b5d2996a2..2e08f6a3a 100644
 --- a/app/(app)/dashboard/updates/page.tsx
 +++ b/app/(app)/dashboard/updates/page.tsx
 @@ -1,6 +1,12 @@
@@ -49,7 +49,7 @@ index b5d2996a2..18cba9e52 100644
 +import { PilotRollouts } from '@/components/hrm/PilotRollouts';
 +import { InstallationPolicyPanel } from '@/components/hrm/InstallationPolicyPanel';
 +import { AutomaticUpdatesPausedAlert, UpdateSchedule } from '@/components/hrm/UpdateSchedule';
-+import { VERSION_CHECK_TIMES } from '@/components/hrm/VersionDiscovery';
++import { VERSION_CHECK_TIMES, clock as checkClock, useVersionCheckStatus } from '@/components/hrm/VersionDiscovery';
 +import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
  import { UpdateCard, UpdateCardSkeleton, AutoUpdateHistory } from '@/components/updates';
  import { AutoUpdateAppsModal } from '@/components/updates/AutoUpdateAppsModal';
@@ -277,7 +277,7 @@ index b5d2996a2..18cba9e52 100644
  
    const handleRefresh = useCallback(async () => {
      await refreshUpdates();
-@@ -369,8 +418,33 @@ export default function UpdatesPage() {
+@@ -369,8 +418,35 @@ export default function UpdatesPage() {
      }
    }, [isLoadingUpdates, isRefreshing, mspTenantSelectionRequired, updates.length, handleRefresh]);
  
@@ -306,13 +306,15 @@ index b5d2996a2..18cba9e52 100644
 +    return () => clearTimeout(timer);
 +  }, [highlight]);
 +
++  const { data: lastCheck } = useVersionCheckStatus();
++
    // Check if any filters are active
 -  const hasActiveFilters = search.trim() !== '' || showCriticalOnly || updateTypeFilter !== null;
 +  const hasActiveFilters = search.trim() !== '' || (supabaseMode && showCriticalOnly) || updateTypeFilter !== null;
  
    const clearAllFilters = () => {
      setSearch('');
-@@ -378,32 +452,46 @@ export default function UpdatesPage() {
+@@ -378,43 +454,57 @@ export default function UpdatesPage() {
      setUpdateTypeFilter(null);
    };
  
@@ -383,8 +385,9 @@ index b5d2996a2..18cba9e52 100644
 +            {checkButton('outline')}
              {eligibleForBulkUpdate.length > 0 && (
                <>
-                 <Button
-@@ -411,9 +499,9 @@ export default function UpdatesPage() {
+-                <Button
++                {activeTab === 'available' && <Button
+                   onClick={() => {
                      setBulkProgress({ phase: 'confirm', completed: 0, failed: 0, total: eligibleForBulkUpdate.length, errors: [] });
                      setBulkDialogOpen(true);
                    }}
@@ -392,11 +395,13 @@ index b5d2996a2..18cba9e52 100644
 +                  className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium whitespace-nowrap"
                  >
 -                  <T>Update All</T> ({eligibleForBulkUpdate.length})
+-                </Button>
 +                  <T>Update all</T> ({eligibleForBulkUpdate.length})
-                 </Button>
++                </Button>}
                  <Dialog
                    open={bulkDialogOpen}
-@@ -443,11 +531,11 @@ export default function UpdatesPage() {
+                   onOpenChange={(open) => {
+@@ -443,11 +533,11 @@ export default function UpdatesPage() {
                                {eligibleForBulkUpdate.some(u => classifyUpdateType(u.current_version, u.latest_version) === 'major') && (
                                  <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-status-warning/10 border border-status-warning/20 rounded-lg text-sm text-status-warning">
                                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -410,7 +415,7 @@ index b5d2996a2..18cba9e52 100644
                                  if (newAppsCount === 0) return null;
                                  return (
                                    <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-500">
-@@ -470,7 +558,7 @@ export default function UpdatesPage() {
+@@ -470,7 +560,7 @@ export default function UpdatesPage() {
                                          {type}
                                        </span>
                                        {u.display_name} ({u.current_version} &rarr; {u.latest_version})
@@ -419,7 +424,7 @@ index b5d2996a2..18cba9e52 100644
                                          <span className="text-[10px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border text-violet-500 bg-violet-500/10 border-violet-500/20">
                                            NEW
                                          </span>
-@@ -482,6 +570,7 @@ export default function UpdatesPage() {
+@@ -482,6 +572,7 @@ export default function UpdatesPage() {
                              </div>
                            </DialogDescription>
                          </DialogHeader>
@@ -427,7 +432,7 @@ index b5d2996a2..18cba9e52 100644
                          <DialogFooter>
                            <Button
                              variant="ghost"
-@@ -492,9 +581,10 @@ export default function UpdatesPage() {
+@@ -492,9 +583,10 @@ export default function UpdatesPage() {
                            </Button>
                            <Button
                              onClick={() => void handleBulkUpdate()}
@@ -439,7 +444,7 @@ index b5d2996a2..18cba9e52 100644
                            </Button>
                          </DialogFooter>
                        </>
-@@ -582,7 +672,7 @@ export default function UpdatesPage() {
+@@ -582,7 +674,7 @@ export default function UpdatesPage() {
                                }}
                                className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
                              >
@@ -448,7 +453,7 @@ index b5d2996a2..18cba9e52 100644
                                <ArrowRight className="w-4 h-4 ml-1.5" />
                              </Button>
                            )}
-@@ -594,10 +684,16 @@ export default function UpdatesPage() {
+@@ -594,10 +686,16 @@ export default function UpdatesPage() {
                </>
              )}
            </div>
@@ -467,7 +472,7 @@ index b5d2996a2..18cba9e52 100644
        <Dialog open={newAppDialogOpen} onOpenChange={setNewAppDialogOpen}>
          <DialogContent className="bg-bg-surface border-overlay/10">
            <DialogHeader>
-@@ -620,7 +716,7 @@ export default function UpdatesPage() {
+@@ -620,7 +718,7 @@ export default function UpdatesPage() {
                    <>
                      <p>
                        <T><Var><span className="font-medium text-text-primary">{pendingNewAppUpdate?.display_name}</span></Var> was matched
@@ -476,7 +481,7 @@ index b5d2996a2..18cba9e52 100644
                      </p>
                      <ul className="space-y-1.5 text-sm">
                        <li className="flex items-start gap-2">
-@@ -698,7 +794,7 @@ export default function UpdatesPage() {
+@@ -698,7 +796,7 @@ export default function UpdatesPage() {
                    : 'bg-violet-600 hover:bg-violet-700'
                )}
              >
@@ -485,7 +490,16 @@ index b5d2996a2..18cba9e52 100644
              </Button>
            </DialogFooter>
          </DialogContent>
-@@ -732,114 +828,69 @@ export default function UpdatesPage() {
+@@ -711,7 +809,7 @@ export default function UpdatesPage() {
+           initial={shouldReduceMotion ? { opacity: 1 } : 'hidden'}
+           animate={shouldReduceMotion ? { opacity: 1 } : 'visible'}
+           role="alert"
+-          className="glass-light rounded-xl p-4 border-l-[3px] border-l-status-warning border-t border-r border-b border-black/[0.08] bg-gradient-to-r from-status-warning/5 to-transparent"
++          className="glass-light rounded-xl p-4 border-l-[3px] border-l-status-warning border-t border-r border-b border-overlay/10 bg-gradient-to-r from-status-warning/5 to-transparent"
+         >
+           <div className="flex items-center justify-between gap-3">
+             <div className="flex items-center gap-3">
+@@ -732,114 +830,69 @@ export default function UpdatesPage() {
                  onClick={() => setShowCriticalOnly(true)}
                  className="text-status-warning hover:text-status-warning hover:bg-status-warning/10 text-xs font-medium flex-shrink-0"
                >
@@ -625,7 +639,7 @@ index b5d2996a2..18cba9e52 100644
                      showCriticalOnly
                        ? 'bg-status-warning/20 text-status-warning hover:bg-status-warning/30 border border-status-warning/20'
                        : 'text-text-secondary hover:text-text-primary'
-@@ -850,17 +901,17 @@ export default function UpdatesPage() {
+@@ -850,17 +903,17 @@ export default function UpdatesPage() {
                    {criticalCount > 0 && (
                      <span className="ml-1 tabular-nums">{criticalCount}</span>
                    )}
@@ -647,7 +661,7 @@ index b5d2996a2..18cba9e52 100644
                      showUnmanaged
                        ? 'bg-accent-violet/20 text-accent-violet hover:bg-accent-violet/30 border border-accent-violet/20'
                        : 'text-text-secondary hover:text-text-primary'
-@@ -868,16 +919,29 @@ export default function UpdatesPage() {
+@@ -868,16 +921,29 @@ export default function UpdatesPage() {
                  >
                    <ShieldOff className="w-3.5 h-3.5 mr-1.5" />
                    <T>Unmanaged</T>
@@ -680,7 +694,7 @@ index b5d2996a2..18cba9e52 100644
                          updateTypeFilter
                            ? 'bg-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/30 border border-accent-cyan/20'
                            : 'text-text-secondary hover:text-text-primary'
-@@ -888,7 +952,7 @@ export default function UpdatesPage() {
+@@ -888,7 +954,7 @@ export default function UpdatesPage() {
                      </Button>
                    </DropdownMenuTrigger>
                    <DropdownMenuContent align="end" className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
@@ -689,7 +703,7 @@ index b5d2996a2..18cba9e52 100644
                      <DropdownMenuSeparator className="bg-overlay/[0.06]" />
                      <DropdownMenuItem
                        onClick={() => setUpdateTypeFilter(null)}
-@@ -919,31 +983,31 @@ export default function UpdatesPage() {
+@@ -919,31 +985,31 @@ export default function UpdatesPage() {
                        <span className="ml-auto text-[11px] text-text-muted tabular-nums">{updateTypeCounts.patch}</span>
                      </DropdownMenuItem>
                    </DropdownMenuContent>
@@ -730,7 +744,7 @@ index b5d2996a2..18cba9e52 100644
  
                  {/* Results count + clear */}
                  {!isLoadingUpdates && updates.length > 0 && (
-@@ -971,6 +1035,10 @@ export default function UpdatesPage() {
+@@ -971,6 +1037,10 @@ export default function UpdatesPage() {
              </div>
            )}
  
@@ -741,7 +755,7 @@ index b5d2996a2..18cba9e52 100644
            {mspTenantSelectionRequired ? (
              <AnimatedEmptyState
                icon={Package}
-@@ -988,7 +1056,7 @@ export default function UpdatesPage() {
+@@ -988,7 +1058,7 @@ export default function UpdatesPage() {
                description={updatesError.message}
                color="neutral"
                action={{
@@ -750,7 +764,7 @@ index b5d2996a2..18cba9e52 100644
                  onClick: () => refetchUpdates(),
                  variant: 'secondary',
                }}
-@@ -997,7 +1065,7 @@ export default function UpdatesPage() {
+@@ -997,7 +1067,7 @@ export default function UpdatesPage() {
              <motion.div
                initial={{ opacity: 0 }}
                animate={{ opacity: 1 }}
@@ -759,7 +773,7 @@ index b5d2996a2..18cba9e52 100644
              >
                {filteredUpdates.map((update, index) => (
                  <UpdateCard
-@@ -1007,6 +1075,7 @@ export default function UpdatesPage() {
+@@ -1007,6 +1077,7 @@ export default function UpdatesPage() {
                    onPolicyChange={handlePolicyChange}
                    isUpdating={updatingIds.has(update.id)}
                    index={index}
@@ -767,7 +781,7 @@ index b5d2996a2..18cba9e52 100644
                  />
                ))}
              </motion.div>
-@@ -1018,28 +1087,34 @@ export default function UpdatesPage() {
+@@ -1018,28 +1089,34 @@ export default function UpdatesPage() {
                color="neutral"
                showOrbs={false}
                action={{
@@ -789,7 +803,7 @@ index b5d2996a2..18cba9e52 100644
 +                <CheckCircle2 className="h-7 w-7 text-status-success" aria-hidden="true" />
 +              </div>
 +              <h2 className="text-lg font-semibold text-text-primary"><T>All apps are up to date</T></h2>
-+              <p className="mx-auto mt-2 max-w-md text-sm text-text-secondary">No newer versions were found at the last check. Scheduled checks run {VERSION_CHECK_TIMES.charAt(0).toLowerCase() + VERSION_CHECK_TIMES.slice(1)}.</p>
++              <p className="mx-auto mt-2 max-w-md text-sm text-text-secondary">No newer versions were found at the last check{lastCheck?.lastAttemptAt && lastCheck.result === 'success' ? ` (${checkClock(lastCheck.lastAttemptAt)})` : ''}. Scheduled checks run {VERSION_CHECK_TIMES.charAt(0).toLowerCase() + VERSION_CHECK_TIMES.slice(1)}.</p>
 +              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
 +                {checkButton('outline')}
 +                {history.length > 0 && <Button variant="ghost" className="whitespace-nowrap text-accent-cyan hover:text-accent-cyan" onClick={() => setActiveTab('history')}>View update history ({history.length})</Button>}
@@ -800,7 +814,7 @@ index b5d2996a2..18cba9e52 100644
  
          {/* History Tab */}
          <TabsContent value="history" className="mt-0">
-+          <p className="mb-4 text-sm text-text-secondary">Expand a deployed version for its install results.</p>
++          <p className="mb-4 text-sm text-text-secondary">Expand a deployed version to see its install results and saved installation policy.</p>
            {mspTenantSelectionRequired ? (
              <AnimatedEmptyState
                icon={History}
@@ -810,7 +824,7 @@ index b5d2996a2..18cba9e52 100644
                color="neutral"
                showOrbs={false}
              />
-@@ -1054,30 +1129,43 @@ export default function UpdatesPage() {
+@@ -1054,30 +1131,43 @@ export default function UpdatesPage() {
          </TabsContent>
        </Tabs>
  
@@ -1733,10 +1747,10 @@ index 000000000..b5a5ceba5
 +}
 diff --git a/components/hrm/UpdateSchedule.render.test.ts b/components/hrm/UpdateSchedule.render.test.ts
 new file mode 100644
-index 000000000..4ee03d76b
+index 000000000..0aee37b64
 --- /dev/null
 +++ b/components/hrm/UpdateSchedule.render.test.ts
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,66 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -1771,13 +1785,15 @@ index 000000000..4ee03d76b
 +  await act(async () => button('Pause automatic updates').click());
 +  expect(state.mutate.mock.calls[0][0]).toEqual({ action: 'setPaused', paused: true });
 +});
-+it('keeps Resume on the row while paused', async () => {
++it('says Paused on the bar and keeps Resume in the alert above the list, not twice', async () => {
 +  state.paused = true;
-+  await render();
++  await act(async () => root.render(createElement('div', null, createElement(AutomaticUpdatesPausedAlert), createElement(UpdateSchedule, { appsOn: 12, onShowApps: showApps }))));
 +  const row = document.querySelector('section[aria-label="When can IntuneGet send automatic updates to Intune?"]')!;
 +  expect(row.textContent).toContain('Paused for all apps');
-+  expect(row.textContent).toContain('Paused');
-+  await act(async () => button('Resume automatic updates').click());
++  expect(row.textContent).not.toContain('Resume automatic updates');
++  const resume = [...document.querySelectorAll('button')].filter(b => b.textContent === 'Resume automatic updates');
++  expect(resume).toHaveLength(1);
++  await act(async () => resume[0].click());
 +  expect(state.mutate.mock.calls[0][0]).toEqual({ action: 'setPaused', paused: false });
 +});
 +it('saves an unrestricted schedule without resuming paused automatic updates', async () => {
@@ -1830,10 +1846,10 @@ index 000000000..9f815af75
 +});
 diff --git a/components/hrm/UpdateSchedule.tsx b/components/hrm/UpdateSchedule.tsx
 new file mode 100644
-index 000000000..bd7f1d168
+index 000000000..73ff9aead
 --- /dev/null
 +++ b/components/hrm/UpdateSchedule.tsx
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,147 @@
 +'use client';
 +import Link from 'next/link';
 +import { useEffect, useState } from 'react';
@@ -1940,7 +1956,7 @@ index 000000000..bd7f1d168
 +    </div>;
 +  const pauseButton = schedule && <Button variant="outline" size="sm" disabled={action.isPending} onClick={() => action.mutate({ action: 'setPaused', paused: !schedule.paused })}>{action.isPending && action.variables?.action === 'setPaused' ? 'Saving…' : schedule.paused ? 'Resume automatic updates' : 'Pause automatic updates'}</Button>;
 +  // App updates' status bar: the window's state and a few words, the apps with Automatic updates on, and
-+  // the editor. Pausing, check times and blackouts are in the panel. Resume stays on the bar while paused.
++  // the editor. Pausing, check times and blackouts are in the panel; while paused, Resume is in the alert above the list.
 +  const appsText = appsOn === undefined ? null : `${appsOn === 1 ? '1 app' : `${appsOn} apps`} with Automatic updates on`;
 +  const summary = isLoading ? 'Loading the update schedule…' : !schedule ? null : schedule.paused ? 'Paused for all apps' : `${windowLabel(schedule)}${schedule.enabled ? ', Maryland time' : ''}`;
 +  const state = schedule && (schedule.paused ? <StripPill tone="warn">Paused</StripPill> : w && !w.open ? <StripPill tone="warn">Waiting</StripPill> : <StripPill tone="ok">On</StripPill>);
@@ -1954,9 +1970,8 @@ index 000000000..bd7f1d168
 +        {onShowApps ? <button type="button" className="text-left text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded" onClick={onShowApps}>{appsText}</button> : <span className="text-text-secondary">{appsText}</span>}
 +      </>}
 +      {schedule && <span className="flex flex-wrap items-center gap-2">
-+      {schedule.paused && pauseButton}
 +      <Dialog open={editing} onOpenChange={value => { if (!action.isPending) { if (value) { action.reset(); setDraft(schedule); } setEditing(value); } }}>
-+        <DialogTrigger asChild><Button variant="ghost" size="sm" className="h-7 whitespace-nowrap px-2 text-accent-cyan hover:text-accent-cyan">Edit publishing window</Button></DialogTrigger>
++        <DialogTrigger asChild><Button variant="ghost" size="sm" className="h-7 whitespace-nowrap px-0 text-accent-cyan hover:bg-transparent hover:text-accent-cyan hover:underline">Edit publishing window</Button></DialogTrigger>
 +        <DialogContent side="right" hideCloseButton={action.isPending} onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }}>
 +          <DialogHeader className="pr-12"><DialogTitle>When can IntuneGet send automatic updates to Intune?</DialogTitle><DialogDescription>Controls when new automatic update packages and pilots can deploy to Intune. How automatic updates install is a separate setting on this page.</DialogDescription></DialogHeader>
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
@@ -1984,10 +1999,10 @@ index 000000000..bd7f1d168
 +}
 diff --git a/components/hrm/VersionDiscovery.tsx b/components/hrm/VersionDiscovery.tsx
 new file mode 100644
-index 000000000..1bded310d
+index 000000000..6bcf0a603
 --- /dev/null
 +++ b/components/hrm/VersionDiscovery.tsx
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,64 @@
 +'use client';
 +import Link from 'next/link';
 +import { useQuery } from '@tanstack/react-query';
@@ -2024,10 +2039,11 @@ index 000000000..1bded310d
 +  </section>;
 +}
 +interface CheckStatus { supported: boolean; reported: boolean; lastAttemptAt: string | null; result: string | null; nextExpectedAt: string }
-+const clock = (value: string) => new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-+export function VersionCheckStatus({ compact = false }: { compact?: boolean } = {}) {
++export const clock = (value: string) => new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
++/** The last and next new-version check, shared by the header and the empty list. */
++export function useVersionCheckStatus() {
 +  const { getAccessToken, isAuthenticated, account } = useMicrosoftAuth();
-+  const query = useQuery<CheckStatus>({ queryKey: ['hrm', 'version-check-status', account?.tenantId, account?.localAccountId], enabled: isAuthenticated, staleTime: 60000,
++  return useQuery<CheckStatus>({ queryKey: ['hrm', 'version-check-status', account?.tenantId, account?.localAccountId], enabled: isAuthenticated, staleTime: 60000,
 +    queryFn: async () => {
 +      const token = await getAccessToken();
 +      if (!token) throw new Error('Sign in to view version check status.');
@@ -2035,6 +2051,9 @@ index 000000000..1bded310d
 +      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Version check status unavailable.');
 +      return response.json();
 +    } });
++}
++export function VersionCheckStatus({ compact = false }: { compact?: boolean } = {}) {
++  const query = useVersionCheckStatus();
 +  if (query.data?.supported === false) return null;
 +  const status = query.data;
 +  if (compact) {
@@ -2232,7 +2251,7 @@ index 561b90e5e..55cf98df2 100644
            )}
          </div>
 diff --git a/components/updates/AutoUpdateHistory.tsx b/components/updates/AutoUpdateHistory.tsx
-index 6666d0d8f..082eac1cd 100644
+index 6666d0d8f..57dc33d36 100644
 --- a/components/updates/AutoUpdateHistory.tsx
 +++ b/components/updates/AutoUpdateHistory.tsx
 @@ -1,5 +1,7 @@
@@ -2283,7 +2302,7 @@ index 6666d0d8f..082eac1cd 100644
  
  const updateTypeColors: Record<string, string> = {
 -  patch: 'text-text-muted bg-overlay/[0.04] border-black/[0.08]',
-+  patch: 'text-text-muted bg-overlay/[0.04] border-overlay/10',
++  patch: 'text-status-success bg-status-success/10 border-status-success/20',
    minor: 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/20',
    major: 'text-status-warning bg-status-warning/10 border-status-warning/20',
  };
@@ -2688,10 +2707,10 @@ index 2f6dbf69d..31bf9520e 100644
    );
 diff --git a/components/updates/UpdateCard.test.ts b/components/updates/UpdateCard.test.ts
 new file mode 100644
-index 000000000..00a3046e5
+index 000000000..45237b5d2
 --- /dev/null
 +++ b/components/updates/UpdateCard.test.ts
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,180 @@
 +// @vitest-environment happy-dom
 +// HRM patch 0036: policy badges use the menu's names, auto-update turned off by failures says so,
 +// and Critical, Unmanaged and "new app" markers show only in Supabase mode.
@@ -2818,6 +2837,8 @@ index 000000000..00a3046e5
 +    expect(review.className).toContain('bg-accent-cyan');
 +    await render(update({ policy: policy() }));
 +    expect(buttons('Review update')[0].className).not.toContain('bg-accent-cyan hover');
++    await render(update({ policy: policy({ auto_update_scope: 'minor' }), current_version: '1.0.0', latest_version: '1.0.1' }));
++    expect(buttons('Review update')[0].className).toContain('bg-accent-cyan hover');
 +    await render(update({ policy: policy({ policy_type: 'notify' }) }), false);
 +    expect(buttons('Review update')).toHaveLength(0);
 +    expect(buttons('Update')).toHaveLength(1);
@@ -2871,7 +2892,7 @@ index 000000000..00a3046e5
 +  });
 +});
 diff --git a/components/updates/UpdateCard.tsx b/components/updates/UpdateCard.tsx
-index 479225ee5..c94d7df13 100644
+index 479225ee5..74e163039 100644
 --- a/components/updates/UpdateCard.tsx
 +++ b/components/updates/UpdateCard.tsx
 @@ -10,19 +10,28 @@ import {
@@ -2941,7 +2962,7 @@ index 479225ee5..c94d7df13 100644
  const updateTypeConfig: Record<string, { label: string; color: string; bgColor: string; borderColor: string; dotColor: string }> = {
    patch: {
      label: 'Patch',
-@@ -87,21 +77,34 @@ export function UpdateCard({
+@@ -87,21 +77,36 @@ export function UpdateCard({
    onDismiss,
    isUpdating = false,
    index = 0,
@@ -2970,6 +2991,8 @@ index 479225ee5..c94d7df13 100644
    const typeConfig = updateTypeConfig[updateType];
 -  const PolicyIcon = policyStatus?.policy_type ? policyIcons[policyStatus.policy_type] : null;
 +  const isCustom = isCustomAppId(update.winget_id);
++  // A quiet button only where IntuneGet will deploy it itself; an update held by scope needs IT.
++  const quiet = isAutoUpdateEnabled && !scopeReason;
 +  const [datesOpen, setDatesOpen] = useState(false);
 +  const [pilotOpen, setPilotOpen] = useState(false);
 +  const pilot = usePilotStart(update);
@@ -2978,7 +3001,7 @@ index 479225ee5..c94d7df13 100644
  
    // Calculate how old the detected update is
    const detectedDaysAgo = Math.floor(
-@@ -116,29 +119,30 @@ export function UpdateCard({
+@@ -116,29 +121,30 @@ export function UpdateCard({
        transition={shouldReduceMotion ? undefined : { delay: index * 0.04 }}
        whileHover={shouldReduceMotion ? undefined : { y: -2, transition: springPresets.snappy }}
        className={cn(
@@ -3018,7 +3041,7 @@ index 479225ee5..c94d7df13 100644
            {/* App Icon with subtle ring */}
            <div className="relative flex-shrink-0">
              <AppIcon
-@@ -156,170 +160,218 @@ export function UpdateCard({
+@@ -156,170 +162,218 @@ export function UpdateCard({
            <div className="flex-1 min-w-0">
              <div className="flex items-center gap-2 mb-0.5">
                <h3 className="text-sm font-semibold text-text-primary truncate">
@@ -3263,7 +3286,7 @@ index 479225ee5..c94d7df13 100644
 +
 +            <Button
 +              size="sm"
-+              variant={isAutoUpdateEnabled ? 'outline' : 'default'}
++              variant={quiet ? 'outline' : 'default'}
 +              aria-label={`${reviewFirst ? 'Review update' : 'Update'} ${update.display_name} to ${update.latest_version}`}
 +              onClick={() => onTriggerUpdate(update)}
 +              disabled={isUpdating}
@@ -3271,7 +3294,7 @@ index 479225ee5..c94d7df13 100644
 +                'font-medium text-xs sm:text-[13px] h-8 px-3 sm:px-3.5 whitespace-nowrap',
 +                isUpdating
 +                  ? 'bg-accent-cyan/50 text-bg-deepest/70'
-+                  : isAutoUpdateEnabled
++                  : quiet
 +                    ? 'border-overlay/15 text-text-primary hover:bg-overlay/5'
 +                    : 'bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest shadow-sm hover:shadow-glow-cyan transition-shadow'
                )}
@@ -3357,7 +3380,7 @@ index 479225ee5..c94d7df13 100644
          >
            <div className="p-5">
              {/* Top row */}
-@@ -343,7 +395,7 @@ export function UpdateCardSkeleton({ count = 3 }: UpdateCardSkeletonProps) {
+@@ -343,7 +397,7 @@ export function UpdateCardSkeleton({ count = 3 }: UpdateCardSkeletonProps) {
              <div className="h-3 w-28 bg-overlay/[0.04] rounded-md animate-pulse mb-3.5" />
  
              {/* Bottom row */}
@@ -3423,7 +3446,7 @@ index 65c42d510..55d1a58e5 100644
 +  expect(pill.className).toContain('text-status-warning');
 +});
 diff --git a/components/updates/UpdatePolicySelector.tsx b/components/updates/UpdatePolicySelector.tsx
-index 45fe6f642..715d49e5a 100644
+index 45fe6f642..e9dab0940 100644
 --- a/components/updates/UpdatePolicySelector.tsx
 +++ b/components/updates/UpdatePolicySelector.tsx
 @@ -21,6 +21,8 @@ import {
@@ -3525,7 +3548,7 @@ index 45fe6f642..715d49e5a 100644
  
      setIsUpdating(true);
      try {
-@@ -110,32 +130,44 @@ export function UpdatePolicySelector({
+@@ -110,38 +130,50 @@ export function UpdatePolicySelector({
    };
  
    const activeOptions = policyOptions.filter((o) => o.group === 'active');
@@ -3575,6 +3598,13 @@ index 45fe6f642..715d49e5a 100644
              </>
            )}
          </Button>
+       </DropdownMenuTrigger>
+       <DropdownMenuContent
+-        align="end"
++        align={variant === 'pill' ? 'start' : 'end'}
+         className="w-60 bg-bg-elevated border-overlay/10 shadow-soft-lg p-1"
+       >
+         {activeOptions.map((option) => (
 @@ -151,7 +183,7 @@ export function UpdatePolicySelector({
              className={cn(
                'flex items-start gap-2.5 p-2.5 cursor-pointer rounded-md',

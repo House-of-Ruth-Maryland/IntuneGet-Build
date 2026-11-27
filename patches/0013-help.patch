@@ -912,10 +912,10 @@ index 000000000..6990bc2e9
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..12d821c9a
+index 000000000..66755cb1e
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,642 @@
+@@ -0,0 +1,644 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -1031,7 +1031,7 @@ index 000000000..12d821c9a
 +  {
 +    id: 'updates',
 +    title: 'App updates',
-+    uiLabels: ['App updates', 'Checked', 'Check for app updates', 'Update all', 'Available updates', 'Update history', 'Type', 'Ignored apps', 'Deploy new version', 'Review update', 'Notify only', 'Auto-update', 'Auto-update off', 'Ignore', 'Automatic update policy:', 'Waiting for your review', 'Major', 'Minor', 'Patch', 'Install dates', 'Test with a pilot group', 'Open app workspace', 'with Automatic updates on', 'Auto-update on', 'Edit publishing window', 'Pause automatic updates', 'Home', 'Server status', 'Version sync after deploy', 'Failing'],
++    uiLabels: ['App updates', 'Checked', 'Check for app updates', 'Update all', 'No newer versions were found at the last check', 'Available updates', 'Update history', 'Type', 'Ignored apps', 'Deploy new version', 'Review update', 'Notify only', 'Auto-update', 'Auto-update off', 'Ignore', 'Automatic update policy:', 'Waiting for your review', 'Major', 'Minor', 'Patch', 'Install dates', 'Test with a pilot group', 'Open app workspace', 'with Automatic updates on', 'Auto-update on', 'Edit publishing window', 'Pause automatic updates', 'Home', 'Server status', 'Version sync after deploy', 'Failing'],
 +    points: [
 +      'The server checks for new app versions at 3:30 AM and 3:30 PM, and sends update alerts at 4:00 AM and 4:00 PM (Maryland time).',
 +      'Updates waiting for approval show on the Home page and in App updates.',
@@ -1049,14 +1049,16 @@ index 000000000..12d821c9a
 +      'App updates lists new versions from each app’s publisher, found in the WinGet and curated catalogs and GitHub releases. The update list comes first. The Automatic updates bar below it sets when automatic updates deploy to Intune and how they install.',
 +      'App updates does not choose who gets an app. An update keeps the groups of the copy it replaces. To change groups, open the card’s More actions menu (…), choose Open app workspace, then use Edit groups.',
 +      'Checked, beside the App updates title, gives the time of the last new version check, in Maryland time. Hover over it or tab to it to see the fixed schedule, the next check, and that a check can start Auto-update deployments.',
-+      'Available updates and Update history are tabs. On a wide screen, search, the Type filter, the sort menu and Ignored apps share their row.',
++      'Available updates and Update history are tabs. On a wide screen, search, the Type filter, the sort menu and Ignored apps share their row. In Update history, expand a deployed version to see its install results and saved installation policy.',
 +      'The top right of each card shows the update type: Major, Minor or Patch. A Major update also has an amber left edge. The versions read current → new, such as 157.0.1 → 160.0.1.',
 +      'Required and Available after each group have a dotted underline. Hover over them or tab to them for a short explanation.',
 +      'A Notify only card says Waiting for your review and how many days ago the version was found. An Auto-update card says what happens next, such as Waiting for publishing window (see Update schedule and blackouts).',
 +      'At the bottom left of each card, the policy pill reads Notify only, Auto-update or Auto-update off. At the bottom right, Review update opens the Review update dialog. Nothing is sent to Intune until you press Send update to Intune there.',
-+      'Review update is the filled button on Notify only cards and an outline button on Auto-update cards. A custom app with a new GitHub release shows Deploy new version instead.',
-+      'Update all, beside Check for app updates, reviews every eligible update together, then sends them as one batch (see Updating an app).',
++      'Review update is a solid button on Notify only cards and on Auto-update cards held by scope, which IntuneGet will not deploy itself. It is an outline button on Auto-update cards that IntuneGet will deploy.',
++      'A custom app with a new GitHub release shows Deploy new version instead of Review update.',
++      'Update all, beside Check for app updates, shows only on the Available updates tab. It reviews every eligible update together, then sends them as one batch (see Updating an app).',
 +      'The More actions menu (…) beside Review update offers Install dates, Test with a pilot group (only when a pilot can start) and Open app workspace. The app name at the top of the card also opens the app workspace.',
++      'When no updates are waiting, the list says No newer versions were found at the last check, with that check’s time when it succeeded, and when scheduled checks run.',
 +    ],
 +  },
 +  {
@@ -1254,7 +1256,7 @@ index 000000000..12d821c9a
 +      "Checked, beside the App updates title, shows the last new version check. Hover over it or tab to it for the schedule and the next check. Checks run daily at 3:30 AM and 3:30 PM, Maryland time, fixed on the server. Edit publishing window lists New version checks too.",
 +      "Choose Auto-update on an app to deploy its new versions automatically. Choose Notify only to review that app manually. Changing one app’s rule does not pause other apps.",
 +      "Pause automatic updates, at the top of Edit publishing window, holds new automatic updates, pilot starts and wider rollouts across the tenant. Paused for all apps confirms it. Open What does pausing change? for scope: checks and queued work can continue.",
-+      "While paused, an alert above the update list reads Automatic updates are paused for all apps. It offers Resume automatic updates and Edit publishing window. The bar shows Resume automatic updates too.",
++      "While paused, an alert above the update list reads Automatic updates are paused for all apps. It offers Resume automatic updates and Edit publishing window. Resume is only in that alert; the bar shows the Paused pill and Paused for all apps.",
 +      "To set hours, press Edit publishing window. Select Restrict deploying to selected days and hours, choose days and hours in Maryland time, then press Save schedule.",
 +      "Leaving Restrict deploying to selected days and hours unchecked means no time restriction. It does not turn Auto-update off. Use Pause automatic updates to hold all new automatic updates, or Notify only for one app.",
 +      "An end hour before the start hour runs past midnight, for example 8 PM to 6 AM.",
@@ -1560,7 +1562,7 @@ index 000000000..12d821c9a
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..e7c6a459b
+index 000000000..ef51fda0f
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,405 @@
@@ -1670,7 +1672,7 @@ index 000000000..e7c6a459b
 +    success: 'The app’s card or list shows the update rule you intended.', caution: 'Automatic updates follow the Update schedule and safety checks. What staff see follows How automatic updates install; when computers install follows each group’s install dates.',
 +    related: ['updating', 'automatic-installation-policy', 'update-schedule'],
 +    troubleshoot: [{ problem: 'You need to change who gets an app or its install dates', action: 'App updates does not set groups. On the app’s card, open More actions (…). Choose Install dates, or Open app workspace and then Edit groups.', guide: 'group-changes' }, { problem: 'The header says Last check did not complete', action: 'The last new version check failed. Press Check for app updates or wait for the next 3:30 check. If it keeps failing, check Server status on Home.', guide: 'server' }, { problem: 'An app seems missing', action: 'Check Ignored apps. A copy deleted in Intune drops off at the next check.' }, { problem: 'A custom app has no update alert', action: 'Automatic checks cover GitHub release downloads; watch other vendors’ releases yourself.', guide: 'updating' }, { problem: 'App updates still shows the old version after a deploy', action: 'The next update check, at 3:30 AM or 3:30 PM, corrects it. If Version sync after deploy still shows Failing after that, tell HRM Support.', guide: 'server' }],
-+    referenceGroups: [reference('What App updates is and is not', [13, 14, 16]), reference('Check cadence and new versions', [0, 1, 15, 10, 22, 7]), reference('Update rules and visibility', [2, 3, 4, 5]), reference('Reading an update card', [6, 17, 18, 19, 20, 21, 23]), reference('After a deployment finishes', [8, 9, 11, 12])],
++    referenceGroups: [reference('What App updates is and is not', [13, 14, 16]), reference('Check cadence and new versions', [0, 1, 15, 10, 23, 7, 25]), reference('Update rules and visibility', [2, 3, 4, 5]), reference('Reading an update card', [6, 17, 18, 19, 20, 21, 22, 24]), reference('After a deployment finishes', [8, 9, 11, 12])],
 +  },
 +  {
 +    id: 'updating', category: 'updates', title: 'Deploy a new version',

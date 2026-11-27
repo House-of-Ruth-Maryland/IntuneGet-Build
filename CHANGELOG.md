@@ -22,7 +22,9 @@
   only, outline for Auto-update); "1 app exceptions" now reads "1 app exception"; Required and
   Available on cards explain themselves on hover or keyboard focus; the duplicate Open app
   workspace link is gone; card and Update history borders no longer vanish in dark mode; buttons,
-  tabs and counts no longer wrap at phone width. How automatic updates install now lists app
+  tabs and counts no longer wrap at phone width. While paused, Resume automatic updates is in the
+  alert only. Update all shows only on Available updates. An Auto-update card held by scope keeps
+  the solid Review update button, since IntuneGet will not deploy it itself. How automatic updates install now lists app
   exceptions in its panel. No server behavior changed. Help updated by help-writer, which also
   corrected the Version sync window in Help to 24 hours.
 
