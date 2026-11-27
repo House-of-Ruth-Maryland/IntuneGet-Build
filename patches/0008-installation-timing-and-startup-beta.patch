@@ -4513,10 +4513,10 @@ index 000000000..0ffaa5f0b
 +});
 diff --git a/app/api/hrm/app-assignments/route.ts b/app/api/hrm/app-assignments/route.ts
 new file mode 100644
-index 000000000..cf0c0d94c
+index 000000000..2687851c7
 --- /dev/null
 +++ b/app/api/hrm/app-assignments/route.ts
-@@ -0,0 +1,177 @@
+@@ -0,0 +1,219 @@
 +import { createHash } from 'node:crypto';
 +import { NextRequest, NextResponse } from 'next/server';
 +import { parseAccessToken } from '@/lib/auth-utils';
@@ -4530,6 +4530,7 @@ index 000000000..cf0c0d94c
 +import { summarizeAssignments } from '@/lib/hrm/app-insights';
 +import { intentLabel, leavesNoGroups, removeProblem, rowKey, rowLabel, sameTarget, switchPlan, switchProblem, targetName } from '@/lib/hrm/group-edit';
 +import type { GraphAssignment } from '@/lib/hrm/duplicates';
++import { asObject, assignmentSnapshot, canonical, preservedAssignmentSettings, type PlainRecord } from '@/packager/src/assignment-settings';
 +
 +const reply = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
 +// Serialize requests within this server. Never retry a POST automatically:
@@ -4605,10 +4606,10 @@ index 000000000..cf0c0d94c
 +interface Existing { change: 'remove' | 'switch'; body: { action: string; appId: string; assignmentId: string; intent?: 'required' | 'available'; token?: string; confirmNoGroups?: unknown }; tenantId: string; token: string; checkHold: () => Promise<void>; actor: string }
 +
 +/**
-+ * Remove one group, or switch one group between Required and Available. One row is written at a
-+ * time; /assign is never used, so every other group keeps its exact row in Intune. A switch adds the
-+ * new row first and deletes the old one only after Intune shows the new one, so a failure in
-+ * between leaves the group with both rather than with none, and reviewing again finishes it.
++ * Remove one group, or switch one group between Required and Available. A removal deletes that one
++ * assignment and never sends the others. A switch saves the whole group list once with the assign
++ * action, every other group exactly as read, because Intune refuses the same group as Required and
++ * Available together. Either way the list is read again afterwards and must match what was asked.
 + */
 +async function changeExisting({ change, body, tenantId, token, checkHold, actor }: Existing) {
 +  // Each phase gets its own reader, so one slow step cannot use up the time of the next.
@@ -4656,35 +4657,76 @@ index 000000000..cf0c0d94c
 +  }
 +
 +  const to = body.intent!;
-+  const twins = rows.filter(r => r.id !== body.assignmentId && r.intent === to && (row ? sameTarget(r, row) : false));
 +  if (!row) {
-+    // A retry after a lost reply: the old row is gone. Nothing is written without a fresh review.
++    // A retry after a lost reply: the old assignment is gone. Nothing is written without a fresh review.
 +    if (saving) return reply({ success: true, alreadyDone: true, assignments: rows });
 +    throw new PilotError('This group is no longer on the app. Refresh and check the groups again.');
 +  }
 +  if (row.intent === to) throw new PilotError(`This group is already ${intentLabel(to)}.`);
 +  const problem = switchProblem(row);
 +  if (problem) throw new PilotError(problem);
++  // A switch saves the app's whole group list once (Graph's assign action). Intune does not accept
++  // the same group as Required and Available at the same time, so adding the new assignment before
++  // removing the old one is refused. Every group is therefore checked before anything is sent: a
++  // group IntuneGet could not send back exactly stops the switch.
++  let before: PlainRecord[];
++  try { before = listForAssign(rows); }
++  catch { throw new PilotError('Another group on this app has settings IntuneGet cannot send back exactly. Switch this group in Intune.'); }
++  const twins = rows.filter(r => r.id !== row.id && r.intent === to && sameTarget(r, row));
 +  if (twins.length > 1) throw new PilotError('This group already has more than one matching assignment. Review it in Intune.');
 +  const twin = twins[0];
 +  let plan;
 +  try { plan = switchPlan(row, to); }
 +  catch (error) { throw new PilotError(error instanceof Error ? error.message : 'This group cannot be switched here. Switch it in Intune.'); }
-+  const reviewToken = sha([tenantId, app.id, app.displayVersion, 'switch', rowKey(row), to, twin ? rowKey(twin) : null]);
++  // The list Intune gets: every other group exactly as read, and this group with its new type.
++  // If the group somehow already has the new type as well, only its old assignment is left out.
++  const index = rows.indexOf(row);
++  const wanted = before.flatMap((entry, i) => i !== index ? [entry] : twin ? [] : [plan.body]);
++  // The review covers the whole list, so any change to any group in Intune after the review refuses the save.
++  const reviewToken = sha([tenantId, app.id, app.displayVersion, 'switch', row.id, to, comparable(before)]);
 +  const review = { change, appId: app.id, appName: app.displayName, version: app.displayVersion, assignmentId: row.id, group: targetName(row, names), from: intentLabel(row.intent), to: intentLabel(to),
 +    kept: twin ? [] : plan.kept, dropped: twin ? [] : plan.dropped, alreadyBoth: Boolean(twin), leavesNoGroups: false, remaining: rows.filter(r => r.id !== row.id && r !== twin).map(label), token: reviewToken };
 +  if (!saving) return reply({ review });
 +  if (body.token !== reviewToken) throw new PilotError('The app or its groups changed. Review the change again.');
 +  await checkHold();
-+  if (!twin) {
-+    const response = await send('/assignments', { method: 'POST', body: JSON.stringify(plan.body) });
-+    if (!response.ok) throw new PilotError(response.status === 403 ? 'Intune denied the change. Check app permissions.' : `Intune did not accept the ${intentLabel(to)} assignment. Nothing was removed; the group is still ${intentLabel(row.intent)}. Review again before retrying.`, response.status === 403 ? 403 : 424);
-+    const created = (await reader().assignments(app.id)).filter(r => r.id !== row.id && r.intent === to && sameTarget(r, row));
-+    if (created.length !== 1) throw new PilotError(`Intune accepted the ${intentLabel(to)} assignment, but it is not visible yet. Nothing was removed. Review the change again.`, 424);
++  const response = await send('/assign', { method: 'POST', body: JSON.stringify({ mobileAppAssignments: wanted }) });
++  const actual = await reader().assignments(app.id);
++  let after: string;
++  try { after = comparable(listForAssign(actual)); } catch { after = ''; }
++  if (!response.ok) {
++    if (response.status === 403) throw new PilotError('Intune denied the change. Check app permissions.', 403);
++    if (after === comparable(before)) throw new PilotError(`Intune did not accept the change. Nothing was changed; the group is still ${intentLabel(row.intent)}. Review again before retrying.`, 424);
++    throw new PilotError("Intune did not confirm the change, and this app's groups no longer read as they did. Check the groups in Intune before trying again.", 424);
 +  }
-+  const actual = await remove(row, `The group is now ${intentLabel(to)}, but its ${intentLabel(row.intent)} assignment could not be removed. Review the change again to finish.`);
++  if (after !== comparable(wanted)) throw new PilotError("Intune accepted the change, but this app's groups do not read back as expected. Check the groups in Intune before trying again.", 424);
 +  await record(actual, `Group switched to ${intentLabel(to)}`);
 +  return reply({ success: true, assignments: actual });
++}
++
++/**
++ * The app's groups as the assign action takes them: target and filter, type, and settings that pass
++ * the same allowlist a replacement uses (items 103 and 111). Throws when a group cannot be sent back
++ * exactly (inherited, an unknown target or type, or settings IntuneGet does not know).
++ */
++function listForAssign(rows: GraphAssignment[]): PlainRecord[] {
++  const byId = new Map(assignmentSnapshot(rows).map(entry => [String(asObject(entry).id), asObject(entry)]));
++  return rows.map(row => {
++    const entry = byId.get(String(row.id || ''));
++    if (!row.id || !entry) throw new Error('unreadable group');
++    // A group Intune returned without settings is sent back without settings.
++    return { '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: entry.intent, target: entry.target, ...(row.settings == null || entry.settings === null ? {} : { settings: entry.settings }) };
++  });
++}
++/**
++ * One order-free text for comparing two group lists. A missing setting and an empty one read the
++ * same, and so do no settings and Intune's defaults, because Intune fills both in when it answers.
++ */
++function comparable(list: PlainRecord[]): string {
++  const strip = (value: unknown): unknown => Array.isArray(value) ? value.map(strip)
++    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key, v]) => v != null && key !== '@odata.context' && !(key === 'deviceAndAppManagementAssignmentFilterType' && v === 'none')).map(([key, v]) => [key, key === 'groupId' && typeof v === 'string' ? v.toLowerCase() : strip(v)]))
++    : value;
++  const filled = (entry: PlainRecord) => String(asObject(entry.target)['@odata.type']).includes('exclusionGroup') ? { ...entry, settings: null } : { ...entry, settings: preservedAssignmentSettings(entry.settings) };
++  return canonical(list.map(filled).map(strip).map(canonical).sort());
 +}
 +
 +/** Names for the review. A group whose name cannot be read is shown by its ID, never guessed. */
@@ -5147,13 +5189,14 @@ index 000000000..c7998df37
 +});
 diff --git a/app/api/hrm/app-assignments/route.groups.test.ts b/app/api/hrm/app-assignments/route.groups.test.ts
 new file mode 100644
-index 000000000..27692d3d3
+index 000000000..ac0d38e88
 --- /dev/null
 +++ b/app/api/hrm/app-assignments/route.groups.test.ts
-@@ -0,0 +1,251 @@
+@@ -0,0 +1,318 @@
 +// Edit groups: removing one group and switching one group between Required and Available.
-+// Fake Graph only. Every test checks the exact writes, because the rule is one row at a time and
-+// never the whole list.
++// Fake Graph only. Every test checks the exact writes. A removal deletes one assignment. A switch
++// saves the whole list once (Intune refuses a group as Required and Available together), and
++// every other group must go back exactly as it was read.
 +import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 +import { NextRequest } from 'next/server';
 +const state = vi.hoisted(() => ({ sqlite: false, retiring: false, pilot: false }));
@@ -5172,7 +5215,7 @@ index 000000000..27692d3d3
 +type Row = Record<string, unknown> & { id: string; intent: string };
 +let rows: Row[];
 +let calls: { method: string; path: string; body?: Record<string, unknown> }[];
-+let postStatus: number, deleteStatus: number, hidePosted: boolean, keepDeleted: boolean, version: string;
++let assignStatus: number, deleteStatus: number, ignoreAssign: boolean, mangleAssign: boolean, keepDeleted: boolean, version: string;
 +const writes = () => calls.filter(c => c.method !== 'GET');
 +const send = (body: object) => POST(new NextRequest('http://localhost/api/hrm/app-assignments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId: APP, ...body }) }));
 +const json = async (body: object) => { const r = await send(body); return { status: r.status, ...(await r.json()) }; };
@@ -5189,20 +5232,24 @@ index 000000000..27692d3d3
 +    { id: 'staff', intent: 'required', source: 'direct', target: group(G2), settings: { '@odata.type': SETTINGS, notifications: 'showAll', futureSetting: { keep: true } }, futureRoot: 1 },
 +    { id: 'excluded', intent: 'required', source: 'direct', target: { '@odata.type': '#microsoft.graph.exclusionGroupAssignmentTarget', groupId: G3 }, settings: null },
 +  ];
-+  calls = []; postStatus = 201; deleteStatus = 204; hidePosted = false; keepDeleted = false; version = '1.2';
++  calls = []; assignStatus = 204; deleteStatus = 204; ignoreAssign = false; mangleAssign = false; keepDeleted = false; version = '1.2';
 +  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
 +    const path = new URL(url).pathname.replace(/^\/(beta|v1\.0)/, ''); const method = init?.method ?? 'GET';
 +    const body = init?.body ? JSON.parse(init.body as string) : undefined;
 +    calls.push({ method, path, body });
 +    if (path.startsWith('/groups/')) { const id = path.split('/')[2]; return Response.json({ id, displayName: `Group ${id.slice(-1)}`, securityEnabled: true }); }
-+    if (path.endsWith('/assignments')) {
-+      if (method === 'POST') {
-+        if (postStatus !== 201) return new Response('', { status: postStatus });
-+        if (!hidePosted) rows.push({ id: `new-${rows.length}`, source: 'direct', ...body });
-+        return Response.json(body, { status: 201 });
-+      }
-+      return Response.json({ value: rows });
++    if (path.endsWith('/assign') && method === 'POST') {
++      // Intune's assign action replaces the whole list, or refuses and changes nothing.
++      if (assignStatus !== 204) return new Response('', { status: assignStatus });
++      if (!ignoreAssign) rows = (body.mobileAppAssignments as Record<string, unknown>[]).map((a, i) => {
++        const target = a.target as { groupId?: string; '@odata.type': string };
++        // Like Intune: the ID follows the group and type, and settings come back with empty fields filled in.
++        const settings = a.settings ? { restartSettings: null, installTimeSettings: null, autoUpdateSettings: null, ...(a.settings as object), ...(mangleAssign && i === 1 ? { notifications: 'hideAll' } : {}) } : null;
++        return { id: `${target.groupId ?? target['@odata.type']}_${a.intent}`, source: 'direct', intent: a.intent as string, target, settings };
++      });
++      return new Response(null, { status: 204 });
 +    }
++    if (path.endsWith('/assignments')) return Response.json({ value: rows });
 +    const one = path.match(/\/assignments\/(.+)$/);
 +    if (one && method === 'DELETE') {
 +      if (deleteStatus !== 204) return new Response('', { status: deleteStatus });
@@ -5295,33 +5342,45 @@ index 000000000..27692d3d3
 +});
 +
 +// ---- Switch ----
-+it('switches Required to Available: adds the new row first, keeps every setting it can and names what it drops', async () => {
-+  const untouched = structuredClone(rows.filter(r => r.id !== 'pilot'));
++const assigns = () => writes().filter(c => c.path.endsWith('/assign'));
++const sent = () => assigns()[0].body!.mobileAppAssignments as Record<string, unknown>[];
++const asSent = (row: Row) => ({ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: row.intent, target: row.target, ...(row.settings ? { settings: row.settings } : {}) });
++it('switches Required to Available with one save of the whole list, every other group exactly as read', async () => {
++  rows[1] = { id: 'staff', intent: 'required', source: 'direct', target: group(G2), settings: { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured', inUseSettings: { countdownMinutes: 5, minutesBetweenDeferrals: 60, numberOfDeferrals: 2 }, installTimeSettings: { useLocalTime: false, startDateTime: null, deadlineDateTime: '2026-12-09T17:00:00Z' } } };
++  const others = structuredClone(rows.filter(r => r.id !== 'pilot'));
 +  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
 +  expect(r).toMatchObject({ change: 'switch', group: 'Group 1', from: 'Required', to: 'Available', alreadyBoth: false, leavesNoGroups: false });
 +  expect(r.kept).toEqual(['Filter', 'Notifications', 'Download priority', 'Available from', 'Restart grace period', 'App in use settings']);
 +  expect(r.dropped).toEqual(['Must install by (Available groups have no deadline)']);
++  expect(r.remaining).toEqual(['Group 2 · Required', 'Group 3 · Excluded']);
 +  expect(writes()).toEqual([]);
 +  expect((await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token })).success).toBe(true);
-+  expect(writes().map(c => `${c.method} ${c.path.split('/').slice(4).join('/')}`)).toEqual(['POST assignments', 'DELETE assignments/pilot']);
-+  expect(writes()[0].body).toEqual({ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available',
-+    target: { ...group(G1), deviceAndAppManagementAssignmentFilterId: 'filter-1', deviceAndAppManagementAssignmentFilterType: 'include' },
-+    settings: { ...full, installTimeSettings: { useLocalTime: true, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: null } } });
-+  expect(rows.filter(row => row.id !== writesId())).toEqual(untouched);
-+  function writesId() { return rows.find(row => row.intent === 'available')!.id; }
++  // Exactly one write, and it is the assign action. Nothing is added or deleted one by one.
++  expect(writes().map(c => `${c.method} ${c.path.split('/').slice(4).join('/')}`)).toEqual(['POST assign']);
++  expect(sent()).toEqual([
++    { '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available',
++      target: { ...group(G1), deviceAndAppManagementAssignmentFilterId: 'filter-1', deviceAndAppManagementAssignmentFilterType: 'include' },
++      settings: { ...full, installTimeSettings: { useLocalTime: true, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: null } } },
++    asSent(others[0]), asSent(others[1]),
++  ]);
++  // The other groups keep their in-use settings, dates and notifications; the exclusion keeps no settings.
++  expect(rows.find(row => (row.target as { groupId: string }).groupId === G2)!.settings).toMatchObject(others[0].settings as object);
++  expect(rows.find(row => (row.target as { groupId: string }).groupId === G3)!.settings).toBeNull();
++  expect(rows.filter(row => (row.target as { groupId: string }).groupId === G1).map(row => row.intent)).toEqual(['available']);
 +});
 +it('switches Available to Required and leaves out the Available-only auto-update setting', async () => {
 +  rows[1] = { id: 'staff', intent: 'available', source: 'direct', target: group(G2), settings: { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured', installTimeSettings: null, autoUpdateSettings: { '@odata.type': '#microsoft.graph.win32LobAppAutoUpdateSettings', autoUpdateSupersededAppsState: 'enabled' } } };
 +  const r = await review({ change: 'switch', assignmentId: 'staff', intent: 'required' });
 +  expect(r.dropped).toEqual(['Automatic update of superseded versions (Available groups only)']);
-+  await json({ action: 'save', change: 'switch', assignmentId: 'staff', intent: 'required', token: r.token });
-+  expect(writes()[0].body).toEqual({ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'required', target: group(G2), settings: { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured', installTimeSettings: null, autoUpdateSettings: null } });
++  expect((await json({ action: 'save', change: 'switch', assignmentId: 'staff', intent: 'required', token: r.token })).success).toBe(true);
++  expect(sent()[1]).toEqual({ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'required', target: group(G2), settings: { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured', installTimeSettings: null, autoUpdateSettings: null } });
 +});
-+it('keeps a group with no settings object without one', async () => {
-+  rows[1] = { id: 'staff', intent: 'required', source: 'direct', target: group(G2), settings: null };
++it('keeps a group with no settings object without one, and a single group app works', async () => {
++  rows = [{ id: 'staff', intent: 'required', source: 'direct', target: group(G2), settings: null }];
 +  const r = await review({ change: 'switch', assignmentId: 'staff', intent: 'available' });
-+  await json({ action: 'save', change: 'switch', assignmentId: 'staff', intent: 'available', token: r.token });
-+  expect(writes()[0].body).toEqual({ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available', target: group(G2) });
++  expect(r.remaining).toEqual([]);
++  expect((await json({ action: 'save', change: 'switch', assignmentId: 'staff', intent: 'available', token: r.token })).success).toBe(true);
++  expect(sent()).toEqual([{ '@odata.type': '#microsoft.graph.mobileAppAssignment', intent: 'available', target: group(G2) }]);
 +});
 +it.each([
 +  ['a setting IntuneGet does not know', 'staff', 'available', () => {}, 'cannot carry over'],
@@ -5337,51 +5396,101 @@ index 000000000..27692d3d3
 +  expect((await json({ action: 'save', change: 'switch', assignmentId: id, intent, token: 'x' })).status).toBe(409);
 +  expect(writes()).toEqual([]);
 +});
++// The whole list is sent, so one group that cannot be sent back exactly stops the switch of another.
++it.each([
++  ['unknown settings', () => {}],
++  ['an inherited assignment', () => { rows[1] = { id: 'staff', intent: 'required', source: 'policySets', target: group(G2), settings: null }; }],
++  ['an unknown kind of target', () => { rows[1] = { id: 'staff', intent: 'required', source: 'direct', target: { '@odata.type': '#microsoft.graph.futureTarget' }, settings: null }; }],
++  ['a type IntuneGet does not know', () => { rows[1] = { id: 'staff', intent: 'futureIntent', source: 'direct', target: group(G2), settings: null }; }],
++])('will not switch a group while another group has %s', async (_name, mutate) => {
++  mutate();
++  const r = await json({ action: 'review', change: 'switch', assignmentId: 'pilot', intent: 'available' });
++  expect(r.status).toBe(409); expect(r.error).toContain('Another group on this app has settings IntuneGet cannot send back exactly');
++  expect(writes()).toEqual([]);
++});
 +it.each(['uninstall', 'availableWithoutEnrollment', '', undefined])('refuses a switch to %s', async intent => {
 +  expect((await json({ action: 'review', change: 'switch', assignmentId: 'pilot', intent })).status).toBe(400);
 +});
-+it('removes nothing when Intune refuses the new assignment', async () => {
++const plain = () => { rows[1] = { id: 'staff', intent: 'required', source: 'direct', target: group(G2), settings: { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured' } }; };
++it.each([400, 409, 500])('changes nothing when Intune refuses the save with %s, and says the group is still Required', async status => {
++  plain(); const before = structuredClone(rows);
 +  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
-+  postStatus = 400;
++  assignStatus = status;
 +  const saved = await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token });
-+  expect(saved.status).toBe(424); expect(saved.error).toContain('Nothing was removed');
++  expect(saved.status).toBe(424); expect(saved.error).toBe('Intune did not accept the change. Nothing was changed; the group is still Required. Review again before retrying.');
 +  expect(writes().map(c => c.method)).toEqual(['POST']);
-+  expect(rows.find(row => row.id === 'pilot')!.intent).toBe('required');
++  expect(rows).toEqual(before);
 +});
-+it('removes nothing when the new assignment is accepted but not visible', async () => {
++it('reports a save Intune denied', async () => {
++  plain();
 +  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
-+  hidePosted = true;
++  assignStatus = 403;
 +  const saved = await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token });
-+  expect(saved.status).toBe(424); expect(saved.error).toContain('Nothing was removed');
-+  expect(writes().map(c => c.method)).toEqual(['POST']);
++  expect(saved.status).toBe(403); expect(saved.error).toContain('denied');
 +});
-+it('says the group is both when the old assignment cannot be removed, and a second review finishes without adding again', async () => {
++it('does not report success when Intune accepts the save but the groups read back unchanged', async () => {
++  plain();
 +  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
-+  deleteStatus = 500;
++  ignoreAssign = true;
 +  const saved = await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token });
-+  expect(saved.status).toBe(424); expect(saved.error).toContain('Review the change again to finish');
-+  expect(rows.filter(row => (row.target as { groupId: string }).groupId === G1).map(row => row.intent).sort()).toEqual(['available', 'required']);
-+  // The first review is stale now. A new one sees both rows and only removes the old one.
-+  expect((await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token })).status).toBe(409);
-+  deleteStatus = 204; calls = [];
-+  const again = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
-+  expect(again.alreadyBoth).toBe(true); expect(again.kept).toEqual([]);
-+  expect((await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: again.token })).success).toBe(true);
-+  expect(writes().map(c => c.method)).toEqual(['DELETE']);
++  expect(saved.status).toBe(424); expect(saved.error).toContain('do not read back as expected');
++});
++it('does not report success when another group reads back differently after the save', async () => {
++  plain();
++  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
++  mangleAssign = true;
++  const saved = await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token });
++  expect(saved.status).toBe(424); expect(saved.error).toContain('do not read back as expected');
++});
++it.each([
++  ['the group being switched', () => { (rows[0].settings as Record<string, unknown>).notifications = 'hideAll'; }],
++  ['another group', () => { (rows[1].settings as Record<string, unknown>).notifications = 'hideAll'; }],
++  ['a group added by someone else', () => { rows.push({ id: 'late', intent: 'available', source: 'direct', target: { '@odata.type': '#microsoft.graph.allLicensedUsersAssignmentTarget' }, settings: null }); }],
++  ['a group removed by someone else', () => { rows = rows.filter(r => r.id !== 'excluded'); }],
++  ['the app version', () => { version = '1.3'; }],
++])('refuses the save when %s changed in Intune after the review, and writes nothing', async (_name, mutate) => {
++  plain();
++  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
++  mutate();
++  const saved = await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token });
++  expect(saved.status).toBe(409); expect(saved.error).toBe('The app or its groups changed. Review the change again.');
++  expect(writes()).toEqual([]);
++});
++it('finishes a group that is somehow both by leaving out only its old assignment', async () => {
++  plain();
++  rows.push({ id: 'pilot-available', intent: 'available', source: 'direct', target: structuredClone(rows[0].target), settings: { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured' } });
++  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
++  expect(r.alreadyBoth).toBe(true); expect(r.kept).toEqual([]);
++  expect((await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token })).success).toBe(true);
++  expect(sent()).toHaveLength(3);
 +  expect(rows.filter(row => (row.target as { groupId: string }).groupId === G1).map(row => row.intent)).toEqual(['available']);
 +});
 +it('does not treat the same group with a different filter as the same assignment', async () => {
++  plain();
 +  rows.push({ id: 'other-filter', intent: 'available', source: 'direct', target: { ...group(G1), deviceAndAppManagementAssignmentFilterId: 'filter-2', deviceAndAppManagementAssignmentFilterType: 'include' }, settings: null });
 +  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
 +  expect(r.alreadyBoth).toBe(false);
 +});
 +it('treats a switch retried after it finished as done and writes nothing', async () => {
++  plain();
 +  const r = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
 +  await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token });
 +  calls = [];
 +  expect(await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: r.token })).toMatchObject({ success: true, alreadyDone: true });
 +  expect(writes()).toEqual([]);
 +  expect(rows.filter(row => (row.target as { groupId: string }).groupId === G1)).toHaveLength(1);
++});
++it('switches back to Required and the group reads as it did, apart from the deadline it lost', async () => {
++  plain();
++  const first = await review({ change: 'switch', assignmentId: 'pilot', intent: 'available' });
++  await json({ action: 'save', change: 'switch', assignmentId: 'pilot', intent: 'available', token: first.token });
++  const id = rows.find(row => (row.target as { groupId: string }).groupId === G1)!.id;
++  const back = await review({ change: 'switch', assignmentId: id, intent: 'required' });
++  expect(back.dropped).toEqual([]);
++  expect((await json({ action: 'save', change: 'switch', assignmentId: id, intent: 'required', token: back.token })).success).toBe(true);
++  const pilot = rows.find(row => (row.target as { groupId: string }).groupId === G1)!;
++  expect(pilot.intent).toBe('required');
++  expect(pilot.settings).toMatchObject({ ...full, installTimeSettings: { useLocalTime: true, startDateTime: '2026-12-01T09:00:00Z', deadlineDateTime: null } });
 +});
 +
 +// ---- Both ----
@@ -5803,15 +5912,16 @@ index 000000000..a9fd68ecc
 +}
 diff --git a/lib/hrm/group-edit.ts b/lib/hrm/group-edit.ts
 new file mode 100644
-index 000000000..960965376
+index 000000000..eded9d821
 --- /dev/null
 +++ b/lib/hrm/group-edit.ts
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,115 @@
 +/**
 + * Edit groups: what one change to an existing Win32 app's groups may do. Pure functions, shared by
-+ * the panel and the server. The server never rewrites the whole group list: it adds one row,
-+ * deletes one row, or (to switch Required and Available) adds the new row and then deletes the old
-+ * one. Every other group keeps its row untouched in Intune.
++ * the panel and the server. Adding a group posts one assignment and removing a group deletes one;
++ * neither sends the other groups. Switching Required and Available saves the whole list once with
++ * Intune's assign action, every other group exactly as read, because Intune refuses the same
++ * group as Required and Available together.
 + */
 +import { preservedAssignmentSettings, asObject, canonical, type PlainRecord } from '@/packager/src/assignment-settings';
 +import type { GraphAssignment } from './duplicates';

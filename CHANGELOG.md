@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Edit groups, Switch to Available and Switch to Required: fixed. In v0.8.6-hrm.6 a switch added
+  the new assignment before removing the old one, and Intune refused it on the first live test
+  (the pilot group stayed Required and nothing changed), most likely because Intune does not hold
+  one group as Required and Available on the same app. A switch now saves the app's whole group
+  list once through Intune's assign action, with only that group's type changed. Every other group
+  goes back exactly as read, through the same allowlist a replacement uses (items 103 and 111), so
+  a switch is refused when another group cannot be sent back exactly. Intune is read again before
+  the save, which is refused if the app or any group changed since the review, and again
+  afterwards, when the groups must match what was asked. A refused save leaves everything as it
+  was and says so. The review screen is unchanged. Adding a group and removing a group are
+  unchanged: one assignment each, never the other groups. Proven against fake Intune responses;
+  it still needs the live check on the pilot group. Help updated by help-writer.
+
 - One name per setting, and each screen says what it controls. The sidebar says App updates, like
   the page and every link to it. Settings, General no longer shows read-only facts as cards: the
   "App updates" and "Update behavior" cards are replaced by a plain "Not set on this page" list
