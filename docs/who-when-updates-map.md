@@ -95,8 +95,9 @@ version whose Required deadline has already passed, it pauses for IT to confirm 
   adds a group only. The `edit-app-assignments` workspace holds the same work uncommitted; it has
   nothing newer than `main`.
 - Install dates: released and editable.
-- Edit groups (item 122: remove a group, switch Required and Available): built in this repo's
-  Unreleased changes, not deployed. Tested against fake Intune responses only; check the first
-  switch in Intune.
+- Edit groups (item 122): released in v0.8.6-hrm.6. Adding a group works. Switching a group
+  between Required and Available does not work in hrm.6 (Intune refuses it and nothing changes);
+  the fix is in this repo's Unreleased changes and needs the live check on a pilot group. Removing
+  a group has not been tried on a real group.
 - Install dates in the deploy form (item 122): built, not deployed. It appears on HRM's server
   only after the private packaging workflow is updated and `HRM_DEPLOY_DATES_CAPABILITY` is set.

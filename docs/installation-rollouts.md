@@ -42,10 +42,13 @@ Edit groups and install dates in the deploy form were tested against fake Intune
 tests and in a browser. These points depend on how Intune itself answers and need one check on a
 test group in the real tenant before relying on them:
 
-- **Switch Required and Available.** The switch adds the new assignment for the group before it
-  removes the old one, so the group is never left with none. That needs Intune to accept, for a
-  moment, the same group as both Required and Available. If Intune refuses, the panel says
-  "Nothing was removed" and the group is unchanged; report it rather than working around it.
+- **Switch Required and Available.** Tried once on v0.8.6-hrm.6 (November 26, 2026) on a pilot
+  group: Intune refused the new assignment, the panel said nothing was removed, and the group
+  stayed Required. That build added the new assignment before removing the old one. The switch now
+  saves the whole group list once with the assign action. Repeat the check on the same pilot
+  group: switch it to Available, confirm in Intune that only its type changed, switch it back and
+  confirm again. If Intune refuses, the panel says "Nothing was changed" and the group is
+  unchanged; report it rather than working around it.
 - **Remove a group.** One `DELETE` of that group's assignment. Confirm in Intune that only that
   group went and the others kept their dates and filters.
 - **Settings carried by a switch.** Confirm a switched group still shows its filter, notifications,
