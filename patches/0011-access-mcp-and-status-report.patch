@@ -1362,7 +1362,7 @@ index 000000000..16d191f93
 +});
 diff --git a/lib/hrm/__tests__/mcp-api.test.ts b/lib/hrm/__tests__/mcp-api.test.ts
 new file mode 100644
-index 000000000..de60c1050
+index 000000000..beb8b79ce
 --- /dev/null
 +++ b/lib/hrm/__tests__/mcp-api.test.ts
 @@ -0,0 +1,323 @@
@@ -1538,21 +1538,21 @@ index 000000000..de60c1050
 +});
 +
 +describe('available updates', () => {
-+  it('merges every deployer’s rows for the tenant and adds the policy', async () => {
++  it('reads tenant updates directly without relying on deployment authors and adds the policy', async () => {
 +    mocks.history.mockResolvedValue([
 +      { user_id: 'user-one', intune_tenant_id: TENANT, intune_app_id: APP, winget_id: 'Example.App', version: '1.0', deployed_at: '2026-10-01T00:00:00Z' },
 +      { user_id: 'user-two', intune_tenant_id: TENANT, intune_app_id: APP2, winget_id: 'Other.App', version: '2.0', deployed_at: '2026-10-01T00:00:00Z' },
 +      { user_id: 'user-three', intune_tenant_id: OTHER_TENANT, intune_app_id: APP2, winget_id: 'Other.App', version: '2.0', deployed_at: '2026-10-01T00:00:00Z' },
 +    ]);
 +    const row = (extra: Record<string, unknown>) => ({ tenant_id: TENANT, user_id: 'user-one', winget_id: 'Example.App', intune_app_id: APP, display_name: 'Example App', current_version: '1.0', latest_version: '1.1', dismissed_at: null, detected_at: '2026-11-03T07:30:00Z', updated_at: '2026-11-03T07:30:00Z', ...extra });
-+    mocks.updates.mockImplementation(async (user: string) => user === 'user-one'
++    mocks.updates.mockImplementation(async (user: string) => user === ''
 +      ? [row({}), row({ updated_at: '2026-11-01T00:00:00Z', latest_version: '1.05' })]
 +      : [row({ user_id: user, winget_id: 'Other.App', intune_app_id: APP2, display_name: 'Other App', current_version: '2.0', latest_version: '2.0' })]);
 +    mocks.policies.mockResolvedValue([{ tenant_id: TENANT, winget_id: 'Example.App', policy_type: 'auto_update', user_id: 'user-one' }, { tenant_id: OTHER_TENANT, winget_id: 'Other.App', policy_type: 'ignore' }]);
 +    mocks.status.mockResolvedValue({ reported: true, updateCheck: { result: 'success', at: '2026-11-03T07:30:00Z' } });
 +    const view = await listUpdates(ctx(), q('includeDismissed=true'));
-+    expect(mocks.updates.mock.calls.map((c) => c[0]).sort()).toEqual(['user-one', 'user-two']);
-+    expect(mocks.updates).toHaveBeenCalledWith('user-one', { tenantId: TENANT, includeDismissed: true });
++    expect(mocks.updates).toHaveBeenCalledTimes(1);
++    expect(mocks.updates).toHaveBeenCalledWith('', { tenantId: TENANT, includeDismissed: true });
 +    noForbidden(view);
 +    expect(view).toEqual({
 +      updates: [{ appName: 'Example App', wingetId: 'Example.App', intuneAppId: APP, currentVersion: '1.0', latestVersion: '1.1', policy: 'auto_update', dismissed: false, detectedAt: '2026-11-03T07:30:00.000Z' }],
@@ -2464,10 +2464,10 @@ index 000000000..ec771efcc
 +}
 diff --git a/lib/hrm/mcp-api.ts b/lib/hrm/mcp-api.ts
 new file mode 100644
-index 000000000..3bb2b277c
+index 000000000..53245ecdb
 --- /dev/null
 +++ b/lib/hrm/mcp-api.ts
-@@ -0,0 +1,511 @@
+@@ -0,0 +1,509 @@
 +/**
 + * HRM patch 0055: the read-only API behind HRM's MCP server (contract: IntuneGet-Build docs/mcp-api.md).
 + *
@@ -2818,9 +2818,7 @@ index 000000000..3bb2b277c
 +  const includeDismissed = boolParam(query, 'includeDismissed');
 +  const db = getDatabase();
 +  const history = await tenantHistory(ctx.tenantId);
-+  // Detected updates are stored per staff member; read every deployer's rows for this tenant, once each.
-+  const users = [...new Set(history.map((r) => r.user_id))].slice(0, 50);
-+  const rows = (await Promise.all(users.map((user) => db.updateCheckResults.list(user, { tenantId: ctx.tenantId, includeDismissed })))).flat();
++  const rows = await db.updateCheckResults.list('', { tenantId: ctx.tenantId, includeDismissed });
 +  const newest = new Map<string, UpdateCheckResult>();
 +  for (const row of rows) {
 +    if (row.tenant_id !== ctx.tenantId) continue;

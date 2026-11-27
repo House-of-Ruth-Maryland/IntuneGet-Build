@@ -429,10 +429,10 @@ index 000000000..9ac6c1c4e
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 000000000..2cc75bcc7
+index 000000000..2d126b6a0
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,247 @@
 +import { describe, expect, it } from 'vitest';
 +import { HELP_SECTIONS } from '../help-content';
 +
@@ -652,7 +652,9 @@ index 000000000..2cc75bcc7
 +  const updates = HELP_SECTIONS.find(section => section.id === 'updates')!;
 +  expect(updates.uiLabels).toContain('Check for app updates');
 +  expect(updates.uiLabels).not.toContain('Refresh');
-+  expect(updates.points.join(' ')).toContain('may start your enabled automatic updates');
++  expect(updates.points.join(' ')).toContain('may start enabled automatic updates for the tenant');
++  expect(updates.points.join(' ')).toContain('Personal notification preferences stay personal');
++  expect(updates.points.join(' ')).not.toContain('your own Auto-update apps only');
 +  expect(updates.points.join(' ')).toContain('Automatic update policy:');
 +  expect(HELP_SECTIONS.find(section => section.id === 'pilot-rollouts')!.points.join(' ')).toContain('Refresh pilot status reads pilot status without checking for new app versions');
 +  const schedule = HELP_SECTIONS.find(section => section.id === 'update-schedule')!;
@@ -912,7 +914,7 @@ index 000000000..6990bc2e9
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..66755cb1e
+index 000000000..abe3830ae
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
 @@ -0,0 +1,644 @@
@@ -1034,8 +1036,8 @@ index 000000000..66755cb1e
 +    uiLabels: ['App updates', 'Checked', 'Check for app updates', 'Update all', 'No newer versions were found at the last check', 'Available updates', 'Update history', 'Type', 'Ignored apps', 'Deploy new version', 'Review update', 'Notify only', 'Auto-update', 'Auto-update off', 'Ignore', 'Automatic update policy:', 'Waiting for your review', 'Major', 'Minor', 'Patch', 'Install dates', 'Test with a pilot group', 'Open app workspace', 'with Automatic updates on', 'Auto-update on', 'Edit publishing window', 'Pause automatic updates', 'Home', 'Server status', 'Version sync after deploy', 'Failing'],
 +    points: [
 +      'The server checks for new app versions at 3:30 AM and 3:30 PM, and sends update alerts at 4:00 AM and 4:00 PM (Maryland time).',
-+      'Updates waiting for approval show on the Home page and in App updates.',
-+      'Each app is set to Notify only, Auto-update or Ignore. Notify only shows new versions for you to review. To change it, press the policy pill at the bottom left of the app’s card, named Automatic update policy: followed by its current rule.',
++      'Authorized staff in your tenant share App updates, its counts and badges, the Home update card and Update history. Dismissing an update changes the shared list. Personal notification preferences stay personal.',
++      'Each app’s Notify only, Auto-update or Ignore rule applies across your tenant. Notify only shows versions for staff review. Change the rule with the card’s bottom-left policy pill, named Automatic update policy: followed by its current rule.',
 +      'The Automatic updates bar below the list shows how many apps have Automatic updates on, such as 12 apps with Automatic updates on. Press it to open the Auto-update on list and change each app there.',
 +      'Pause automatic updates, in Edit publishing window, holds automatic updates for every app without changing these app rules.',
 +      'Apps set to Ignore are left out of App updates and the Teams update alert. To bring one back, press Ignored apps in App updates and choose Notify only or Auto-update for it.',
@@ -1043,7 +1045,7 @@ index 000000000..66755cb1e
 +      'Custom apps installed from a GitHub release download are checked too. A newer release shows in App updates with Deploy new version.',
 +      'When a deployment finishes as deployed, App updates and Home show the new version straight away, whoever deployed it. The app drops off the list, or shows the new version as current if an even newer one is out.',
 +      'App updates reads its list again when you come back to the browser tab, and every 45 seconds while one of your deployments is running.',
-+      'Press Check for app updates at the top of App updates to check now. As its hover note says, it may start your enabled automatic updates. It clears out-of-date entries for everyone in your tenant. Any automatic updates it starts are for your own Auto-update apps only.',
++      'Press Check for app updates at the top of App updates to check now. It refreshes the shared tenant list and may start enabled automatic updates for the tenant.',
 +      'If App updates still shows the old version after a deploy, the next update check at 3:30 AM or 3:30 PM (Maryland time) corrects it.',
 +      'When this happens after 2 or more deploys in 24 hours, Version sync after deploy shows Failing in Server status on Home. That update check clears it.',
 +      'App updates lists new versions from each app’s publisher, found in the WinGet and curated catalogs and GitHub releases. The update list comes first. The Automatic updates bar below it sets when automatic updates deploy to Intune and how they install.',
@@ -1101,7 +1103,7 @@ index 000000000..66755cb1e
 +      'Expired required deadlines pause replacement packaging for IT, including automatic updates, legacy deployments and retries. Confirm replacement deadlines offers Retain the existing deadlines or Choose a new deadline. Retaining may make installation due at the next Intune attempt. New deadlines change only affected required deadlines, keeping availability, groups, filters, notifications and restart grace. Device-local deadlines that may already be due also need confirmation and a new date needs 14 hours of lead time. For other past dates, Review past or device-local dates still offers Keep the current assignment dates or Reset availability and deadline to ASAP; reset clears both dates only when no required deadline needs confirmation.',
 +      'Send update to Intune starts one reviewed update; Update all starts the reviewed batch. Neither proves installation. If settings, version or assignments change after review, review again; packaging checks the assignment snapshot again.',
 +      'If reading or an app review fails, use Retry review. A deployment paused before its hosted run starts offers Review deadlines in Deployments, then Confirm and resume packaging. Cancel review changes nothing. A changed assignment or newly expired deadline requires a fresh confirmation; late workflow holds use Retry safely for a fresh job. Empty current assignments show no targets; each date is paired with its group and intent. For missing settings or custom detection, review Inventory or App catalog.',
-+      'Effective update settings shows versions, Saved app settings or Curated, install behavior, restart, assignment groups and dates. Reviewing starts nothing.',
++      'Effective update settings shows versions, Saved app settings or Curated, install behavior, restart, groups and dates. Saved settings come from the tenant’s latest deployment, including another staff member’s. Reviewing starts nothing.',
 +      'Curated updates also require the current exact-installer security check. If it is held or unavailable, read the deployment reason. Retry safely cannot supply missing verification or clear a hold; ask HRM Support before another attempt.',
 +    ],
 +    links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'How old copies are removed', href: '/dashboard/help#old-copies' }],
@@ -1226,7 +1228,7 @@ index 000000000..66755cb1e
 +    points: [
 +      'In Deployments, press Open app workspace. In App updates, press the app name on its card, or choose Open app workspace from its More actions menu (…). Inventory opens the app, with Install results above Current release and Future updates.',
 +      'How automatic updates install controls prompts and postponement in packages. Future updates and its Saved settings describe future automatic updates; they do not describe what the current installed copy will do.',
-+      'While your update policy for a verified app is Auto-update, Future updates shows How it installs with Change how it installs beside it. Search offers Review future updates and Review current copy and install dates; both jump within this app.',
++      'While the tenant’s update policy for a verified app is Auto-update, Future updates shows How it installs with Change how it installs beside it. Search offers Review future updates and Review current copy and install dates; both jump within this app.',
 +      'Change how it installs is scoped to this app. Clear Use shared policy to edit an exception. For the shared rule, open App updates, press Edit shared policy in the Automatic updates bar below the list and select All apps with Automatic updates on in Apply to.',
 +      'Under What staff see, choose Let users install now or postpone and Days users can postpone. Save for this app saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
 +      'Use each app’s saved settings preserves existing configurations and is the default; restart Beta is off by default. It does not mean silent installation. Install automatically is separate. Current and queued packages keep their settings.',
@@ -1369,7 +1371,7 @@ index 000000000..66755cb1e
 +      'Changes found in Intune show when they were observed. IntuneGet does not know who made those changes in Intune. Known group edits through Save to Intune or Keep this copy show the staff member who saved them.',
 +      'For a copy that is no longer in Intune, open Inventory, then Open activity beside its warning in Group changes to review, to see its recorded history. Open in Intune checks it there.',
 +      'Latest deployment attempt is linked to the exact copy and tenant, including a replacement attempt that failed before upload. Archived attempts stay read-only here. They remain hidden from deployment history. No retry starts from this summary.',
-+      'Version in Intune is configuration, not per-computer version inventory. Install results remain separate from failed packaging attempts. Per-computer versions are not collected here. Future updates shows your account’s saved future policy, not the installed copy or another account’s policy.',
++      'Version in Intune is configuration, not per-computer version inventory. Install results remain separate from failed packaging attempts. Per-computer versions are not collected here. Future updates shows the tenant’s saved future policy, separate from the installed copy.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }],
 +  },
@@ -1562,7 +1564,7 @@ index 000000000..66755cb1e
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..ef51fda0f
+index 000000000..7e98f768b
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,405 @@
@@ -1662,11 +1664,11 @@ index 000000000..ef51fda0f
 +  {
 +    id: 'updates', category: 'updates', title: 'Choose how an app stays updated',
 +    summary: 'App updates lists new versions from each app’s publisher. Choose Notify only, Auto-update or Ignore for each app.', keywords: ['notify', 'ignore', 'automatic', 'new version', 'GitHub releases', 'refresh', 'Check for app updates', 'Automatic update policy', 'what is App updates', 'publisher', 'who gets an app', 'New version checks', 'Checked', 'More actions', 'Major', 'Minor', 'Patch', 'Waiting for your review', 'policy pill'],
-+    start: updates, before: ['App updates does not choose who gets an app. An update keeps the groups of the copy it replaces.', 'Check the app’s current groups before choosing Auto-update.'],
++    start: updates, before: ['App updates does not choose who gets an app. An update keeps the groups of the copy it replaces.', 'Authorized staff share App updates, Update history and app rules across the tenant. Check current groups before choosing Auto-update.'],
 +    steps: [
 +      step('Find the app', 'Open App updates and find the app’s card. Read its groups, its update type and the status line under them.', 'updates', 'App updates', 'You can see where the next update would go and what happens next.'),
 +      step('Choose its update rule', 'Press the policy pill at the bottom left of the card. Choose Notify only for manual review, Auto-update for automatic deployment, or Ignore to leave the app out of update checks.', 'updates', 'Auto-update', 'The pill shows the app’s update rule.'),
-+      step('Check for new versions', 'Press Check for app updates at the top to check now. As its hover note says, it may start your enabled automatic updates. Refresh pilot status only reads pilot status.', 'updates', 'Check for app updates', 'You understand the check can start automatic deployment, not just refresh the list.'),
++      step('Check for new versions', 'Press Check for app updates at the top to check now. It may start enabled automatic updates in your tenant. Refresh pilot status only reads pilot status.', 'updates', 'Check for app updates', 'You understand the check can start automatic deployment, not just refresh the list.'),
 +      step('Check the lists', 'In the Automatic updates bar below the list, press the apps with Automatic updates on count to open the Auto-update on list. Use Ignored apps, beside the tabs, to restore an ignored app.', 'updates', 'Ignored apps', 'Auto-update and ignored apps are easy to audit.'),
 +    ],
 +    success: 'The app’s card or list shows the update rule you intended.', caution: 'Automatic updates follow the Update schedule and safety checks. What staff see follows How automatic updates install; when computers install follows each group’s install dates.',
@@ -1680,7 +1682,7 @@ index 000000000..ef51fda0f
 +    start: updates, before: ['Replacements with expired required deadlines pause for IT confirmation before packaging. Keep the current deadlines explicitly or choose new future deadlines.', 'For a custom app, have the new version and its HTTPS installer link ready.'],
 +    steps: [
 +      step('Choose the new version', 'For WinGet or curated apps, press Review update on the app’s card in App updates. For a custom app, press Details on its newest Inventory copy, then Deploy new version under Actions.', 'updates', 'Review update', 'The new version uses the appropriate update path.'),
-+      step('Review settings and assignments', 'Read Effective update settings: version, Saved app settings or Curated, install behavior, restart, groups and dates. This review does not edit package settings.', 'updates', 'Effective update settings', 'You know which saved settings and current Intune assignments are being reviewed.'),
++      step('Review settings and assignments', 'Read Effective update settings: version, Saved app settings or Curated, install behavior, restart, groups and dates. This review does not edit package settings.', 'updates', 'Effective update settings', 'Saved settings use the tenant’s latest deployment, including another staff member’s; assignments come from Intune.'),
 +      step('Choose dates and start', 'Read Confirm replacement deadlines when shown. Choose Retain the existing deadlines or Choose a new deadline. Send update to Intune starts one app; Update all starts the reviewed batch.', 'updates', 'Send update to Intune', 'Sending starts deployment; computers install according to assignments and check-in.'),
 +      step('Review a custom version', 'For a custom app, check version, link and checksum, then add it to the Deployment list. Review groups and Replaces current copy before deploying.', 'deployment-list', 'Replaces current copy', 'The custom version follows its own deployment review.'),
 +      step('Follow the deployment', 'Open Deployments to check packaging and deployment. If it fails, read Failed at: and Details before using Retry safely.', 'deployments', 'Failed at:', 'Once deployed, App updates and Home show the new version. A failure shows its stage.'),
@@ -1754,7 +1756,7 @@ index 000000000..ef51fda0f
 +    success: 'Future updates reflects the saved policy; the current copy and its live results remain separately visible.',
 +    caution: 'Postponement starts at each computer’s first install attempt and isn’t reported in Update history. Employee choose time, an absolute cutoff and bounded startup fallback are unavailable; What employees see describes the saved installer experience.',
 +    related: ['update-schedule', 'installation-timing', 'startup-beta'],
-+    troubleshoot: [{ problem: 'Change how it installs is missing', action: 'It shows only while your update policy for the app is Auto-update. Choose Auto-update for the app in App updates first.', guide: 'updates' }, { problem: 'An existing package did not change', action: 'Policy edits do not change queued or deployed packages. Check the release’s saved policy.' }, { problem: 'You need to see which apps have their own rule', action: 'In App updates, press Edit shared policy below the list. App exceptions lists each app with Edit app exception.' }, { problem: 'You need installation only after restart', action: 'Save the per-app startup Beta target, then use Start restart Beta pilot; saving alone does not deploy.', guide: 'startup-beta' }],
++    troubleshoot: [{ problem: 'Change how it installs is missing', action: 'It shows only while the tenant’s update policy for the app is Auto-update. Choose Auto-update for the app in App updates first.', guide: 'updates' }, { problem: 'An existing package did not change', action: 'Policy edits do not change queued or deployed packages. Check the release’s saved policy.' }, { problem: 'You need to see which apps have their own rule', action: 'In App updates, press Edit shared policy below the list. App exceptions lists each app with Edit app exception.' }, { problem: 'You need installation only after restart', action: 'Save the per-app startup Beta target, then use Start restart Beta pilot; saving alone does not deploy.', guide: 'startup-beta' }],
 +    referenceGroups: [reference('App workspace, scope and saving', [0, 1, 2, 3, 4, 5, 9, 10, 15]), reference('Shared policy and app exceptions on App updates', [16, 17]), reference('Postponement and prompts on computers', [6, 7, 8]), reference('Deployed release evidence and other timing controls', [11, 12, 13, 14])],
 +  },
 +  {

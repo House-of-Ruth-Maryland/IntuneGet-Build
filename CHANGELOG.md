@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Authorized IT staff in one tenant now share App updates, its counts and Home card, update policies,
+  dismissals and update history. Manual update reviews and saved deployment settings use the tenant’s
+  latest deployment, including a teammate’s deployment; App catalog deployment badges and MCP updates
+  use the same tenant scope. Notifications and hosted automatic checks respect the newest tenant
+  policy regardless of its author. Other tenants remain excluded, and a caller-supplied tenant cannot widen
+  access. Legacy author-attributed checks and policies are read once per tenant app/copy, using the
+  newest record; staff attribution and notification channel ownership remain intact.
+
 - App updates redesign (approved Nov 26). The update list now comes first. The last check sits
   beside the title as "Checked Nov 26, 3:30 PM", with the fixed schedule on hover. The four-row
   status strip above the list is gone: one Automatic updates bar below the list holds the

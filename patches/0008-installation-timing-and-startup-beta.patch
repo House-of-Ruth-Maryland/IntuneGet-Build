@@ -881,7 +881,7 @@ index 000000000..c2415af65
 +  return reply(await read(user.tenantId));
 +}
 diff --git a/app/api/intune/apps/deployed/config/route.test.ts b/app/api/intune/apps/deployed/config/route.test.ts
-index 65d4eb237..e3ef18808 100644
+index 65d4eb237..a270eb485 100644
 --- a/app/api/intune/apps/deployed/config/route.test.ts
 +++ b/app/api/intune/apps/deployed/config/route.test.ts
 @@ -12,6 +12,7 @@ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => ({ userId: 'f
@@ -892,6 +892,23 @@ index 65d4eb237..e3ef18808 100644
    getApp: async () => ({ displayName: 'Fixture app', rules: [] }),
    convertToGraphAssignments: (assignments: unknown) => assignments,
    assignToGroups: vi.fn(), syncAppCategories: vi.fn(), setAppRules: vi.fn(),
+@@ -78,14 +79,14 @@ describe('hosted deployed config selection', () => {
+   }
+ 
+   for (const appId of ['older-app', '', null]) {
+-    it(`filters the selected app without widening owner or tenant scope: ${String(appId)}`, async () => {
++    it(`filters the selected app within the authorized tenant across authors: ${String(appId)}`, async () => {
+       fetchMock.mockResolvedValue(Response.json({ package_config: { description: 'Fixture' }, intune_app_id: 'older-app', completed_at: null }));
+       const params = new URLSearchParams({ wingetId: 'Fixture.App' });
+       if (appId !== null) params.set('intuneAppId', appId);
+       const response = await GET(new NextRequest(`https://website.example.test/api/intune/apps/deployed/config?${params}`));
+       expect(response.status).toBe(200);
+       const query = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
+-      expect(query.get('user_id')).toBe('eq.fixture-owner');
++      expect(query.has('user_id')).toBe(false);
+       expect(query.get('tenant_id')).toBe('eq.fixture-tenant');
+       expect(query.get('winget_id')).toBe('eq.Fixture.App');
+       expect(query.get('status')).toBe('eq.deployed');
 diff --git a/components/hrm/AppTimingPanel.test.ts b/components/hrm/AppTimingPanel.test.ts
 new file mode 100644
 index 000000000..9560f16dd

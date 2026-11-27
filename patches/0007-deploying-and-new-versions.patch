@@ -8952,3 +8952,24 @@ index 000000000..c7a09ce0b
 +  await expect(deployStoreApp(item, 'fixture-token')).rejects.toThrow('Store apps cannot be Update only. Choose Required, Available or Uninstall.');
 +  expect(fetchMock).not.toHaveBeenCalled();
 +});
+diff --git a/app/api/intune/apps/deployed/config/route.ts b/app/api/intune/apps/deployed/config/route.ts
+index 366a1c73a..dcc22f90c 100644
+--- a/app/api/intune/apps/deployed/config/route.ts
++++ b/app/api/intune/apps/deployed/config/route.ts
+@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
+ 
+     if (!supabase) {
+       const job = await getDatabase().jobs.getLatestDeployed(
+-        user.userId, user.tenantId, wingetId, intuneAppId ?? undefined
++        user.userId, user.tenantId, wingetId, intuneAppId ?? undefined, 'tenant'
+       );
+       return NextResponse.json({
+         config: job?.package_config ?? null,
+@@ -54,7 +54,6 @@ export async function GET(request: NextRequest) {
+     let query = supabase
+       .from('packaging_jobs')
+       .select('package_config, completed_at, intune_app_id')
+-      .eq('user_id', user.userId)
+       .eq('tenant_id', tenantResolution.tenantId)
+       .eq('winget_id', wingetId)
+       .eq('status', 'deployed');
