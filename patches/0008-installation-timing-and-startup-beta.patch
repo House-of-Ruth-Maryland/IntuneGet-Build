@@ -1551,7 +1551,7 @@ index 000000000..114d53fed
 +});
 diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
 new file mode 100644
-index 000000000..670b02588
+index 000000000..8110eff38
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.tsx
 @@ -0,0 +1,126 @@
@@ -1613,7 +1613,7 @@ index 000000000..670b02588
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
 +            <div className="text-sm"><h3 className="font-medium text-text-primary">1. Scope</h3>{draft.mode === 'restart' && <p className="mt-1 text-text-secondary">App-scoped restart Beta pilot only. Save the rule, then explicitly start its selected pilot.</p>}<p role="status" className="mt-1 text-text-muted">{dirty && !saved ? 'Unsaved changes' : 'Saved settings'}</p></div>{appId ? <div className="text-sm"><span className="text-text-muted">Applies to</span><p className="mt-1 font-medium text-text-primary">{apps.find(app => app.winget_id.toLowerCase() === appId.toLowerCase())?.deployment_config?.displayName || appId}</p></div> : <label className="block text-sm text-text-secondary">Apply to
 +              <select className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={selected} disabled={action.isPending} onChange={e => choose(e.target.value)}>
-+                {!appId && <option value="">All apps with Automatic updates on · Shared policy</option>}
++                {!appId && <option value="">All apps with Auto-update on</option>}
 +                {apps.map(app => <option key={app.id} value={app.winget_id}>{app.deployment_config?.displayName || app.winget_id}{exceptions.some(p => p.appId.toLowerCase() === app.winget_id.toLowerCase()) ? ' · App exception' : ' · Uses shared policy'}</option>)}
 +              </select></label>}
 +            {!appId && !selected && exceptions.length > 0 && <div className="text-sm"><h3 className="font-medium text-text-primary">App exceptions</h3><ul className="mt-1 divide-y divide-overlay/10">{exceptions.map(exception => <li key={exception.appId} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><span className="text-text-primary">{apps.find(a => a.winget_id.toLowerCase() === exception.appId.toLowerCase())?.deployment_config?.displayName || exception.appId}</span><p className="text-xs text-text-muted">{installationPolicySummary(exception)}</p></div><button type="button" className="text-xs text-accent-cyan hover:underline disabled:opacity-50" disabled={action.isPending} onClick={() => choose(exception.appId)}>Edit app exception</button></li>)}</ul></div>}

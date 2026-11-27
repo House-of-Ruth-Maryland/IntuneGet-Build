@@ -11,7 +11,7 @@ index 000000000..ceaaa2f16
 +}
 diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
 new file mode 100644
-index 000000000..8ddc06879
+index 000000000..4bba55b25
 --- /dev/null
 +++ b/components/hrm/help/HelpVisual.tsx
 @@ -0,0 +1,95 @@
@@ -96,7 +96,7 @@ index 000000000..8ddc06879
 +            {step.screen === 'discovered' && <>{row('How this works', 'Open the collapsed guide')}{row('App found on computers', 'Review match and eligibility')}</>}
 +            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">All · Active · Completed · Failed · Cancelled</p><p className="mt-1 text-xs text-text-muted">Status buttons include loaded counts.</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Installing on computers is a separate result.</p></div>}
 +            {step.screen === 'reports' && <><ExampleRow label="Report period" value="7 days · 30 days · 90 days · 1 year"/><ExampleRow label="Scope" value="All in tenant / My deployments"/></>}
-+            {step.screen === 'settings' && (alertSettings ? <>{row('Notifications', 'Settings section')}<ExampleRow label="Webhook notifications" value="Example channel"/>{row('Send test', 'Send test for Example channel')}<ExampleRow label="Screen reader name" value="Send test for Example channel"/><ExampleRow label="Edit / Enable / Disable / Delete" value="Actions name Example channel"/><ExampleRow label="Add webhook / Edit" value="Form keeps focus; closing restores it"/></> : <>{step.focus === 'Open sidebar' && <>{row('Open sidebar', 'Open mobile navigation')}<ExampleRow label="Navigation" value="Tab stays inside the menu"/><ExampleRow label="Close sidebar" value="Esc or backdrop also closes"/></>}{row('Find a page or guide', 'Header · Ctrl+K or Cmd+K')}{row('Keyboard shortcuts', 'G then a letter; / focuses page search')}{row('Theme', 'Account menu · profile image or name')}{row('Not set on this page', 'Settings · General')}<ExampleRow label="Settings" value="General · Permissions · Notifications"/></>)}
++            {step.screen === 'settings' && (alertSettings ? <>{row('Notifications', 'Settings section')}<ExampleRow label="Webhook notifications" value="Example channel"/>{row('Send test', 'Send test for Example channel')}<ExampleRow label="Screen reader name" value="Send test for Example channel"/><ExampleRow label="Edit / Enable / Disable / Delete" value="Actions name Example channel"/><ExampleRow label="Add webhook / Edit" value="Form keeps focus; closing restores it"/></> : <>{step.focus === 'Open sidebar' && <>{row('Open sidebar', 'Open mobile navigation')}<ExampleRow label="Navigation" value="Tab stays inside the menu"/><ExampleRow label="Close sidebar" value="Esc or backdrop also closes"/></>}{row('Find a page or guide', 'Header · Ctrl+K or Cmd+K')}<ExampleRow label="Close search" value="Phone search dialog · close button"/>{row('Keyboard shortcuts', 'G then a letter; / focuses page search')}{row('Theme', 'Account menu · profile image or name')}{row('Not set on this page', 'Settings · General')}<ExampleRow label="Settings" value="General · Permissions · Notifications"/></>)}
 +            {step.screen === 'server' && (needsAttention ? row('Needs attention', 'Example app needs a look') : <>{row('Server status', '1 needs a look')}{row('Intune self-test', 'Failing · reason shown')}{row('Version', 'Example version')}{row('All checks', '9 working')}</>)}
 +            {step.screen === 'support' && <div className="my-4 space-y-3 rounded-lg border border-overlay/10 p-3 text-xs text-text-muted"><p>App and version</p><p>What you tried</p><p>Result or error code</p></div>}
 +            {!focusAtHeading && !focusAtRow && !actionsPanel && target}
@@ -717,10 +717,10 @@ index 000000000..2d126b6a0
 +});
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 new file mode 100644
-index 000000000..332589fd1
+index 000000000..d52290fa7
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-guides.test.ts
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,173 @@
 +import { existsSync, readFileSync, readdirSync } from 'node:fs';
 +import path from 'node:path';
 +import { describe, expect, it } from 'vitest';
@@ -885,6 +885,15 @@ index 000000000..332589fd1
 +  expect(points('your-settings')).toContain('Apps stays highlighted');
 +  expect(points('your-settings')).toContain('Activity stays highlighted');
 +});
++
++
++it('names phone search dismissal, the checklist control and the shared scope exactly', () => {
++  const points = (id: string) => HELP_SECTIONS.find(section => section.id === id)!.points.join(' ');
++  expect(points('your-settings')).toContain('on a phone, Close search');
++  expect(points('deploying')).toContain('checklist icon at the top right');
++  expect(points('automatic-installation-policy')).toContain('All apps with Auto-update on');
++  expect(points('automatic-installation-policy')).not.toContain('All apps with Automatic updates on');
++});
 diff --git a/lib/hrm/__tests__/help-navigation.test.ts b/lib/hrm/__tests__/help-navigation.test.ts
 new file mode 100644
 index 000000000..6990bc2e9
@@ -971,7 +980,7 @@ index 000000000..6990bc2e9
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..fcb8debfc
+index 000000000..6b16f929e
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
 @@ -0,0 +1,651 @@
@@ -1015,7 +1024,7 @@ index 000000000..fcb8debfc
 +    uiLabels: ['Curated apps', 'Checked every 30 minutes', 'App catalog', 'Who gets it', 'When a new version comes out', 'Notify only', 'Auto-update', 'Ignore', 'Add to Deployment list', 'Deployment list', 'Deploy to Intune', 'Edit settings', 'Save to Deployment list', 'Clear list', 'Add a second copy anyway', 'Second copy', 'Previous copy', 'Replaces current copy', 'Deploy now', 'App setup and checks', 'Toolkit messages and appearance', 'Inventory', 'Keep this copy', 'Delete from Intune', 'Save to Intune', 'New computer setup', 'Deploy again', 'Apps', 'Details', 'Curated', 'Edit groups', 'Install dates', 'Set install dates', 'Hide install dates', 'Change install dates', 'Remove install dates', 'Time zone', 'Available from', 'Must install by', 'Restart grace period', 'Ready to deploy', 'App handling and restart', 'Restart handling in Intune', 'Use installer return codes', 'Force an Intune restart', 'Suppress Intune restarts', 'Required', 'Available', 'Uninstall', 'Update only'],
 +    points: [
 +      'Find the app in App catalog. Choose Who gets it, then Notify only, Auto-update or Ignore under When a new version comes out. Press Add to Deployment list.',
-+      'Open the Deployment list with the round button at the bottom right of the page, which shows how many apps it holds. Then press Deploy to Intune.',
++      'Open the Deployment list using the checklist icon at the top right, or the round button at the bottom right. Its badge counts apps in the list. Then press Deploy to Intune.',
 +      'A review shows what will happen in Intune for each app, which groups get it and anything to check, such as no groups or a second copy.',
 +      'In the review, press Deploy now to start the deployment, or Change to fix an app first.',
 +      'To change an app in the Deployment list, press its pencil button. Change it in Edit settings, then press Save to Deployment list. Clear list empties the list.',
@@ -1281,13 +1290,13 @@ index 000000000..fcb8debfc
 +  {
 +    id: 'automatic-installation-policy',
 +    title: 'How automatic updates install',
-+    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Future updates', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Edit shared policy', 'Change how it installs', 'How it installs', 'What staff see', 'When it deploys to Intune', 'Change the publishing window in App updates', 'Review future updates', 'Review current copy and install dates', 'Find a page or guide', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot', 'How automatic updates install', 'App exceptions', 'Edit app exception', 'Startup install results'],
++    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Future updates', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Edit shared policy', 'Change how it installs', 'How it installs', 'What staff see', 'When it deploys to Intune', 'Change the publishing window in App updates', 'Review future updates', 'Review current copy and install dates', 'Find a page or guide', 'Apply to', 'All apps with Auto-update on', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot', 'How automatic updates install', 'App exceptions', 'Edit app exception', 'Startup install results'],
 +    flow: ['Open app workspace', 'Review current saved version', 'Press Change how it installs', 'Review saved rule', 'Save for this app'],
 +    points: [
 +      'In Deployments, press Open app workspace. In App updates, press the app name on its card, or choose Open app workspace from its More actions menu (…). Inventory opens the app, with Install results above Current release and Future updates.',
 +      'How automatic updates install controls prompts and postponement in packages. Future updates and its Saved settings describe future automatic updates; they do not describe what the current installed copy will do.',
 +      'Tenant update policy is shared by IT admins in this tenant. While a verified app uses Auto-update, Future updates shows How it installs with Change how it installs beside it. Find a page or guide offers Review future updates and Review current copy and install dates; both jump within this app.',
-+      'Change how it installs is scoped to this app. Clear Use shared policy to edit an exception. For the shared rule, open App updates, press Edit shared policy in the Automatic updates bar below the list and select All apps with Automatic updates on in Apply to.',
++      'Change how it installs is scoped to this app. Clear Use shared policy to edit an exception. For the shared rule, open App updates, press Edit shared policy in the Automatic updates bar below the list and select All apps with Auto-update on in Apply to.',
 +      'Under What staff see, choose Let users install now or postpone and Days users can postpone. Save for this app saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
 +      'Use each app’s saved settings preserves existing configurations and is the default; restart Beta is off by default. It does not mean silent installation. Install automatically is separate. Current and queued packages keep their settings.',
 +      'Postponement starts at each computer’s first install attempt, not when the server finds or deploys a version. Offline computers start later. After expiry, the next Intune attempt enforces installation, without an exact appointment.',
@@ -1583,9 +1592,9 @@ index 000000000..fcb8debfc
 +  {
 +    id: 'your-settings',
 +    title: 'Theme, shortcuts and your settings',
-+    uiLabels: ['Open sidebar', 'Close sidebar', 'General', 'Permissions', 'Notifications', 'Signed-in tenant', 'Tenant ID', 'Copy tenant ID', 'Sign out', 'Find a page or guide', 'Keyboard shortcuts', 'Same as computer', 'Theme', 'Settings', 'Deployment list', 'Open the Deployment list when you add an app', 'Not set on this page', 'What an update replaces', 'App updates', 'Home', 'Apps', 'App catalog', 'Inventory', 'Discovered apps', 'Activity', 'Deployments', 'Reports', 'Help'],
++    uiLabels: ['Close search', 'Open sidebar', 'Close sidebar', 'General', 'Permissions', 'Notifications', 'Signed-in tenant', 'Tenant ID', 'Copy tenant ID', 'Sign out', 'Find a page or guide', 'Keyboard shortcuts', 'Same as computer', 'Theme', 'Settings', 'Deployment list', 'Open the Deployment list when you add an app', 'Not set on this page', 'What an update replaces', 'App updates', 'Home', 'Apps', 'App catalog', 'Inventory', 'Discovered apps', 'Activity', 'Deployments', 'Reports', 'Help'],
 +    points: [
-+      'To jump to any page, press Ctrl+K (Cmd+K on a Mac), or press Find a page or guide at the top of the page. Type to filter, use the Up and Down arrows to move, Enter to open, and Esc to close.',
++      'To jump to any page, press Ctrl+K (Cmd+K on a Mac), or press Find a page or guide at the top of the page. Type to filter; arrows move and Enter opens. Press Esc or, on a phone, Close search to close it.',
 +      'The sidebar has Home, Apps, App updates, Activity, Settings and Help. Apps stays highlighted in Inventory, App catalog, Discovered apps and app workspaces. Activity stays highlighted in Deployments and Reports. Choose the page in its section’s subnavigation.',
 +      'Press G, then a letter, to open a page: D Home, A App catalog, I Inventory, V Discovered apps, P App updates, U Deployments, R Reports, S Settings or H Help. Keyboard shortcuts in Find a page or guide lists them all; the keys keep their page names. When you are not typing, / focuses the first available page search field.',
 +      'Open your account menu using your name or profile image at the bottom of the sidebar. Choose Light, Dark or Same as computer under Theme. The menu also offers Settings and Sign out.',

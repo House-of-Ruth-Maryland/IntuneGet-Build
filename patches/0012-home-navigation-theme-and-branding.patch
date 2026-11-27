@@ -16,18 +16,21 @@ index 13c7c31f8..34e7b2627 100644
    );
  }
 diff --git a/app/(app)/dashboard/apps/page.tsx b/app/(app)/dashboard/apps/page.tsx
-index f818738c1..b604bd8f8 100644
+index f818738c1..246e51c23 100644
 --- a/app/(app)/dashboard/apps/page.tsx
 +++ b/app/(app)/dashboard/apps/page.tsx
-@@ -3,6 +3,7 @@
+@@ -1,8 +1,10 @@
+ 'use client';
+ 
  import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
++import { createPortal } from 'react-dom';
  import { T, Var } from "gt-next";
  import { useSearchParams } from 'next/navigation';
 +import { useNewVersionPrefill } from '@/hooks/useNewVersionPrefill';
  import Link from 'next/link';
  import {
    Package,
-@@ -107,6 +108,14 @@ export default function AppCatalogPage() {
+@@ -107,6 +109,14 @@ export default function AppCatalogPage() {
  
    // Custom app modal state
    const [isCustomAppModalOpen, setIsCustomAppModalOpen] = useState(false);
@@ -42,7 +45,7 @@ index f818738c1..b604bd8f8 100644
  
    // Bulk selection state
    const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
-@@ -403,7 +412,7 @@ export default function AppCatalogPage() {
+@@ -403,7 +413,7 @@ export default function AppCatalogPage() {
        .filter((p) => selectedPackageIds.has(p.id))
        .filter((p) => !cartIds.has(`${p.id}@${p.version}`));
      if (selected.length === 0) {
@@ -51,7 +54,7 @@ index f818738c1..b604bd8f8 100644
        return;
      }
  
-@@ -418,7 +427,7 @@ export default function AppCatalogPage() {
+@@ -418,7 +428,7 @@ export default function AppCatalogPage() {
      setBulkProgress(null);
  
      if (result.failed.length === 0) {
@@ -60,7 +63,16 @@ index f818738c1..b604bd8f8 100644
      } else {
        toast.warning(
          `Added ${result.succeeded.length} of ${selected.length} apps`,
-@@ -540,6 +549,7 @@ export default function AppCatalogPage() {
+@@ -524,7 +534,7 @@ export default function AppCatalogPage() {
+   const renderFilterPanel = () => (
+     <div className="rounded-2xl border border-overlay/10 bg-bg-elevated p-4 shadow-soft space-y-4">
+       <div className="flex items-center justify-between">
+-        <div className="inline-flex items-center gap-2">
++        <div className="hidden lg:inline-flex items-center gap-2">
+           <SlidersHorizontal className="w-4 h-4 text-accent-cyan" />
+           <h3 className="text-sm font-semibold tracking-wide text-text-primary uppercase"><T>Filters</T></h3>
+         </div>
+@@ -540,6 +550,7 @@ export default function AppCatalogPage() {
  
        <div className="border-t border-overlay/10 pt-3 space-y-2">
          <button
@@ -68,7 +80,7 @@ index f818738c1..b604bd8f8 100644
            onClick={() => setIsSortSectionOpen((prev) => !prev)}
            className="w-full flex items-center justify-between text-sm font-medium text-text-primary"
          >
-@@ -551,6 +561,7 @@ export default function AppCatalogPage() {
+@@ -551,6 +562,7 @@ export default function AppCatalogPage() {
              {SORT_OPTIONS.map(({ key, label, icon: Icon }) => (
                <button
                  key={key}
@@ -76,7 +88,7 @@ index f818738c1..b604bd8f8 100644
                  onClick={() => handleSortChange(key)}
                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
                    sortBy === key
-@@ -562,7 +573,6 @@ export default function AppCatalogPage() {
+@@ -562,7 +574,6 @@ export default function AppCatalogPage() {
                    <Icon className="w-4 h-4" />
                    {label}
                  </span>
@@ -84,7 +96,7 @@ index f818738c1..b604bd8f8 100644
                </button>
              ))}
            </div>
-@@ -571,6 +581,7 @@ export default function AppCatalogPage() {
+@@ -571,6 +582,7 @@ export default function AppCatalogPage() {
  
        <div className="border-t border-overlay/10 pt-3 space-y-2">
          <button
@@ -92,7 +104,7 @@ index f818738c1..b604bd8f8 100644
            onClick={() => setIsCategoriesSectionOpen((prev) => !prev)}
            className="w-full flex items-center justify-between text-sm font-medium text-text-primary"
          >
-@@ -580,6 +591,7 @@ export default function AppCatalogPage() {
+@@ -580,6 +592,7 @@ export default function AppCatalogPage() {
          {isCategoriesSectionOpen && (
            <div className="max-h-[380px] overflow-y-auto pr-1 space-y-1">
              <button
@@ -100,7 +112,7 @@ index f818738c1..b604bd8f8 100644
                onClick={() => handleCategoryChange(null)}
                className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
                  selectedCategory === null
-@@ -594,6 +606,7 @@ export default function AppCatalogPage() {
+@@ -594,6 +607,7 @@ export default function AppCatalogPage() {
              {(categoriesData?.categories || []).map((cat) => (
                <button
                  key={cat.category}
@@ -108,7 +120,7 @@ index f818738c1..b604bd8f8 100644
                  onClick={() => handleCategoryChange(cat.category)}
                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
                    selectedCategory === cat.category
-@@ -638,14 +651,14 @@ export default function AppCatalogPage() {
+@@ -638,14 +652,14 @@ export default function AppCatalogPage() {
            <div className="absolute right-0 top-0 h-28 w-28 md:h-40 md:w-40 bg-gradient-to-bl from-accent-violet/10 via-accent-cyan/5 to-transparent blur-2xl" />
  
            <div className="relative">
@@ -126,7 +138,7 @@ index f818738c1..b604bd8f8 100644
                </Link>
                <span className="inline-flex items-center gap-2 rounded-full border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
                  <Package className="w-4 h-4 text-accent-cyan" />
-@@ -673,6 +686,7 @@ export default function AppCatalogPage() {
+@@ -673,6 +687,7 @@ export default function AppCatalogPage() {
  
                <div className="flex items-center gap-2 self-end lg:self-auto">
                  <button
@@ -134,7 +146,7 @@ index f818738c1..b604bd8f8 100644
                    ref={mobileFilterTriggerRef}
                    onClick={() => setIsMobileFiltersOpen(true)}
                    className="lg:hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-overlay/10 bg-bg-surface text-sm text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-colors"
-@@ -756,19 +770,11 @@ export default function AppCatalogPage() {
+@@ -756,19 +771,11 @@ export default function AppCatalogPage() {
                    </>
                  ) : (
                    <>
@@ -155,7 +167,7 @@ index f818738c1..b604bd8f8 100644
                {!showSearchResults && (
                  <span className="inline-flex items-center gap-2 rounded-lg border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
                    <Package className="w-4 h-4 text-accent-cyan" />
-@@ -835,13 +841,13 @@ export default function AppCatalogPage() {
+@@ -835,13 +842,13 @@ export default function AppCatalogPage() {
                  onClick={() => setSearchQuery('')}
                  className="px-4 py-2 text-sm font-medium text-text-primary bg-bg-elevated hover:bg-overlay/5 rounded-lg border border-overlay/10 transition-colors"
                >
@@ -171,7 +183,7 @@ index f818738c1..b604bd8f8 100644
                </button>
              </div>
            </div>
-@@ -862,7 +868,7 @@ export default function AppCatalogPage() {
+@@ -862,7 +869,7 @@ export default function AppCatalogPage() {
                        onClick={() => setSelectedCategory(null)}
                        className="text-text-secondary hover:text-accent-cyan transition-colors"
                      >
@@ -180,7 +192,7 @@ index f818738c1..b604bd8f8 100644
                      </button>
                      <ChevronRight className="w-3.5 h-3.5 text-text-muted" />
                      <span className="text-text-primary font-medium">{activeCategoryLabel}</span>
-@@ -881,10 +887,10 @@ export default function AppCatalogPage() {
+@@ -881,10 +888,10 @@ export default function AppCatalogPage() {
  
                      <h2 className="text-xl font-bold tracking-tight text-text-primary">
                        {showSearchResults
@@ -193,7 +205,12 @@ index f818738c1..b604bd8f8 100644
                      </h2>
                    </div>
                    {!showSearchResults && (
-@@ -963,7 +969,7 @@ export default function AppCatalogPage() {
+@@ -959,11 +966,11 @@ export default function AppCatalogPage() {
+             </div>
+           </div>
+ 
+-          {isMobileFiltersOpen && (
++          {isMobileFiltersOpen && createPortal(
              <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-labelledby="mobile-filters-title">
                <button
                  aria-label="Close filters"
@@ -202,7 +219,14 @@ index f818738c1..b604bd8f8 100644
                  onClick={() => {
                    setIsMobileFiltersOpen(false);
                    mobileFilterTriggerRef.current?.focus();
-@@ -993,7 +999,7 @@ export default function AppCatalogPage() {
+@@ -987,13 +994,13 @@ export default function AppCatalogPage() {
+                   {renderFilterPanel()}
+                 </div>
+               </div>
+-            </div>
++            </div>, document.body
+           )}
+         </>
        )}
  
        {isCustomAppModalOpen && (
@@ -211,7 +235,7 @@ index f818738c1..b604bd8f8 100644
        )}
  
        {deploymentIntentId &&
-@@ -1005,7 +1011,7 @@ export default function AppCatalogPage() {
+@@ -1005,7 +1012,7 @@ export default function AppCatalogPage() {
              aria-modal="true"
              aria-label="Loading selected catalog app"
            >
@@ -220,7 +244,7 @@ index f818738c1..b604bd8f8 100644
              <div className="absolute bottom-0 right-0 top-0 flex w-full max-w-2xl items-center justify-center border-l border-overlay/5 bg-bg-surface shadow-2xl">
                <div className="px-6 text-center" role="status" aria-live="polite">
                  <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-accent-cyan motion-reduce:animate-none" aria-hidden="true" />
-@@ -1033,7 +1039,7 @@ export default function AppCatalogPage() {
+@@ -1033,7 +1040,7 @@ export default function AppCatalogPage() {
  
        {selectedPackage && ((isSelectedStoreApp && isLoadingStoreManifest) || (!isSelectedStoreApp && isLoadingInstallers) || (isSelectedDeployed && isLoadingDeployedConfig)) && (
          <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="Loading package details">
@@ -229,7 +253,7 @@ index f818738c1..b604bd8f8 100644
            <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/5 shadow-2xl flex items-center justify-center animate-slide-in-right">
              <div className="text-center">
                <div className="relative">
-@@ -1048,7 +1054,7 @@ export default function AppCatalogPage() {
+@@ -1048,7 +1055,7 @@ export default function AppCatalogPage() {
  
        {selectedPackage && !isSelectedStoreApp && !isLoadingInstallers && selectedInstallers.length === 0 && (
          <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="No installers found">
@@ -238,7 +262,7 @@ index f818738c1..b604bd8f8 100644
            <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/5 shadow-2xl flex items-center justify-center animate-slide-in-right">
              <div className="text-center px-6">
                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-status-error/10 flex items-center justify-center">
-@@ -1089,7 +1095,7 @@ export default function AppCatalogPage() {
+@@ -1089,7 +1096,7 @@ export default function AppCatalogPage() {
              onClick={handleSelectAllVisible}
              className="text-sm text-text-secondary hover:text-accent-cyan transition-colors whitespace-nowrap"
            >
@@ -247,7 +271,7 @@ index f818738c1..b604bd8f8 100644
            </button>
            <button
              onClick={handleClearBulkSelection}
-@@ -1111,7 +1117,7 @@ export default function AppCatalogPage() {
+@@ -1111,7 +1118,7 @@ export default function AppCatalogPage() {
              ) : (
                <>
                  <Check className="w-4 h-4" />
@@ -257,10 +281,10 @@ index f818738c1..b604bd8f8 100644
              )}
            </button>
 diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
-index bade6e949..8cc952981 100644
+index bade6e949..7f4313f2f 100644
 --- a/app/(app)/dashboard/layout.tsx
 +++ b/app/(app)/dashboard/layout.tsx
-@@ -1,7 +1,7 @@
+@@ -1,10 +1,10 @@
  'use client';
  
  import { useRouter } from 'next/navigation';
@@ -268,7 +292,11 @@ index bade6e949..8cc952981 100644
 +import { useCallback, useEffect, useRef, useState } from 'react';
  import { motion, useReducedMotion } from 'framer-motion';
  import {
-   ShoppingCart,
+-  ShoppingCart,
++  ListChecks,
+   AlertTriangle,
+   RefreshCw,
+   Loader2,
 @@ -12,28 +12,33 @@ import {
  import { T } from 'gt-next';
  import { Button } from '@/components/ui/button';
@@ -392,7 +420,7 @@ index bade6e949..8cc952981 100644
                </kbd>
              </button>
              <div className="flex-1 lg:hidden" />
-@@ -177,12 +196,12 @@ export default function DashboardLayout({
+@@ -177,15 +196,16 @@ export default function DashboardLayout({
              <div className="flex min-w-0 items-center gap-1 sm:gap-3">
                <TenantSwitcher />
                <DeploymentStatusIndicator />
@@ -403,11 +431,16 @@ index bade6e949..8cc952981 100644
                  variant="ghost"
                  onClick={toggleCart}
 -                aria-label={cartItemCount > 0 ? `Deployment cart, ${cartItemCount} items` : 'Deployment cart'}
++                title="Deployment list"
 +                aria-label={cartItemCount > 0 ? `Deployment list, ${cartItemCount} items` : 'Deployment list'}
                  className="relative h-11 w-11 shrink-0 px-0 text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-all"
                >
-                 <ShoppingCart className="w-5 h-5" />
-@@ -239,12 +258,13 @@ export default function DashboardLayout({
+-                <ShoppingCart className="w-5 h-5" />
++                <ListChecks className="w-5 h-5" />
+                 {cartItemCount > 0 && (
+                   <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-accent-cyan to-accent-violet text-bg-elevated text-xs font-medium rounded-full flex items-center justify-center shadow-glow-cyan animate-scale-in">
+                     {cartItemCount}
+@@ -239,12 +259,13 @@ export default function DashboardLayout({
                <div className="flex items-start sm:items-center gap-3 min-w-0">
                  <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5 sm:mt-0" />
                  <div className="min-w-0">
@@ -424,7 +457,7 @@ index bade6e949..8cc952981 100644
                        : <T>Please check your connection and try again.</T>}
                    </p>
                  </div>
-@@ -273,6 +293,7 @@ export default function DashboardLayout({
+@@ -273,6 +294,7 @@ export default function DashboardLayout({
  
          {/* Page content */}
          <main className="p-4 lg:p-6 relative">
@@ -432,7 +465,7 @@ index bade6e949..8cc952981 100644
            {children}
          </main>
        </motion.div>
-@@ -281,11 +302,11 @@ export default function DashboardLayout({
+@@ -281,11 +303,11 @@ export default function DashboardLayout({
        {(isCartOpen || cartLoaded) && <UploadCart />}
  
        {/* Command Palette */}
@@ -1617,7 +1650,7 @@ index 8b7cfe81a..18839a80a 100644
  
  function isStoredSettings(value: unknown): value is Record<string, unknown> {
 diff --git a/app/globals.css b/app/globals.css
-index d1fdf2c7d..c1545fc5e 100644
+index d1fdf2c7d..1f81add45 100644
 --- a/app/globals.css
 +++ b/app/globals.css
 @@ -100,11 +100,11 @@ pre {
@@ -1868,7 +1901,7 @@ index d1fdf2c7d..c1545fc5e 100644
    }
  }
  
-@@ -652,3 +659,33 @@ pre {
+@@ -652,3 +659,36 @@ pre {
    outline: 2px solid var(--focus-ring);
    outline-offset: 2px;
  }
@@ -1902,6 +1935,9 @@ index d1fdf2c7d..c1545fc5e 100644
 +[cmdk-input]:focus-visible {
 +  outline: none;
 +}
++
++/* Darker amber keeps warning copy legible on light dashboard surfaces. */
++:root:not(.dark) .text-status-warning { color: #854d0e; }
 diff --git a/app/layout.tsx b/app/layout.tsx
 index 517010b3f..dd5d02974 100644
 --- a/app/layout.tsx
@@ -2029,7 +2065,7 @@ index 27c710577..776a9b69c 100644
        />
      </>
 diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
-index 33d0890cc..664243e11 100644
+index 33d0890cc..d75bdad0c 100644
 --- a/components/dashboard/CommandPalette.tsx
 +++ b/components/dashboard/CommandPalette.tsx
 @@ -2,8 +2,9 @@
@@ -2043,7 +2079,7 @@ index 33d0890cc..664243e11 100644
  import {
    LayoutDashboard,
    Package,
-@@ -13,50 +14,50 @@ import {
+@@ -13,50 +14,51 @@ import {
    ArrowUpCircle,
    BarChart3,
    Settings,
@@ -2052,6 +2088,7 @@ index 33d0890cc..664243e11 100644
 +  LifeBuoy,
    Search,
    Keyboard,
++  X,
  } from 'lucide-react';
 -import { SHORTCUT_HINTS } from '@/hooks/useKeyboardShortcuts';
 +import { SHORTCUT_HINTS, useModifierKeyLabel } from '@/hooks/useKeyboardShortcuts';
@@ -2121,7 +2158,7 @@ index 33d0890cc..664243e11 100644
  
    const handleSelect = useCallback(
      (href: string) => {
-@@ -66,29 +67,29 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -66,37 +68,38 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
      [onOpenChange, router]
    );
  
@@ -2166,8 +2203,9 @@ index 33d0890cc..664243e11 100644
 +              aria-label="Find a page or guide"
                className="flex-1 py-3 text-sm bg-transparent text-text-primary placeholder:text-text-muted outline-none"
              />
++            <Dialog.Close aria-label="Close search" className="grid size-11 place-items-center rounded-md text-text-secondary sm:hidden"><X className="size-4" /></Dialog.Close>
              <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-text-muted bg-overlay/10 rounded border border-overlay/5">
-@@ -96,7 +97,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+               ESC
              </kbd>
            </div>
  
@@ -2176,7 +2214,7 @@ index 33d0890cc..664243e11 100644
              <Command.Empty className="py-6 text-center text-sm text-text-muted">
                <T>No results found</T>
              </Command.Empty>
-@@ -106,9 +107,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -106,9 +109,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                heading={<T>Navigation</T>}
                className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
              >
@@ -2188,7 +2226,7 @@ index 33d0890cc..664243e11 100644
                    value={`${item.name} ${item.keywords}`}
                    onSelect={() => handleSelect(item.href)}
                    className="flex items-center gap-3 px-2 py-2 text-sm text-text-secondary rounded-lg cursor-pointer data-[selected=true]:bg-overlay/5 data-[selected=true]:text-text-primary transition-colors"
-@@ -122,7 +123,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -122,7 +125,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
              {/* Keyboard shortcuts group */}
              {!search && (
                <Command.Group
@@ -2197,7 +2235,7 @@ index 33d0890cc..664243e11 100644
                  className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:mt-2"
                >
                  {SHORTCUT_HINTS.map((hint) => (
-@@ -142,7 +143,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -142,7 +145,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                            key={key}
                            className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5"
                          >
@@ -2206,7 +2244,7 @@ index 33d0890cc..664243e11 100644
                          </kbd>
                        ))}
                      </div>
-@@ -151,8 +152,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -151,8 +154,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                </Command.Group>
              )}
            </Command.List>
@@ -2220,7 +2258,7 @@ index 33d0890cc..664243e11 100644
    );
  }
 diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
-index e941306a7..235dc91ac 100644
+index e941306a7..78610833d 100644
 --- a/components/dashboard/Sidebar.tsx
 +++ b/components/dashboard/Sidebar.tsx
 @@ -2,6 +2,7 @@
@@ -2341,7 +2379,7 @@ index e941306a7..235dc91ac 100644
 +  );
  
 -  const sidebarContent = (
-+  const renderSidebar = (isCollapsed: boolean) => (
++  const renderSidebar = (isCollapsed: boolean, mobile = false) => (
      <div className="flex flex-col h-full">
        {/* Logo */}
        <div className={cn(
@@ -2390,7 +2428,15 @@ index e941306a7..235dc91ac 100644
                        >
                          <T>{group.label}</T>
                        </motion.span>
-@@ -252,40 +287,20 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -243,6 +278,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+       {/* User section */}
+       <SidebarUserSection
+         user={user}
++        mobile={mobile}
+         isCollapsed={isCollapsed}
+         onSignOut={onSignOut}
+         onNavigate={closeMobile}
+@@ -252,40 +288,20 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
  
    return (
      <TooltipProvider delayDuration={0}>
@@ -2438,14 +2484,14 @@ index e941306a7..235dc91ac 100644
 +          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
 +          <Dialog.Content aria-describedby={undefined} className="fixed inset-y-0 left-0 z-50 w-64 max-w-[90vw] border-r border-overlay/10 bg-bg-surface shadow-lg focus:outline-none">
 +            <Dialog.Title className="sr-only">Navigation</Dialog.Title>
-+            {renderSidebar(false)}
++            {renderSidebar(false, true)}
 +          </Dialog.Content>
 +        </Dialog.Portal>
 +      </Dialog.Root>
  
        {/* Desktop sidebar */}
        <motion.aside
-@@ -294,7 +309,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -294,7 +310,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
          transition={prefersReducedMotion ? { duration: 0 } : springPresets.snappy}
        >
          <div className="absolute top-0 right-0 bottom-0 w-px bg-gradient-to-b from-accent-cyan/30 via-accent-violet/20 to-transparent" />
@@ -2455,7 +2501,7 @@ index e941306a7..235dc91ac 100644
      </TooltipProvider>
    );
 diff --git a/components/dashboard/SidebarUserSection.tsx b/components/dashboard/SidebarUserSection.tsx
-index d834efe1b..8c812bc33 100644
+index d834efe1b..37e2e2629 100644
 --- a/components/dashboard/SidebarUserSection.tsx
 +++ b/components/dashboard/SidebarUserSection.tsx
 @@ -2,7 +2,7 @@
@@ -2467,7 +2513,7 @@ index d834efe1b..8c812bc33 100644
  import Link from 'next/link';
  import { usePathname } from 'next/navigation';
  import { cn } from '@/lib/utils';
-@@ -20,6 +20,7 @@ import {
+@@ -20,16 +20,19 @@ import {
    TooltipTrigger,
    TooltipContent,
  } from '@/components/ui/tooltip';
@@ -2475,7 +2521,19 @@ index d834efe1b..8c812bc33 100644
  
  interface SidebarUserSectionProps {
    user: { id?: string; name?: string | null; email?: string | null } | null;
-@@ -66,7 +67,7 @@ export function SidebarUserSection({
+   isCollapsed: boolean;
++  mobile?: boolean;
+   onSignOut: () => void;
+   onNavigate?: () => void;
+ }
+ 
+ export function SidebarUserSection({
+   user,
++  mobile = false,
+   isCollapsed,
+   onSignOut,
+   onNavigate,
+@@ -66,7 +69,7 @@ export function SidebarUserSection({
            <Tooltip delayDuration={0}>
              <TooltipTrigger asChild>
                <DropdownMenuTrigger asChild>
@@ -2484,7 +2542,7 @@ index d834efe1b..8c812bc33 100644
                    {avatar}
                  </button>
                </DropdownMenuTrigger>
-@@ -88,19 +89,16 @@ export function SidebarUserSection({
+@@ -88,19 +91,16 @@ export function SidebarUserSection({
                </div>
              </DropdownMenuLabel>
              <DropdownMenuSeparator />
@@ -2508,7 +2566,7 @@ index d834efe1b..8c812bc33 100644
              <DropdownMenuItem onClick={onSignOut}>
                <LogOut className="w-4 h-4 mr-2" />
                <T>Sign out</T>
-@@ -115,7 +113,7 @@ export function SidebarUserSection({
+@@ -115,7 +115,7 @@ export function SidebarUserSection({
      <div className="p-3 border-t border-overlay/5">
        <DropdownMenu>
          <DropdownMenuTrigger asChild>
@@ -2517,7 +2575,19 @@ index d834efe1b..8c812bc33 100644
              {avatar}
              <AnimatePresence mode="wait">
                {!isCollapsed && (
-@@ -158,21 +156,10 @@ export function SidebarUserSection({
+@@ -144,8 +144,9 @@ export function SidebarUserSection({
+           </button>
+         </DropdownMenuTrigger>
+         <DropdownMenuContent
+-          side="right"
+-          align="end"
++          side={mobile ? "top" : "right"}
++          align={mobile ? "start" : "end"}
++          collisionPadding={8}
+           sideOffset={12}
+           className="w-56"
+         >
+@@ -158,21 +159,10 @@ export function SidebarUserSection({
              </div>
            </DropdownMenuLabel>
            <DropdownMenuSeparator />
@@ -2541,7 +2611,7 @@ index d834efe1b..8c812bc33 100644
                onClick={onNavigate}
                className={cn(
                  pathname.startsWith('/dashboard/settings') && 'text-accent-cyan'
-@@ -183,6 +170,8 @@ export function SidebarUserSection({
+@@ -183,6 +173,8 @@ export function SidebarUserSection({
              </Link>
            </DropdownMenuItem>
            <DropdownMenuSeparator />

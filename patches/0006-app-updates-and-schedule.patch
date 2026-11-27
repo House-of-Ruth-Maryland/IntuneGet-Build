@@ -16,7 +16,7 @@ index 7987a53b6..5b0d405c9 100644
    );
  }
 diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
-index b5d2996a2..0edbec7c1 100644
+index b5d2996a2..f7ed2a8ec 100644
 --- a/app/(app)/dashboard/updates/page.tsx
 +++ b/app/(app)/dashboard/updates/page.tsx
 @@ -1,6 +1,12 @@
@@ -694,11 +694,13 @@ index b5d2996a2..0edbec7c1 100644
                          updateTypeFilter
                            ? 'bg-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/30 border border-accent-cyan/20'
                            : 'text-text-secondary hover:text-text-primary'
-@@ -888,9 +954,10 @@ export default function UpdatesPage() {
+@@ -887,10 +953,11 @@ export default function UpdatesPage() {
+                       {updateTypeFilter ? <T>{updateTypeFilter.charAt(0).toUpperCase() + updateTypeFilter.slice(1)}</T> : <T>Type</T>}
                      </Button>
                    </DropdownMenuTrigger>
-                   <DropdownMenuContent align="end" className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
+-                  <DropdownMenuContent align="end" className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
 -                    <DropdownMenuLabel className="text-[11px] text-text-muted uppercase tracking-wide"><T>Update Type</T></DropdownMenuLabel>
++                  <DropdownMenuContent align="end" collisionPadding={8} className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
 +                    <DropdownMenuLabel className="text-[11px] text-text-muted uppercase tracking-wide"><T>Update type</T></DropdownMenuLabel>
                      <DropdownMenuSeparator className="bg-overlay/[0.06]" />
                      <DropdownMenuItem
@@ -748,8 +750,9 @@ index b5d2996a2..0edbec7c1 100644
 +                      {sortLabels[effectiveSort]}
                      </Button>
                    </DropdownMenuTrigger>
-                   <DropdownMenuContent align="end" className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
+-                  <DropdownMenuContent align="end" className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
 -                    <DropdownMenuLabel className="text-[11px] text-text-muted uppercase tracking-wide"><T>Sort By</T></DropdownMenuLabel>
++                  <DropdownMenuContent align="end" collisionPadding={8} className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
 +                    <DropdownMenuLabel className="text-[11px] text-text-muted uppercase tracking-wide"><T>Sort by</T></DropdownMenuLabel>
                      <DropdownMenuSeparator className="bg-overlay/[0.06]" />
 -                    {(Object.keys(sortLabels) as SortOption[]).map((option) => (

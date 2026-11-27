@@ -4608,7 +4608,7 @@ index 43ef55e76..0d0bd5fa8 100644
    });
  });
 diff --git a/components/ErrorDisplay.tsx b/components/ErrorDisplay.tsx
-index 086e99f85..4c0514bca 100644
+index 086e99f85..14a3f1916 100644
 --- a/components/ErrorDisplay.tsx
 +++ b/components/ErrorDisplay.tsx
 @@ -96,7 +96,10 @@ const errorCodeMessages: Record<string, string> = {
@@ -4646,6 +4646,15 @@ index 086e99f85..4c0514bca 100644
      message: blockedBeforeTest
        ? 'A security check stopped this deployment before the installation test ran.'
        : errorMessage?.includes('MANIFEST_CHANGED')
+@@ -190,7 +201,7 @@ export function ErrorDisplay({
+   return (
+     <div className="mt-4 p-4 bg-status-error/[0.07] border border-status-error/15 rounded-xl space-y-3">
+       {/* Header with stage and code */}
+-      <div className="flex items-start justify-between gap-3">
++      <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+         <div className="flex items-center gap-2">
+           <div className="w-8 h-8 rounded-lg bg-status-error/20 flex items-center justify-center">
+             <StageIcon className="w-4 h-4 text-status-error" />
 @@ -211,6 +222,9 @@ export function ErrorDisplay({
        {/* Main error message */}
        <div className="text-sm text-status-error/90">
@@ -9049,3 +9058,24 @@ index 366a1c73a..dcc22f90c 100644
        .eq('tenant_id', tenantResolution.tenantId)
        .eq('winget_id', wingetId)
        .eq('status', 'deployed');
+diff --git a/components/ProgressStepper.tsx b/components/ProgressStepper.tsx
+index 96ff97ad2..8919bff41 100644
+--- a/components/ProgressStepper.tsx
++++ b/components/ProgressStepper.tsx
+@@ -65,7 +65,7 @@ export function ProgressStepper({
+   return (
+     <div className="mt-5 space-y-3">
+       {/* Stage Stepper - Two Row Layout */}
+-      <div className="space-y-2">
++      <div className="overflow-x-auto pb-1"><div className="min-w-[32rem] space-y-2">
+         {/* Row 1: Circles and connector lines */}
+         <div className="flex items-center">
+           {stages.map((stage, index) => {
+@@ -172,6 +172,7 @@ export function ProgressStepper({
+         </div>
+       </div>
+ 
++      </div>
+       {/* Status Message and Time */}
+       <div className="flex items-center justify-between text-sm">
+         <div className="flex min-w-0 items-center gap-2" aria-live="polite" aria-atomic="true">
