@@ -12,7 +12,7 @@ The browser walkthrough renders the dashboard components with synthetic local da
 | Focus and touch | Verified initial palette input focus, focus restoration after Escape, the mobile sidebar focus trap and return to its opener, tooltip activation on a phone and keyboard, and return to the webhook opener. |
 | Screenshot coverage | 35 states × 2 sizes × 2 themes, before and after. Desktop is 1440 × 900. Phone is 390 × 844. |
 | Patch application | All 13 patches applied to the clean pinned upstream revision. Checked file ownership across patches and compared all 58 edited source files byte for byte with the tested tree. |
-| Full patched app check | TypeScript passed. Vitest passed 6,701 tests across 495 files. The suite skipped 203 tests and five files. |
+| Full patched app check | TypeScript passed. Vitest passed 6,702 tests across 495 files. The suite skipped 203 tests and five files. |
 | Visual review regressions | Twenty additional Chromium runs checked the account menu, update type menu, catalog filter header, search dismissal and Deployment list across both widths and themes. Phone checks verified menu bounds, touch hit-testing and the Close search action. |
 | Lint and production build | ESLint finished with zero errors and two existing warnings in the SCCM page and ManualUpdateReview. The Next.js production build passed using placeholder credentials. |
 | Repository Help review | The help-writer reviewed the dashboard menus, verified the labels and timer values, and synchronized Help and the illustrated steps. The final Help check found 547 on-screen labels. |
