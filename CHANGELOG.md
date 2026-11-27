@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Group change notices fixed (item 122 follow-up). After an Edit groups save, the app page's
+  "Groups or assignment settings changed" notice and App activity showed the group by its ID
+  instead of its Entra name. Saves in Edit groups now record the names
+  IntuneGet read, and any record made without a name lookup (Edit groups, Install dates,
+  retirement, old copy cleanup) reuses the names an earlier check found. A group whose name has
+  never been read still shows by its ID. A change waiting for review that ends where it started
+  (for example a group switched to Available and back to Required) now clears by itself, and a
+  saved notice whose Previously and Now sides match is never shown or listed in Group changes to
+  review. Adding a group in Edit groups is now recorded as a change made in IntuneGet, so the next
+  check no longer lists it for review. Null fields, default assignment settings, and an explicit no-filter
+  value that Intune fills in no longer count as changes. Help updated by help-writer.
+
 - Authorized IT staff in one tenant now share App updates, its counts and Home card, update policies,
   dismissals and update history. Manual update reviews and saved deployment settings use the tenant’s
   latest deployment, including a teammate’s deployment; App catalog deployment badges and MCP updates

@@ -4689,10 +4689,10 @@ index 000000000..0ffaa5f0b
 +});
 diff --git a/app/api/hrm/app-assignments/route.ts b/app/api/hrm/app-assignments/route.ts
 new file mode 100644
-index 000000000..2687851c7
+index 000000000..b0ac10ef1
 --- /dev/null
 +++ b/app/api/hrm/app-assignments/route.ts
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,227 @@
 +import { createHash } from 'node:crypto';
 +import { NextRequest, NextResponse } from 'next/server';
 +import { parseAccessToken } from '@/lib/auth-utils';
@@ -4771,10 +4771,25 @@ index 000000000..2687851c7
 +    if (!response.ok) throw new PilotError(response.status === 403 ? 'Intune denied assignment changes. Check app permissions.' : 'Intune did not confirm the save. Review again before retrying; the assignment may already exist.', response.status === 403 ? 403 : 424);
 +    const actual = await graph.assignments(app.id);
 +    if (!actual.some(row => row.target.groupId?.toLowerCase() === group.id.toLowerCase() && row.intent === body.intent)) throw new PilotError('Intune accepted the save, but the assignment is not visible yet. Refresh assignments before retrying.', 424);
++    // Record the save as made in IntuneGet, so the next check does not show it as a change to review.
++    await recordSave(tenantId, app, actual, { [group.id.toLowerCase()]: group.name }, `Group added as ${intentLabel(body.intent)} by ${user.userEmail || 'a staff member'}`);
 +    return reply({ success: true, assignments: actual });
 +  } catch (error) {
 +    return reply({ error: error instanceof PilotError ? error.message : 'Could not confirm the assignment. Review again before retrying; the assignment may already exist.' }, error instanceof PilotError ? error.status : 424);
 +  } finally { if (lock) saving.delete(lock); }
++}
++
++/**
++ * Saves the confirmed groups to App activity as a change made in IntuneGet (never a change to review),
++ * with the Entra names IntuneGet read; a name it couldn't read is taken from earlier checks.
++ */
++async function recordSave(tenantId: string, app: { id: string; displayName: string; displayVersion?: string }, actual: GraphAssignment[], names: Record<string, string>, actor: string) {
++  if (!isSqliteMode()) return;
++  try {
++    const { sqliteAppInsights: insights } = await import('@/lib/db/sqlite');
++    const family = insights.family(tenantId, app.id);
++    if (family) insights.observe(tenantId, { appId: app.id, wingetId: family, displayName: app.displayName, version: app.displayVersion ?? '', exists: true, assignments: summarizeAssignments(actual, names), checkedAt: new Date().toISOString() }, actor, true);
++  } catch { /* Optional activity must not hide a confirmed save. */ }
 +}
 +
 +const BASE = 'https://graph.microsoft.com/beta';
@@ -4804,14 +4819,7 @@ index 000000000..2687851c7
 +    if (actual.some(r => r.id === target.id)) throw new PilotError(failure, 424);
 +    return actual;
 +  };
-+  const record = async (actual: GraphAssignment[], note: string) => {
-+    if (!isSqliteMode()) return;
-+    try {
-+      const { sqliteAppInsights: insights } = await import('@/lib/db/sqlite');
-+      const family = insights.family(tenantId, app.id);
-+      if (family) insights.observe(tenantId, { appId: app.id, wingetId: family, displayName: app.displayName, version: app.displayVersion ?? '', exists: true, assignments: summarizeAssignments(actual), checkedAt: new Date().toISOString() }, `${note} by ${actor}`, true);
-+    } catch { /* Optional activity must not hide a confirmed save. */ }
-+  };
++  const record = (actual: GraphAssignment[], note: string) => recordSave(tenantId, app, actual, names, `${note} by ${actor}`);
 +
 +  if (change === 'remove') {
 +    if (!row) {
@@ -5365,23 +5373,27 @@ index 000000000..c7998df37
 +});
 diff --git a/app/api/hrm/app-assignments/route.groups.test.ts b/app/api/hrm/app-assignments/route.groups.test.ts
 new file mode 100644
-index 000000000..ac0d38e88
+index 000000000..cdcf83567
 --- /dev/null
 +++ b/app/api/hrm/app-assignments/route.groups.test.ts
-@@ -0,0 +1,318 @@
+@@ -0,0 +1,384 @@
 +// Edit groups: removing one group and switching one group between Required and Available.
 +// Fake Graph only. Every test checks the exact writes. A removal deletes one assignment. A switch
 +// saves the whole list once (Intune refuses a group as Required and Available together), and
 +// every other group must go back exactly as it was read.
 +import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 +import { NextRequest } from 'next/server';
-+const state = vi.hoisted(() => ({ sqlite: false, retiring: false, pilot: false }));
++const state = vi.hoisted(() => ({ sqlite: false, retiring: false, pilot: false, insights: { family: () => null, observe: () => {} } as unknown }));
 +vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => ({ userId: 'staff', tenantId: 'tenant', userEmail: 'admin@example.test' }) }));
 +vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
 +vi.mock('@/lib/db', () => ({ isSqliteMode: () => state.sqlite }));
-+vi.mock('@/lib/db/sqlite', () => ({ sqliteRetirements: { holdsApp: () => state.retiring }, sqlitePilotRollouts: { holdsApp: () => state.pilot, active: () => false }, sqliteAppInsights: { family: () => null, observe: () => {} } }));
++vi.mock('@/lib/db/sqlite', () => ({ sqliteRetirements: { holdsApp: () => state.retiring }, sqlitePilotRollouts: { holdsApp: () => state.pilot, active: () => false }, get sqliteAppInsights() { return state.insights; } }));
 +vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'fixture-token' }));
 +vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: async () => ({ tenantId: 'tenant', errorResponse: null }) }));
++import Database from 'better-sqlite3';
++import { runSqliteMigrations } from '@/lib/db/sqlite-migrations';
++import { createAppInsightsStore } from '@/lib/hrm/app-insights-store';
++import { hasUnreviewedChange, summarizeAssignments } from '@/lib/hrm/app-insights';
 +import { POST } from './route';
 +
 +const APP = '10000000-0000-0000-0000-000000000001';
@@ -5402,7 +5414,7 @@ index 000000000..ac0d38e88
 +  inUseSettings: { countdownMinutes: 10, minutesBetweenDeferrals: 30, numberOfDeferrals: 3 } };
 +
 +beforeEach(() => {
-+  state.sqlite = false; state.retiring = false; state.pilot = false;
++  state.sqlite = false; state.retiring = false; state.pilot = false; state.insights = { family: () => null, observe: () => {} };
 +  rows = [
 +    { id: 'pilot', intent: 'required', source: 'direct', target: { ...group(G1), deviceAndAppManagementAssignmentFilterId: 'filter-1', deviceAndAppManagementAssignmentFilterType: 'include' }, settings: structuredClone(full) },
 +    { id: 'staff', intent: 'required', source: 'direct', target: group(G2), settings: { '@odata.type': SETTINGS, notifications: 'showAll', futureSetting: { keep: true } }, futureRoot: 1 },
@@ -5686,6 +5698,68 @@ index 000000000..ac0d38e88
 +  vi.mocked(fetch).mockImplementation(async (url, init) => String(url).endsWith('/assignments') && !init?.method ? Response.json({ value: rows, '@odata.nextLink': 'https://example.invalid/next' }) : impl(url, init));
 +  expect((await json({ action: 'review', change: 'remove', assignmentId: 'pilot' })).status).toBe(424);
 +  expect(writes()).toEqual([]);
++});
++
++// ---- App activity (item 122) ----
++const names = { [G1]: 'Group 1', [G2]: 'Group 2', [G3]: 'Group 3' };
++function realInsights() {
++  const db = new Database(':memory:'); runSqliteMigrations(db);
++  db.prepare(`INSERT INTO upload_history (id, user_id, winget_id, version, display_name, intune_app_id, intune_tenant_id, deployed_at) VALUES ('d1', 'staff', 'Example.App', '1.2', 'Example app', ?, 'tenant', '2026-01-01T10:00:00Z')`).run(APP);
++  const store = createAppInsightsStore(() => db);
++  state.sqlite = true; state.insights = store;
++  // The 3:30 check, which reads group names.
++  store.observe('tenant', { appId: APP, wingetId: 'Example.App', displayName: 'Example app', exists: true, version: '1.2', assignments: summarizeAssignments(rows, names), checkedAt: '2026-01-01T12:00:00Z' });
++  return store;
++}
++const switchTo = async (intent: 'required' | 'available') => {
++  const id = rows.find(row => (row.target as { groupId: string }).groupId === G1)!.id;
++  const r = await review({ change: 'switch', assignmentId: id, intent });
++  expect((await json({ action: 'save', change: 'switch', assignmentId: id, intent, token: r.token })).success).toBe(true);
++};
++it('records an Edit groups save with group names, not IDs, and as a change made in IntuneGet', async () => {
++  plain(); rows[0].settings = { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured' };
++  const store = realInsights();
++  await switchTo('available');
++  const snapshot = store.snapshot('tenant', APP)!;
++  expect(snapshot.assignments.map(a => a.label).join('\n')).not.toMatch(/Group 2000/);
++  expect(snapshot.assignments.some(a => a.label.startsWith('Group 1 · Available'))).toBe(true);
++  expect(hasUnreviewedChange(snapshot)).toBe(false);
++  expect(store.alerts('tenant')).toEqual([]);
++  expect(store.activity('tenant', 'Example.App')[0]).toMatchObject({ title: 'Groups or assignment settings changed', actor: 'Group switched to Available by admin@example.test' });
++  expect(store.activity('tenant', 'Example.App')[0].detail).not.toMatch(/Group 2000/);
++});
++it('shows no change to review after a group is switched to Available and back while an earlier change waits', async () => {
++  plain(); rows[0].settings = { '@odata.type': SETTINGS, notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured' };
++  const store = realInsights();
++  // Someone changed another group's notifications in Intune; a check saw it and it waits for review.
++  const changed = rows.map(r => r.id === 'staff' ? { ...r, settings: { ...(r.settings as object), notifications: 'hideAll' } } : r);
++  store.observe('tenant', { appId: APP, wingetId: 'Example.App', displayName: 'Example app', exists: true, version: '1.2', assignments: summarizeAssignments(changed, names), checkedAt: '2026-01-01T13:00:00Z' });
++  expect(store.alerts('tenant')).toHaveLength(1);
++  // It is put back in Intune, then the pilot group is switched to Available and back in IntuneGet.
++  await switchTo('available');
++  expect(hasUnreviewedChange(store.snapshot('tenant', APP)!)).toBe(true); // Intune's change still differs
++  await switchTo('required');
++  const snapshot = store.snapshot('tenant', APP)!;
++  expect(snapshot.change).toBeNull();
++  expect(store.alerts('tenant')).toEqual([]);
++});
++it('records a group added in Edit groups as a change made in IntuneGet', async () => {
++  plain(); rows = rows.filter(r => r.id !== 'pilot');
++  const store = realInsights();
++  const impl = vi.mocked(fetch).getMockImplementation()!;
++  vi.mocked(fetch).mockImplementation(async (url, init) => {
++    if (!String(url).endsWith('/assignments') || init?.method !== 'POST') return impl(url, init);
++    const input = JSON.parse(init.body as string);
++    rows.push({ id: 'added', source: 'direct', ...input });
++    return Response.json(input, { status: 201 });
++  });
++  const r = (await json({ action: 'review', groupId: G1, intent: 'required' })).review;
++  expect((await json({ action: 'save', groupId: G1, intent: 'required', token: r.token })).success).toBe(true);
++  const snapshot = store.snapshot('tenant', APP)!;
++  expect(snapshot.revision).toBe(1);
++  expect(hasUnreviewedChange(snapshot)).toBe(false);
++  expect(snapshot.assignments.some(a => a.label.startsWith('Group 1 · Required'))).toBe(true);
++  expect(store.activity('tenant', 'Example.App')[0].actor).toBe('Group added as Required by admin@example.test');
 +});
 diff --git a/components/hrm/TimingFields.tsx b/components/hrm/TimingFields.tsx
 new file mode 100644
