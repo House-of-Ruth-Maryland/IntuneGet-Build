@@ -3528,3 +3528,40 @@ index 4bc758c5c..878287ada 100644
    claimStatus?: ClaimStatus;
    lastSynced: string;
  }
+diff --git a/app/api/intune/apps/deployed/route.test.ts b/app/api/intune/apps/deployed/route.test.ts
+index e6c675346..e6b3044bb 100644
+--- a/app/api/intune/apps/deployed/route.test.ts
++++ b/app/api/intune/apps/deployed/route.test.ts
+@@ -95,9 +95,9 @@ describe('GET /api/intune/apps/deployed', () => {
+     expect(body.count).toBe(2);
+     expect(
+       operations.some(
+-        (op) => op.method === 'eq' && op.args[0] === 'user_id' && op.args[1] === 'user-1'
++        (op) => op.method === 'eq' && op.args[0] === 'user_id'
+       )
+-    ).toBe(true);
++    ).toBe(false);
+     expect(
+       operations.some(
+         (op) => op.method === 'eq' && op.args[0] === 'intune_tenant_id' && op.args[1] === 'tenant-home'
+diff --git a/app/api/intune/apps/deployed/route.ts b/app/api/intune/apps/deployed/route.ts
+index b013b2c71..5979bcc35 100644
+--- a/app/api/intune/apps/deployed/route.ts
++++ b/app/api/intune/apps/deployed/route.ts
+@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
+         });
+       }
+ 
+-      const history = await getDatabase().uploadHistory.getByUserId(user.userId);
++      const history = await getDatabase().uploadHistory.currentDeployments(user.tenantId);
+       const deployedWingetIds = Array.from(new Set(history.map((row) => row.winget_id)));
+       return NextResponse.json({ deployedWingetIds, count: deployedWingetIds.length });
+     }
+@@ -98,7 +98,6 @@ export async function GET(request: NextRequest) {
+     const { data, error } = await supabase
+       .from('upload_history')
+       .select('winget_id')
+-      .eq('user_id', user.userId)
+       .eq('intune_tenant_id', tenantResolution.tenantId);
+ 
+     if (error) {
