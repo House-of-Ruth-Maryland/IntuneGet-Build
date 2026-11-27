@@ -16,7 +16,7 @@ index 13c7c31f8..34e7b2627 100644
    );
  }
 diff --git a/app/(app)/dashboard/apps/page.tsx b/app/(app)/dashboard/apps/page.tsx
-index f818738c1..eedc84b27 100644
+index f818738c1..21cbdadae 100644
 --- a/app/(app)/dashboard/apps/page.tsx
 +++ b/app/(app)/dashboard/apps/page.tsx
 @@ -3,6 +3,7 @@
@@ -78,7 +78,28 @@ index f818738c1..eedc84b27 100644
                </Link>
                <span className="inline-flex items-center gap-2 rounded-full border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
                  <Package className="w-4 h-4 text-accent-cyan" />
-@@ -835,13 +844,13 @@ export default function AppCatalogPage() {
+@@ -756,19 +765,11 @@ export default function AppCatalogPage() {
+                   </>
+                 ) : (
+                   <>
+-                    <T>Sorting</T> <span className="font-medium text-text-primary">{activeSortLabel}</span>
+-                    <T>across all packages</T>
++                    <T>All apps</T>
+                   </>
+                 )}
+               </span>
+ 
+-              {!showSearchResults && (
+-                <span className="hidden lg:inline-flex items-center gap-2 rounded-lg border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
+-                  <ArrowUpDown className="w-4 h-4 text-accent-cyan" />
+-                  <T>Sort</T> <span className="font-medium text-text-primary">{activeSortLabel}</span>
+-                </span>
+-              )}
+-
+               {!showSearchResults && (
+                 <span className="inline-flex items-center gap-2 rounded-lg border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
+                   <Package className="w-4 h-4 text-accent-cyan" />
+@@ -835,13 +836,13 @@ export default function AppCatalogPage() {
                  onClick={() => setSearchQuery('')}
                  className="px-4 py-2 text-sm font-medium text-text-primary bg-bg-elevated hover:bg-overlay/5 rounded-lg border border-overlay/10 transition-colors"
                >
@@ -94,7 +115,7 @@ index f818738c1..eedc84b27 100644
                </button>
              </div>
            </div>
-@@ -862,7 +871,7 @@ export default function AppCatalogPage() {
+@@ -862,7 +863,7 @@ export default function AppCatalogPage() {
                        onClick={() => setSelectedCategory(null)}
                        className="text-text-secondary hover:text-accent-cyan transition-colors"
                      >
@@ -103,7 +124,7 @@ index f818738c1..eedc84b27 100644
                      </button>
                      <ChevronRight className="w-3.5 h-3.5 text-text-muted" />
                      <span className="text-text-primary font-medium">{activeCategoryLabel}</span>
-@@ -881,10 +890,10 @@ export default function AppCatalogPage() {
+@@ -881,10 +882,10 @@ export default function AppCatalogPage() {
  
                      <h2 className="text-xl font-bold tracking-tight text-text-primary">
                        {showSearchResults
@@ -116,7 +137,7 @@ index f818738c1..eedc84b27 100644
                      </h2>
                    </div>
                    {!showSearchResults && (
-@@ -963,7 +972,7 @@ export default function AppCatalogPage() {
+@@ -963,7 +964,7 @@ export default function AppCatalogPage() {
              <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-labelledby="mobile-filters-title">
                <button
                  aria-label="Close filters"
@@ -125,7 +146,7 @@ index f818738c1..eedc84b27 100644
                  onClick={() => {
                    setIsMobileFiltersOpen(false);
                    mobileFilterTriggerRef.current?.focus();
-@@ -993,7 +1002,7 @@ export default function AppCatalogPage() {
+@@ -993,7 +994,7 @@ export default function AppCatalogPage() {
        )}
  
        {isCustomAppModalOpen && (
@@ -134,7 +155,7 @@ index f818738c1..eedc84b27 100644
        )}
  
        {deploymentIntentId &&
-@@ -1005,7 +1014,7 @@ export default function AppCatalogPage() {
+@@ -1005,7 +1006,7 @@ export default function AppCatalogPage() {
              aria-modal="true"
              aria-label="Loading selected catalog app"
            >
@@ -143,7 +164,7 @@ index f818738c1..eedc84b27 100644
              <div className="absolute bottom-0 right-0 top-0 flex w-full max-w-2xl items-center justify-center border-l border-overlay/5 bg-bg-surface shadow-2xl">
                <div className="px-6 text-center" role="status" aria-live="polite">
                  <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-accent-cyan motion-reduce:animate-none" aria-hidden="true" />
-@@ -1033,7 +1042,7 @@ export default function AppCatalogPage() {
+@@ -1033,7 +1034,7 @@ export default function AppCatalogPage() {
  
        {selectedPackage && ((isSelectedStoreApp && isLoadingStoreManifest) || (!isSelectedStoreApp && isLoadingInstallers) || (isSelectedDeployed && isLoadingDeployedConfig)) && (
          <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="Loading package details">
@@ -152,7 +173,7 @@ index f818738c1..eedc84b27 100644
            <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/5 shadow-2xl flex items-center justify-center animate-slide-in-right">
              <div className="text-center">
                <div className="relative">
-@@ -1048,7 +1057,7 @@ export default function AppCatalogPage() {
+@@ -1048,7 +1049,7 @@ export default function AppCatalogPage() {
  
        {selectedPackage && !isSelectedStoreApp && !isLoadingInstallers && selectedInstallers.length === 0 && (
          <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="No installers found">
@@ -161,7 +182,7 @@ index f818738c1..eedc84b27 100644
            <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/5 shadow-2xl flex items-center justify-center animate-slide-in-right">
              <div className="text-center px-6">
                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-status-error/10 flex items-center justify-center">
-@@ -1089,7 +1098,7 @@ export default function AppCatalogPage() {
+@@ -1089,7 +1090,7 @@ export default function AppCatalogPage() {
              onClick={handleSelectAllVisible}
              className="text-sm text-text-secondary hover:text-accent-cyan transition-colors whitespace-nowrap"
            >
@@ -170,7 +191,7 @@ index f818738c1..eedc84b27 100644
            </button>
            <button
              onClick={handleClearBulkSelection}
-@@ -1111,7 +1120,7 @@ export default function AppCatalogPage() {
+@@ -1111,7 +1112,7 @@ export default function AppCatalogPage() {
              ) : (
                <>
                  <Check className="w-4 h-4" />
@@ -180,7 +201,7 @@ index f818738c1..eedc84b27 100644
              )}
            </button>
 diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
-index bade6e949..88c9337d7 100644
+index bade6e949..4f9982c65 100644
 --- a/app/(app)/dashboard/layout.tsx
 +++ b/app/(app)/dashboard/layout.tsx
 @@ -12,28 +12,33 @@ import {
@@ -269,7 +290,7 @@ index bade6e949..88c9337d7 100644
      return (
        <div className="min-h-screen flex items-center justify-center bg-bg-deepest">
          <div className="relative">
-@@ -160,16 +175,17 @@ export default function DashboardLayout({
+@@ -160,16 +175,18 @@ export default function DashboardLayout({
          className="max-lg:!pl-0"
        >
          {/* Top bar */}
@@ -281,17 +302,20 @@ index bade6e949..88c9337d7 100644
 +                for the computer in use. */}
              <button
                onClick={handleOpenCommandPalette}
-               className="hidden lg:flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted hover:text-text-secondary bg-overlay/[0.03] hover:bg-overlay/5 rounded-lg border border-overlay/5 transition-colors"
+-              className="hidden lg:flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted hover:text-text-secondary bg-overlay/[0.03] hover:bg-overlay/5 rounded-lg border border-overlay/5 transition-colors"
++              aria-label="Find a page or guide"
++              className="flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted hover:text-text-secondary bg-overlay/[0.03] hover:bg-overlay/5 rounded-lg border border-overlay/5 transition-colors"
              >
 -              <span><T>Search...</T></span>
-+              <span><T>Search…</T></span>
-               <kbd className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5">
+-              <kbd className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5">
 -                <span className="text-xs"><T>Cmd</T></span><T>K</T>
++              <span><T>Find a page or guide</T></span>
++              <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5">
 +                <span className="text-xs">{modifierKey}</span>K
                </kbd>
              </button>
              <div className="flex-1 lg:hidden" />
-@@ -177,7 +193,7 @@ export default function DashboardLayout({
+@@ -177,12 +194,12 @@ export default function DashboardLayout({
              <div className="flex min-w-0 items-center gap-1 sm:gap-3">
                <TenantSwitcher />
                <DeploymentStatusIndicator />
@@ -300,7 +324,13 @@ index bade6e949..88c9337d7 100644
                {hostedServices && <NotificationBell />}
                <Button
                  variant="ghost"
-@@ -239,12 +255,13 @@ export default function DashboardLayout({
+                 onClick={toggleCart}
+-                aria-label={cartItemCount > 0 ? `Deployment cart, ${cartItemCount} items` : 'Deployment cart'}
++                aria-label={cartItemCount > 0 ? `Deployment list, ${cartItemCount} items` : 'Deployment list'}
+                 className="relative h-11 w-11 shrink-0 px-0 text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-all"
+               >
+                 <ShoppingCart className="w-5 h-5" />
+@@ -239,12 +256,13 @@ export default function DashboardLayout({
                <div className="flex items-start sm:items-center gap-3 min-w-0">
                  <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5 sm:mt-0" />
                  <div className="min-w-0">
@@ -317,7 +347,7 @@ index bade6e949..88c9337d7 100644
                        : <T>Please check your connection and try again.</T>}
                    </p>
                  </div>
-@@ -273,6 +290,7 @@ export default function DashboardLayout({
+@@ -273,6 +291,7 @@ export default function DashboardLayout({
  
          {/* Page content */}
          <main className="p-4 lg:p-6 relative">
@@ -325,7 +355,7 @@ index bade6e949..88c9337d7 100644
            {children}
          </main>
        </motion.div>
-@@ -285,7 +303,7 @@ export default function DashboardLayout({
+@@ -285,7 +304,7 @@ export default function DashboardLayout({
  
        {/* Toast notifications */}
        <Toaster
@@ -335,7 +365,7 @@ index bade6e949..88c9337d7 100644
          toastOptions={{
            className: 'bg-bg-surface border border-overlay/10 text-text-primary',
 diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
-index 24e1de8db..b707bfc80 100644
+index 24e1de8db..ab66c5a26 100644
 --- a/app/(app)/dashboard/page.tsx
 +++ b/app/(app)/dashboard/page.tsx
 @@ -10,11 +10,9 @@ import {
@@ -638,7 +668,16 @@ index 24e1de8db..b707bfc80 100644
            value={stats?.thisMonth ?? 0}
            icon={Upload}
            color="success"
-@@ -219,156 +341,6 @@ export default function DashboardPage() {
+@@ -212,163 +334,13 @@ export default function DashboardPage() {
+       {statisticsScope === 'tenant' && !statsError && stats?.perUser && (
+         <section className="glass-light rounded-xl p-6" aria-label="Deployments by user">
+           <h2 className="text-lg font-semibold mb-4"><T>Deployments by user</T></h2>
+-          <div className="overflow-x-auto"><table className="w-full text-sm">
++          {stats.perUser.length > 0 && <div className="overflow-x-auto"><table className="w-full text-sm">
+             <thead><tr className="text-left"><th scope="col"><T>User</T></th><th scope="col"><T>Deployed</T></th><th scope="col"><T>Pending</T></th><th scope="col"><T>Failed</T></th></tr></thead>
+             <tbody>{stats.perUser.map((person, index) => <tr key={index}><th scope="row" className="text-left font-normal py-2">{person.userEmail}</th><td>{person.deployed}</td><td>{person.pending}</td><td>{person.failed}</td></tr>)}</tbody>
+-          </table></div>
++          </table></div>}
            {stats.perUser.length === 0 && <p className="text-text-muted"><T>No deployment activity in this tenant.</T></p>}
          </section>
        )}
@@ -830,10 +869,10 @@ index 24e1de8db..b707bfc80 100644
 -  return content;
 -}
 diff --git a/app/(app)/dashboard/reports/page.tsx b/app/(app)/dashboard/reports/page.tsx
-index 648e311ff..f3992e9a2 100644
+index 648e311ff..ebef36f86 100644
 --- a/app/(app)/dashboard/reports/page.tsx
 +++ b/app/(app)/dashboard/reports/page.tsx
-@@ -18,14 +18,17 @@ import { PageHeader, AnimatedStatCard, StatCardGrid, SkeletonGrid, AnimatedEmpty
+@@ -18,16 +18,21 @@ import { PageHeader, AnimatedStatCard, StatCardGrid, SkeletonGrid, AnimatedEmpty
  export default function ReportsPage() {
    const [days, setDays] = useState(30);
    const [isExporting, setIsExporting] = useState(false);
@@ -845,15 +884,21 @@ index 648e311ff..f3992e9a2 100644
    const { exportCSV } = useExportAnalytics();
    const prefersReducedMotion = useReducedMotion();
  
++  const [exportError, setExportError] = useState(false);
    const handleExport = async () => {
++    setExportError(false);
      setIsExporting(true);
      try {
 -      await exportCSV(days);
+-    } catch (err) {
+-      console.error('Export failed:', err);
 +      await exportCSV(days, scope);
-     } catch (err) {
-       console.error('Export failed:', err);
++    } catch {
++      setExportError(true);
      } finally {
-@@ -56,13 +59,39 @@ export default function ReportsPage() {
+       setIsExporting(false);
+     }
+@@ -56,13 +61,40 @@ export default function ReportsPage() {
      }
    };
  
@@ -891,11 +936,12 @@ index 648e311ff..f3992e9a2 100644
 +          title={title}
 +          description={description}
          />
-+        {scopeToggle}
++        {exportError && <p role="alert" className="text-sm text-status-error">Could not export this report. Try again.</p>}
++      {scopeToggle}
          <SkeletonGrid count={4} columns={4} variant="stat" />
          <div className="grid gap-6 lg:grid-cols-2">
            <div className="glass-light rounded-xl p-6 border border-overlay/5 h-64 animate-pulse" />
-@@ -76,9 +105,10 @@ export default function ReportsPage() {
+@@ -76,9 +108,11 @@ export default function ReportsPage() {
      return (
        <div className="space-y-6">
          <PageHeader
@@ -904,11 +950,12 @@ index 648e311ff..f3992e9a2 100644
 +          title={title}
 +          description={description}
          />
-+        {scopeToggle}
++        {exportError && <p role="alert" className="text-sm text-status-error">Could not export this report. Try again.</p>}
++      {scopeToggle}
          <AnimatedEmptyState
            icon={AlertTriangle}
            title="Failed to load analytics"
-@@ -100,8 +130,8 @@ export default function ReportsPage() {
+@@ -100,8 +134,8 @@ export default function ReportsPage() {
      <div className="space-y-6">
        {/* Header */}
        <PageHeader
@@ -919,16 +966,17 @@ index 648e311ff..f3992e9a2 100644
          gradient
          gradientColors="mixed"
          actions={
-@@ -132,6 +162,8 @@ export default function ReportsPage() {
+@@ -132,6 +166,9 @@ export default function ReportsPage() {
          }
        />
  
++      {exportError && <p role="alert" className="text-sm text-status-error">Could not export this report. Try again.</p>}
 +      {scopeToggle}
 +
        {/* Date Range Picker */}
        <motion.div
          variants={itemVariants}
-@@ -153,7 +185,7 @@ export default function ReportsPage() {
+@@ -153,7 +190,7 @@ export default function ReportsPage() {
        {/* Summary Stats */}
        <StatCardGrid columns={4}>
          <AnimatedStatCard
@@ -937,7 +985,7 @@ index 648e311ff..f3992e9a2 100644
            value={summary?.totalJobs || 0}
            icon={Package}
            color="cyan"
-@@ -194,7 +226,7 @@ export default function ReportsPage() {
+@@ -194,7 +231,7 @@ export default function ReportsPage() {
            variants={itemVariants}
            className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
          >
@@ -946,7 +994,7 @@ index 648e311ff..f3992e9a2 100644
            <SuccessRateChart
              completed={summary?.completedJobs || 0}
              failed={summary?.failedJobs || 0}
-@@ -208,7 +240,7 @@ export default function ReportsPage() {
+@@ -208,7 +245,7 @@ export default function ReportsPage() {
            className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
          >
            <h2 className="text-lg font-semibold text-text-primary mb-4">
@@ -955,7 +1003,7 @@ index 648e311ff..f3992e9a2 100644
            </h2>
            <DeploymentsLineChart data={data?.dailyDeployments || []} />
          </motion.div>
-@@ -222,7 +254,7 @@ export default function ReportsPage() {
+@@ -222,7 +259,7 @@ export default function ReportsPage() {
          className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
        >
          <h2 className="text-lg font-semibold text-text-primary mb-4">
@@ -964,7 +1012,7 @@ index 648e311ff..f3992e9a2 100644
          </h2>
          <TopAppsChart data={data?.topApps || []} />
        </motion.div>
-@@ -234,7 +266,7 @@ export default function ReportsPage() {
+@@ -234,7 +271,7 @@ export default function ReportsPage() {
          animate="visible"
          className="glass-light border border-overlay/5 rounded-xl p-6 hover:border-accent-cyan/20 transition-colors"
        >
@@ -974,7 +1022,7 @@ index 648e311ff..f3992e9a2 100644
        </motion.div>
      </div>
 diff --git a/app/(app)/dashboard/settings/page.tsx b/app/(app)/dashboard/settings/page.tsx
-index fa4896636..a01c7bcc7 100644
+index fa4896636..19024cbfb 100644
 --- a/app/(app)/dashboard/settings/page.tsx
 +++ b/app/(app)/dashboard/settings/page.tsx
 @@ -1,4 +1,5 @@
@@ -1014,7 +1062,44 @@ index fa4896636..a01c7bcc7 100644
    const [activeTab, setActiveTab] = useState<SettingsTab>('general');
    const [isChecking, setIsChecking] = useState(false);
    const [permissionStatus, setPermissionStatus] = useState<PermissionStatusState | null>(null);
-@@ -305,7 +314,9 @@ export default function SettingsPage() {
+@@ -204,9 +213,13 @@ export default function SettingsPage() {
+     requestAdminConsent();
+   };
+ 
+-  const copyToClipboard = useCallback((text: string, field: string) => {
+-    navigator.clipboard.writeText(text);
+-    setCopiedField(field);
++  const copyToClipboard = useCallback(async (text: string, field: string) => {
++    try {
++      await navigator.clipboard.writeText(text);
++      setCopiedField(field);
++    } catch {
++      setCopiedField('failed');
++    }
+     setTimeout(() => setCopiedField(null), 2000);
+   }, []);
+ 
+@@ -270,16 +283,17 @@ export default function SettingsPage() {
+         >
+           <div className="glass-light rounded-xl border border-overlay/5 p-2 lg:sticky lg:top-24">
+             {/* Mobile: horizontal scroll, Desktop: vertical stack */}
+-            <div className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0">
++            <div className="grid grid-cols-3 lg:flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0">
+               {SETTINGS_TABS.map((tab) => {
+                 const Icon = tab.icon;
+                 const isActive = activeTab === tab.id;
+                 return (
+                   <button
+                     key={tab.id}
++                    aria-pressed={isActive}
+                     onClick={() => setActiveTab(tab.id)}
+                     className={cn(
+-                      'flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all relative flex-shrink-0',
++                      'flex flex-col lg:flex-row items-center gap-1 lg:gap-3 px-1 lg:px-3 py-2.5 rounded-lg text-left transition-all relative flex-shrink-0',
+                       'lg:w-full',
+                       isActive
+                         ? 'bg-accent-cyan/10 text-accent-cyan'
+@@ -305,7 +319,9 @@ export default function SettingsPage() {
                          {tab.label}
                        </p>
                        <p className="text-xs text-text-muted hidden lg:block truncate">
@@ -1025,7 +1110,7 @@ index fa4896636..a01c7bcc7 100644
                        </p>
                      </div>
                    </button>
-@@ -351,7 +362,7 @@ export default function SettingsPage() {
+@@ -351,7 +367,7 @@ export default function SettingsPage() {
                        <SettingRow label={<T>Name</T>} value={user?.name || 'Not provided'} />
                        <SettingRow label={<T>Email</T>} value={user?.email || 'Not provided'} />
                        <SettingRow
@@ -1034,26 +1119,47 @@ index fa4896636..a01c7bcc7 100644
                          value="Microsoft Entra ID"
                          noBorder
                        />
-@@ -368,7 +379,7 @@ export default function SettingsPage() {
+@@ -368,22 +384,12 @@ export default function SettingsPage() {
                          <Building2 className="w-5 h-5 text-accent-violet" />
                        </div>
                        <div>
 -                        <h2 className="text-lg font-semibold text-text-primary"><T>Intune Connection</T></h2>
+-                        <p className="text-sm text-text-muted"><T>Tenant configuration and status</T></p>
 +                        <h2 className="text-lg font-semibold text-text-primary"><T>Intune connection</T></h2>
-                         <p className="text-sm text-text-muted"><T>Tenant configuration and status</T></p>
++                        <p className="text-sm text-text-muted"><T>Signed-in tenant</T></p>
                        </div>
                      </div>
-@@ -395,7 +406,7 @@ export default function SettingsPage() {
+ 
+                     <div className="space-y-1">
+-                      <div className="flex items-center justify-between py-3 border-b border-overlay/5">
+-                        <div>
+-                          <p className="text-text-secondary text-sm"><T>Status</T></p>
+-                          <div className="flex items-center gap-2 mt-1">
+-                            <div className="w-2 h-2 rounded-full bg-status-success animate-pulse" />
+-                            <p className="text-status-success font-medium text-sm"><T>Connected</T></p>
+-                          </div>
+-                        </div>
+-                      </div>
+-
+                       <div className="flex items-center justify-between py-3 border-b border-overlay/5">
+                         <div>
+                           <p className="text-text-secondary text-sm"><T>Tenant ID</T></p>
+@@ -395,7 +401,7 @@ export default function SettingsPage() {
                            <button
                              onClick={() => copyToClipboard(user.tenantId!, 'tenantId')}
                              className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-overlay/5 transition-colors"
 -                            title="Copy Tenant ID"
-+                            title="Copy tenant ID"
++                            aria-label="Copy tenant ID" title="Copy tenant ID"
                            >
                              {copiedField === 'tenantId' ? (
                                <Check className="w-4 h-4 text-status-success" />
-@@ -408,14 +419,14 @@ export default function SettingsPage() {
+@@ -406,16 +412,19 @@ export default function SettingsPage() {
+                         )}
+                       </div>
  
++                      <p role="status" className="text-sm text-text-secondary">
++                        {copiedField === 'failed' ? 'Could not copy the tenant ID.' : copiedField === 'tenantId' ? 'Tenant ID copied.' : ''}
++                      </p>
                        <div className="flex items-center justify-between py-3">
                          <div>
 -                          <p className="text-text-secondary text-sm"><T>Intune Portal</T></p>
@@ -1069,7 +1175,7 @@ index fa4896636..a01c7bcc7 100644
                              <ExternalLink className="w-3.5 h-3.5" />
                            </a>
                          </div>
-@@ -423,16 +434,16 @@ export default function SettingsPage() {
+@@ -423,20 +432,21 @@ export default function SettingsPage() {
                      </div>
                    </motion.section>
  
@@ -1089,7 +1195,12 @@ index fa4896636..a01c7bcc7 100644
                          </p>
                        </div>
                        <div className="flex min-w-28 flex-col items-end gap-1">
-@@ -451,6 +462,8 @@ export default function SettingsPage() {
+                         <ToggleSwitch
++                          label="Open the Deployment list when you add an app"
+                           checked={autoOpenOnAdd}
+                           onChange={(value) => void handleCartToggle(value)}
+                           disabled={isSaving && activePreferenceSave !== 'cart'}
+@@ -451,6 +461,8 @@ export default function SettingsPage() {
                      </div>
                    </motion.section>
  
@@ -1098,7 +1209,7 @@ index fa4896636..a01c7bcc7 100644
                    {/* Carry over assignments card */}
                    <motion.section
                      variants={itemVariants}
-@@ -458,7 +471,7 @@ export default function SettingsPage() {
+@@ -458,13 +470,14 @@ export default function SettingsPage() {
                    >
                      <div className="flex items-center justify-between">
                        <div>
@@ -1107,7 +1218,22 @@ index fa4896636..a01c7bcc7 100644
                          <p className="text-sm text-text-muted">
                            <T>When enabled, assignments from the previous app version are copied to the new version and removed from the old app. When disabled, new app versions are created without assignments.</T>
                          </p>
-@@ -506,6 +519,7 @@ export default function SettingsPage() {
+                       </div>
+                       <div className="flex min-w-28 flex-col items-end gap-1">
+                         <ToggleSwitch
++                          label="Carry over assignments"
+                           checked={userSettings.carryOverAssignments}
+                           onChange={(value) => void handleAssignmentsToggle(value)}
+                           disabled={isSaving && activePreferenceSave !== 'assignments'}
+@@ -493,6 +506,7 @@ export default function SettingsPage() {
+                       </div>
+                       <div className="flex min-w-28 flex-col items-end gap-1">
+                         <ToggleSwitch
++                          label="Supersede previous version on update"
+                           checked={userSettings.supersedePreviousApp}
+                           onChange={(value) => void handleSupersedenceToggle(value)}
+                           disabled={isSaving && activePreferenceSave !== 'supersedence'}
+@@ -506,6 +520,7 @@ export default function SettingsPage() {
                        </div>
                      </div>
                    </motion.section>
@@ -1115,7 +1241,7 @@ index fa4896636..a01c7bcc7 100644
                  </motion.div>
                </motion.div>
              )}
-@@ -534,7 +548,7 @@ export default function SettingsPage() {
+@@ -534,7 +549,7 @@ export default function SettingsPage() {
                            <Shield className="w-5 h-5 text-accent-cyan" />
                          </div>
                          <div>
@@ -1124,7 +1250,7 @@ index fa4896636..a01c7bcc7 100644
                            <p className="text-sm text-text-muted"><T>Required Microsoft Graph permissions</T></p>
                          </div>
                        </div>
-@@ -550,7 +564,7 @@ export default function SettingsPage() {
+@@ -550,7 +565,7 @@ export default function SettingsPage() {
                          ) : (
                            <Shield className="w-4 h-4 mr-2" />
                          )}
@@ -1133,7 +1259,7 @@ index fa4896636..a01c7bcc7 100644
                        </Button>
                      </div>
  
-@@ -607,7 +621,7 @@ export default function SettingsPage() {
+@@ -607,7 +622,7 @@ export default function SettingsPage() {
                        <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
                          <Loader2 className="w-4 h-4 text-blue-400 animate-spin mt-0.5 flex-shrink-0" />
                          <p className="text-sm text-blue-400">
@@ -1142,7 +1268,7 @@ index fa4896636..a01c7bcc7 100644
                          </p>
                        </div>
                      )}
-@@ -623,7 +637,7 @@ export default function SettingsPage() {
+@@ -623,7 +638,7 @@ export default function SettingsPage() {
                            size="sm"
                            className="bg-status-warning hover:bg-status-warning/90 text-white"
                          >
@@ -1151,7 +1277,7 @@ index fa4896636..a01c7bcc7 100644
                          </Button>
                        </div>
                      )}
-@@ -632,14 +646,14 @@ export default function SettingsPage() {
+@@ -632,14 +647,14 @@ export default function SettingsPage() {
                        permissionStatus?.permissions.deviceManagementManagedDevices === false && (
                        <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
                          <p className="text-sm text-status-warning mb-2">
@@ -1168,7 +1294,7 @@ index fa4896636..a01c7bcc7 100644
                          </Button>
                        </div>
                      )}
-@@ -655,7 +669,7 @@ export default function SettingsPage() {
+@@ -655,7 +670,7 @@ export default function SettingsPage() {
                            size="sm"
                            className="bg-status-warning hover:bg-status-warning/90 text-white"
                          >
@@ -1177,7 +1303,7 @@ index fa4896636..a01c7bcc7 100644
                          </Button>
                        </div>
                      )}
-@@ -689,9 +703,12 @@ export default function SettingsPage() {
+@@ -689,9 +704,12 @@ export default function SettingsPage() {
                    animate="visible"
                    className="space-y-6"
                  >
@@ -1193,7 +1319,7 @@ index fa4896636..a01c7bcc7 100644
                    <motion.div variants={itemVariants}>
                      <WebhookManager />
                    </motion.div>
-@@ -722,7 +739,7 @@ export default function SettingsPage() {
+@@ -722,7 +740,7 @@ export default function SettingsPage() {
                          <FileDown className="w-5 h-5 text-accent-cyan" />
                        </div>
                        <div>
@@ -1202,7 +1328,7 @@ index fa4896636..a01c7bcc7 100644
                          <p className="text-sm text-text-muted"><T>Configure default export settings</T></p>
                        </div>
                      </div>
-@@ -756,7 +773,7 @@ export default function SettingsPage() {
+@@ -756,7 +774,7 @@ export default function SettingsPage() {
                          <Database className="w-5 h-5 text-accent-violet" />
                        </div>
                        <div>
@@ -1211,6 +1337,43 @@ index fa4896636..a01c7bcc7 100644
                          <p className="text-sm text-text-muted"><T>Cache, sync, and storage settings</T></p>
                        </div>
                      </div>
+@@ -905,6 +923,7 @@ function ExportPreferencesSection() {
+           <p className="text-sm text-text-secondary"><T>Embed base64-encoded icons in export files</T></p>
+         </div>
+         <ToggleSwitch
++          label="Include application icons"
+           checked={includeIcons}
+           onChange={setIncludeIcons}
+         />
+@@ -917,6 +936,7 @@ function ExportPreferencesSection() {
+           <p className="text-sm text-text-secondary"><T>Add deployment dates, version history, and assignment info</T></p>
+         </div>
+         <ToggleSwitch
++          label="Include metadata"
+           checked={includeMetadata}
+           onChange={setIncludeMetadata}
+         />
+@@ -1072,10 +1092,12 @@ function AutoRefreshSelector() {
+ }
+ 
+ function ToggleSwitch({
++  label,
+   checked,
+   onChange,
+   disabled,
+ }: {
++  label: string;
+   checked: boolean;
+   onChange: (value: boolean) => void;
+   disabled?: boolean;
+@@ -1087,6 +1109,7 @@ function ToggleSwitch({
+     )}>
+       <input
+         type="checkbox"
++        aria-label={label}
+         checked={checked}
+         onChange={(e) => onChange(e.target.checked)}
+         disabled={disabled}
 diff --git a/app/api/hrm/home/route.test.ts b/app/api/hrm/home/route.test.ts
 new file mode 100644
 index 000000000..a6e87a613
@@ -1767,7 +1930,7 @@ index 27c710577..776a9b69c 100644
        />
      </>
 diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
-index 33d0890cc..8d5173eb0 100644
+index 33d0890cc..8c2a0a5ad 100644
 --- a/components/dashboard/CommandPalette.tsx
 +++ b/components/dashboard/CommandPalette.tsx
 @@ -2,8 +2,9 @@
@@ -1813,7 +1976,7 @@ index 33d0890cc..8d5173eb0 100644
 +  { name: 'App updates', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'updates upgrade versions automatic schedule publish delivery blackout pilot next rollout' },
 +  { name: 'Deployments', href: '/dashboard/uploads', icon: Rocket, keywords: 'activity uploads deploy jobs status history' },
 +  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, keywords: 'analytics reports charts my deployments' },
-+  { name: 'New version checks', href: '/dashboard/updates', icon: ArrowUpCircle, keywords: 'catalog discovery cadence check schedule 3:30 new versions' },
++  { name: 'New version checks', href: '/dashboard/updates#version-checks', icon: ArrowUpCircle, keywords: 'catalog discovery cadence check schedule 3:30 new versions' },
 +  { name: 'Automatic publishing window', href: '/dashboard/updates#automatic-updates', icon: ArrowUpCircle, keywords: 'automatic update delivery edit schedule refresh check for app updates when can intuneget send automatic updates to intune update schedule publishing window blackout pause' },
 +  { name: 'How automatic updates install guide', href: '/dashboard/help#automatic-installation-policy', icon: LifeBuoy, keywords: 'installation behavior behaviour employee choice postpone startup restart schedule next rollout' },
 +  { name: 'Installation settings guide', href: '/dashboard/help#install-settings', icon: LifeBuoy, keywords: 'toolkit windows installer silent progress only installer decides more settings what staff see postpone deferral disk space restart countdown inactive settings' },
@@ -1883,13 +2046,13 @@ index 33d0890cc..8d5173eb0 100644
 +    <Command.Dialog
 +      open={open}
 +      onOpenChange={onOpenChange}
-+      label="Search"
++      label="Find a page or guide"
 +      loop
 +      overlayClassName="fixed inset-0 z-[60] bg-black/50"
-+      contentClassName="fixed inset-x-4 top-[20vh] z-[60] mx-auto max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden focus:outline-none"
++      contentClassName="fixed inset-x-4 top-16 sm:top-[20vh] z-[60] mx-auto max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden focus:outline-none"
 +      aria-describedby={undefined}
 +    >
-+      <DialogTitle className="sr-only">Search</DialogTitle>
++      <DialogTitle className="sr-only">Find a page or guide</DialogTitle>
            {/* Search input */}
            <div className="flex items-center gap-3 px-4 border-b border-overlay/5">
              <Search className="w-4 h-4 text-text-muted flex-shrink-0" />
@@ -1897,20 +2060,33 @@ index 33d0890cc..8d5173eb0 100644
 +              autoFocus
                value={search}
                onValueChange={setSearch}
-               placeholder="Type a command or search..."
-+              aria-label="Search apps and commands"
+-              placeholder="Type a command or search..."
++              placeholder="Find a page or guide"
++              aria-label="Find a page or guide"
                className="flex-1 py-3 text-sm bg-transparent text-text-primary placeholder:text-text-muted outline-none"
              />
              <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-text-muted bg-overlay/10 rounded border border-overlay/5">
-@@ -106,7 +108,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -96,7 +98,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+             </kbd>
+           </div>
+ 
+-          <Command.List className="max-h-[300px] overflow-y-auto p-2">
++          <Command.List className="max-h-[min(55dvh,300px)] overflow-y-auto p-2">
+             <Command.Empty className="py-6 text-center text-sm text-text-muted">
+               <T>No results found</T>
+             </Command.Empty>
+@@ -106,9 +108,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                heading={<T>Navigation</T>}
                className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
              >
 -              {NAVIGATION_ITEMS.map((item) => (
 +              {items.map((item) => (
                  <Command.Item
-                   key={item.href}
+-                  key={item.href}
++                  key={item.name}
                    value={`${item.name} ${item.keywords}`}
+                   onSelect={() => handleSelect(item.href)}
+                   className="flex items-center gap-3 px-2 py-2 text-sm text-text-secondary rounded-lg cursor-pointer data-[selected=true]:bg-overlay/5 data-[selected=true]:text-text-primary transition-colors"
 @@ -122,7 +124,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
              {/* Keyboard shortcuts group */}
              {!search && (
@@ -1940,10 +2116,18 @@ index 33d0890cc..8d5173eb0 100644
    );
  }
 diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
-index e941306a7..d909aaea7 100644
+index e941306a7..235dc91ac 100644
 --- a/components/dashboard/Sidebar.tsx
 +++ b/components/dashboard/Sidebar.tsx
-@@ -11,6 +11,7 @@ import {
+@@ -2,6 +2,7 @@
+ 
+ import { useCallback, useEffect, useState } from 'react';
+ import Link from 'next/link';
++import * as Dialog from '@radix-ui/react-dialog';
+ import Image from 'next/image';
+ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+ import {
+@@ -11,6 +12,7 @@ import {
    Menu,
    X,
    Server,
@@ -1951,7 +2135,7 @@ index e941306a7..d909aaea7 100644
    BarChart3,
    Building2,
    ArrowUpCircle,
-@@ -21,6 +22,7 @@ import {
+@@ -21,6 +23,7 @@ import {
    Layers,
    Webhook,
    Lightbulb,
@@ -1959,7 +2143,7 @@ index e941306a7..d909aaea7 100644
    PanelLeftClose,
    PanelLeftOpen,
  } from 'lucide-react';
-@@ -35,6 +37,7 @@ import { UpdateBadge } from '@/components/inventory';
+@@ -35,6 +38,7 @@ import { UpdateBadge } from '@/components/inventory';
  import { TooltipProvider } from '@/components/ui/tooltip';
  import { SidebarNavItem } from './SidebarNavItem';
  import { SidebarUserSection } from './SidebarUserSection';
@@ -1967,7 +2151,7 @@ index e941306a7..d909aaea7 100644
  import type { LucideIcon } from 'lucide-react';
  
  type NavItem = {
-@@ -50,23 +53,31 @@ type NavGroup = {
+@@ -50,23 +54,31 @@ type NavGroup = {
  };
  
  const coreNav: NavItem[] = [
@@ -2005,7 +2189,22 @@ index e941306a7..d909aaea7 100644
  const mspNav: NavItem[] = [
    { name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 },
    { name: 'Batch Deploy', href: '/dashboard/msp/batch', icon: Layers },
-@@ -110,13 +121,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -103,6 +115,14 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+     setMounted(true);
+   }, []);
+ 
++  useEffect(() => {
++    if (!mobileOpen) return;
++    const desktop = window.matchMedia('(min-width: 1024px)');
++    const closeOnDesktop = () => { if (desktop.matches) setMobileOpen(false); };
++    desktop.addEventListener('change', closeOnDesktop);
++    return () => desktop.removeEventListener('change', closeOnDesktop);
++  }, [mobileOpen]);
++
+   const closeMobile = () => setMobileOpen(false);
+ 
+   // NEXT_PUBLIC_DISABLE_SCCM=true hides the SCCM Migration nav item
+@@ -110,13 +130,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
    const managementItems = sccmEnabled
      ? managementNav
      : managementNav.filter((item) => item.href !== '/dashboard/sccm');
@@ -2022,7 +2221,7 @@ index e941306a7..d909aaea7 100644
      {
        label: 'Analytics',
        items: hostedServices
-@@ -127,6 +136,16 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -127,15 +145,25 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
        ? [{ label: 'MSP', items: mspNav }]
        : [{ label: 'MSP', items: [{ name: 'MSP Dashboard', href: '/dashboard/msp', icon: Building2 }] }]),
    ];
@@ -2037,9 +2236,20 @@ index e941306a7..d909aaea7 100644
 +    helpNav
 +  );
  
-   const sidebarContent = (
+-  const sidebarContent = (
++  const renderSidebar = (isCollapsed: boolean) => (
      <div className="flex flex-col h-full">
-@@ -153,9 +172,10 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+       {/* Logo */}
+       <div className={cn(
+         'flex items-center h-16 border-b border-overlay/5',
+         isCollapsed ? 'justify-center px-3' : 'justify-between px-4'
+       )}>
+-        <Link href="/dashboard" className="group flex items-center gap-3">
++        <Link href="/dashboard" onClick={closeMobile} className="group flex items-center gap-3">
+           <div className="relative w-9 h-9 rounded-lg overflow-hidden shadow-glow-cyan transition-shadow duration-300 group-hover:shadow-glow-cyan-lg flex-shrink-0">
+             <Image
+               src="/favicon.svg"
+@@ -153,9 +181,10 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
                  animate={{ opacity: 1, width: 'auto' }}
                  exit={{ opacity: 0, width: 0 }}
                  transition={{ duration: 0.15 }}
@@ -2052,7 +2262,7 @@ index e941306a7..d909aaea7 100644
                </motion.span>
              )}
            </AnimatePresence>
-@@ -180,7 +200,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -180,7 +209,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
            className="space-y-1"
          >
            {navGroups.map((group, groupIndex) => (
@@ -2067,7 +2277,7 @@ index e941306a7..d909aaea7 100644
                {/* Section divider/label */}
                {group.label && (
                  <div className={cn('pt-4 pb-2', isCollapsed ? 'px-0' : 'px-3')}>
-@@ -194,7 +220,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -194,7 +229,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
                          animate={{ opacity: 1 }}
                          exit={{ opacity: 0 }}
                          transition={{ duration: 0.15 }}
@@ -2076,31 +2286,72 @@ index e941306a7..d909aaea7 100644
                        >
                          <T>{group.label}</T>
                        </motion.span>
-@@ -252,10 +278,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+@@ -252,40 +287,20 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
  
    return (
      <TooltipProvider delayDuration={0}>
 -      {/* Mobile hamburger */}
-+      {/* Mobile hamburger. HRM patch 0058: z-40 keeps it above the sticky z-30 page header; the
-+          backdrop (z-40, later) and the open menu (z-50) still cover it. */}
-       <button
-         onClick={() => setMobileOpen(true)}
+-      <button
+-        onClick={() => setMobileOpen(true)}
 -        className="fixed top-4 left-4 z-30 lg:hidden text-text-secondary hover:text-text-primary transition-colors"
-+        className="fixed top-4 left-4 z-40 lg:hidden text-text-secondary hover:text-text-primary transition-colors"
-         aria-label="Open sidebar"
-       >
-         <Menu className="w-6 h-6" />
-@@ -270,7 +297,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
-             animate={{ opacity: 1 }}
-             exit={{ opacity: 0 }}
-             transition={{ duration: 0.2 }}
+-        aria-label="Open sidebar"
+-      >
+-        <Menu className="w-6 h-6" />
+-      </button>
+-
+-      {/* Mobile backdrop */}
+-      <AnimatePresence>
+-        {mobileOpen && (
+-          <motion.div
+-            key="sidebar-backdrop"
+-            initial={{ opacity: 0 }}
+-            animate={{ opacity: 1 }}
+-            exit={{ opacity: 0 }}
+-            transition={{ duration: 0.2 }}
 -            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
-+            className="fixed inset-0 bg-black/30 z-40 lg:hidden"
-             onClick={closeMobile}
-           />
-         )}
+-            onClick={closeMobile}
+-          />
+-        )}
+-      </AnimatePresence>
+-
+-      {/* Mobile sidebar */}
+-      <aside
+-        className={cn(
+-          'fixed top-0 left-0 z-50 h-full w-64 bg-bg-surface/95 backdrop-blur-xl transform transition-transform duration-300 ease-spring lg:hidden',
+-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+-        )}
+-      >
+-        <div className="absolute top-0 right-0 bottom-0 w-px bg-gradient-to-b from-accent-cyan/30 via-accent-violet/20 to-transparent" />
+-        {sidebarContent}
+-      </aside>
++      <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
++        <Dialog.Trigger asChild>
++          <button className="fixed top-2 left-2 z-40 grid h-11 w-11 place-items-center rounded-lg text-text-secondary hover:text-text-primary lg:hidden" aria-label="Open sidebar">
++            <Menu className="h-6 w-6" />
++          </button>
++        </Dialog.Trigger>
++        <Dialog.Portal>
++          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
++          <Dialog.Content aria-describedby={undefined} className="fixed inset-y-0 left-0 z-50 w-64 max-w-[90vw] border-r border-overlay/10 bg-bg-surface shadow-lg focus:outline-none">
++            <Dialog.Title className="sr-only">Navigation</Dialog.Title>
++            {renderSidebar(false)}
++          </Dialog.Content>
++        </Dialog.Portal>
++      </Dialog.Root>
+ 
+       {/* Desktop sidebar */}
+       <motion.aside
+@@ -294,7 +309,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
+         transition={prefersReducedMotion ? { duration: 0 } : springPresets.snappy}
+       >
+         <div className="absolute top-0 right-0 bottom-0 w-px bg-gradient-to-b from-accent-cyan/30 via-accent-violet/20 to-transparent" />
+-        {sidebarContent}
++        {renderSidebar(isCollapsed)}
+       </motion.aside>
+     </TooltipProvider>
+   );
 diff --git a/components/dashboard/SidebarUserSection.tsx b/components/dashboard/SidebarUserSection.tsx
-index d834efe1b..6a84253d2 100644
+index d834efe1b..8c812bc33 100644
 --- a/components/dashboard/SidebarUserSection.tsx
 +++ b/components/dashboard/SidebarUserSection.tsx
 @@ -2,7 +2,7 @@
@@ -2120,21 +2371,31 @@ index d834efe1b..6a84253d2 100644
  
  interface SidebarUserSectionProps {
    user: { id?: string; name?: string | null; email?: string | null } | null;
-@@ -88,12 +89,7 @@ export function SidebarUserSection({
+@@ -66,7 +67,7 @@ export function SidebarUserSection({
+           <Tooltip delayDuration={0}>
+             <TooltipTrigger asChild>
+               <DropdownMenuTrigger asChild>
+-                <button className="group flex items-center justify-center w-full rounded-lg p-1.5 hover:bg-overlay/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan/50 focus-visible:ring-offset-1">
++                <button aria-label={`Account menu for ${user?.name || user?.email || "signed-in user"}`} className="group flex items-center justify-center w-full rounded-lg p-1.5 hover:bg-overlay/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan/50 focus-visible:ring-offset-1">
+                   {avatar}
+                 </button>
+               </DropdownMenuTrigger>
+@@ -88,19 +89,16 @@ export function SidebarUserSection({
                </div>
              </DropdownMenuLabel>
              <DropdownMenuSeparator />
--            <DropdownMenuItem asChild>
++            {/* HRM patch 0036: no Account link. That page repeats Settings > General and the Home counts. */}
+             <DropdownMenuItem asChild>
 -              <Link href="/dashboard/account" onClick={onNavigate}>
 -                <User className="w-4 h-4 mr-2" />
 -                <T>Account</T>
 -              </Link>
 -            </DropdownMenuItem>
-+            {/* HRM patch 0036: no Account link. That page repeats Settings > General and the Home counts. */}
-             <DropdownMenuItem asChild>
-               <Link href="/dashboard/settings" onClick={onNavigate}>
+-            <DropdownMenuItem asChild>
+-              <Link href="/dashboard/settings" onClick={onNavigate}>
++              <Link href="/dashboard/settings" aria-current={pathname === '/dashboard/settings' ? 'page' : undefined} onClick={onNavigate}>
                  <Settings className="w-4 h-4 mr-2" />
-@@ -101,6 +97,8 @@ export function SidebarUserSection({
+                 <T>Settings</T>
                </Link>
              </DropdownMenuItem>
              <DropdownMenuSeparator />
@@ -2143,12 +2404,22 @@ index d834efe1b..6a84253d2 100644
              <DropdownMenuItem onClick={onSignOut}>
                <LogOut className="w-4 h-4 mr-2" />
                <T>Sign out</T>
-@@ -158,18 +156,7 @@ export function SidebarUserSection({
+@@ -115,7 +113,7 @@ export function SidebarUserSection({
+     <div className="p-3 border-t border-overlay/5">
+       <DropdownMenu>
+         <DropdownMenuTrigger asChild>
+-          <button className="group flex items-center gap-3 w-full rounded-lg p-2 hover:bg-overlay/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan/50 focus-visible:ring-offset-1">
++          <button aria-label={`Account menu for ${user?.name || user?.email || "signed-in user"}`} className="group flex items-center gap-3 w-full rounded-lg p-2 hover:bg-overlay/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan/50 focus-visible:ring-offset-1">
+             {avatar}
+             <AnimatePresence mode="wait">
+               {!isCollapsed && (
+@@ -158,21 +156,10 @@ export function SidebarUserSection({
              </div>
            </DropdownMenuLabel>
            <DropdownMenuSeparator />
--          <DropdownMenuItem asChild>
--            <Link
++          {/* HRM patch 0036: no Account link. That page repeats Settings > General and the Home counts. */}
+           <DropdownMenuItem asChild>
+             <Link
 -              href="/dashboard/account"
 -              onClick={onNavigate}
 -              className={cn(
@@ -2159,10 +2430,13 @@ index d834efe1b..6a84253d2 100644
 -              <T>Account</T>
 -            </Link>
 -          </DropdownMenuItem>
-+          {/* HRM patch 0036: no Account link. That page repeats Settings > General and the Home counts. */}
-           <DropdownMenuItem asChild>
-             <Link
-               href="/dashboard/settings"
+-          <DropdownMenuItem asChild>
+-            <Link
+-              href="/dashboard/settings"
++              href="/dashboard/settings" aria-current={pathname === '/dashboard/settings' ? 'page' : undefined}
+               onClick={onNavigate}
+               className={cn(
+                 pathname.startsWith('/dashboard/settings') && 'text-accent-cyan'
 @@ -183,6 +170,8 @@ export function SidebarUserSection({
              </Link>
            </DropdownMenuItem>
@@ -2277,7 +2551,7 @@ index 000000000..1bbb7070d
 +});
 diff --git a/components/dashboard/__tests__/mobile-menu-layering.test.ts b/components/dashboard/__tests__/mobile-menu-layering.test.ts
 new file mode 100644
-index 000000000..bec4f6545
+index 000000000..e58cf6be7
 --- /dev/null
 +++ b/components/dashboard/__tests__/mobile-menu-layering.test.ts
 @@ -0,0 +1,24 @@
@@ -2298,7 +2572,7 @@ index 000000000..bec4f6545
 +    const button = z(classesOf(sidebar, /className="([^"]*)"\s*aria-label="Open sidebar"/));
 +    const header = z(classesOf(layout, /<header className="([^"]*sticky[^"]*)"/));
 +    const backdrop = z(classesOf(sidebar, /className="(fixed inset-0[^"]*)"/));
-+    const panel = z(classesOf(sidebar, /'(fixed top-0 left-0[^']*lg:hidden)'/));
++    const panel = z(classesOf(sidebar, /<Dialog\.Content[^>]*className="([^"]*)"/));
 +    expect(header).toBeGreaterThan(0);
 +    expect(button).toBeGreaterThan(header);
 +    expect(backdrop).toBeGreaterThanOrEqual(button);
@@ -2989,7 +3263,7 @@ index 000000000..573a2a93f
 +  });
 +}
 diff --git a/hooks/useKeyboardShortcuts.ts b/hooks/useKeyboardShortcuts.ts
-index e2cbffe3d..96849cbb7 100644
+index e2cbffe3d..57b0530fa 100644
 --- a/hooks/useKeyboardShortcuts.ts
 +++ b/hooks/useKeyboardShortcuts.ts
 @@ -1,7 +1,8 @@
@@ -3002,6 +3276,15 @@ index e2cbffe3d..96849cbb7 100644
  
  interface ShortcutAction {
    key: string;
+@@ -41,7 +42,7 @@ export function useKeyboardShortcuts({
+       }
+ 
+       // Remaining shortcuts only work when not typing in inputs
+-      if (isInputFocused()) return;
++      if (isInputFocused() || document.querySelector('[role="dialog"][data-state="open"], [role="menu"][data-state="open"]')) return;
+ 
+       // / -> Focus search (on pages with search)
+       if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
 @@ -75,31 +76,11 @@ export function useKeyboardShortcuts({
          pendingKey.current = null;
          if (pendingTimer.current) clearTimeout(pendingTimer.current);
@@ -3066,7 +3349,7 @@ index e2cbffe3d..96849cbb7 100644
 +// HRM patch 0053: the G shortcuts come from GO_TO_SHORTCUTS, in sidebar order, and C names the
 +// deployment list.
 +export const SHORTCUT_HINTS: readonly { keys: readonly string[]; description: string }[] = [
-+  { keys: ['Mod', 'K'], description: 'Search' },
++  { keys: ['Mod', 'K'], description: 'Find a page or guide' },
    { keys: ['/'], description: 'Focus search' },
 -  { keys: ['C'], description: 'Toggle cart' },
 -  { keys: ['G', 'D'], description: 'Go to Dashboard' },
@@ -3791,3 +4074,83 @@ index a566983e7..9234b5592 100644
    sidebarCollapsed: false,
    selectedTenantId: null,
    cartAutoOpenOnAdd: true,
+diff --git a/components/reports/RecentFailuresTable.tsx b/components/reports/RecentFailuresTable.tsx
+index 95b526c43..a41505106 100644
+--- a/components/reports/RecentFailuresTable.tsx
++++ b/components/reports/RecentFailuresTable.tsx
+@@ -34,7 +34,6 @@ export function RecentFailuresTable({ data }: RecentFailuresTableProps) {
+           </svg>
+         </div>
+         <p>No recent failures</p>
+-        <p className="text-sm text-text-muted mt-1">All deployments successful</p>
+       </div>
+     );
+   }
+diff --git a/components/reports/DateRangePicker.tsx b/components/reports/DateRangePicker.tsx
+index 2e3513b5d..34010cfa1 100644
+--- a/components/reports/DateRangePicker.tsx
++++ b/components/reports/DateRangePicker.tsx
+@@ -9,25 +9,26 @@ interface DateRangePickerProps {
+ }
+ 
+ const presets = [
+-  { label: '7 Days', value: 7 },
+-  { label: '30 Days', value: 30 },
+-  { label: '90 Days', value: 90 },
+-  { label: '1 Year', value: 365 },
++  { label: '7 days', value: 7 },
++  { label: '30 days', value: 30 },
++  { label: '90 days', value: 90 },
++  { label: '1 year', value: 365 },
+ ];
+ 
+ export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
+   return (
+-    <div className="flex items-center gap-2">
++    <div role="group" aria-label="Report period" className="flex flex-wrap items-center gap-2">
+       {presets.map((preset) => (
+         <Button
+           key={preset.value}
+           variant="ghost"
+           size="sm"
++          aria-pressed={value === preset.value}
+           onClick={() => onChange(preset.value)}
+           className={cn(
+             'text-sm transition-colors',
+             value === preset.value
+-              ? 'bg-blue-600/10 text-blue-500 hover:bg-blue-600/20 hover:text-blue-400'
++              ? 'bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20'
+               : 'text-text-muted hover:text-text-primary hover:bg-overlay/10'
+           )}
+         >
+diff --git a/components/dashboard/SidebarNavItem.tsx b/components/dashboard/SidebarNavItem.tsx
+index 4514623bb..1889c9137 100644
+--- a/components/dashboard/SidebarNavItem.tsx
++++ b/components/dashboard/SidebarNavItem.tsx
+@@ -4,6 +4,7 @@ import Link from 'next/link';
+ import { usePathname } from 'next/navigation';
+ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+ import { cn } from '@/lib/utils';
++import { primaryNavActive } from '@/lib/hrm/navigation';
+ import { listItem } from '@/lib/animations/variants';
+ import {
+   Tooltip,
+@@ -37,16 +38,14 @@ export function SidebarNavItem({
+   const pathname = usePathname();
+   const prefersReducedMotion = useReducedMotion();
+ 
+-  const isActive =
+-    pathname === href ||
+-    (href !== '/dashboard' && href !== '/dashboard/msp' && pathname.startsWith(href));
++  const isActive = primaryNavActive(href, pathname);
+ 
+   const content = (
+     <motion.div variants={prefersReducedMotion ? reducedMotionVariant : listItem}>
+       <Link
+         href={href}
+         onClick={onClick}
+-        aria-current={isActive ? 'page' : undefined}
++        aria-current={isActive ? pathname === href ? 'page' : 'location' : undefined}
+         className={cn(
+           'group relative flex items-center gap-3 rounded-lg transition-colors duration-150',
+           isCollapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',

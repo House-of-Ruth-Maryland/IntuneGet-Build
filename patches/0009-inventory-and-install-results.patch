@@ -1,5 +1,5 @@
 diff --git a/app/(app)/dashboard/inventory/page.tsx b/app/(app)/dashboard/inventory/page.tsx
-index d4fb43f0f..5d2c214bc 100644
+index d4fb43f0f..450ee7ec2 100644
 --- a/app/(app)/dashboard/inventory/page.tsx
 +++ b/app/(app)/dashboard/inventory/page.tsx
 @@ -1,12 +1,14 @@
@@ -11,7 +11,8 @@ index d4fb43f0f..5d2c214bc 100644
 +import { useRouter, useSearchParams } from 'next/navigation';
  import { T } from 'gt-next';
  import { motion, useReducedMotion } from 'framer-motion';
- import { AlertCircle, RefreshCw, Package, Server, Building2, Clock, Shield } from 'lucide-react';
+-import { AlertCircle, RefreshCw, Package, Server, Building2, Clock, Shield } from 'lucide-react';
++import { AlertCircle, RefreshCw, Package } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import { useInventoryApps } from '@/hooks/use-inventory';
 +import { AppDriftPanel } from '@/components/hrm/AppInsights';
@@ -19,8 +20,12 @@ index d4fb43f0f..5d2c214bc 100644
  import {
    InventoryAppCard,
    InventoryAppDetails,
-@@ -18,14 +20,40 @@ import {
- import { PageHeader, AnimatedEmptyState, SkeletonGrid, AnimatedStatCard, StatCardGrid } from '@/components/dashboard';
+@@ -15,17 +17,43 @@ import {
+   InventoryPagination,
+   InventoryListHeader,
+ } from '@/components/inventory';
+-import { PageHeader, AnimatedEmptyState, SkeletonGrid, AnimatedStatCard, StatCardGrid } from '@/components/dashboard';
++import { PageHeader, AnimatedEmptyState, SkeletonGrid } from '@/components/dashboard';
  import { useUserSettings } from '@/components/providers/UserSettingsProvider';
  import { usePagination } from '@/hooks/use-pagination';
 +import { INVENTORY_PATH, linkedAppId } from '@/lib/hrm/inventory-link';
@@ -33,7 +38,7 @@ index d4fb43f0f..5d2c214bc 100644
 +    <div className="space-y-6">
 +      <PageHeader
 +        title={<T>Inventory</T>}
-+        description={<T>Win32 apps in your Intune tenant. Open an app to change who gets it, its install dates and its future updates.</T>}
++        description={<T>Win32 apps in your tenant.</T>}
 +      />
 +      <SkeletonGrid count={4} columns={4} variant="stat" />
 +      <SkeletonGrid count={6} columns={3} variant="content" />
@@ -102,7 +107,7 @@ index d4fb43f0f..5d2c214bc 100644
          <PageHeader
            title={<T>Inventory</T>}
 -          description={<T>Win32 applications deployed in your Intune tenant</T>}
-+          description={<T>Win32 apps in your Intune tenant. Open an app to change who gets it, its install dates and its future updates.</T>}
++          description={<T>Win32 apps in your tenant.</T>}
          />
          <AnimatedEmptyState
            icon={AlertCircle}
@@ -120,7 +125,7 @@ index d4fb43f0f..5d2c214bc 100644
        <PageHeader
          title={<T>Inventory</T>}
 -        description={<T>Win32 applications deployed in your Intune tenant</T>}
-+        description={<T>Win32 apps in your Intune tenant. Open an app to change who gets it, its install dates and its future updates.</T>}
++        description={<T>Win32 apps in your tenant.</T>}
          gradient
          gradientColors="mixed"
          actions={
@@ -131,45 +136,60 @@ index d4fb43f0f..5d2c214bc 100644
              disabled={isFetching}
              className="text-text-secondary hover:text-text-primary"
            >
-@@ -222,7 +247,7 @@ export default function InventoryPage() {
-       {apps.length > 0 && (
-         <StatCardGrid columns={4}>
-           <AnimatedStatCard
--            title={<T>Total Apps</T>}
-+            title={<T>Total apps</T>}
-             value={stats.total}
-             icon={Server}
-             color="cyan"
-@@ -236,7 +261,7 @@ export default function InventoryPage() {
-             delay={0.1}
-           />
-           <AnimatedStatCard
--            title={<T>Recently Modified</T>}
-+            title={<T>Recently modified</T>}
-             value={stats.recentlyModified}
-             icon={Clock}
-             color="violet"
-@@ -244,7 +269,7 @@ export default function InventoryPage() {
-             description={<T>Last 30 days</T>}
-           />
-           <AnimatedStatCard
--            title={<T>System Install</T>}
-+            title={<T>System install</T>}
-             value={stats.systemInstall}
-             icon={Shield}
-             color="neutral"
-@@ -253,6 +278,10 @@ export default function InventoryPage() {
-         </StatCardGrid>
-       )}
+@@ -218,40 +243,18 @@ export default function InventoryPage() {
+         }
+       />
  
+-      {/* Stats Row */}
+-      {apps.length > 0 && (
+-        <StatCardGrid columns={4}>
+-          <AnimatedStatCard
+-            title={<T>Total Apps</T>}
+-            value={stats.total}
+-            icon={Server}
+-            color="cyan"
+-            delay={0}
+-          />
+-          <AnimatedStatCard
+-            title={<T>Publishers</T>}
+-            value={stats.publishers}
+-            icon={Building2}
+-            color="neutral"
+-            delay={0.1}
+-          />
+-          <AnimatedStatCard
+-            title={<T>Recently Modified</T>}
+-            value={stats.recentlyModified}
+-            icon={Clock}
+-            color="violet"
+-            delay={0.2}
+-            description={<T>Last 30 days</T>}
+-          />
+-          <AnimatedStatCard
+-            title={<T>System Install</T>}
+-            value={stats.systemInstall}
+-            icon={Shield}
+-            color="neutral"
+-            delay={0.3}
+-          />
+-        </StatCardGrid>
+-      )}
++      {apps.length > 0 && <dl aria-label="Inventory summary" className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-text-secondary">
++        {[
++          ['Total apps', stats.total], ['Publishers', stats.publishers],
++          ['Modified in 30 days', stats.recentlyModified], ['System install', stats.systemInstall],
++        ].map(([label, count]) => <div key={label} className="inline-flex items-baseline gap-1.5">
++          <dt>{label}</dt><dd className="font-semibold tabular-nums text-text-primary">{count}</dd>
++        </div>)}
++      </dl>}
++
 +      {/* HRM patch 0025: apps with more than one copy in Intune (only once the whole list has loaded) */}
 +      <AppDriftPanel onOpen={setSelectedAppId} />
 +      {isComplete && <DuplicatesPanel apps={apps} onOpen={setSelectedAppId} onChanged={() => refetch()} />}
-+
+ 
        {/* Filters */}
        <motion.div
-         initial={{ opacity: 0, y: 10 }}
-@@ -339,7 +368,7 @@ export default function InventoryPage() {
+@@ -339,7 +342,7 @@ export default function InventoryPage() {
            color="neutral"
            showOrbs={false}
            action={{
@@ -178,7 +198,7 @@ index d4fb43f0f..5d2c214bc 100644
              onClick: () => {
                setSearch('');
                setSelectedPublisher(null);
-@@ -351,10 +380,10 @@ export default function InventoryPage() {
+@@ -351,10 +354,10 @@ export default function InventoryPage() {
          <AnimatedEmptyState
            icon={Package}
            title={<T>No Win32 apps found</T>}
@@ -191,7 +211,7 @@ index d4fb43f0f..5d2c214bc 100644
              onClick: () => router.push('/dashboard/apps'),
            }}
          />
-@@ -363,7 +392,7 @@ export default function InventoryPage() {
+@@ -363,7 +366,7 @@ export default function InventoryPage() {
        {/* App Details Panel */}
        <InventoryAppDetails
          appId={selectedAppId}
@@ -998,10 +1018,10 @@ index c8e12c2fe..0b4c90f05 100644
    SectionTransition,
 diff --git a/components/hrm/AppGroupsLine.test.ts b/components/hrm/AppGroupsLine.test.ts
 new file mode 100644
-index 000000000..7af5c8c32
+index 000000000..efbf7cd28
 --- /dev/null
 +++ b/components/hrm/AppGroupsLine.test.ts
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,87 @@
 +// @vitest-environment happy-dom
 +const insights = vi.hoisted(() => ({ value: { data: { supported: false }, action: {} } as Record<string, unknown> }));
 +vi.mock('@/hooks/useAppInsights', () => ({ useAppInsights: () => insights.value }));
@@ -1023,6 +1043,7 @@ index 000000000..7af5c8c32
 +}
 +
 +beforeEach(() => {
++  insights.value = { data: { supported: false }, action: {} };
 +  const el = document.createElement('div');
 +  document.body.append(el);
 +  root = createRoot(el);
@@ -1055,7 +1076,7 @@ index 000000000..7af5c8c32
 +
 +  it('warns when the copy has no groups or is gone from Intune', async () => {
 +    state.value = { data: { app: { assignments: [] } } };
-+    expect(await render()).toContain('No groups. This copy installs nowhere.');
++    expect(await render()).toContain('No install assignments.');
 +    state.value = { error: new Error('App not found') };
 +    expect(await render()).toContain('Not in Intune any more');
 +  });
@@ -1071,12 +1092,13 @@ index 000000000..7af5c8c32
 +    insights.value = { data: { supported: true, snapshot: { ...snapshot, exists: true } }, action: {} };
 +    state.value = { data: { app: { assignments: [] } } };
 +    text = await render();
-+    expect(text).toContain('No groups. This copy installs nowhere.');
++    expect(text).toContain('No install assignments.');
 +    expect(text).not.toContain('No groups receive this app');
 +    insights.value = { data: { supported: true, snapshot: { ...snapshot, exists: true, revision: 3,
 +      change: { before: [{ key: 'a', label: 'All devices · Required', installs: true }], after: [], observedAt: '2026-01-02T12:00:00Z' } } }, action: {} };
 +    text = await render();
-+    expect(text).toContain('Groups or assignment settings changed');
++    expect(text).toContain('Change observed');
++    expect(text).toContain('All devices');
 +    insights.value = { data: { supported: false }, action: {} };
 +  });
 +
@@ -1089,10 +1111,10 @@ index 000000000..7af5c8c32
 +});
 diff --git a/components/hrm/AppGroupsLine.tsx b/components/hrm/AppGroupsLine.tsx
 new file mode 100644
-index 000000000..bf0840055
+index 000000000..68f1e9636
 --- /dev/null
 +++ b/components/hrm/AppGroupsLine.tsx
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,59 @@
 +'use client';
 +
 +// HRM patch 0023: which groups an Intune app is assigned to, in one line, read live from Intune.
@@ -1129,22 +1151,17 @@ index 000000000..bf0840055
 +  }
 +  const app = data?.app;
 +  if (!app) return null;
-+  const assignments = app.assignments ?? [];
-+  if (assignments.length === 0) {
-+    return (
-+      <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-+        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-+        No groups. This copy installs nowhere.
-+      </p>
-+    );
++  const assignments = app.assignments;
++  if (!assignments?.length) {
++    return <p className="text-xs text-text-secondary">{assignments ? 'No install assignments.' : 'Assignments unavailable.'}</p>;
 +  }
 +  const labels = assignments.map((a): ReactNode => {
 +    const label = assignmentTargetLabel(a.target, app.assignmentGroupNames, app.assignmentGroupLookupFailures);
 +    // An exclusion is Excluded, not Required: Intune stores an intent for it that means nothing to staff.
-+    if (label.startsWith('Excluded group: ')) return `${label.slice('Excluded group: '.length)} · Excluded`;
++    if (label.startsWith('Excluded group: ')) return <>{label.slice('Excluded group: '.length)} · <Term term="excluded">Excluded</Term></>;
 +    const intent = INTENT[a.intent] ?? a.intent;
 +    // Required and Available keep Intune's names and explain themselves on hover or keyboard focus.
-+    const term = intent === 'Required' ? 'required' : intent === 'Available' ? 'available' : null;
++    const term = intent === 'Required' ? 'required' : intent === 'Available' ? 'available' : intent === 'Uninstall' ? 'uninstall' : null;
 +    return <>{label.replace(/^Group: /, '')} · {term ? <Term term={term}>{intent}</Term> : intent}</>;
 +  });
 +  return (
@@ -1206,13 +1223,13 @@ index 000000000..1de56fc7b
 +});
 diff --git a/components/hrm/AppInsights.tsx b/components/hrm/AppInsights.tsx
 new file mode 100644
-index 000000000..37f25026e
+index 000000000..e43f15427
 --- /dev/null
 +++ b/components/hrm/AppInsights.tsx
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,132 @@
 +'use client';
 +import { useAppInsights } from '@/hooks/useAppInsights';
-+import { needsReview, type AppSnapshot } from '@/lib/hrm/app-insights';
++import { GUID, needsReview, type AssignmentSummary, type AppSnapshot } from '@/lib/hrm/app-insights';
 +import { intuneAppUrl, OPEN_IN_INTUNE } from '@/lib/hrm/intune-link';
 +
 +const date = (at: string) => new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -1222,18 +1239,43 @@ index 000000000..37f25026e
 +// say so from the live Intune read, so the same warning isn't shown twice.
 +const hasUnreviewedChange = (s: AppSnapshot) => s.change !== null && s.reviewedRevision < s.revision;
 +
++function SavedAssignment({ assignment, counterpart }: { assignment: AssignmentSummary; counterpart?: AssignmentSummary }) {
++  const [target, intent, ...settings] = assignment.label.split(' · ');
++  const groupId = target.startsWith('Group ') ? target.slice(6) : '';
++  const unavailable = GUID.test(groupId);
++  const previousSettings = new Set(counterpart?.label.split(' · ').slice(2));
++  const readable = settings.filter(value => !counterpart || !previousSettings.has(value)).map(value => value
++    .replace('notifications: show All', 'Notifications: Show all')
++    .replace('notifications: hide All', 'Notifications: Hide all')
++    .replace('notifications: show Reboot', 'Notifications: Show restart notifications')
++    .replace('delivery optimization priority: not Configured', 'Delivery optimization priority: Not configured'));
++  return <li className="break-words">
++    <span>{unavailable ? 'Group name unavailable' : target}</span>{intent && <> · {intent}</>}
++    {(unavailable || readable.length > 0) && <details className="text-xs text-text-secondary" open={counterpart && readable.length > 0 ? true : undefined}>
++      <summary className="cursor-pointer py-1">Assignment details</summary>
++      {unavailable && <p>Group ID: {groupId}</p>}
++      {readable.map((value, index) => <p key={index}>{value}</p>)}
++    </details>}
++  </li>;
++}
++
 +export function AssignmentDifference({ snapshot, changesOnly = false }: { snapshot: AppSnapshot; changesOnly?: boolean }) {
 +  const change = snapshot.change;
 +  return <div className="space-y-2 text-sm">
 +    {!changesOnly && !snapshot.exists && <p>This copy is no longer in Intune. It may have been replaced or deleted. Check before deploying again.</p>}
-+    {!changesOnly && snapshot.exists && !snapshot.assignments.some((a) => a.installs) && <p>No groups receive this app for installation. Exclusions and uninstall assignments do not install it.</p>}
++    {!changesOnly && snapshot.exists && !snapshot.assignments.some((a) => a.installs) && <p>No install assignments.</p>}
 +    {change && snapshot.reviewedRevision < snapshot.revision && <>
-+      <p>Groups or assignment settings changed since the previous check ({date(change.observedAt)}).</p>
++      <p>Change observed {date(change.observedAt)}.</p>
 +      <div className="grid gap-3 sm:grid-cols-2">
-+        {(['before', 'after'] as const).map((key) => <div key={key}>
++        {(['before', 'after'] as const).map((key) => {
++          const other = change[key === 'before' ? 'after' : 'before'];
++          const otherKeys = new Set(other.map(row => row.key));
++          const changed = change[key].filter(row => !otherKeys.has(row.key));
++          return <div key={key}>
 +          <p className="font-medium">{key === 'before' ? 'Previously' : 'Now'}</p>
-+          {change[key].length === 0 ? <p className="text-text-muted">No groups</p> : <ul className="list-disc pl-4 space-y-1 break-words">{change[key].map((a) => <li key={a.key}>{a.label}</li>)}</ul>}
-+        </div>)}
++          {changed.length ? <ul className="space-y-1">{changed.map(assignment => <SavedAssignment key={assignment.key} assignment={assignment} counterpart={other.find(row => row.label.split(' · ').slice(0, 2).join(' · ') === assignment.label.split(' · ').slice(0, 2).join(' · '))} />)}</ul> : <p className="text-text-muted">{key === 'before' ? 'No removed assignments' : 'No added assignments'}</p>}
++        </div>;
++        })}
 +      </div>
 +    </>}
 +  </div>;
@@ -1247,31 +1289,53 @@ index 000000000..37f25026e
 +  const { data, error } = useAppInsights(appId);
 +  if (error) return <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Could not check saved group changes. Review the live groups before deploying.</p>;
 +  if (!data?.snapshot || !(changesOnly ? hasUnreviewedChange(data.snapshot) : needsReview(data.snapshot))) return null;
-+  return <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-300"><AssignmentDifference snapshot={data.snapshot} changesOnly={changesOnly} /></div>;
++  return <div className="mt-2 rounded-lg border border-overlay/10 bg-bg-surface p-3 text-text-secondary"><AssignmentDifference snapshot={data.snapshot} changesOnly={changesOnly} /></div>;
 +}
 +
 +export function AppDriftPanel({ onOpen }: { onOpen: (id: string) => void }) {
 +  const { data, isLoading, error, refetch, action } = useAppInsights();
 +  if (data?.supported === false) return null;
++  const alerts = data?.alerts ?? [];
++  const changes = alerts.filter(s => s.exists && hasUnreviewedChange(s));
++  const missing = alerts.filter(s => !s.exists);
++  const unassigned = alerts.filter(s => s.exists && !hasUnreviewedChange(s) && !s.assignments.some(a => a.installs));
 +  return <section className="mb-6 rounded-xl border border-overlay/10 bg-bg-surface p-4" aria-label="Group changes to review">
 +    <div className="flex items-center justify-between gap-3">
 +      <h2 className="font-semibold text-text-primary">Group changes to review</h2>
 +      <button className={button} disabled={action.isPending} onClick={() => action.mutate({ action: 'check' })}>{action.isPending && action.variables?.action === 'check' ? 'Checking…' : 'Check now'}</button>
 +    </div>
-+    <p className="mt-1 text-xs text-text-muted">Apps deployed by IntuneGet. Checked at 3:30 AM and 3:30 PM, Maryland time. Changes are observed between checks; who changed them in Intune is not known.</p>
++    <p className="mt-1 text-xs text-text-muted">Checks run at 3:30 AM and 3:30 PM, Maryland time.</p>
 +    {isLoading && <p className="mt-3 text-sm text-text-muted">Loading saved checks…</p>}
 +    {error && <p role="alert" className="mt-3 text-sm text-status-error">{error.message} <button className={button} onClick={() => refetch()}>Try again</button></p>}
 +    {action.error && <p role="alert" className="mt-3 text-sm text-status-error">{action.error.message}</p>}
 +    {action.data && <p role="status" className="mt-2 text-xs text-text-secondary">{action.data.reviewed ? 'Change marked reviewed.' : `Checked ${action.data.checked ?? 0} apps.`}{action.data.errors > 0 ? ` Could not check ${action.data.errors}; their last successful checks are kept.` : ''}</p>}
-+    {data && data.alerts?.length === 0 && <p className="mt-3 text-sm text-text-secondary">No saved warnings. Use Check now to get the latest groups from Intune.</p>}
-+    <ul className="mt-3 space-y-3">{data?.alerts?.map((s) => <li key={s.appId} className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-300">
-+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2"><p className="font-medium">{s.displayName} {s.version}</p>
-+        <div className="flex gap-3"><button className={button} onClick={() => onOpen(s.appId)}>{s.exists ? 'Open app' : 'Open activity'}</button>{!s.exists && <a className={button} href={intuneAppUrl(s.appId)} target="_blank" rel="noopener noreferrer">{OPEN_IN_INTUNE}</a>}</div>
-+      </div>
++    {data && changes.length === 0 && <p className="mt-2 text-sm text-text-secondary">No group changes to review.</p>}
++    {changes.map(s => <details key={s.appId} className="mt-2 border-t border-overlay/10 pt-1">
++      <summary className="cursor-pointer py-2 text-sm font-medium text-text-primary">{s.displayName} {s.version}</summary>
 +      <AssignmentDifference snapshot={s} />
 +      <p className="mt-2 text-xs text-text-muted">Last successful check: {date(s.checkedAt)}</p>
-+      {s.change && s.reviewedRevision < s.revision && <button className={`${button} mt-2`} disabled={action.isPending} onClick={() => action.mutate({ action: 'review', appId: s.appId, revision: s.revision })}>Mark reviewed</button>}
-+    </li>)}</ul>
++      <div className="mt-2 flex flex-wrap items-center gap-4">
++        <button className={button} disabled={action.isPending} onClick={() => action.mutate({ action: 'review', appId: s.appId, revision: s.revision })}>Mark reviewed</button>
++        <button className={button} onClick={() => onOpen(s.appId)}>Open app</button>
++      </div>
++    </details>)}
++    {missing.length > 0 && <details className="mt-2 border-t border-overlay/10">
++      <summary className="cursor-pointer py-2 text-sm">Copies no longer in Intune ({missing.length})</summary>
++      {missing.map(s => <div key={s.appId} className="flex flex-wrap items-center gap-3 py-1 text-sm">
++        <span>{s.displayName} {s.version}</span><button className={button} onClick={() => onOpen(s.appId)}>Open activity</button>
++        <a className={button} href={intuneAppUrl(s.appId)} target="_blank" rel="noopener noreferrer">{OPEN_IN_INTUNE}</a>
++        {hasUnreviewedChange(s) && <details className="basis-full"><summary className="cursor-pointer">Last recorded group change</summary>
++          <AssignmentDifference snapshot={s} changesOnly />
++          <button className={button} disabled={action.isPending} onClick={() => action.mutate({ action: 'review', appId: s.appId, revision: s.revision })}>Mark reviewed</button>
++        </details>}
++      </div>)}
++    </details>}
++    {unassigned.length > 0 && <details className="mt-2 border-t border-overlay/10">
++      <summary className="cursor-pointer py-2 text-sm text-text-secondary">No install assignments ({unassigned.length})</summary>
++      {unassigned.map(s => <div key={s.appId} className="flex flex-wrap items-center gap-3 py-1 text-sm">
++        <span>{s.displayName} {s.version}</span><button className={button} onClick={() => onOpen(s.appId)}>Open app</button>
++      </div>)}
++    </details>}
 +  </section>;
 +}
 +
@@ -1563,10 +1627,10 @@ index 267d2600e..d702001b5 100644
    );
  });
 diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
-index 5e9631f0e..bc0d9aec0 100644
+index 5e9631f0e..f375e1955 100644
 --- a/components/inventory/InventoryAppDetails.tsx
 +++ b/components/inventory/InventoryAppDetails.tsx
-@@ -1,7 +1,17 @@
+@@ -1,7 +1,19 @@
  'use client';
  
 -import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users } from 'lucide-react';
@@ -1576,6 +1640,8 @@ index 5e9631f0e..bc0d9aec0 100644
 +import { useNewVersionPrefill } from '@/hooks/useNewVersionPrefill';
 +import { jobIdFromNotes } from '@/lib/hrm/new-version';
  import { CopyableCommand } from './CopyableCommand';
++import { Term } from '@/components/hrm/Term';
++import { installs } from '@/lib/hrm/group-edit';
 +import { AppActivityTimeline, AppDriftWarning } from '@/components/hrm/AppInsights';
 +import { InstallStatusBar } from '@/components/hrm/InstallStatusBar';
 +import { PreviousCopyNote } from '@/components/hrm/PreviousCopy';
@@ -1585,7 +1651,7 @@ index 5e9631f0e..bc0d9aec0 100644
  import { Button } from '@/components/ui/button';
  import { SlidePanel } from '@/components/dashboard/animations/SlidePanel';
  import { useAppDetails } from '@/hooks/use-inventory';
-@@ -17,6 +27,8 @@ interface InventoryAppDetailsProps {
+@@ -17,6 +29,8 @@ interface InventoryAppDetailsProps {
  export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDetailsProps) {
    const { data, isLoading, error, refetch } = useAppDetails(appId);
    const app = data?.app;
@@ -1594,7 +1660,7 @@ index 5e9631f0e..bc0d9aec0 100644
  
    const formatDate = (dateString: string) => {
      return new Date(dateString).toLocaleDateString('en-US', {
-@@ -38,10 +50,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -38,10 +52,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
  
    const getAssignmentIntent = (intent: IntuneAppAssignment['intent']) => {
      const intents: Record<string, { label: string; className: string }> = {
@@ -1609,7 +1675,7 @@ index 5e9631f0e..bc0d9aec0 100644
      };
      return intents[intent] || { label: intent, className: 'bg-overlay/5 text-text-muted' };
    };
-@@ -61,7 +73,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -61,7 +75,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        </div>
        <div className="flex-1 min-w-0">
          <h3 className="text-xl font-semibold text-text-primary truncate">{app.displayName}</h3>
@@ -1618,7 +1684,7 @@ index 5e9631f0e..bc0d9aec0 100644
          {app.displayVersion && (
            <span className="inline-block mt-1 text-xs bg-accent-cyan/10 text-accent-cyan px-2 py-0.5 rounded-full">
              v{app.displayVersion}
-@@ -73,20 +85,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -73,20 +87,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
          size="sm"
          onClick={() => refetch()}
          disabled={isLoading}
@@ -1657,7 +1723,7 @@ index 5e9631f0e..bc0d9aec0 100644
      </Button>
    ) : undefined;
  
-@@ -96,8 +123,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -96,8 +125,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        onClose={onClose}
        width="lg"
        direction="right"
@@ -1668,7 +1734,7 @@ index 5e9631f0e..bc0d9aec0 100644
      >
        {/* Loading State */}
        {isLoading && (
-@@ -110,25 +138,43 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -110,25 +140,43 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        {error && (
          <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
            <AlertCircle className="w-12 h-12 text-status-error mb-4" />
@@ -1716,7 +1782,7 @@ index 5e9631f0e..bc0d9aec0 100644
                  Description
                </h4>
                <p className="text-sm text-text-secondary leading-relaxed">{app.description}</p>
-@@ -138,23 +184,37 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -138,23 +186,36 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
            {/* Commands */}
            <div className="space-y-4">
              {app.installCommandLine && (
@@ -1731,15 +1797,14 @@ index 5e9631f0e..bc0d9aec0 100644
  
 -          {/* Assignments */}
 +          {/* Assignments. HRM patch 0023: always shown, so an app with no groups is obvious. */}
-+          {(!app.assignments || app.assignments.length === 0) && (
++          {(!app.assignments || !app.assignments.some(installs)) && (
 +            <div>
 +              <h4 className="text-sm font-semibold text-text-secondary mb-3 flex items-center gap-2">
 +                <Users className="w-3.5 h-3.5" />
 +                Groups
 +              </h4>
-+              <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-700 dark:text-amber-300">
-+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
-+                No groups. This app installs nowhere until it&apos;s assigned to a group.
++              <p className="text-sm text-text-secondary">
++                {app.assignments ? 'No install assignments.' : 'Assignments unavailable.'}
 +              </p>
 +            </div>
 +          )}
@@ -1759,7 +1824,7 @@ index 5e9631f0e..bc0d9aec0 100644
                    return (
                      <div
                        key={assignment.id}
-@@ -173,12 +233,12 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -173,12 +234,12 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                                assignment.target,
                                app.assignmentGroupNames,
                                app.assignmentGroupLookupFailures
@@ -1771,11 +1836,11 @@ index 5e9631f0e..bc0d9aec0 100644
 -                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${intentInfo.className}`}>
 -                        {intentInfo.label}
 +                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${excluded ? 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300' : intentInfo.className}`}>
-+                        {excluded ? 'Excluded' : intentInfo.label}
++                        {excluded ? <Term term="excluded">Excluded</Term> : assignment.intent === 'required' || assignment.intent === 'available' || assignment.intent === 'uninstall' ? <Term term={assignment.intent}>{intentInfo.label}</Term> : intentInfo.label}
                        </span>
                      </div>
                    );
-@@ -189,7 +249,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -189,7 +250,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
  
            {/* Metadata Grid */}
            <div>
@@ -1784,7 +1849,7 @@ index 5e9631f0e..bc0d9aec0 100644
                Details
              </h4>
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-@@ -210,12 +270,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -210,12 +271,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                />
                <MetadataItem
                  icon={User}
@@ -1874,7 +1939,7 @@ index eba518fc0..ab871da75 100644
    );
  });
 diff --git a/components/inventory/assignment-group-labels.test.ts b/components/inventory/assignment-group-labels.test.ts
-index b19c39912..ba0b1a177 100644
+index b19c39912..93d84eef2 100644
 --- a/components/inventory/assignment-group-labels.test.ts
 +++ b/components/inventory/assignment-group-labels.test.ts
 @@ -1,9 +1,15 @@
@@ -1893,7 +1958,7 @@ index b19c39912..ba0b1a177 100644
  vi.mock('@/components/dashboard/animations/SlidePanel',()=>({SlidePanel:({children}:{children:React.ReactNode})=>children}));
  import {InventoryAppDetails} from './InventoryAppDetails';
  let root:Root;
-@@ -13,7 +19,7 @@ async function render(excluded=false,name?:string,failure?:'not_found'|'access_d
+@@ -13,17 +19,17 @@ async function render(excluded=false,name?:string,failure?:'not_found'|'access_d
    const id='11111111-1111-4111-8111-111111111111';
    state.app={id:'fixture-app',displayName:'Fixture',publisher:'Example',createdDateTime:'2026-01-01T00:00:00Z',lastModifiedDateTime:'2026-01-01T00:00:00Z',installExperience:{runAsAccount:'system'},assignments:[{id:'assignment',intent:'required',target:{'@odata.type':`#microsoft.graph.${excluded?'exclusionGroupAssignmentTarget':'groupAssignmentTarget'}`,groupId:id},settings:null}],assignmentGroupNames:name?{[id]:name}:undefined,assignmentGroupLookupFailures:failure?{[id]:failure}:undefined};
    vi.stubGlobal('fetch',vi.fn(()=>{throw Error('Network forbidden in renderer regression');}));
@@ -1902,12 +1967,15 @@ index b19c39912..ba0b1a177 100644
  }
  describe('actual inventory assignment rendering',()=>{
    it('shows a resolved assignment name',async()=>{expect(await render(false,'Fixture Group')).toContain('Group: Fixture Group');expect(fetch).not.toHaveBeenCalled();});
-@@ -22,8 +28,8 @@ describe('actual inventory assignment rendering',()=>{
-     expect(await render(false,undefined,'not_found')).toContain('Group: 11111111... (group deleted or not found)');
+-  it('keeps ID fallback for old cached responses',async()=>{expect(await render()).toContain('Group: 11111111... (name unavailable)');});
++  it('keeps the unavailable-name fallback for old cached responses',async()=>{expect(await render()).toContain('Group: name unavailable');});
+   it('explains deleted groups and missing permission while keeping the full ID available',async()=>{
+-    expect(await render(false,undefined,'not_found')).toContain('Group: 11111111... (group deleted or not found)');
++    expect(await render(false,undefined,'not_found')).toContain('Group: group deleted or not found');
      expect(document.querySelector('[title="11111111-1111-4111-8111-111111111111"]')).not.toBeNull();
      await act(async()=>root.unmount());document.body.innerHTML='';
 -    expect(await render(true,undefined,'access_denied')).toContain('Excluded group: 11111111... (no permission to read group name)');
-+    expect(await render(true,undefined,'access_denied')).toContain('Group: 11111111... (no permission to read group name)');
++    expect(await render(true,undefined,'access_denied')).toContain('Group: no permission to read group name');
    });
 -  it('identifies excluded groups',async()=>{expect(await render(true,'Finance')).toContain('Excluded group: Finance');});
 +  it('identifies excluded groups',async()=>{const text=await render(true,'Finance');expect(text).toContain('Group: FinanceExcluded');expect(text).not.toContain('Required');});
@@ -3997,7 +4065,7 @@ index 000000000..07785bd56
 +}
 diff --git a/hooks/__tests__/app-evidence-scope.test.ts b/hooks/__tests__/app-evidence-scope.test.ts
 new file mode 100644
-index 000000000..cd977cd7b
+index 000000000..0434abb89
 --- /dev/null
 +++ b/hooks/__tests__/app-evidence-scope.test.ts
 @@ -0,0 +1,13 @@
@@ -4009,8 +4077,8 @@ index 000000000..cd977cd7b
 +import {useInstallStatus,installStatusKey} from '../useInstallStatus';
 +import {useDeployedConfig} from '../use-deployed-config';
 +it('separates cached results and saved settings when the authorized user or tenant changes',()=>{
-+ const read=()=>{state.query.mockClear();useInstallStatus('copy');useDeployedConfig('Example.App','copy');return state.query.mock.calls.map(([q])=>q.queryKey);};
-+ const first=read();state.user={id:'second',tenantId:'tenant-a'};const colleague=read();state.user={id:'second',tenantId:'tenant-b'};const other=read();
++ const useEvidenceKeys=()=>{state.query.mockClear();useInstallStatus('copy');useDeployedConfig('Example.App','copy');return state.query.mock.calls.map(([q])=>q.queryKey);};
++ const first=useEvidenceKeys();state.user={id:'second',tenantId:'tenant-a'};const colleague=useEvidenceKeys();state.user={id:'second',tenantId:'tenant-b'};const other=useEvidenceKeys();
 + expect(first[0]).not.toEqual(colleague[0]);expect(first[1]).not.toEqual(colleague[1]);expect(colleague[0]).not.toEqual(other[0]);expect(colleague[1]).not.toEqual(other[1]);
 + expect(installStatusKey('copy','first','tenant-a')).not.toEqual(installStatusKey('other-copy','first','tenant-a'));
 +});
@@ -4224,25 +4292,31 @@ index 000000000..dd2461b5c
 +  });
 +});
 diff --git a/lib/intune/assignment-group-names.test.ts b/lib/intune/assignment-group-names.test.ts
-index 851c281fe..f2546c3f8 100644
+index 851c281fe..c617abf76 100644
 --- a/lib/intune/assignment-group-names.test.ts
 +++ b/lib/intune/assignment-group-names.test.ts
-@@ -50,7 +50,8 @@ describe('assignment group name resolution',()=>{
-     expect(assignmentTargetLabel(assignment().target)).toBe('Group: 11111111... (name unavailable)');
-     expect(assignmentTargetLabel(assignment().target,{},{[id]:'not_found'})).toBe('Group: 11111111... (group deleted or not found)');
-     expect(assignmentTargetLabel(assignment(id.toUpperCase(),true).target,{},{[id]:'access_denied'})).toBe('Excluded group: 11111111... (no permission to read group name)');
+@@ -47,10 +47,11 @@ describe('assignment group name resolution',()=>{
+   it('labels includes, exclusions and unresolved groups without altering special targets',()=>{
+     expect(assignmentTargetLabel(assignment().target,{[id]:'Finance'})).toBe('Group: Finance');
+     expect(assignmentTargetLabel(assignment(id,true).target,{[id]:'Finance'})).toBe('Excluded group: Finance');
+-    expect(assignmentTargetLabel(assignment().target)).toBe('Group: 11111111... (name unavailable)');
+-    expect(assignmentTargetLabel(assignment().target,{},{[id]:'not_found'})).toBe('Group: 11111111... (group deleted or not found)');
+-    expect(assignmentTargetLabel(assignment(id.toUpperCase(),true).target,{},{[id]:'access_denied'})).toBe('Excluded group: 11111111... (no permission to read group name)');
 -    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'})).toBe('All Devices');
 -    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allUsersAssignmentTarget'})).toBe('All Users');
++    expect(assignmentTargetLabel(assignment().target)).toBe('Group: name unavailable');
++    expect(assignmentTargetLabel(assignment().target,{},{[id]:'not_found'})).toBe('Group: group deleted or not found');
++    expect(assignmentTargetLabel(assignment(id.toUpperCase(),true).target,{},{[id]:'access_denied'})).toBe('Excluded group: no permission to read group name');
 +    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'})).toBe('All devices');
 +    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allUsersAssignmentTarget'})).toBe('All users');
 +    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.groupAssignmentTarget'})).toBe('Unknown group');
    });
  });
 diff --git a/lib/intune/assignment-group-names.ts b/lib/intune/assignment-group-names.ts
-index 2c3370e23..8b5ee681e 100644
+index 2c3370e23..bee5fc450 100644
 --- a/lib/intune/assignment-group-names.ts
 +++ b/lib/intune/assignment-group-names.ts
-@@ -60,9 +60,9 @@ export function assignmentTargetLabel(
+@@ -60,14 +60,14 @@ export function assignmentTargetLabel(
    failures: Partial<Record<string, AssignmentGroupLookupFailure>> = {},
  ): string {
    const type = target['@odata.type'];
@@ -4255,3 +4329,173 @@ index 2c3370e23..8b5ee681e 100644
    const excluded = type === '#microsoft.graph.exclusionGroupAssignmentTarget';
    const prefix = excluded ? 'Excluded group' : 'Group';
    const id = target.groupId.toLowerCase();
+   if (names[id]) return `${prefix}: ${names[id]}`;
+   const failure = failures[id];
+   const reason = failure ? FAILURE_LABELS[failure] : 'name unavailable';
+-  return `${prefix}: ${target.groupId.slice(0, 8)}... (${reason})`;
++  return `${prefix}: ${reason}`;
+ }
+diff --git a/components/inventory/InventoryFilters.tsx b/components/inventory/InventoryFilters.tsx
+index c0d1725cd..3f427d08f 100644
+--- a/components/inventory/InventoryFilters.tsx
++++ b/components/inventory/InventoryFilters.tsx
+@@ -91,15 +91,15 @@ export function InventoryFilters({
+ 
+   return (
+     <div className="glass-light rounded-xl p-4 border border-overlay/5">
+-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
++      <div className="flex flex-wrap gap-3 items-center justify-between">
+         {/* Search + Publisher Filter */}
+-        <div className="flex items-center gap-3 w-full sm:w-auto">
++        <div className="grid w-full gap-2 sm:flex sm:w-auto sm:items-center">
+           <div className="relative w-full sm:w-80">
+             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+             <Input
+               ref={searchInputRef}
+               type="text"
+-              placeholder="Search apps... (press / to focus)"
++              aria-label="Search inventory" placeholder="Search apps"
+               value={localSearch}
+               onChange={(e) => setLocalSearch(e.target.value)}
+               className="pl-10 bg-bg-elevated border-overlay/10 text-text-primary placeholder:text-text-muted focus:border-accent-cyan/50 focus:ring-accent-cyan/20"
+@@ -140,7 +140,7 @@ export function InventoryFilters({
+               variant="ghost"
+               size="sm"
+               onClick={onSortOrderToggle}
+-              aria-label={`Sort ${sortOrder === 'asc' ? 'ascending' : 'descending'}`}
++              aria-label={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
+               className="text-text-secondary hover:text-text-primary hover:bg-overlay/5"
+             >
+               {sortOrder === 'asc' ? (
+diff --git a/components/inventory/PublisherFilter.tsx b/components/inventory/PublisherFilter.tsx
+index a7000e0bb..3e8a27efc 100644
+--- a/components/inventory/PublisherFilter.tsx
++++ b/components/inventory/PublisherFilter.tsx
+@@ -1,9 +1,5 @@
+ 'use client';
+ 
+-import { useState, useRef, useEffect } from 'react';
+-import { Building2, ChevronDown, X } from 'lucide-react';
+-import { cn } from '@/lib/utils';
+-
+ interface PublisherFilterProps {
+   publishers: string[];
+   selectedPublisher: string | null;
+@@ -15,111 +11,12 @@ export function PublisherFilter({
+   selectedPublisher,
+   onPublisherChange,
+ }: PublisherFilterProps) {
+-  const [isOpen, setIsOpen] = useState(false);
+-  const containerRef = useRef<HTMLDivElement>(null);
+-
+-  // Close on click outside
+-  useEffect(() => {
+-    if (!isOpen) return;
+-
+-    function handleClickOutside(e: MouseEvent) {
+-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+-        setIsOpen(false);
+-      }
+-    }
+-
+-    document.addEventListener('mousedown', handleClickOutside);
+-    return () => document.removeEventListener('mousedown', handleClickOutside);
+-  }, [isOpen]);
+-
+-  // Close on Escape
+-  useEffect(() => {
+-    if (!isOpen) return;
+-
+-    function handleKeyDown(e: KeyboardEvent) {
+-      if (e.key === 'Escape') {
+-        setIsOpen(false);
+-      }
+-    }
+-
+-    document.addEventListener('keydown', handleKeyDown);
+-    return () => document.removeEventListener('keydown', handleKeyDown);
+-  }, [isOpen]);
+-
+-  const handleSelect = (publisher: string | null) => {
+-    onPublisherChange(publisher);
+-    setIsOpen(false);
+-  };
+-
+   return (
+-    <div ref={containerRef} className="relative">
+-      <button
+-        onClick={() => setIsOpen(!isOpen)}
+-        className={cn(
+-          'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors',
+-          selectedPublisher
+-            ? 'border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan'
+-            : 'border-overlay/10 bg-bg-elevated text-text-secondary hover:text-text-primary hover:border-overlay/20'
+-        )}
+-        aria-expanded={isOpen}
+-        aria-haspopup="listbox"
+-      >
+-        <Building2 className="w-4 h-4" />
+-        <span className="truncate max-w-[160px]">
+-          {selectedPublisher || 'All Publishers'}
+-        </span>
+-        {selectedPublisher ? (
+-          <X
+-            className="w-3.5 h-3.5 hover:text-text-primary"
+-            onClick={(e) => {
+-              e.stopPropagation();
+-              onPublisherChange(null);
+-            }}
+-          />
+-        ) : (
+-          <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', isOpen && 'rotate-180')} />
+-        )}
+-      </button>
+-
+-      {isOpen && (
+-        <div
+-          className="absolute top-full left-0 mt-1 w-64 bg-bg-elevated border border-overlay/10 rounded-xl shadow-soft-lg z-50 overflow-hidden"
+-          role="listbox"
+-          aria-label="Publisher filter"
+-        >
+-          <div className="max-h-60 overflow-y-auto p-1">
+-            <button
+-              onClick={() => handleSelect(null)}
+-              role="option"
+-              aria-selected={selectedPublisher === null}
+-              className={cn(
+-                'w-full text-left px-3 py-2 rounded-lg text-sm transition-colors',
+-                selectedPublisher === null
+-                  ? 'bg-accent-cyan/10 text-accent-cyan'
+-                  : 'text-text-secondary hover:bg-bg-surface hover:text-text-primary'
+-              )}
+-            >
+-              All Publishers
+-            </button>
+-            {publishers.map((publisher) => (
+-              <button
+-                key={publisher}
+-                onClick={() => handleSelect(publisher)}
+-                role="option"
+-                aria-selected={selectedPublisher === publisher}
+-                className={cn(
+-                  'w-full text-left px-3 py-2 rounded-lg text-sm transition-colors truncate',
+-                  selectedPublisher === publisher
+-                    ? 'bg-accent-cyan/10 text-accent-cyan'
+-                    : 'text-text-secondary hover:bg-bg-surface hover:text-text-primary'
+-                )}
+-              >
+-                {publisher}
+-              </button>
+-            ))}
+-          </div>
+-        </div>
+-      )}
+-    </div>
++    <select aria-label="Filter by publisher" value={selectedPublisher ?? ''}
++      onChange={(event) => onPublisherChange(event.target.value || null)}
++      className="max-w-full rounded-lg border border-overlay/10 bg-bg-elevated px-3 py-2 text-sm text-text-primary focus-visible:ring-2 focus-visible:ring-accent-cyan">
++      <option value="">All publishers</option>
++      {publishers.map(publisher => <option key={publisher} value={publisher}>{publisher}</option>)}
++    </select>
+   );
+ }

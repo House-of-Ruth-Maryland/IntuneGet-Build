@@ -11,10 +11,10 @@ index 000000000..ceaaa2f16
 +}
 diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
 new file mode 100644
-index 000000000..7362128d6
+index 000000000..e5d0b2a46
 --- /dev/null
 +++ b/components/hrm/help/HelpVisual.tsx
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,93 @@
 +'use client';
 +import { ArrowRight, ArrowUpCircle, Box, Check, ChevronDown, Circle, LayoutDashboard, LifeBuoy, Package, Rocket, Search, Server } from 'lucide-react';
 +import type { LucideIcon } from 'lucide-react';
@@ -52,6 +52,7 @@ index 000000000..7362128d6
 +/** A schematic built from app labels, never a screenshot of a tenant or a live action. */
 +export function HelpVisual({ step, number, guideId }: { step: HelpStep; number: number; guideId: string }) {
 +  const screen = HELP_SCREENS[step.screen];
++  const groupReview = guideId === 'group-changes' && ['Check now', 'Previously', 'Open app', 'Mark reviewed'].includes(step.focus);
 +  const manualReview = guideId === 'updating' && ['Effective update settings', 'Send update to Intune'].includes(step.focus);
 +  const restartEditor = guideId === 'startup-beta' && step.screen === 'inventory' && step.focus !== 'Change how it installs';
 +  const isRemoval = ['retire', 'remove-discovered'].includes(guideId);
@@ -60,19 +61,19 @@ index 000000000..7362128d6
 +  // Home: task guides about apps show Needs attention; the server guide shows Server status (patch 0058 layout 3B).
 +  const needsAttention = step.screen === 'server' && guideId !== 'server';
 +  const installSettings = guideId === 'install-settings';
-+  const rowLabels: Partial<Record<HelpScreen, string[]>> = { catalog: ['Who gets it', 'When a new version comes out'], 'deployment-list': ['Who gets it', 'When a new version comes out'], updates: ['Checked', 'Publishing window:', 'How automatic updates install', 'Startup install results'], inventory: ['Current release', 'Who gets it', 'Install dates', 'Install results', 'Future updates', 'Change how it installs', 'Edit groups', 'Review change', 'App activity'], discovered: ['App found on computers'], settings: ['Appearance', 'Notifications'], server: needsAttention ? ['Needs attention'] : ['Server status', 'Intune self-test', 'Version', 'All checks'] };
++  const rowLabels: Partial<Record<HelpScreen, string[]>> = { catalog: ['Who gets it', 'When a new version comes out'], 'deployment-list': ['Who gets it', 'When a new version comes out'], updates: ['Checked', 'Publishing window:', 'How automatic updates install', 'Startup install results'], inventory: ['Current release', 'Who gets it', 'Install dates', 'Install results', 'Future updates', 'Change how it installs', 'Edit groups', 'Review change', 'App activity'], discovered: ['App found on computers'], settings: ['Open sidebar', 'Find a page or guide', 'Keyboard shortcuts', 'Theme', 'Not set on this page'], server: needsAttention ? ['Needs attention'] : ['Server status', 'Intune self-test', 'Version', 'All checks'] };
 +  const heading = screen.heading ?? screen.label;
 +  const focusAtHeading = step.focus === heading;
 +  // Inventory app details: Install dates, Previous version and Retire app sit under Actions, between Install results and Groups.
 +  const actionsPanel = step.screen === 'inventory' ? ({ rollback: 'Previous version', retire: 'Retire app' } as Record<string, string>)[guideId] : undefined;
-+  const focusAtRow = manualReview || restartEditor || (installSettings && ['Toolkit windows', 'App setup and checks', 'Staff experience'].includes(step.focus)) || rowLabels[step.screen]?.includes(step.focus);
++  const focusAtRow = groupReview || manualReview || restartEditor || (installSettings && ['Toolkit windows', 'App setup and checks', 'Staff experience'].includes(step.focus)) || rowLabels[step.screen]?.includes(step.focus);
 +  const row = (label: string, value: string) => step.focus === label ? target : <ExampleRow label={label} value={value}/>;
 +  // App updates: Checked in the header, the update list first, then the Automatic updates bar below it (publishing
 +  // window and How automatic updates install; a Startup Beta line only while a Beta package is recorded).
 +  // Card controls: policy pill at the bottom left, Review update and the More actions menu (…) at the bottom right.
 +  const cardPlace: Record<string, string> = { 'Auto-update': 'policy pill, bottom left', 'Review update': 'Review update, bottom right', 'Test with a pilot group': 'More actions (…), bottom right', 'Open app workspace': 'More actions (…), bottom right' };
 +  const scheduleDialog = ['Pause automatic updates', 'Edit publishing window', 'Restrict deploying to selected days and hours', 'Add blackout'].includes(step.focus);
-+  const location = step.focus === 'Check for app updates' ? 'App updates · header · hover note: may start enabled automatic updates' : manualReview ? 'App updates · Review update or Update all · read-only assignment review' : restartEditor ? 'Apps · App workspace · Future updates · Change how it installs · app exception · requires enabled validated startup workflow' : step.screen === 'catalog' && !focusAtHeading ? 'App configuration · panel on the right' : needsAttention ? 'Home · Needs attention' : guideId === 'installation-timing' && step.screen === 'inventory' ? 'App workspace · Current release · Install dates' : ['Edit groups', 'Review change'].includes(step.focus) ? 'App workspace · Current release · Who gets it · Edit groups' : step.focus === 'Check installs now' ? 'App details · Install results' : actionsPanel ? `Inventory · Details · Actions · ${actionsPanel}` : step.focus === 'Installation policy for this release' ? 'Update history · expanded version' : step.screen === 'updates' && cardPlace[step.focus] ? `Available updates · app card · ${cardPlace[step.focus]}` : guideId === 'automatic-installation-policy' && step.screen === 'inventory' ? 'App workspace · Future updates · Change how it installs' : scheduleDialog ? 'App updates · Automatic updates bar below the list · Edit publishing window · When can IntuneGet send automatic updates to Intune?' : step.focus === 'Ignored apps' ? 'App updates · beside the Available updates and Update history tabs' : guideId === 'startup-beta' && step.screen === 'updates' ? 'Automatic updates bar · Startup install results (Beta) · Open · panel on the right' : step.screen === 'updates' && ['Publishing window:', 'Update schedule'].includes(step.focus) ? 'App updates · Automatic updates bar below the list' : null;
++  const location = step.focus === 'Open sidebar' ? 'Small screen · Open sidebar · Navigation dialog' : groupReview ? 'Inventory · Group changes to review · expand an app row' : step.focus === 'Check for app updates' ? 'App updates · header · hover note: may start enabled automatic updates' : manualReview ? 'App updates · Review update or Update all · read-only assignment review' : restartEditor ? 'Apps · App workspace · Future updates · Change how it installs · app exception · requires enabled validated startup workflow' : step.screen === 'catalog' && !focusAtHeading ? 'App configuration · panel on the right' : needsAttention ? 'Home · Needs attention' : guideId === 'installation-timing' && step.screen === 'inventory' ? 'App workspace · Current release · Install dates' : ['Edit groups', 'Review change'].includes(step.focus) ? 'App workspace · Current release · Who gets it · Edit groups' : step.focus === 'Check installs now' ? 'App details · Install results' : actionsPanel ? `Inventory · Details · Actions · ${actionsPanel}` : step.focus === 'Installation policy for this release' ? 'Update history · expanded version' : step.screen === 'updates' && cardPlace[step.focus] ? `Available updates · app card · ${cardPlace[step.focus]}` : guideId === 'automatic-installation-policy' && step.screen === 'inventory' ? 'App workspace · Future updates · Change how it installs' : scheduleDialog ? 'App updates · Automatic updates bar below the list · Edit publishing window · When can IntuneGet send automatic updates to Intune?' : step.focus === 'Ignored apps' ? 'App updates · beside the Available updates and Update history tabs' : guideId === 'startup-beta' && step.screen === 'updates' ? 'Automatic updates bar · Startup install results (Beta) · Open · panel on the right' : step.screen === 'updates' && ['Publishing window:', 'Update schedule'].includes(step.focus) ? 'App updates · Automatic updates bar below the list' : null;
 +  return <figure className="min-w-0 overflow-hidden rounded-2xl border border-overlay/10 bg-bg-elevated" aria-label={`Visual reference: ${screen.label}, ${step.focus}`}>
 +    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-overlay/10 px-4 py-3"><span className="text-xs font-medium text-text-secondary">Where to look</span><span className="rounded-full bg-overlay/5 px-2 py-1 text-[11px] text-text-muted">Illustration · example data</span></div>
 +    <div className="p-4 sm:p-6">
@@ -89,10 +90,11 @@ index 000000000..7362128d6
 +            {['catalog', 'inventory', 'discovered', 'deployments', 'deployment-list', 'updates'].includes(step.screen) && <div className="mb-3 flex items-center gap-3"><span className="rounded-xl bg-accent-cyan/10 p-2.5 text-accent-cyan"><Package size={20}/></span><div className="min-w-0"><p className="text-sm font-medium text-text-primary">Example app</p><p className="mt-1 text-xs text-text-muted">{step.screen === 'deployments' ? 'Deployment history' : 'Deployment configuration'}</p></div></div>}
 +            {['catalog', 'deployment-list'].includes(step.screen) && (installSettings ? <>{row('Toolkit windows', 'No toolkit windows')}{row('App setup and checks', 'Disk space check remains active')}{row('Staff experience', 'Saved postponement is inactive')}<p className="mt-3 text-xs text-text-muted">Vendor installer switches and Intune notifications are separate. Switching mode keeps saved values.</p></> : <>{row('Who gets it', 'Pilot device group')}{guideId === 'deploying' && <ExampleRow label="Install dates" value="As soon as possible · Set install dates"/>}{row('When a new version comes out', 'Notify only')}{guideId === 'deploying' && <ExampleRow label="Curated" value="Installation settings are provided by the IntuneGet catalog."/>}</>)}
 +            {step.screen === 'updates' && (manualReview ? <>{row('Effective update settings', 'Example app · version 1 to 2')}{row('Saved app settings', 'Saved installer behavior · restart suppressed')}{row('Groups', 'Example pilot group · Required')}{row('Confirm replacement deadlines', 'Paused for IT')}{row('Retain the existing deadlines', 'Availability and other settings stay unchanged')}{row('Choose a new deadline', 'Future date for affected required assignments')}{row('Send update to Intune', 'Single app; bulk uses Update all')}<p className="mt-3 text-xs text-text-muted">Expired required deadlines need explicit IT confirmation. Single app uses Send update to Intune; bulk uses Update all. Reviewing starts nothing. Device installation follows assignments and check-in.</p></> : <>{row('Checked', 'New version checks · hover for the schedule')}<ExampleRow label="Available updates" value="Example app · Minor · 1.2.0 → 1.3.0"/>{row('Publishing window:', 'Example hours, Maryland time · On')}{row('How automatic updates install', 'Users can postpone · 3 days · 1 app exception')}{guideId === 'startup-beta' && row('Startup install results', 'Beta · shown while a Beta package is recorded')}{guideId === 'updates' && step.focus !== 'Check for app updates' && <ExampleRow label="Check for app updates" value="May start enabled automatic updates"/>}{guideId === 'pilot-rollouts' && <ExampleRow label="Refresh pilot status" value="Read pilot status only"/>}</>)}
-+            {step.screen === 'inventory' && (restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save for this app', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{step.focus === 'Edit groups' && target}{step.focus === 'Review change' && <><ExampleRow label="Groups on this app" value="Example pilot group · Required"/><ExampleRow label="Add a group" value="Find an Entra group"/>{target}<ExampleRow label="Check this change" value="Read it, then Save to Intune"/></>}{step.focus === 'Install dates' ? target : <ExampleRow label="Install dates" value="Read from Intune for each group"/>}{row('Install behavior', 'Saved installer settings')}{row('What employees see', 'Saved installer experience')}{row('Future updates', 'Future automatic packages only')}{step.focus === 'Change how it installs' && <><ExampleRow label="How it installs" value="Users can postpone · 3 days"/>{target}</>}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
-+            {step.screen === 'discovered' && row('App found on computers', 'Review match and eligibility')}
-+            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">Deployment outcome</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Installing on computers is a separate result.</p></div>}
-+            {step.screen === 'settings' && <>{row('Appearance', 'Your preference')}{row('Notifications', 'Review configuration')}</>}
++            {step.screen === 'inventory' && (groupReview ? <>{row('Group changes to review', 'Expand Example app')}{row('Check now', 'Read current assignments')}{row('Previously', 'Removed assignments only')}{row('Now', 'Added assignments only')}{row('Assignment details', 'Expand settings or unavailable group name')}{row('Open app', 'Review live groups')}{row('Mark reviewed', 'Acknowledge this change')}<ExampleRow label="Copies no longer in Intune" value="Collapsed list"/><ExampleRow label="No install assignments" value="Collapsed list"/></> : restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save for this app', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{step.focus === 'Edit groups' && target}{step.focus === 'Review change' && <><ExampleRow label="Groups on this app" value="Example pilot group · Required"/><ExampleRow label="Add a group" value="Find an Entra group"/>{target}<ExampleRow label="Check this change" value="Read it, then Save to Intune"/></>}{step.focus === 'Install dates' ? target : <ExampleRow label="Install dates" value="Read from Intune for each group"/>}{row('Install behavior', 'Saved installer settings')}{row('What employees see', 'Saved installer experience')}{row('Future updates', 'Future automatic packages only')}{step.focus === 'Change how it installs' && <><ExampleRow label="How it installs" value="Users can postpone · 3 days"/>{target}</>}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
++            {step.screen === 'discovered' && <>{row('How this works', 'Open the collapsed guide')}{row('App found on computers', 'Review match and eligibility')}</>}
++            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">All · Active · Completed · Failed · Cancelled</p><p className="mt-1 text-xs text-text-muted">Status buttons include loaded counts.</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Installing on computers is a separate result.</p></div>}
++            {step.screen === 'reports' && <><ExampleRow label="Report period" value="7 days · 30 days · 90 days · 1 year"/><ExampleRow label="Scope" value="All in tenant / My deployments"/></>}
++            {step.screen === 'settings' && <>{step.focus === 'Open sidebar' && <>{row('Open sidebar', 'Open mobile navigation')}<ExampleRow label="Navigation" value="Tab stays inside the menu"/><ExampleRow label="Close sidebar" value="Esc or backdrop also closes"/></>}{row('Find a page or guide', 'Header · Ctrl+K or Cmd+K')}{row('Keyboard shortcuts', 'G then a letter; / focuses page search')}{row('Theme', 'Account menu · profile image or name')}{row('Not set on this page', 'Settings · General')}<ExampleRow label="Settings" value="General · Permissions · Notifications"/></>}
 +            {step.screen === 'server' && (needsAttention ? row('Needs attention', 'Example app needs a look') : <>{row('Server status', '1 needs a look')}{row('Intune self-test', 'Failing · reason shown')}{row('Version', 'Example version')}{row('All checks', '9 working')}</>)}
 +            {step.screen === 'support' && <div className="my-4 space-y-3 rounded-lg border border-overlay/10 p-3 text-xs text-text-muted"><p>App and version</p><p>What you tried</p><p>Result or error code</p></div>}
 +            {!focusAtHeading && !focusAtRow && !actionsPanel && target}
@@ -108,10 +110,10 @@ index 000000000..7362128d6
 +}
 diff --git a/components/hrm/help/HelpWorkspace.test.ts b/components/hrm/help/HelpWorkspace.test.ts
 new file mode 100644
-index 000000000..98327bfc9
+index 000000000..273e97608
 --- /dev/null
 +++ b/components/hrm/help/HelpWorkspace.test.ts
-@@ -0,0 +1,190 @@
+@@ -0,0 +1,207 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -302,9 +304,26 @@ index 000000000..98327bfc9
 +  expect(visual.getAttribute('aria-label')).toContain('Send update to Intune');
 +  expect(visual.textContent).toContain('bulk uses Update all');
 +});
++
++
++it('shows mobile navigation focus guidance and the exact Reports periods', async () => {
++  window.history.replaceState(null, '', '/dashboard/help#your-settings');
++  await act(async () => root.render(createElement(HelpWorkspace)));
++  let visual = document.querySelector('[aria-label^="Visual reference:"]')!;
++  expect(visual.getAttribute('aria-label')).toContain('Open sidebar');
++  expect(visual.textContent).toContain('Navigation dialog');
++  expect(visual.textContent).toContain('Tab stays inside the menu');
++  expect(document.querySelector('[aria-label="Current step"]')?.textContent).toContain('returns focus to Open sidebar');
++  await act(async () => root.unmount());
++  root = createRoot(document.body.appendChild(document.createElement('div')));
++  window.history.replaceState(null, '', '/dashboard/help#reports');
++  await act(async () => root.render(createElement(HelpWorkspace)));
++  visual = document.querySelector('[aria-label^="Visual reference:"]')!;
++  for (const label of ['Report period', '7 days', '30 days', '90 days', '1 year']) expect(visual.textContent).toContain(label);
++});
 diff --git a/components/hrm/help/HelpWorkspace.tsx b/components/hrm/help/HelpWorkspace.tsx
 new file mode 100644
-index 000000000..9ac6c1c4e
+index 000000000..fdf7f6b35
 --- /dev/null
 +++ b/components/hrm/help/HelpWorkspace.tsx
 @@ -0,0 +1,119 @@
@@ -385,7 +404,7 @@ index 000000000..9ac6c1c4e
 +
 +  return <div className="mx-auto max-w-6xl space-y-7 pb-8">
 +    <header className="flex flex-wrap items-start justify-between gap-4">
-+      <div><div className="mb-3 flex items-center gap-2 text-xs font-medium text-text-muted"><BookOpen size={15} className="text-accent-cyan" aria-hidden="true"/>INTUNEGET / HELP</div><h1 className="text-3xl font-semibold tracking-tight text-text-primary">Help & guides</h1><p className="mt-2 max-w-2xl text-sm leading-relaxed text-text-secondary">Choose a task. See where to click. Know what to check afterwards.</p></div>
++      <div><div className="mb-3 flex items-center gap-2 text-xs font-medium text-text-muted"><BookOpen size={15} className="text-accent-cyan" aria-hidden="true"/>INTUNEGET / HELP</div><h1 className="text-3xl font-semibold tracking-tight text-text-primary">Help & guides</h1><p className="mt-2 max-w-2xl text-sm leading-relaxed text-text-secondary">Find a guide by task or setting.</p></div>
 +      <AppLink href={HRM_SUPPORT_URL} className="inline-flex items-center gap-2 rounded-lg border border-overlay/15 px-3 py-2 text-xs font-medium text-text-secondary hover:border-accent-cyan/40 hover:text-text-primary">Get support</AppLink>
 +    </header>
 +
@@ -397,11 +416,11 @@ index 000000000..9ac6c1c4e
 +    {(!guide || searching) ? <>
 +      <nav aria-label="Filter help guides" className="flex flex-wrap gap-2">{[{ id: 'all' as const, label: 'All topics' }, ...HELP_CATEGORIES].map(item => <button key={item.id} type="button" aria-pressed={category === item.id} onClick={() => chooseCategory(item.id)} className={`rounded-full border px-3.5 py-2 text-xs font-medium transition-colors ${focusRing} ${category === item.id ? 'border-accent-cyan/35 bg-accent-cyan/10 text-text-primary' : 'border-overlay/10 text-text-secondary hover:border-overlay/25 hover:text-text-primary'}`}>{item.label}</button>)}</nav>
 +      <section aria-labelledby="help-task-list-title" className="space-y-4">
-+        <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 id="help-task-list-title" className="text-lg font-semibold text-text-primary">{searching ? 'Search results' : browseAll ? category === 'all' ? 'All task guides' : HELP_CATEGORIES.find(item => item.id === category)?.label : 'What would you like to do?'}</h2>{!searching && !browseAll && <span className="text-xs text-text-muted">Start with a common task</span>}</div>
++        <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 id="help-task-list-title" className="text-lg font-semibold text-text-primary">{searching ? 'Search results' : browseAll ? category === 'all' ? 'All task guides' : HELP_CATEGORIES.find(item => item.id === category)?.label : 'What would you like to do?'}</h2>{!searching && !browseAll && <span className="text-xs text-text-muted">Common tasks</span>}</div>
 +        {shownGuides.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{shownGuides.map(item => <a key={item.id} href={`#${item.id}`} onClick={event => guideClick(event, item.id)} className={`group flex min-w-0 flex-col rounded-xl border border-overlay/10 bg-bg-surface p-5 transition-colors hover:border-accent-cyan/35 hover:bg-accent-cyan/[0.03] ${focusRing}`}><div className="mb-4 flex items-center justify-between gap-2"><span className="text-[11px] font-medium text-text-muted">{HELP_CATEGORIES.find(group => group.id === item.category)?.label}</span><ArrowUpRight size={16} className="text-text-muted group-hover:text-accent-cyan" aria-hidden="true"/></div><h3 className="text-sm font-semibold text-text-primary">{item.title}</h3><p className="mt-2 text-xs leading-relaxed text-text-secondary">{item.summary}</p><span className="mt-5 flex items-center gap-1.5 text-xs text-accent-cyan"><ListChecks size={13} aria-hidden="true"/>{item.steps.length} steps<span className="ml-auto text-text-muted">View guide</span></span></a>)}</div> : <div className="rounded-xl border border-dashed border-overlay/20 p-8 text-center"><CircleHelp size={25} className="mx-auto mb-3 text-text-muted" aria-hidden="true"/><h3 className="text-sm font-semibold text-text-primary">No matching guide yet</h3><p className="mx-auto mt-2 max-w-sm text-sm text-text-secondary">Try “restart”, “groups” or “failed update”. You can also browse every guide.</p><button type="button" onClick={() => { setQuery(''); setCategory('all'); setBrowseAll(true); }} className={`mt-4 rounded-lg border border-overlay/15 px-4 py-2 text-xs text-text-primary ${focusRing}`}>Browse all guides</button></div>}
 +        {!searching && !browseAll && <button type="button" onClick={() => setBrowseAll(true)} className={`flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-medium text-text-secondary hover:text-accent-cyan ${focusRing}`}>Browse all {HELP_GUIDES.length} guides<ChevronDown size={14}/></button>}
 +      </section>
-+      {!searching && <section className="rounded-2xl border border-overlay/10 bg-bg-elevated p-5 sm:p-6" aria-labelledby="help-workflow-title"><div className="mb-5 flex items-center gap-2"><Lightbulb size={16} className="text-accent-cyan" aria-hidden="true"/><h2 id="help-workflow-title" className="text-sm font-semibold text-text-primary">One distinction that saves a lot of confusion</h2></div><ol className="grid gap-3 sm:grid-cols-3">{[
++      {!searching && <section className="rounded-2xl border border-overlay/10 bg-bg-elevated p-5 sm:p-6" aria-labelledby="help-workflow-title"><div className="mb-5 flex items-center gap-2"><Lightbulb size={16} className="text-accent-cyan" aria-hidden="true"/><h2 id="help-workflow-title" className="text-sm font-semibold text-text-primary">App versions and deployment attempts</h2></div><ol className="grid gap-3 sm:grid-cols-3">{[
 +        { id: 'deploying', title: '1. Configure', text: 'Choose the app, groups and installation timing.', label: 'Deploy an app' },
 +        { id: 'updating', title: '2. Deploy to Intune', text: 'The package is ready in Intune. Computers may still be waiting.', label: 'Understand deploying' },
 +        { id: 'install-results', title: '3. Check computers', text: 'Verify installation from the install results Intune receives.', label: 'Check install results' },
@@ -682,10 +701,10 @@ index 000000000..2d126b6a0
 +});
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 new file mode 100644
-index 000000000..17b847112
+index 000000000..332589fd1
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-guides.test.ts
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,164 @@
 +import { existsSync, readFileSync, readdirSync } from 'node:fs';
 +import path from 'node:path';
 +import { describe, expect, it } from 'vitest';
@@ -828,6 +847,28 @@ index 000000000..17b847112
 +  expect(guide.steps[2].instruction).toContain('Update all starts the reviewed batch');
 +  expect(guide.steps[2].result).toContain('computers install according to assignments and check-in');
 +});
++
++
++it('describes the current menus and grouped assignment review', () => {
++  expect(prose('your-settings')).toContain('Find a page or guide');
++  expect(prose('your-settings')).toContain('/ focuses the first available page search field');
++  expect(prose('your-settings')).toContain('name or profile image');
++  expect(prose('group-changes')).toContain('Unchanged assignments are omitted');
++  expect(prose('group-changes')).toContain('No install assignments');
++  expect(prose('discovered')).toContain('How this works opens the collapsed guide');
++  expect(prose('updates')).toContain('shared by its IT admins');
++  expect(prose('reports')).toContain('counted status buttons above the list');
++});
++
++
++it('keeps readable live assignment labels and exact loaded-history coverage', () => {
++  const points = (id: string) => HELP_SECTIONS.find(section => section.id === id)!.points.join(' ');
++  expect(points('reports')).toContain('Counts and status filters cover only what is loaded');
++  expect(points('group-changes')).toContain('without showing a shortened group ID');
++  expect(points('group-changes')).toContain('Assignments unavailable means it was not reported');
++  expect(points('your-settings')).toContain('Apps stays highlighted');
++  expect(points('your-settings')).toContain('Activity stays highlighted');
++});
 diff --git a/lib/hrm/__tests__/help-navigation.test.ts b/lib/hrm/__tests__/help-navigation.test.ts
 new file mode 100644
 index 000000000..6990bc2e9
@@ -914,10 +955,10 @@ index 000000000..6990bc2e9
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..abe3830ae
+index 000000000..f778b2627
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,644 @@
+@@ -0,0 +1,647 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -966,7 +1007,7 @@ index 000000000..abe3830ae
 +      'Add a second copy anyway acknowledges this item in this tenant and requests a Second copy. Review again after changing tenant or package. It never bypasses a queued or running deployment. Afterwards, consolidate groups with Keep this copy in Inventory.',
 +      'Inventory may tag the older of the 2 copies Previous copy. IntuneGet never removes a copy you added on purpose, because the newer copy doesn\'t replace it.',
 +      'Installation and staff experience, App setup and checks, and Toolkit messages and appearance separate effective settings. Curated hint: Installation settings are provided by the IntuneGet catalog. Hover, focus or tap the badge.',
-+      'In Apps, an Inventory app name opens the app workspace, where Who gets it lists its groups. Details opens the app details dialog, where Groups lists Required and Available groups. No groups means it installs nowhere.',
++      'In Apps, an Inventory app name opens the app workspace, where Who gets it lists its groups. Details opens the app details dialog, where Groups lists Required and Available groups. No install assignments means no group receives installation; exclusions and Uninstall do not count.',
 +      'IntuneGet removes old copies left by its own updates (see How old copies are removed). For other copies, such as a second copy or one added in Intune by hand, use duplicate cleanup in Inventory.',
 +      'If Inventory finds more than one copy of an app in Intune, it lists them at the top. Previous copies waiting for automatic removal are left out of that list.',
 +      'Keep this copy moves every group onto that copy and leaves the others with none. Nothing is uninstalled.',
@@ -1223,12 +1264,12 @@ index 000000000..abe3830ae
 +  {
 +    id: 'automatic-installation-policy',
 +    title: 'How automatic updates install',
-+    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Future updates', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Edit shared policy', 'Change how it installs', 'How it installs', 'What staff see', 'When it deploys to Intune', 'Change the publishing window in App updates', 'Review future updates', 'Review current copy and install dates', 'Search', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot', 'How automatic updates install', 'App exceptions', 'Edit app exception', 'Startup install results'],
++    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Future updates', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Edit shared policy', 'Change how it installs', 'How it installs', 'What staff see', 'When it deploys to Intune', 'Change the publishing window in App updates', 'Review future updates', 'Review current copy and install dates', 'Find a page or guide', 'Apply to', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot', 'How automatic updates install', 'App exceptions', 'Edit app exception', 'Startup install results'],
 +    flow: ['Open app workspace', 'Review current saved version', 'Press Change how it installs', 'Review saved rule', 'Save for this app'],
 +    points: [
 +      'In Deployments, press Open app workspace. In App updates, press the app name on its card, or choose Open app workspace from its More actions menu (…). Inventory opens the app, with Install results above Current release and Future updates.',
 +      'How automatic updates install controls prompts and postponement in packages. Future updates and its Saved settings describe future automatic updates; they do not describe what the current installed copy will do.',
-+      'While the tenant’s update policy for a verified app is Auto-update, Future updates shows How it installs with Change how it installs beside it. Search offers Review future updates and Review current copy and install dates; both jump within this app.',
++      'Tenant update policy is shared by IT admins in this tenant. While a verified app uses Auto-update, Future updates shows How it installs with Change how it installs beside it. Find a page or guide offers Review future updates and Review current copy and install dates; both jump within this app.',
 +      'Change how it installs is scoped to this app. Clear Use shared policy to edit an exception. For the shared rule, open App updates, press Edit shared policy in the Automatic updates bar below the list and select All apps with Automatic updates on in Apply to.',
 +      'Under What staff see, choose Let users install now or postpone and Days users can postpone. Save for this app saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
 +      'Use each app’s saved settings preserves existing configurations and is the default; restart Beta is off by default. It does not mean silent installation. Install automatically is separate. Current and queued packages keep their settings.',
@@ -1250,7 +1291,7 @@ index 000000000..abe3830ae
 +  {
 +    id: 'update-schedule',
 +    title: 'Update schedule and blackouts',
-+    uiLabels: ["Update schedule", "When can IntuneGet send automatic updates to Intune?", "How automatic updates install", "Publishing window:", "Checked", "New version checks", "Auto-update", "Notify only", "Pause automatic updates", "Resume automatic updates", "Paused for all apps", "Automatic updates are paused for all apps.", "What does pausing change?", "Edit publishing window", "Search", "Automatic publishing window", "Restrict deploying to selected days and hours", "Save schedule", "Waiting to deploy", "Waiting for publishing window", "Held updates", "Add blackout", "Remove blackout", "Deploy to pilot group", "Approve wider rollout", "Review update", "Update all", "Deploy new version"],
++    uiLabels: ["Update schedule", "When can IntuneGet send automatic updates to Intune?", "How automatic updates install", "Publishing window:", "Checked", "New version checks", "Auto-update", "Notify only", "Pause automatic updates", "Resume automatic updates", "Paused for all apps", "Automatic updates are paused for all apps.", "What does pausing change?", "Edit publishing window", "Find a page or guide", "Automatic publishing window", "Restrict deploying to selected days and hours", "Save schedule", "Waiting to deploy", "Waiting for publishing window", "Held updates", "Add blackout", "Remove blackout", "Deploy to pilot group", "Approve wider rollout", "Review update", "Update all", "Deploy new version"],
 +    flow: ['Open App updates', 'Find the Automatic updates bar', 'Press Edit publishing window', 'Set deployment hours', 'Save schedule'],
 +    points: [
 +      "Edit publishing window, in the Automatic updates bar below the update list, opens When can IntuneGet send automatic updates to Intune? on the right. It governs new automatic update packages and pilots, and is shared across the tenant.",
@@ -1270,7 +1311,7 @@ index 000000000..abe3830ae
 +      "While automatic updates are paused, outside allowed hours or during a blackout, Deploy to pilot group and Approve wider rollout cannot proceed. A pilot already testing keeps its pilot group. Check the displayed reason before trying again.",
 +      "Resume automatic updates removes the shared pause. Deployment hours, blackouts and per-app update rules still apply. Resuming does not override those restrictions or change How automatic updates install.",
 +      "When the window is open, an Auto-update card says it starts at the next hourly start, or at the next update check when no hours are set, unless a safety check holds it. During a blackout, the card shows its reason.",
-+      "Automatic publishing window in Search, the links in Settings, General and Change the publishing window in an app workspace go to the Automatic updates bar and highlight it briefly. They open no panel; press Edit publishing window there.",
++      "Automatic publishing window in Find a page or guide, the links in Settings, General and Change the publishing window in an app workspace go to the Automatic updates bar and highlight it briefly. They open no panel; press Edit publishing window there.",
 +    ],
 +    links: [{ label: 'Open App updates', href: '/dashboard/updates#automatic-updates' }],
 +  },
@@ -1378,12 +1419,12 @@ index 000000000..abe3830ae
 +  {
 +    id: 'group-changes',
 +    title: 'Group changes to review',
-+    uiLabels: ['Group changes to review', 'Check now', 'Previously', 'Open app', 'Mark reviewed', 'Edit groups', 'Who gets it', 'Groups on this app', 'Remove', 'Add a group', 'Find an Entra group', 'Required or Available', 'Review change', 'Check this change', 'Save to Intune', 'Cancel', 'Install dates', 'Excluded'],
++    uiLabels: ['Group changes to review', 'Check now', 'Previously', 'Now', 'Assignment details', 'Group name unavailable', 'Copies no longer in Intune', 'No install assignments', 'Last recorded group change', 'Open app', 'Mark reviewed', 'Edit groups', 'Who gets it', 'Groups on this app', 'Remove', 'Add a group', 'Find an Entra group', 'Required or Available', 'Review change', 'Check this change', 'Save to Intune', 'Cancel', 'Install dates', 'Excluded'],
 +    points: [
-+      'In Inventory, Group changes to review lists the newest copy of each app IntuneGet deployed when its groups or assignment settings changed, it has no groups receiving installations, or it is no longer in Intune.',
++      'In Inventory, Group changes to review shows changed assignments in expandable app rows. Copies no longer in Intune and No install assignments have separate collapsed lists for the newest copies IntuneGet deployed.',
 +      'Checks run at 3:30 AM and 3:30 PM, Maryland time. Press Check now in Group changes to review for a fresh check. If Intune cannot be read, the last successful check is kept.',
-+      'Compare Previously and Now, including exclusions, installation choices and assignment settings. Open app shows the current groups. Check the last successful check time before relying on a saved warning.',
-+      'Mark reviewed acknowledges the displayed change without changing anything in Intune. A newer change needs its own review. Warnings for missing apps or no groups receiving installations remain until the problem is fixed.',
++      'Expand an app: Previously shows removed assignments; Now shows added assignments. Unchanged assignments are omitted. Expand Assignment details for settings or Group name unavailable. Open app shows live groups. Check the last successful check time.',
++      'Mark reviewed acknowledges only the displayed change. A newer change needs review. Copies no longer in Intune and No install assignments remain until fixed; a missing copy may also offer Last recorded group change.',
 +      'Saved group-change warnings also appear with the live groups in App updates and when the deployment review replaces a current copy. Check the groups before you update or deploy again.',
 +      'An exclusion shows as the group name, then Excluded. Exclusions and Uninstall assignments do not install an app. Group checks describe assignments, not which computers or users are in a group.',
 +      'Edit groups, beside Who gets it in the app workspace, changes who gets the copy in Intune, whoever deployed it. Groups on this app lists each group as Required or Available. No new package is made.',
@@ -1403,6 +1444,8 @@ index 000000000..abe3830ae
 +      'After a switch, IntuneGet reads the groups again and compares them with what it asked for. If Intune did not accept the change, nothing was changed. If the groups read differently, check them in Intune before trying again.',
 +      'If the reply to adding or removing a group is uncertain, review again before retrying, because Intune may already have saved it.',
 +      'Changes are held while the app is being retired or has an active pilot. Finish the pilot in App updates, or the retirement, first.',
++      'Live groups use names when available. Otherwise they say name unavailable, group deleted or not found, or no permission to read group name, without showing a shortened group ID. These labels do not mean the assignment was removed.',
++      'On App updates cards, No install assignments means the live assignment list is empty. Assignments unavailable means it was not reported. Excluded and Uninstall rows explain their meaning on hover, keyboard focus or touch; neither installs the app.',
 +    ],
 +    links: [{ label: 'Open Inventory', href: '/dashboard/inventory' }, { label: 'Open App updates', href: '/dashboard/updates' }],
 +  },
@@ -1414,7 +1457,7 @@ index 000000000..abe3830ae
 +    points: [
 +      'Discovered apps lists software Intune found on HRM computers, including apps with deployment history. Inventory remains visible here after deployment; a newly detected version does not reset the package’s deployment state.',
 +      'Nothing on this page changes a computer by itself. Every change goes through the Deployment list and Deploy to Intune.',
-+      'The How Discovered apps works panel at the top shows both paths and the terms. Hide closes it and How this works opens it again. Your choice is remembered in this browser.',
++      'How this works opens the collapsed How Discovered apps works guide above the list. Hide closes it. Your choice is remembered in this browser; a new browser starts with the guide closed.',
 +      'Matched identifies a catalog package, not its management state. With no history, active deployment or outcome needing review, press Claim, then Add to Deployment list in Claim discovered app. Claim saves the explicit source link before staging the catalog installer locally.',
 +      'Claimed means the installer is staged in this browser’s Deployment list. Nothing has changed on computers. It does not adopt an existing Intune app. The row shows Claimed: in Deployment list.',
 +      'Claimed counts discovered rows linked to staged packages, so several rows can refer to one installer. In the Deployment list, not deployed yet describes local staging. Showing claimed and Hiding claimed show or hide these rows.',
@@ -1520,30 +1563,31 @@ index 000000000..abe3830ae
 +  {
 +    id: 'your-settings',
 +    title: 'Theme, shortcuts and your settings',
-+    uiLabels: ['Search', 'Keyboard shortcuts', 'Same as computer', 'Theme', 'Settings', 'Deployment list', 'Open the Deployment list when you add an app', 'Not set on this page', 'What an update replaces', 'App updates', 'Home', 'Apps', 'App catalog', 'Inventory', 'Discovered apps', 'Activity', 'Deployments', 'Reports', 'Help'],
++    uiLabels: ['Open sidebar', 'Close sidebar', 'General', 'Permissions', 'Notifications', 'Signed-in tenant', 'Tenant ID', 'Copy tenant ID', 'Sign out', 'Find a page or guide', 'Keyboard shortcuts', 'Same as computer', 'Theme', 'Settings', 'Deployment list', 'Open the Deployment list when you add an app', 'Not set on this page', 'What an update replaces', 'App updates', 'Home', 'Apps', 'App catalog', 'Inventory', 'Discovered apps', 'Activity', 'Deployments', 'Reports', 'Help'],
 +    points: [
-+      'To jump to any page, press Ctrl+K (Cmd+K on a Mac), or Search at the top of the page on a wide screen. Type to filter, use the Up and Down arrows to move, Enter to open, and Esc to close.',
-+      'The sidebar has Home, Apps, App updates, Activity, Settings and Help. Apps opens Inventory, with App catalog and Discovered apps in its subnavigation. Activity opens Deployments, with Reports in its subnavigation.',
-+      'Press G, then a letter, to open a page: D Home, A App catalog, I Inventory, V Discovered apps, P App updates, U Deployments, R Reports, S Settings or H Help. Keyboard shortcuts in Search lists them all; the keys keep their page names.',
-+      'IntuneGet follows your computer\'s light or dark setting. To choose, press your name at the bottom of the sidebar, then pick Light, Dark or Same as computer under Theme.',
++      'To jump to any page, press Ctrl+K (Cmd+K on a Mac), or press Find a page or guide at the top of the page. Type to filter, use the Up and Down arrows to move, Enter to open, and Esc to close.',
++      'The sidebar has Home, Apps, App updates, Activity, Settings and Help. Apps stays highlighted in Inventory, App catalog, Discovered apps and app workspaces. Activity stays highlighted in Deployments and Reports. Choose the page in its section’s subnavigation.',
++      'Press G, then a letter, to open a page: D Home, A App catalog, I Inventory, V Discovered apps, P App updates, U Deployments, R Reports, S Settings or H Help. Keyboard shortcuts in Find a page or guide lists them all; the keys keep their page names. When you are not typing, / focuses the first available page search field.',
++      'Open your account menu using your name or profile image at the bottom of the sidebar. Choose Light, Dark or Same as computer under Theme. The menu also offers Settings and Sign out.',
 +      'Your theme and the collapsed sidebar are remembered in this browser. Another browser or computer starts with the defaults.',
 +      'In Settings, General, Open the Deployment list when you add an app opens it each time you add an app. Turn it off to keep adding apps without it opening. Press C on any page to show or hide the Deployment list.',
-+      'Settings, General ends with Not set on this page. It lists what is changed elsewhere, such as who gets an app, install dates and how automatic updates install, each with a link to the right page.',
++      'Settings has General, Permissions and Notifications buttons. General shows Signed-in tenant and Tenant ID; Copy tenant ID confirms success or failure. Not set on this page links to groups, install dates and automatic installation choices.',
 +      'On this server, Settings has no update switches. An update replaces the previous version and keeps its groups; What an update replaces, under Not set on this page, says so.',
++      'On a small screen, press Open sidebar. Tab stays inside the menu. Press Esc, Close sidebar or the backdrop to close it and return focus to Open sidebar. Choosing a page closes the menu.',
 +    ],
 +    links: [{ label: 'Open Settings', href: '/dashboard/settings' }, { label: 'Open App updates', href: '/dashboard/updates' }],
 +  },
 +  {
 +    id: 'reports',
 +    title: 'Reports',
-+    uiLabels: ['Reports', 'Deployment reports', 'My deployment reports', 'Export CSV', 'Deployments', 'All in tenant', 'My deployments', 'Show all in tenant', 'Show older deployments', 'Failed', 'Cancelled', 'Dismiss', 'Clear cancelled history', 'Completed', 'All', 'Active'],
++    uiLabels: ['Report period', '7 days', '30 days', '90 days', '1 year', 'Reports', 'Deployment reports', 'My deployment reports', 'Export CSV', 'Deployments', 'All in tenant', 'My deployments', 'Show all in tenant', 'Show older deployments', 'Failed', 'Cancelled', 'Dismiss', 'Clear cancelled history', 'Completed', 'All', 'Active'],
 +    points: [
 +      'Reports opens on All in tenant with the heading Deployment reports, covering deployments started by anyone in your tenant. Choose My deployments to see My deployment reports, which counts only deployments you started.',
-+      'Reports counts up to 5,000 deployments in the chosen date range. Export CSV follows the chosen scope. An All in tenant export adds a Deployed By column.',
++      'In Reports, choose 7 days, 30 days, 90 days or 1 year under Report period. Reports counts up to 5,000 deployments in that range. Export CSV follows the chosen period and scope; tenant exports add Deployed By.',
 +      'Deployments opens on All in tenant, which lists deployments started by all staff in your tenant. Choose My deployments for those you started. If you have started none, press Show all in tenant.',
-+      'Deployments loads the newest 50. Show older deployments, at the end of the list, loads 50 more, up to 2,000. Counts and status filters cover only what is loaded. Changing between All in tenant and My deployments starts again at 50.',
++      'Deployments loads the newest 50. Show older deployments, at the end of the list, loads 50 more, up to 2,000. Counts and status filters cover only what is loaded. Choose All, Active, Completed, Failed or Cancelled to filter the list. Changing between All in tenant and My deployments starts again at 50.',
 +      'Dismissed and cleared deployments are not listed in either scope. Inventory lists current apps whatever Deployments shows. Failed excludes Cancelled deployments.',
-+      'On Home, the deployment statistics also open on All in tenant. Choose My deployments there to count only your own.',
++      'Inventory shows compact summary counts; they do not filter the list. Reports keeps its summary cards. On Home, the deployment statistics also open on All in tenant. Choose My deployments there to count only your own.',
 +      'Dismiss hides one of your finished deployments. Clear cancelled history hides your cancellations; Completed and Failed clear their outcomes. All clears your finished history. Active has no clear action. Audit records stay.',
 +    ],
 +    links: [{ label: 'Open Reports', href: '/dashboard/reports' }, { label: 'Open Deployments', href: '/dashboard/uploads' }],
@@ -1564,10 +1608,10 @@ index 000000000..abe3830ae
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..7e98f768b
+index 000000000..a1bd30cc4
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
-@@ -0,0 +1,405 @@
+@@ -0,0 +1,406 @@
 +/** Task-first Help. Detailed rules remain in help-content; indexes are zero-based. */
 +export type HelpScreen = 'catalog' | 'deployment-list' | 'updates' | 'inventory' | 'deployments' | 'discovered' | 'settings' | 'server' | 'support' | 'reports';
 +export type HelpCategory = 'deploy' | 'updates' | 'devices' | 'troubleshoot' | 'settings';
@@ -1667,7 +1711,7 @@ index 000000000..7e98f768b
 +    start: updates, before: ['App updates does not choose who gets an app. An update keeps the groups of the copy it replaces.', 'Authorized staff share App updates, Update history and app rules across the tenant. Check current groups before choosing Auto-update.'],
 +    steps: [
 +      step('Find the app', 'Open App updates and find the app’s card. Read its groups, its update type and the status line under them.', 'updates', 'App updates', 'You can see where the next update would go and what happens next.'),
-+      step('Choose its update rule', 'Press the policy pill at the bottom left of the card. Choose Notify only for manual review, Auto-update for automatic deployment, or Ignore to leave the app out of update checks.', 'updates', 'Auto-update', 'The pill shows the app’s update rule.'),
++      step('Choose its update rule', 'Press the policy pill at the bottom left of the card. Choose Notify only for manual review, Auto-update for automatic deployment, or Ignore to leave the app out of update checks.', 'updates', 'Auto-update', 'The pill shows the tenant’s update rule, shared by its IT admins.'),
 +      step('Check for new versions', 'Press Check for app updates at the top to check now. It may start enabled automatic updates in your tenant. Refresh pilot status only reads pilot status.', 'updates', 'Check for app updates', 'You understand the check can start automatic deployment, not just refresh the list.'),
 +      step('Check the lists', 'In the Automatic updates bar below the list, press the apps with Automatic updates on count to open the Auto-update on list. Use Ignored apps, beside the tabs, to restore an ignored app.', 'updates', 'Ignored apps', 'Auto-update and ignored apps are easy to audit.'),
 +    ],
@@ -1713,7 +1757,7 @@ index 000000000..7e98f768b
 +    summary: 'Deploy to one pilot group, review the evidence and explicitly approve wider groups.', keywords: ['pilot', 'test group', 'approve', 'wider rollout', 'stalled', 'failed pilot', 'Refresh', 'Refresh pilot status'],
 +    start: updates, before: ['Choose one small security group for a deployed WinGet or curated app.', 'The update schedule must allow the pilot and approval.'],
 +    steps: [
-+      step('Choose the pilot', 'On the app’s card in App updates, open More actions (…) and choose Test with a pilot group. Search Find a pilot group and select one small group.', 'updates', 'Test with a pilot group', 'The pilot group is selected without changing wider groups.'),
++      step('Choose the pilot', 'On the app’s card in App updates, open More actions (…) and choose Test with a pilot group. Find a page or guide Find a pilot group and select one small group.', 'updates', 'Test with a pilot group', 'The pilot group is selected without changing wider groups.'),
 +      step('Deploy to the pilot', 'Press Deploy to pilot group and follow the deployment until it finishes.', 'updates', 'Deploy to pilot group', 'The new version is Required for the pilot group only.'),
 +      step('Review the evidence', 'In Pilot rollouts, open Review results and wider rollout. Compare both versions’ install results and read failures.', 'updates', 'Review results and wider rollout', 'You can judge whether the update is ready.'),
 +      step('Review wider groups', 'Compare New version currently reaches with New version after approval, including exclusions and filters.', 'updates', 'New version after approval', 'The exact proposed wider assignments are visible.'),
@@ -1848,24 +1892,24 @@ index 000000000..7e98f768b
 +    start: inventory, before: ['Acknowledging a warning does not change Intune.'],
 +    steps: [
 +      step('Refresh the check', 'In Inventory, find Group changes to review and press Check now.', 'inventory', 'Check now', 'The latest readable assignments are compared with the saved state.'),
-+      step('Compare the assignments', 'Read Previously and Now, including exclusions, filters and installation choices. Check the last successful check time.', 'inventory', 'Previously', 'You know what changed and how current the evidence is.'),
++      step('Compare the assignments', 'Expand the app row. Previously shows removed assignments; Now shows added assignments. Unchanged assignments are omitted. Expand Assignment details for settings or an unavailable group name. Check the last successful check time.', 'inventory', 'Previously', 'You know what changed and how current the evidence is.'),
 +      step('Inspect the current app', 'Press Open app to review live groups. Correct unintended assignments before updating or deploying again.', 'inventory', 'Open app', 'The intended assignment can be checked against the warning.'),
 +      step('Acknowledge the review', 'Use Mark reviewed after checking the displayed change.', 'inventory', 'Mark reviewed', 'That change is acknowledged without changing assignments.'),
 +      step('Open Edit groups', 'Open the app workspace. Under Current release, beside Who gets it, press Edit groups. Groups on this app lists each group as Required or Available.', 'inventory', 'Edit groups', 'The panel shows the groups Intune has now. No package is made.'),
 +      step('Review one change and save', 'Press Switch to Available, Switch to Required or Remove beside a group, or choose a group under Add a group and press Review change. Read Check this change, then press Save to Intune.', 'inventory', 'Review change', 'The panel says Saved to Intune. Groups you did not change keep their settings.'),
 +    ],
 +    success: 'The change has been understood and acknowledged, or the app’s groups in Intune now match what you intended.',
-+    caution: 'Missing-app and no-installation-group warnings stay until the underlying problem is fixed. Group checks do not verify group membership.',
++    caution: 'Copies no longer in Intune and No install assignments stay in separate collapsed lists until fixed. Exclusions and Uninstall do not install apps. Group checks do not verify membership.',
 +    related: ['app-activity', 'deploying', 'install-results'],
 +    troubleshoot: [{ problem: 'A group has no Switch or Remove button', action: 'The row says why. Exclusions, Uninstall groups and groups that come from another assignment are changed in Intune. Available without enrollment groups can be removed but not switched.' }, { problem: 'Saving stops because the app or its groups changed', action: 'Intune changed after your review. For a switch, a change to any group on the app counts. Choose the change again, read Check this change, then press Save to Intune.' }, { problem: 'A switch is refused because another group cannot be sent back exactly', action: 'A switch saves the app\'s whole group list. Another group comes from another assignment or has settings IntuneGet does not know. Switch the group in Intune.' }, { problem: 'Intune did not accept a switch', action: 'Nothing was changed and the group keeps its type. Review the switch again before retrying.' }, { problem: 'After a switch, the groups do not read back as expected', action: 'Open the app in Intune and check its groups before trying again.' }, { problem: 'Edit groups refuses a change during a pilot or retirement', action: 'Changes are held until the pilot or retirement finishes.', guide: 'pilot-rollouts' }, { problem: 'Check now cannot read Intune', action: 'Use the last successful timestamp and do not assume the saved groups are current.' }, { problem: 'A warning remains after Mark reviewed', action: 'Missing apps and groups receiving no installations require a real fix.' }],
-+    referenceGroups: [reference('Refresh and compare assignment evidence', [0, 1, 2]), reference('Acknowledge changes and understand limits', [3, 4, 5]), reference('Add, remove or switch a group', [6, 7, 8, 9, 10]), reference('What a change keeps and drops', [11, 12, 13]), reference('Groups that cannot be changed and the last group', [14, 15, 16]), reference('How a switch is saved and when it is refused', [17, 18]), reference('Changes that stop, need checking or are held', [19, 20, 21, 22])],
++    referenceGroups: [reference('Refresh and compare assignment evidence', [0, 1, 2]), reference('Acknowledge changes and understand limits', [3, 4, 5, 23, 24]), reference('Add, remove or switch a group', [6, 7, 8, 9, 10]), reference('What a change keeps and drops', [11, 12, 13]), reference('Groups that cannot be changed and the last group', [14, 15, 16]), reference('How a switch is saved and when it is refused', [17, 18]), reference('Changes that stop, need checking or are held', [19, 20, 21, 22])],
 +  },
 +  {
 +    id: 'discovered', category: 'devices', title: 'Manage an app found on computers',
 +    summary: 'Match a discovered app, add it to the Deployment list and deploy a managed copy.', keywords: ['claim', 'matched', 'partial match', 'link package', 'unmanaged', 'discovered'],
 +    start: discovered, before: ['Claim saves the source link and stages a catalog installer in this browser’s Deployment list. It changes no computers.'],
 +    steps: [
-+      step('Check the match', 'In Discovered apps, check the name, publisher and match status. For Partial match, use Link package to choose the correct package.', 'discovered', 'Link package', 'The app is linked to the intended package.'),
++      step('Check the match', 'In Discovered apps, How this works opens the collapsed guide. Check the name, publisher and match status. For Partial match, use Link package to choose the correct package.', 'discovered', 'Link package', 'The app is linked to the intended package.'),
 +      step('Add it to the list', 'For a Matched app with no history, active deployment or outcome needing review, press Claim, then Add to Deployment list. Otherwise, use Review deployments.', 'discovered', 'Claim', 'The installer is staged locally; computers have not changed.'),
 +      step('Choose groups and deploy', 'Open the Deployment list, choose Required or Available groups, then Deploy to Intune and review the deployment.', 'deployment-list', 'Who gets it', 'A tenant deployment starts; follow its progress in Deployments.'),
 +      step('Verify management', 'After the deployment finishes, find the app in Inventory and check its update rule in App updates.', 'inventory', 'Inventory', 'Future versions and install results can be followed in the app.'),
@@ -1926,36 +1970,37 @@ index 000000000..7e98f768b
 +  },
 +  {
 +    id: 'your-settings', category: 'settings', title: 'Find a page or change your theme',
-+    summary: 'Use the sidebar, Search and keyboard shortcuts, or choose a theme for this browser.', keywords: ['theme', 'dark', 'light', 'keyboard', 'search', 'shortcuts', 'sidebar', 'navigation', 'menu', 'preferences', 'deployment list', 'update behavior', 'Not set on this page', 'Check for new app versions', 'supersede', 'carry over assignments'],
++    summary: 'Use the sidebar, Find a page or guide and keyboard shortcuts, or choose a theme for this browser.', keywords: ['theme', 'dark', 'light', 'keyboard', 'search', 'shortcuts', 'sidebar', 'navigation', 'menu', 'preferences', 'deployment list', 'update behavior', 'Not set on this page', 'Check for new app versions', 'supersede', 'carry over assignments'],
 +    start: settings, before: ['Theme and sidebar preferences are remembered in this browser.'],
 +    steps: [
-+      step('Find the page', 'Choose Apps for Inventory, App catalog or Discovered apps; App updates for new versions; Activity for Deployments or Reports. Search opens with Ctrl+K, or Cmd+K on a Mac.', 'settings', 'Search', 'The primary navigation and page names lead to the same routes.'),
-+      step('Use the shortcuts', 'Press G, then a letter, to open a page, such as G then P for App updates. Keyboard shortcuts in Search lists every key.', 'settings', 'Keyboard shortcuts', 'The complete shortcut list is visible.'),
-+      step('Choose a theme', 'Press your name at the bottom of the sidebar. Under Theme, choose Light, Dark or Same as computer.', 'settings', 'Theme', 'This browser uses the selected appearance.'),
++      step('Open mobile navigation', 'On a small screen, press Open sidebar. Tab stays inside the menu. Close sidebar, Esc or the backdrop closes it and returns focus to Open sidebar. Choosing a page closes it.', 'settings', 'Open sidebar', 'You can reach navigation without tabbing through the page behind it.'),
++      step('Find the page', 'Choose Apps for Inventory, App catalog or Discovered apps; App updates for new versions; Activity for Deployments or Reports. Find a page or guide opens with Ctrl+K, or Cmd+K on a Mac.', 'settings', 'Find a page or guide', 'Apps stays highlighted for its pages and app workspaces; Activity stays highlighted for Deployments and Reports.'),
++      step('Use the shortcuts', 'Press G then P for App updates. Find a page or guide lists Keyboard shortcuts. When you are not typing, / focuses the first available page search field.', 'settings', 'Keyboard shortcuts', 'The complete shortcut list is visible.'),
++      step('Choose a theme', 'Open your account menu using your name or profile image at the bottom of the sidebar. Under Theme, choose Light, Dark or Same as computer.', 'settings', 'Theme', 'This browser uses the selected appearance.'),
 +      step('Find what Settings does not change', 'In Settings, General, read Not set on this page. Each row, such as Who gets an app or Install dates, links to the page where it is changed.', 'settings', 'Not set on this page', 'You know which page changes groups, install dates and update choices.'),
 +    ],
-+    success: 'You can navigate with Search and the browser uses your chosen theme.',
++    success: 'You can navigate with Find a page or guide and the browser uses your chosen theme.',
 +    caution: 'On this server, Settings has no update switches. An update replaces the previous version and keeps its groups.',
 +    related: ['support', 'updates'],
 +    troubleshoot: [{ problem: 'Another browser has different settings', action: 'Theme and sidebar choices are stored separately in each browser.' }],
-+    referenceGroups: [reference('Sidebar, Search and keyboard navigation', [0, 1, 2]), reference('Appearance and saved preferences', [3, 4]), reference('Deployment list and what Settings does not set', [5, 6, 7])],
++    referenceGroups: [reference('Sidebar, Find a page or guide and keyboard navigation', [0, 1, 2, 8]), reference('Appearance and saved preferences', [3, 4]), reference('Deployment list and what Settings does not set', [5, 6, 7])],
 +  },
 +  {
 +    id: 'reports', category: 'devices', title: 'Review deployment results and history',
 +    summary: 'Check deployment trends for your tenant or yourself, distinguish failed and cancelled outcomes, and hide only the finished history you own.', keywords: ['reports', 'trends', 'all in tenant', 'my deployments', 'show older deployments', 'export CSV', 'deployed by', 'history', 'staff', 'failed', 'cancelled', 'dismiss', 'clear history'],
 +    start: { label: 'Open Activity, then Reports', href: '/dashboard/reports' }, before: ['Reports and Deployments open on All in tenant. Choose My deployments for only those you started.', 'Dismiss and clear-history controls are available only for your finished deployments.'],
 +    steps: [
-+      step('Read the report', 'Open Activity, then Reports. Deployment reports shows outcomes and trends for deployments started by anyone in your tenant. Choose My deployments to count only yours.', 'reports', 'Deployment reports', 'The heading names whose deployments are counted.'),
++      step('Read the report', 'Open Activity, then Reports. Choose 7 days, 30 days, 90 days or 1 year under Report period. Deployment reports covers the tenant; My deployments counts only yours.', 'reports', 'Deployment reports', 'The heading and selected Report period show whose deployments and which dates are counted.'),
 +      step('Choose whose history to view', 'Open Deployments. It opens on All in tenant, listing deployments started by all staff. Choose My deployments for those you started.', 'deployments', 'All in tenant', 'Deployments lists the chosen scope, newest first.'),
 +      step('Load older deployments', 'When older deployments remain, press Show older deployments at the end of the list to load 50 more. Counts and status filters cover only the loaded deployments.', 'deployments', 'Show older deployments', 'Older deployments join the list, counts and filters.'),
-+      step('Separate failed and cancelled outcomes', 'Choose Failed for failures, including failed installation checks. Choose Cancelled for cancellations; these are not counted as Failed.', 'deployments', 'Cancelled', 'Cancelled deployments have their own outcome instead of appearing as failures.'),
++      step('Separate failed and cancelled outcomes', 'Use the counted status buttons above the list. Choose Failed for failures, including failed installation checks. Choose Cancelled for cancellations; these are not counted as Failed.', 'deployments', 'Cancelled', 'Cancelled deployments have their own outcome instead of appearing as failures.'),
 +      step('Dismiss one finished deployment', 'For one of your finished deployments, press Dismiss and confirm. This hides the card without deleting its deployment audit or update records.', 'deployments', 'Dismiss', 'Your finished deployment is hidden; other staff’s deployments are unchanged.'),
 +      step('Clear the matching history', 'Choose Completed, Failed or Cancelled, then clear that history. All clears your finished history. Active has no clear action.', 'deployments', 'Clear cancelled history', 'Only your matching finished deployments are hidden; audit and update records remain.'),
 +    ],
 +    success: 'You can distinguish failed and cancelled outcomes and hide only the finished history you own, with audit records preserved.',
 +    caution: 'History controls do not stop active deployments or hide other staff’s records. Deployment trends describe deployment outcomes, not proof of installation on each computer.',
 +    related: ['install-results', 'app-activity', 'support'],
-+    troubleshoot: [{ problem: 'Another staff member’s deployment is absent', action: 'Choose All in tenant in Deployments or Reports. For an older one, press Show older deployments. Dismissed and cleared deployments stay hidden.' }, { problem: 'A count or status filter in Deployments looks too low', action: 'Counts and filters cover only the loaded deployments. Press Show older deployments until the button no longer shows.' }, { problem: 'There is no clear-history action', action: 'Active has no clear action. Choose a finished-outcome filter with at least one of your own deployments; other staff’s history cannot be cleared.' }],
++    troubleshoot: [{ problem: 'Export CSV failed', action: 'Could not export this report. Try again. means the export did not finish. Press Export CSV again.' }, { problem: 'Another staff member’s deployment is absent', action: 'Choose All in tenant in Deployments or Reports. For an older one, press Show older deployments. Dismissed and cleared deployments stay hidden.' }, { problem: 'A count or status filter in Deployments looks too low', action: 'Counts and filters cover only the loaded deployments. Press Show older deployments until the button no longer shows.' }, { problem: 'There is no clear-history action', action: 'Active has no clear action. Choose a finished-outcome filter with at least one of your own deployments; other staff’s history cannot be cleared.' }],
 +    referenceGroups: [reference('Report scope and export', [0, 1]), reference('Deployments scope and older history', [2, 3, 5]), reference('Outcomes and history controls', [4, 6])],
 +  },
 +  {

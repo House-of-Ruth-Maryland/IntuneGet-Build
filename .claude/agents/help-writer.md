@@ -139,7 +139,7 @@ Use these exactly; sentence case, as the screen shows them.
 | Ignored apps | hidden apps |
 | Open in Intune | Check in Intune, View in Intune Portal |
 | Replaces current copy, Second copy (Add a second copy anyway) | Redeploy, deploy as new app |
-| Search (Ctrl+K, Cmd+K on a Mac) | Command palette, Command menu |
+| Find a page or guide (Ctrl+K, Cmd+K on a Mac) | Command palette, Command menu |
 | Partial match, No match | Partial, Unmatched |
 
 Add a row when a new feature brings a new term, and say so in your report.

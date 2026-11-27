@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Inventory separates group changes from copies with no install assignments and shows the changed assignments on demand. The dashboard exposes page and guide search on phones, labels tenant update policies in the app workspace, and shares clearer selection states across filters, Settings and Reports. Deployments now shows each status count once.
+
 - Authorized IT staff in one tenant now share App updates, its counts and Home card, update policies,
   dismissals and update history. Manual update reviews and saved deployment settings use the tenant’s
   latest deployment, including a teammate’s deployment; App catalog deployment badges and MCP updates
