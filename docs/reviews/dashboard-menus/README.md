@@ -19,4 +19,4 @@ The screenshots use a local dashboard signed in as Participant 01. The inventory
 | Settings | General, Permissions and Notifications fit a phone and announce the selected section. General identifies the signed-in tenant and reports whether copying its ID succeeded. Notifications reports failed loads, labels webhook actions by name and keeps keyboard focus inside the form. |
 | Help | The guides, illustrated controls and reference match the menu names, group review, discovery, scopes and tenant policy. All existing guide IDs are preserved. |
 
-[Compare all 35 states at both sizes and in both themes](screenshots.md) · [Test coverage and results](checks.md)
+[Compare all 35 states at both sizes and in both themes](screenshots.md) · [Test coverage and results](checks.md) · [Neon findings and verification](neon.md)
