@@ -914,10 +914,10 @@ index 000000000..6990bc2e9
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..abe3830ae
+index 000000000..182a3130c
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,644 @@
+@@ -0,0 +1,647 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -1368,7 +1368,7 @@ index 000000000..abe3830ae
 +    points: [
 +      'In Apps, open an Inventory app name, then expand App activity to see its latest 100 events across versions deployed by IntuneGet: deployments, failed deployment attempts, version changes, group changes and installation-result counts.',
 +      'Existing deployment history appears immediately. Group and installation-result history starts with the first successful check of Intune. Unchanged counts do not add another event.',
-+      'Changes found in Intune show when they were observed. IntuneGet does not know who made those changes in Intune. Known group edits through Save to Intune or Keep this copy show the staff member who saved them.',
++      'Changes found in Intune show when they were observed. IntuneGet does not know who made those changes in Intune. Group changes saved in IntuneGet, such as Save to Intune in Edit groups or Keep this copy, show the staff member who saved them.',
 +      'For a copy that is no longer in Intune, open Inventory, then Open activity beside its warning in Group changes to review, to see its recorded history. Open in Intune checks it there.',
 +      'Latest deployment attempt is linked to the exact copy and tenant, including a replacement attempt that failed before upload. Archived attempts stay read-only here. They remain hidden from deployment history. No retry starts from this summary.',
 +      'Version in Intune is configuration, not per-computer version inventory. Install results remain separate from failed packaging attempts. Per-computer versions are not collected here. Future updates shows the tenant’s saved future policy, separate from the installed copy.',
@@ -1380,12 +1380,15 @@ index 000000000..abe3830ae
 +    title: 'Group changes to review',
 +    uiLabels: ['Group changes to review', 'Check now', 'Previously', 'Open app', 'Mark reviewed', 'Edit groups', 'Who gets it', 'Groups on this app', 'Remove', 'Add a group', 'Find an Entra group', 'Required or Available', 'Review change', 'Check this change', 'Save to Intune', 'Cancel', 'Install dates', 'Excluded'],
 +    points: [
-+      'In Inventory, Group changes to review lists the newest copy of each app IntuneGet deployed when its groups or assignment settings changed, it has no groups receiving installations, or it is no longer in Intune.',
++      'In Inventory, Group changes to review lists the newest copy of each app IntuneGet deployed when its groups or assignment settings changed in Intune outside IntuneGet, it has no groups receiving installations, or it is no longer in Intune.',
++      'Changes saved in IntuneGet, such as Edit groups or Install dates, are not listed for review. App activity records them with the staff member who saved them.',
 +      'Checks run at 3:30 AM and 3:30 PM, Maryland time. Press Check now in Group changes to review for a fresh check. If Intune cannot be read, the last successful check is kept.',
 +      'Compare Previously and Now, including exclusions, installation choices and assignment settings. Open app shows the current groups. Check the last successful check time before relying on a saved warning.',
 +      'Mark reviewed acknowledges the displayed change without changing anything in Intune. A newer change needs its own review. Warnings for missing apps or no groups receiving installations remain until the problem is fixed.',
++      'A change that goes back to where it started, such as a group switched to Available and back to Required, clears by itself. There is nothing to mark reviewed.',
 +      'Saved group-change warnings also appear with the live groups in App updates and when the deployment review replaces a current copy. Check the groups before you update or deploy again.',
 +      'An exclusion shows as the group name, then Excluded. Exclusions and Uninstall assignments do not install an app. Group checks describe assignments, not which computers or users are in a group.',
++      'Groups show their Entra group name once a check has read it. A group whose name has never been read shows as Group and its ID.',
 +      'Edit groups, beside Who gets it in the app workspace, changes who gets the copy in Intune, whoever deployed it. Groups on this app lists each group as Required or Available. No new package is made.',
 +      'To add a group, choose it with Find an Entra group under Add a group, choose its type under Required or Available, then press Review change.',
 +      'Beside a group, Switch to Available or Switch to Required changes its type, and Remove takes the group off the app. Make one change at a time. While a review is open, the other controls are locked.',
@@ -1564,7 +1567,7 @@ index 000000000..abe3830ae
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..7e98f768b
+index 000000000..de834a2fc
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,405 @@
@@ -1847,7 +1850,7 @@ index 000000000..7e98f768b
 +    summary: 'Compare previous and current groups before acknowledging a change, or add, remove or switch a group on an app already in Intune.', keywords: ['Edit groups', 'switch to Available', 'switch to Required', 'last group', 'assignments', 'groups', 'Previously', 'Now', 'no groups', 'mark reviewed', 'Add a group', 'Edit assignments', 'who gets it', 'change who gets an app', 'remove a group', 'Required or Available', 'Installation intent'],
 +    start: inventory, before: ['Acknowledging a warning does not change Intune.'],
 +    steps: [
-+      step('Refresh the check', 'In Inventory, find Group changes to review and press Check now.', 'inventory', 'Check now', 'The latest readable assignments are compared with the saved state.'),
++      step('Refresh the check', 'In Inventory, find Group changes to review and press Check now.', 'inventory', 'Check now', 'Only changes made in Intune outside IntuneGet are listed.'),
 +      step('Compare the assignments', 'Read Previously and Now, including exclusions, filters and installation choices. Check the last successful check time.', 'inventory', 'Previously', 'You know what changed and how current the evidence is.'),
 +      step('Inspect the current app', 'Press Open app to review live groups. Correct unintended assignments before updating or deploying again.', 'inventory', 'Open app', 'The intended assignment can be checked against the warning.'),
 +      step('Acknowledge the review', 'Use Mark reviewed after checking the displayed change.', 'inventory', 'Mark reviewed', 'That change is acknowledged without changing assignments.'),
@@ -1858,7 +1861,7 @@ index 000000000..7e98f768b
 +    caution: 'Missing-app and no-installation-group warnings stay until the underlying problem is fixed. Group checks do not verify group membership.',
 +    related: ['app-activity', 'deploying', 'install-results'],
 +    troubleshoot: [{ problem: 'A group has no Switch or Remove button', action: 'The row says why. Exclusions, Uninstall groups and groups that come from another assignment are changed in Intune. Available without enrollment groups can be removed but not switched.' }, { problem: 'Saving stops because the app or its groups changed', action: 'Intune changed after your review. For a switch, a change to any group on the app counts. Choose the change again, read Check this change, then press Save to Intune.' }, { problem: 'A switch is refused because another group cannot be sent back exactly', action: 'A switch saves the app\'s whole group list. Another group comes from another assignment or has settings IntuneGet does not know. Switch the group in Intune.' }, { problem: 'Intune did not accept a switch', action: 'Nothing was changed and the group keeps its type. Review the switch again before retrying.' }, { problem: 'After a switch, the groups do not read back as expected', action: 'Open the app in Intune and check its groups before trying again.' }, { problem: 'Edit groups refuses a change during a pilot or retirement', action: 'Changes are held until the pilot or retirement finishes.', guide: 'pilot-rollouts' }, { problem: 'Check now cannot read Intune', action: 'Use the last successful timestamp and do not assume the saved groups are current.' }, { problem: 'A warning remains after Mark reviewed', action: 'Missing apps and groups receiving no installations require a real fix.' }],
-+    referenceGroups: [reference('Refresh and compare assignment evidence', [0, 1, 2]), reference('Acknowledge changes and understand limits', [3, 4, 5]), reference('Add, remove or switch a group', [6, 7, 8, 9, 10]), reference('What a change keeps and drops', [11, 12, 13]), reference('Groups that cannot be changed and the last group', [14, 15, 16]), reference('How a switch is saved and when it is refused', [17, 18]), reference('Changes that stop, need checking or are held', [19, 20, 21, 22])],
++    referenceGroups: [reference('Refresh and compare assignment evidence', [0, 1, 2, 3]), reference('Acknowledge changes and understand limits', [4, 5, 6, 7, 8]), reference('Add, remove or switch a group', [9, 10, 11, 12, 13]), reference('What a change keeps and drops', [14, 15, 16]), reference('Groups that cannot be changed and the last group', [17, 18, 19]), reference('How a switch is saved and when it is refused', [20, 21]), reference('Changes that stop, need checking or are held', [22, 23, 24, 25])],
 +  },
 +  {
 +    id: 'discovered', category: 'devices', title: 'Manage an app found on computers',
