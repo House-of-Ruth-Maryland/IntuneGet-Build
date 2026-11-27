@@ -1176,10 +1176,10 @@ index 000000000..68f1e9636
 +}
 diff --git a/components/hrm/AppInsights.test.ts b/components/hrm/AppInsights.test.ts
 new file mode 100644
-index 000000000..9ee38c9dc
+index 000000000..8fb41a1ff
 --- /dev/null
 +++ b/components/hrm/AppInsights.test.ts
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,74 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -1202,6 +1202,17 @@ index 000000000..9ee38c9dc
 +    const review = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Mark reviewed')!;
 +    await act(async () => review.click());
 +    expect(state.mutate).toHaveBeenCalledWith({ action: 'review', appId: A, revision: 3 });
++  });
++  it('omits a saved notice when the assignments returned to their previous state', async () => {
++    const row = snapshot();
++    const assignments = summarizeAssignments([{ intent: 'required', target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: A } }], { [A]: 'Cedar laptops' });
++    row.assignments = assignments;
++    row.change = { before: assignments, after: [...assignments], observedAt: row.checkedAt };
++    state.value.data = { supported: true, alerts: [row] };
++    await act(async () => root.render(createElement(AppDriftPanel, { onOpen: vi.fn() })));
++    expect(document.body.textContent).toContain('No group changes to review.');
++    expect(document.body.textContent).not.toContain('Mark reviewed');
++    expect(document.body.textContent).not.toContain('Previously');
 +  });
 +  it('shows changed settings inline for the same group and hides unchanged defaults', async () => {
 +    const group = { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: A };
@@ -1245,13 +1256,13 @@ index 000000000..9ee38c9dc
 +});
 diff --git a/components/hrm/AppInsights.tsx b/components/hrm/AppInsights.tsx
 new file mode 100644
-index 000000000..323ac453f
+index 000000000..6dd9073e7
 --- /dev/null
 +++ b/components/hrm/AppInsights.tsx
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,171 @@
 +'use client';
 +import { useAppInsights } from '@/hooks/useAppInsights';
-+import { GUID, needsReview, type AssignmentSummary, type AppSnapshot } from '@/lib/hrm/app-insights';
++import { GUID, hasUnreviewedChange, needsReview, type AssignmentSummary, type AppSnapshot } from '@/lib/hrm/app-insights';
 +import { Term } from './Term';
 +import { intuneAppUrl, OPEN_IN_INTUNE } from '@/lib/hrm/intune-link';
 +
@@ -1260,7 +1271,6 @@ index 000000000..323ac453f
 +
 +// HRM patch 0036: changesOnly leaves out "no longer in Intune" and "no groups", for screens that already
 +// say so from the live Intune read, so the same warning isn't shown twice.
-+const hasUnreviewedChange = (s: AppSnapshot) => s.change !== null && s.reviewedRevision < s.revision;
 +
 +// Saved snapshots include the original display label and a stable JSON key. Match a
 +// settings edit only when one assignment on each side identifies the same target.
@@ -1321,7 +1331,7 @@ index 000000000..323ac453f
 +  return <div className="space-y-2 text-sm">
 +    {!changesOnly && !snapshot.exists && <p>This copy is no longer in Intune. It may have been replaced or deleted. Check before deploying again.</p>}
 +    {!changesOnly && snapshot.exists && !snapshot.assignments.some((a) => a.installs) && <p>No install assignments.</p>}
-+    {change && snapshot.reviewedRevision < snapshot.revision && <>
++    {change && hasUnreviewedChange(snapshot) && <>
 +      <p>Change observed {date(change.observedAt)}.</p>
 +      <div className="grid gap-3 sm:grid-cols-2">
 +        {(['before', 'after'] as const).map((key) => {
@@ -2496,15 +2506,15 @@ index 000000000..fae9b131c
 +});
 diff --git a/lib/hrm/__tests__/app-insights.test.ts b/lib/hrm/__tests__/app-insights.test.ts
 new file mode 100644
-index 000000000..8c27f9a2b
+index 000000000..11b317dce
 --- /dev/null
 +++ b/lib/hrm/__tests__/app-insights.test.ts
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,159 @@
 +import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 +import Database from 'better-sqlite3';
 +import { runSqliteMigrations } from '@/lib/db/sqlite-migrations';
 +import { createAppInsightsStore } from '../app-insights-store';
-+import { summarizeAssignments, needsReview, type AppObservation } from '../app-insights';
++import { summarizeAssignments, needsReview, hasUnreviewedChange, type AppObservation, type AppSnapshot } from '../app-insights';
 +
 +const A = '11111111-1111-4111-8111-111111111111';
 +const B = '22222222-2222-4222-8222-222222222222';
@@ -2546,6 +2556,55 @@ index 000000000..8c27f9a2b
 +    store.observe('tenant', obs({ assignments: summarizeAssignments([group(B)]), checkedAt: '2026-01-02T12:00:00Z' }), 'Saved in IntuneGet by a staff member', true);
 +    expect(store.alerts('tenant')).toEqual([]);
 +    expect(store.activity('tenant', 'Example.App')[0]).toMatchObject({ actor: 'Saved in IntuneGet by a staff member', title: 'Groups or assignment settings changed' });
++  });
++  it('reuses group names from an earlier check when a later record has none (item 122)', () => {
++    store.observe('tenant', obs({ assignments: summarizeAssignments([group()], { [A]: 'Pilot group' }) }));
++    const saved = store.observe('tenant', obs({ assignments: summarizeAssignments([group(A, 'available')]), checkedAt: '2026-01-02T12:00:00Z' }), 'Saved in IntuneGet by a staff member', true);
++    expect(saved.assignments[0].label).toBe('Pilot group · Available');
++    expect(store.activity('tenant', 'Example.App')[0].detail).toBe('Previously: Pilot group · Required\nNow: Pilot group · Available');
++    // A group no check has named keeps its ID.
++    const added = store.observe('tenant', obs({ assignments: summarizeAssignments([group(A, 'available'), group(B)]), checkedAt: '2026-01-03T12:00:00Z' }), 'Saved', true);
++    expect(added.assignments.map((a) => a.label).sort()).toEqual(['Group ' + B + ' · Required', 'Pilot group · Available']);
++  });
++  it('clears a change to review once the groups are back where they started', () => {
++    store.observe('tenant', obs());
++    expect(needsReview(store.observe('tenant', obs({ assignments: summarizeAssignments([group(A, 'available')]), checkedAt: '2026-01-02T12:00:00Z' })))).toBe(true);
++    const back = store.observe('tenant', obs({ checkedAt: '2026-01-03T12:00:00Z' }), 'Saved in IntuneGet by a staff member', true);
++    expect(back.change).toBeNull();
++    expect(needsReview(back)).toBe(false);
++    expect(store.alerts('tenant')).toEqual([]);
++    // The same happens when it is put back in Intune itself.
++    store.observe('tenant', obs({ assignments: [], checkedAt: '2026-01-04T12:00:00Z' }));
++    expect(store.observe('tenant', obs({ checkedAt: '2026-01-05T12:00:00Z' })).change).toBeNull();
++  });
++  it.each([null, { notifications: 'showAll' }])('ignores defaults and nulls Intune adds to %j settings', (settings) => {
++    const row = group(A, 'required', { settings });
++    store.observe('tenant', obs({ assignments: summarizeAssignments([row]) }));
++    const normalized = {
++      ...row,
++      id: 'new-graph-id',
++      target: { ...row.target, deviceAndAppManagementAssignmentFilterId: null, deviceAndAppManagementAssignmentFilterType: 'none' },
++      settings: { notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured', restartSettings: null, installTimeSettings: null, autoUpdateSettings: null },
++    };
++    const next = store.observe('tenant', obs({ assignments: summarizeAssignments([normalized]), checkedAt: '2026-01-02T12:00:00Z' }));
++    expect(next.revision).toBe(0);
++    expect(next.change).toBeNull();
++    expect(store.alerts('tenant')).toEqual([]);
++    expect(store.activity('tenant', 'Example.App')).toHaveLength(2);
++  });
++  it('clears a stored no-op notice without treating the next Edit groups save as drift', () => {
++    const before = summarizeAssignments([group()]);
++    const after = summarizeAssignments([group(A, 'required', { settings: { notifications: 'showAll', restartSettings: null } })]);
++    const saved: AppSnapshot = { ...obs({ assignments: after }), revision: 2, reviewedRevision: 1, change: { before, after, observedAt: '2026-01-01T12:00:00Z' } };
++    db.prepare('INSERT INTO hrm_app_observations (tenant_id, app_id, winget_id, snapshot) VALUES (?, ?, ?, ?)')
++      .run('tenant', A, saved.wingetId, JSON.stringify(saved));
++    expect(hasUnreviewedChange(saved)).toBe(false);
++    expect(needsReview(saved)).toBe(false);
++    const changed = store.observe('tenant', obs({ assignments: summarizeAssignments([group(A, 'available')]), checkedAt: '2026-01-02T12:00:00Z' }), 'Saved in IntuneGet', true);
++    expect(changed.revision).toBe(3);
++    expect(changed.reviewedRevision).toBe(3);
++    expect(changed.change).toBeNull();
++    expect(store.alerts('tenant')).toEqual([]);
 +  });
 +  it('detects exclusion, intent, filter, and assignment-setting changes', () => {
 +    store.observe('tenant', obs());
@@ -3262,13 +3321,13 @@ index 000000000..526eb10da
 +}
 diff --git a/lib/hrm/app-insights-store.ts b/lib/hrm/app-insights-store.ts
 new file mode 100644
-index 000000000..03cafd398
+index 000000000..f8075f49a
 --- /dev/null
 +++ b/lib/hrm/app-insights-store.ts
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,129 @@
 +/** SQLite activity store. Tenant and app are part of every key/read/write. */
 +import type Database from 'better-sqlite3';
-+import { assignmentsEqual, needsReview, type AppObservation, type AppSnapshot, type AppActivity } from './app-insights';
++import { assignmentsEqual, hasUnreviewedChange, knownGroupNames, needsReview, withGroupNames, type AppObservation, type AppSnapshot, type AppActivity } from './app-insights';
 +
 +export function createAppInsightsStore(getDb: () => Database.Database) {
 +  function snapshot(tenant: string, appId: string): AppSnapshot | null {
@@ -3304,14 +3363,29 @@ index 000000000..03cafd398
 +      return db.transaction(() => {
 +        const old = snapshot(tenant, observation.appId);
 +        if (old && old.checkedAt > observation.checkedAt) return old;
++        // Records made without a name lookup (Edit groups, Install dates, retirement) reuse the names
++        // an earlier check found, so groups are not shown by their ID.
++        const names = knownGroupNames(observation.assignments, old?.assignments ?? [], old?.change?.before ?? [], old?.change?.after ?? []);
++        observation = { ...observation, assignments: withGroupNames(observation.assignments, names) };
 +        const changed = old && observation.exists && !assignmentsEqual(old.assignments, observation.assignments);
 +        const revision = (old?.revision ?? 0) + (changed ? 1 : 0);
-+        const pending = old?.change && old.reviewedRevision < old.revision;
-+        const current: AppSnapshot = { ...observation, revision, reviewedRevision: knownChange && !pending ? revision : old?.reviewedRevision ?? 0,
-+          change: changed && (!knownChange || pending) ? { before: pending ? old!.change!.before : old!.assignments, after: observation.assignments, observedAt: observation.checkedAt } : old?.change ?? null };
++        const pending = old && hasUnreviewedChange(old) ? old.change : null;
++        const before = pending?.before ?? old?.assignments;
++        const undone = pending && observation.exists && assignmentsEqual(pending.before, observation.assignments);
++        const obsolete = old?.change && old.reviewedRevision < old.revision && !pending;
++        const current: AppSnapshot = {
++          ...observation,
++          revision,
++          reviewedRevision: undone || (knownChange && !pending) || (obsolete && !changed)
++            ? revision : old?.reviewedRevision ?? 0,
++          change: changed && before && (!knownChange || pending) && !undone
++            ? { before: withGroupNames(before, names), after: observation.assignments, observedAt: observation.checkedAt }
++            : undone || obsolete || !old?.change ? null
++              : { ...old.change, before: withGroupNames(old.change.before, names), after: withGroupNames(old.change.after, names) },
++        };
 +        if (!old || old.exists !== observation.exists || changed) {
 +          const title = !observation.exists ? 'No longer in Intune' : !old ? 'First checked in Intune' : !old.exists ? 'Found in Intune again' : changed ? 'Groups or assignment settings changed' : 'Version changed in Intune';
-+          const detail = changed ? `Previously: ${old!.assignments.map((a) => a.label).join('; ') || 'No groups'}\nNow: ${observation.assignments.map((a) => a.label).join('; ') || 'No groups'}` : observation.exists ? `Version ${observation.version || 'unknown'}` : 'This deployed copy was not found. It may have been replaced or deleted.';
++          const detail = changed ? `Previously: ${withGroupNames(old!.assignments, names).map((a) => a.label).join('; ') || 'No groups'}\nNow: ${observation.assignments.map((a) => a.label).join('; ') || 'No groups'}` : observation.exists ? `Version ${observation.version || 'unknown'}` : 'This deployed copy was not found. It may have been replaced or deleted.';
 +          event(tenant, observation.wingetId, { at: observation.checkedAt, title, detail, actor, appId: observation.appId });
 +        }
 +        if (old && observation.exists && old.version !== observation.version) {
@@ -3382,12 +3456,14 @@ index 000000000..03cafd398
 +export type AppInsightsStore = ReturnType<typeof createAppInsightsStore>;
 diff --git a/lib/hrm/app-insights.ts b/lib/hrm/app-insights.ts
 new file mode 100644
-index 000000000..e0fa1c869
+index 000000000..84525f00d
 --- /dev/null
 +++ b/lib/hrm/app-insights.ts
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,117 @@
 +/** Shared, browser-safe app activity and assignment comparison types. */
-+export interface AssignmentSummary { key: string; label: string; installs: boolean }
++// groupName is kept when Entra returned the group's name, so later records made without a name
++// lookup (an Edit groups save, Install dates, retirement) can show it instead of the group's ID.
++export interface AssignmentSummary { key: string; label: string; installs: boolean; groupName?: string }
 +export interface AssignmentChange { before: AssignmentSummary[]; after: AssignmentSummary[]; observedAt: string }
 +export interface AppObservation {
 +  appId: string; wingetId: string; displayName: string; exists: boolean; version: string;
@@ -3439,15 +3515,67 @@ index 000000000..e0fa1c869
 +      key: JSON.stringify(stable({ intent: r.intent, target: { ...target, groupId: id || undefined, targetType: type }, settings: r.settings ?? null })),
 +      label: `${name} · ${excluded ? 'Excluded' : intent}${filter}${options ? ` · ${options}` : ''}`,
 +      installs: !excluded && (r.intent === 'required' || r.intent === 'available' || r.intent === 'availableWithoutEnrollment'),
++      ...(id && names[id] ? { groupName: names[id] } : {}),
 +    };
 +  });
 +  return [...new Map(entries.map((e) => [e.key, e])).values()].sort((a, b) => a.key.localeCompare(b.key));
 +}
++// Normalize both new and saved keys. Intune can fill in nulls and Win32 defaults
++// before returning assignments, including the explicit 'none' filter type.
++function comparableKey(key: string): string {
++  const dropNulls = (value: unknown): unknown => Array.isArray(value) ? value.map(dropNulls)
++    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v != null).map(([k, v]) => [k, dropNulls(v)]))
++    : value;
++  try {
++    const assignment = JSON.parse(key);
++    const { target, settings } = assignment;
++    if (target?.deviceAndAppManagementAssignmentFilterType === 'none') {
++      delete target.deviceAndAppManagementAssignmentFilterType;
++      delete target.deviceAndAppManagementAssignmentFilterId;
++    }
++    if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
++      // These match the defaults used when saving Win32 assignment settings.
++      if (settings.notifications === 'showAll') delete settings.notifications;
++      if (settings.deliveryOptimizationPriority === 'notConfigured') delete settings.deliveryOptimizationPriority;
++      const configured = dropNulls(settings) as Record<string, unknown>;
++      assignment.settings = Object.keys(configured).length ? configured : null;
++    }
++    return JSON.stringify(dropNulls(assignment));
++  } catch { return key; }
++}
 +export function assignmentsEqual(a: AssignmentSummary[], b: AssignmentSummary[]) {
-+  return JSON.stringify(a.map((e) => e.key).sort()) === JSON.stringify(b.map((e) => e.key).sort());
++  const keys = (list: AssignmentSummary[]) => JSON.stringify([...new Set(list.map((e) => comparableKey(e.key)))].sort());
++  return keys(a) === keys(b);
++}
++function groupIdOf(entry: AssignmentSummary): string {
++  try { const id = JSON.parse(entry.key)?.target?.groupId; return typeof id === 'string' ? id.toLowerCase() : ''; } catch { return ''; }
++}
++/** Entra group names already known from these entries (their own name, or an earlier label). */
++export function knownGroupNames(...lists: AssignmentSummary[][]): Record<string, string> {
++  const names: Record<string, string> = {};
++  for (const entry of lists.flat()) {
++    const id = groupIdOf(entry);
++    if (!id) continue;
++    const name = entry.groupName ?? entry.label.split(' · ')[0];
++    if (name && name !== `Group ${id}` && !names[id]) names[id] = name;
++  }
++  return names;
++}
++/** Replaces "Group <ID>" with the group's name when it is known. Unknown groups keep their ID. */
++export function withGroupNames(list: AssignmentSummary[], names: Record<string, string>): AssignmentSummary[] {
++  return list.map((entry) => {
++    const id = groupIdOf(entry);
++    const fallback = `Group ${id}`;
++    if (!id || !names[id] || !(entry.label === fallback || entry.label.startsWith(`${fallback} · `))) return entry;
++    return { ...entry, label: names[id] + entry.label.slice(fallback.length), groupName: names[id] };
++  });
++}
++/** A saved change still to review. One that ended where it started (switched and back) is not. */
++export function hasUnreviewedChange(s: AppSnapshot) {
++  return s.change !== null && s.reviewedRevision < s.revision && !assignmentsEqual(s.change.before, s.change.after);
 +}
 +export function needsReview(s: AppSnapshot) {
-+  return !s.exists || !s.assignments.some((a) => a.installs) || (s.change !== null && s.reviewedRevision < s.revision);
++  return !s.exists || !s.assignments.some((a) => a.installs) || hasUnreviewedChange(s);
 +}
 diff --git a/lib/hrm/install-error-guidance.ts b/lib/hrm/install-error-guidance.ts
 new file mode 100644
