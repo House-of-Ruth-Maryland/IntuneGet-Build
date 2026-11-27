@@ -1176,10 +1176,10 @@ index 000000000..68f1e9636
 +}
 diff --git a/components/hrm/AppInsights.test.ts b/components/hrm/AppInsights.test.ts
 new file mode 100644
-index 000000000..58fe1db45
+index 000000000..9ee38c9dc
 --- /dev/null
 +++ b/components/hrm/AppInsights.test.ts
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,63 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -1225,6 +1225,14 @@ index 000000000..58fe1db45
 +    await act(async () => activity.click()); expect(open).toHaveBeenCalledWith(A);
 +    expect(document.body.textContent).not.toContain('Mark reviewed');
 +  });
++  it('retains the review for an unreviewed change on a missing copy', async () => {
++    state.value.data = { supported: true, alerts: [{ ...snapshot(), exists: false }] };
++    await act(async () => root.render(createElement(AppDriftPanel, { onOpen: vi.fn() })));
++    expect(document.body.textContent).toContain('Last recorded group change');
++    expect(document.body.textContent).toContain('Mark reviewed');
++    expect(document.body.textContent).not.toContain('No group changes to review');
++  });
++
 +  it('renders saved text safely and distinguishes errors from empty history', async () => {
 +    state.value = { data: { supported: true, activity: [{ id: '1', at: '2026-01-02T12:00:00Z', title: 'Deployed to Intune', detail: '<img src=x>', actor: 'IntuneGet' }] }, action: {} };
 +    await act(async () => root.render(createElement(AppActivityTimeline, { appId: A })));
@@ -1237,7 +1245,7 @@ index 000000000..58fe1db45
 +});
 diff --git a/components/hrm/AppInsights.tsx b/components/hrm/AppInsights.tsx
 new file mode 100644
-index 000000000..2707fbc8e
+index 000000000..323ac453f
 --- /dev/null
 +++ b/components/hrm/AppInsights.tsx
 @@ -0,0 +1,172 @@
@@ -1363,7 +1371,7 @@ index 000000000..2707fbc8e
 +    {error && <p role="alert" className="mt-3 text-sm text-status-error">{error.message} <button className={button} onClick={() => refetch()}>Try again</button></p>}
 +    {action.error && <p role="alert" className="mt-3 text-sm text-status-error">{action.error.message}</p>}
 +    {action.data && <p role="status" className="mt-2 text-xs text-text-secondary">{action.data.reviewed ? 'Change marked reviewed.' : `Checked ${action.data.checked ?? 0} apps.`}{action.data.errors > 0 ? ` Could not check ${action.data.errors}; their last successful checks are kept.` : ''}</p>}
-+    {data && changes.length === 0 && <p className="mt-2 text-sm text-text-secondary">No group changes to review.</p>}
++    {data && !alerts.some(hasUnreviewedChange) && <p className="mt-2 text-sm text-text-secondary">No group changes to review.</p>}
 +    {changes.map(s => <details key={s.appId} className="mt-2 border-t border-overlay/10 pt-1">
 +      <summary className="cursor-pointer py-2 text-sm font-medium text-text-primary">{s.displayName} {s.version}</summary>
 +      <AssignmentDifference snapshot={s} />
