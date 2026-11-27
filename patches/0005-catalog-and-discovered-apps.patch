@@ -490,7 +490,7 @@ index 000000000..e38e48f96
 +  return <TooltipProvider delayDuration={150}><Tooltip open={open} onOpenChange={setOpen}><TooltipTrigger asChild><button type="button" onClick={event => { event.stopPropagation(); setOpen(true); }} className={cn('inline-flex items-center gap-1 rounded-full border border-status-success/20 bg-status-success/10 px-2 py-0.5 text-xs font-medium text-status-success focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan', className)}><ShieldCheck className="h-3 w-3" aria-hidden="true" />Curated</button></TooltipTrigger><TooltipContent className="max-w-64">{CURATED_HINT}</TooltipContent></Tooltip></TooltipProvider>;
 +}
 diff --git a/components/CuratedCatalog.tsx b/components/CuratedCatalog.tsx
-index 9a1d66d2e..086a40c2f 100644
+index 9a1d66d2e..8a553b5c2 100644
 --- a/components/CuratedCatalog.tsx
 +++ b/components/CuratedCatalog.tsx
 @@ -1,4 +1,5 @@
@@ -510,15 +510,33 @@ index 9a1d66d2e..086a40c2f 100644
              ) : (
                <span className="inline-flex items-center gap-1 text-xs text-text-secondary bg-bg-surface px-2 py-0.5 rounded-full border border-overlay/10">
                  <Clock className="h-3 w-3" />
-@@ -289,7 +288,7 @@ export function CuratedCatalog() {
+@@ -289,14 +288,14 @@ export function CuratedCatalog() {
          <div className="absolute right-0 top-0 h-28 w-28 md:h-40 md:w-40 bg-gradient-to-bl from-accent-violet/10 via-accent-cyan/5 to-transparent blur-2xl" />
  
          <div className="relative">
 -          <h1 className="text-display-sm text-text-primary"><T>Curated Catalog</T></h1>
 +          <h1 className="text-display-sm text-text-primary"><T>Curated apps</T></h1>
            <p className="text-text-secondary mt-2 max-w-2xl">
-             <T>Applications downloaded straight from their publishers. New releases are checked every 30 minutes and become available once they pass an automated install, upgrade and uninstall test in an isolated virtual machine.</T>
+-            <T>Applications downloaded straight from their publishers. New releases are checked every 30 minutes and become available once they pass an automated install, upgrade and uninstall test in an isolated virtual machine.</T>
++            <T>Publisher releases appear here after they pass install, upgrade and uninstall tests.</T>
            </p>
+ 
+           <div className="mt-5 flex flex-wrap items-center gap-2">
+             <Link href="/dashboard/apps" className="inline-flex items-center gap-2 rounded-full border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary hover:text-text-primary hover:bg-overlay/5">
+-              <ArrowLeft className="h-4 w-4" /><T>Winget catalog</T>
++              <ArrowLeft className="h-4 w-4" /><T>App catalog</T>
+             </Link>
+             <span className="inline-flex items-center gap-2 rounded-full border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
+               <ShieldCheck className="w-4 h-4 text-status-success" />
+@@ -332,7 +331,7 @@ export function CuratedCatalog() {
+         <p><T>The curated catalog is temporarily unavailable. Please try again later.</T></p>
+         <button disabled={isFetching} onClick={() => void refetch()} className="mt-2 text-sm text-accent-cyan disabled:opacity-50"><T>Try again</T></button>
+       </div>}
+-      {!error && !isPending && visible.length === 0 && <p className="text-text-secondary"><T>No curated applications match your search.</T></p>}
++      {!error && !expired && !isPending && visible.length === 0 && <p className="text-text-secondary">{query.trim() ? <T>No curated apps match your search.</T> : <T>No curated apps are available.</T>}</p>}
+       {!error && <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+         {visible.map(entry => {
+           const { app, release, cartItem } = entry;
 diff --git a/components/sccm/SccmManualMatchModal.tsx b/components/sccm/SccmManualMatchModal.tsx
 index 1a3f51635..b11ffa850 100644
 --- a/components/sccm/SccmManualMatchModal.tsx
@@ -683,7 +701,7 @@ index c6b4cbd92..8fc0c20dc 100644
            </Button>
 diff --git a/components/unmanaged/DiscoveredGuide.tsx b/components/unmanaged/DiscoveredGuide.tsx
 new file mode 100644
-index 000000000..c3f0bb134
+index 000000000..d599962c2
 --- /dev/null
 +++ b/components/unmanaged/DiscoveredGuide.tsx
 @@ -0,0 +1,87 @@
@@ -722,9 +740,9 @@ index 000000000..c3f0bb134
 +];
 +
 +export function DiscoveredGuide() {
-+  const [hidden, setHidden] = useState(false);
++  const [hidden, setHidden] = useState(true);
 +  useEffect(() => {
-+    try { setHidden(window.localStorage.getItem(KEY) === '1'); } catch { /* storage unavailable: show it */ }
++    try { setHidden(window.localStorage.getItem(KEY) !== '0'); } catch { /* keep the default when storage is unavailable */ }
 +  }, []);
 +  const toggle = () => {
 +    const next = !hidden;
@@ -1260,7 +1278,7 @@ index 1eb79dec7..9a715a087 100644
    'error': {
      icon: AlertTriangle,
 diff --git a/components/unmanaged/UnmanagedListRow.tsx b/components/unmanaged/UnmanagedListRow.tsx
-index 6b56bbc07..f6523067a 100644
+index 6b56bbc07..a8325fbeb 100644
 --- a/components/unmanaged/UnmanagedListRow.tsx
 +++ b/components/unmanaged/UnmanagedListRow.tsx
 @@ -1,5 +1,7 @@
@@ -1319,7 +1337,15 @@ index 6b56bbc07..f6523067a 100644
              </div>
            )}
          </div>
-@@ -92,6 +102,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -85,6 +95,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+                 <button
+                   type="button"
+                   onClick={onLink}
++                aria-label={`Link package for ${app.displayName}`}
+                   className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 transition-colors flex-shrink-0"
+                 >
+                   <Lightbulb className="w-3 h-3" />
+@@ -92,6 +103,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
                  </button>
                )}
              </div>
@@ -1327,7 +1353,7 @@ index 6b56bbc07..f6523067a 100644
            </div>
  
            {/* Device count */}
-@@ -113,7 +124,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -113,7 +125,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
            )}
  
            {/* Status badge */}
@@ -1336,10 +1362,18 @@ index 6b56bbc07..f6523067a 100644
  
            {/* Actions */}
            <div className="flex items-center gap-2">
-@@ -129,6 +140,19 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
-                 <span className="hidden lg:inline">Link</span>
-               </Button>
-             )}
+@@ -123,10 +135,24 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+                 size="sm"
+                 variant="outline"
+                 onClick={onLink}
++                aria-label={`Link package for ${app.displayName}`}
+                 className="h-8 px-3 text-text-secondary hover:text-text-primary border-overlay/10 hover:bg-overlay/5"
+               >
+                 <LinkIcon className="w-4 h-4 mr-1.5" />
+-                <span className="hidden lg:inline">Link</span>
++                <span className="hidden lg:inline">Link package</span>
++              </Button>
++            )}
 +            {onRemove && !app.isClaimed && (
 +              <Button
 +                type="button"
@@ -1351,12 +1385,10 @@ index 6b56bbc07..f6523067a 100644
 +              >
 +                {removable ? <Trash2 className="w-4 h-4 lg:mr-1.5" /> : <HelpCircle className="w-4 h-4 lg:mr-1.5" />}
 +                <span className="hidden lg:inline">{removable ? 'Remove' : 'How to remove'}</span>
-+              </Button>
-+            )}
+               </Button>
+             )}
              {canClaim && (
-               <Button
-                 type="button"
-@@ -148,9 +172,12 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -148,9 +174,12 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
                </Button>
              )}
              {app.isClaimed && (
@@ -1373,7 +1405,7 @@ index 6b56bbc07..f6523067a 100644
              )}
            </div>
 diff --git a/components/unmanaged/UnmanagedToolbar.tsx b/components/unmanaged/UnmanagedToolbar.tsx
-index 47deadceb..443918e06 100644
+index 47deadceb..04d93594e 100644
 --- a/components/unmanaged/UnmanagedToolbar.tsx
 +++ b/components/unmanaged/UnmanagedToolbar.tsx
 @@ -57,8 +57,8 @@ function getFilterContextText(filters: UnmanagedAppsFilters): string {
@@ -1396,7 +1428,33 @@ index 47deadceb..443918e06 100644
              {claimableCount > 0 && (
                <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-white/20 text-xs tabular-nums">
                  {claimableCount}
-@@ -246,7 +246,7 @@ export function UnmanagedToolbar({
+@@ -174,7 +174,7 @@ export function UnmanagedToolbar({
+                 variant="ghost"
+                 size="sm"
+                 onClick={() => handleSortChange(option.value)}
+-                aria-sort={filters.sortBy === option.value ? (filters.sortOrder === 'asc' ? 'ascending' : 'descending') : undefined}
++                aria-pressed={filters.sortBy === option.value}
+                 className={cn(
+                   'text-sm transition-colors',
+                   filters.sortBy === option.value
+@@ -189,7 +189,7 @@ export function UnmanagedToolbar({
+               type="button"
+               variant="ghost"
+               size="sm"
+-              aria-label={`Sort ${filters.sortOrder === 'asc' ? 'ascending' : 'descending'}, click to toggle`}
++              aria-label={`Sort ${filters.sortOrder === 'asc' ? 'descending' : 'ascending'}`}
+               onClick={() =>
+                 onFiltersChange({
+                   ...filters,
+@@ -229,6 +229,7 @@ export function UnmanagedToolbar({
+                 {sortOptions.map((option) => (
+                   <DropdownMenuItem
+                     key={option.value}
++                    role="menuitemradio" aria-checked={filters.sortBy === option.value}
+                     onClick={() => handleSortChange(option.value)}
+                     className="flex items-center justify-between"
+                   >
+@@ -246,7 +247,7 @@ export function UnmanagedToolbar({
                      })
                    }
                  >
@@ -1405,7 +1463,7 @@ index 47deadceb..443918e06 100644
                  </DropdownMenuItem>
                </DropdownMenuContent>
              </DropdownMenu>
-@@ -292,7 +292,7 @@ export function UnmanagedToolbar({
+@@ -292,7 +293,7 @@ export function UnmanagedToolbar({
            active={filters.matchStatus === 'all'}
            onClick={() => handleMatchStatusChange('all')}
            count={statusCounts.all}
@@ -1414,7 +1472,7 @@ index 47deadceb..443918e06 100644
          >
            All
          </FilterChip>
-@@ -312,7 +312,7 @@ export function UnmanagedToolbar({
+@@ -312,7 +313,7 @@ export function UnmanagedToolbar({
            color="#f59e0b"
            icon={AlertCircle}
          >
@@ -1423,7 +1481,7 @@ index 47deadceb..443918e06 100644
          </FilterChip>
          <FilterChip
            active={filters.matchStatus === 'unmatched'}
-@@ -321,18 +321,21 @@ export function UnmanagedToolbar({
+@@ -321,18 +322,21 @@ export function UnmanagedToolbar({
            color="#71717a"
            icon={HelpCircle}
          >
@@ -1498,12 +1556,12 @@ index 000000000..39b8ad775
 +});
 diff --git a/hooks/use-unmanaged-apps.discovery.test.ts b/hooks/use-unmanaged-apps.discovery.test.ts
 new file mode 100644
-index 000000000..9cd9213ab
+index 000000000..2815b005b
 --- /dev/null
 +++ b/hooks/use-unmanaged-apps.discovery.test.ts
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,76 @@
 +// @vitest-environment happy-dom
-+import { act, createElement } from 'react';
++import { act, createElement, useLayoutEffect } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
 +import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 +import type { PackageManagementState } from '@/lib/discovery-state';
@@ -1520,7 +1578,11 @@ index 000000000..9cd9213ab
 +let current: ReturnType<typeof useUnmanagedApps>;
 +const app = { id: 'row', discoveredAppId: 'version2', displayName: 'Fixture app', publisher: 'Fixture', version: '2', deviceCount: 2, platform: 'windows', matchStatus: 'matched', matchedPackageId: 'Vendor.App', matchedPackageName: 'Fixture app', matchConfidence: 1, isClaimed: false, lastSynced: '2026-01-01' };
 +(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-+function Harness() { current = useUnmanagedApps(); return null; }
++function Harness() {
++  const result = useUnmanagedApps();
++  useLayoutEffect(() => { current = result; }, [result]);
++  return null;
++}
 +const settle = async () => { for (let n = 0; n < 3; n++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
 +beforeEach(async () => {
 +  Object.assign(session, { tenant: 'tenant', states: {}, claimOk: true, identity: 'Vendor.App' });
@@ -3565,3 +3627,53 @@ index b013b2c71..5979bcc35 100644
        .eq('intune_tenant_id', tenantResolution.tenantId);
  
      if (error) {
+diff --git a/components/AppSearch.tsx b/components/AppSearch.tsx
+index 9de5cbcfa..2400ea214 100644
+--- a/components/AppSearch.tsx
++++ b/components/AppSearch.tsx
+@@ -42,18 +42,6 @@ export function AppSearch({ value, onChange, isLoading = false }: AppSearchProps
+     }
+   }, [value]);
+ 
+-  // Cmd+K / Ctrl+K keyboard shortcut
+-  useEffect(() => {
+-    const handleKeyDown = (e: KeyboardEvent) => {
+-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+-        e.preventDefault();
+-        inputRef.current?.focus();
+-      }
+-    };
+-    document.addEventListener('keydown', handleKeyDown);
+-    return () => document.removeEventListener('keydown', handleKeyDown);
+-  }, []);
+-
+   const clearSearch = () => {
+     setInputValue('');
+     onChange('');
+@@ -97,7 +85,7 @@ export function AppSearch({ value, onChange, isLoading = false }: AppSearchProps
+         <Input
+           ref={inputRef}
+           type="text"
+-          placeholder="Search Winget applications..."
++          aria-label="Search App catalog" placeholder="Search App catalog"
+           value={inputValue}
+           onChange={(e) => {
+             setInputValue(e.target.value);
+@@ -112,17 +100,6 @@ export function AppSearch({ value, onChange, isLoading = false }: AppSearchProps
+           className="h-12 md:h-14 pl-12 pr-12 bg-transparent border-0 text-text-primary placeholder:text-text-muted focus-visible:ring-0 focus-visible:outline-none text-base md:text-lg rounded-xl"
+         />
+ 
+-        {!isFocused && !inputValue && (
+-          <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1 pointer-events-none">
+-            <kbd className="px-1.5 py-0.5 text-[10px] text-text-secondary bg-bg-surface border border-overlay/10 rounded font-mono">
+-              {typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl'}
+-            </kbd>
+-            <kbd className="px-1.5 py-0.5 text-[10px] text-text-secondary bg-bg-surface border border-overlay/10 rounded font-mono">
+-              K
+-            </kbd>
+-          </div>
+-        )}
+-
+         {isLoading && (
+           <div className="absolute right-12 top-1/2 -translate-y-1/2">
+             <Loader2 className="w-5 h-5 text-accent-cyan animate-spin" />

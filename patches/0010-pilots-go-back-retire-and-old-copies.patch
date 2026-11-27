@@ -1173,7 +1173,7 @@ index 000000000..464c2971c
 +});
 diff --git a/components/hrm/PilotRollouts.tsx b/components/hrm/PilotRollouts.tsx
 new file mode 100644
-index 000000000..e4a460575
+index 000000000..8dac446f9
 --- /dev/null
 +++ b/components/hrm/PilotRollouts.tsx
 @@ -0,0 +1,95 @@
@@ -1249,7 +1249,7 @@ index 000000000..e4a460575
 +    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
 +    {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
 +    <ul className="space-y-3">{data?.pilots.map((row)=><li key={row.id} className="rounded-lg border border-overlay/10 p-3 text-sm space-y-2">
-+      <p className="font-medium text-text-primary">{row.startup_beta ? 'Restart Beta · ' : ''}{row.display_name}: {row.previous_version} → {row.new_version || 'new version'}</p>
++      <p className="font-medium text-text-primary">{row.startup_beta ? 'Restart Beta · ' : ''}{row.display_name || row.winget_id || 'App name unavailable'}: {row.previous_version ? row.previous_version + ' → ' : ''}{row.new_version || 'New version'}</p>
 +      <p className="text-text-secondary">Pilot group: {row.group_name}. {row.phase==='complete'?(row.approved_by?'Wider rollout approved.':'Failed pilot ended.'):row.job_status==='deployed'?'Pilot deployed. Wider rollout awaits your approval.':`Deployment: ${row.job_status || 'starting'}. Other updates are held.`}</p>
 +      {['failed','cancelled'].includes(row.job_status || '') && row.phase!=='complete' && <p className="text-status-warning">Packaging did not complete. Check Deployments. End failed pilot only releases the hold after the workflow has ended and no pilot copy remains in Intune.</p>}
 +      <div className="flex flex-wrap gap-4"><a className={secondary} href="/dashboard/uploads">Open Deployments</a>
@@ -1258,7 +1258,7 @@ index 000000000..e4a460575
 +        {row.phase!=='complete' && ['failed','cancelled'].includes(row.job_status || '') && <button className={secondary} disabled={action.isPending} onClick={()=>action.mutate({action:'endFailed',id:row.id})}>End failed pilot</button>}
 +      </div>
 +    </li>)}</ul>
-+    <Dialog open={!!review} onOpenChange={(value)=>{if(!value&&!action.isPending)setReview(null);}}><DialogContent className="max-w-2xl max-h-[85vh] overflow-auto"><DialogHeader><DialogTitle>Approve wider rollout</DialogTitle><DialogDescription>Review both versions and the current groups. Approval replaces the temporary pilot assignment with the previous copy’s current groups, preserving their intent, exclusions, filters and settings. The previous copy keeps its groups.</DialogDescription></DialogHeader>
++    <Dialog open={!!review} onOpenChange={(value)=>{if(!value&&!action.isPending)setReview(null);}}><DialogContent className="w-[calc(100%-2rem)] max-w-2xl max-h-[85dvh] overflow-auto p-4 sm:p-6"><DialogHeader><DialogTitle>Approve wider rollout</DialogTitle><DialogDescription>Review both versions and the current groups. Approval replaces the temporary pilot assignment with the previous copy’s current groups, preserving their intent, exclusions, filters and settings. The previous copy keeps its groups.</DialogDescription></DialogHeader>
 +      {review && <>
 +        <p className="text-sm font-medium">{review.row.display_name}</p>
 +        <p className="text-xs text-text-muted">Results checked {new Date(review.preview.checkedAt).toLocaleString()}. These are app-wide reports, not a membership check for the pilot group.</p>

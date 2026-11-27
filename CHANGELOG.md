@@ -2,12 +2,14 @@
 
 ## Unreleased
 
+- Inventory separates group changes from copies with no install assignments and shows the changed assignments on demand. The dashboard exposes page and guide search on phones, labels tenant update policies in the app workspace, and shares clearer selection states across filters, Settings and Reports. Deployments now shows each status count once. Home keeps the chosen scope when opening Pending or Failed deployments. Notification actions identify the webhook and report errors.
+
 - Group change notices fixed (item 122 follow-up). After an Edit groups save, the app page's
   "Groups or assignment settings changed" notice and App activity showed the group by its ID
   instead of its Entra name. Saves in Edit groups now record the names
   IntuneGet read, and any record made without a name lookup (Edit groups, Install dates,
   retirement, old copy cleanup) reuses the names an earlier check found. A group whose name has
-  never been read still shows by its ID. A change waiting for review that ends where it started
+  never been read appears as Group name unavailable in the comparison. A change waiting for review that ends where it started
   (for example a group switched to Available and back to Required) now clears by itself, and a
   saved notice whose Previously and Now sides match is never shown or listed in Group changes to
   review. Adding a group in Edit groups is now recorded as a change made in IntuneGet, so the next

@@ -13,7 +13,7 @@ index 764cbe59e..abc7c643f 100644
        logLabel="Uploads"
 diff --git a/app/(app)/dashboard/uploads/page.test.ts b/app/(app)/dashboard/uploads/page.test.ts
 new file mode 100644
-index 000000000..b042f1e1f
+index 000000000..854f2245d
 --- /dev/null
 +++ b/app/(app)/dashboard/uploads/page.test.ts
 @@ -0,0 +1,134 @@
@@ -123,13 +123,13 @@ index 000000000..b042f1e1f
 +const listUrls=()=>state.fetch.mock.calls.map(([url])=>url as string).filter(url=>url.startsWith('/api/package?'));
 +it.each(['','scope=tenant','scope=anything'])('opens on All in tenant for search "%s", so staff who deployed nothing still see the tenant list',async search=>{
 + state.search=search;state.jobs=[job('deployed','other')];await render();
-+ expect(button('All in tenant').getAttribute('aria-selected')).toBe('true');
++ expect(button('All in tenant').getAttribute('aria-pressed')).toBe('true');
 + expect(listUrls()).toEqual(['/api/package?scope=tenant&limit=50']);
 + expect([...document.querySelectorAll('h3')].map(e=>e.textContent)).toEqual(['deployed example']);
 +});
 +it('opens the signed-in user\u2019s own list only when the link asks for it, and points an empty one at All in tenant',async()=>{
 + state.search='scope=mine';await render();
-+ expect(button('My deployments').getAttribute('aria-selected')).toBe('true');
++ expect(button('My deployments').getAttribute('aria-pressed')).toBe('true');
 + expect(listUrls()).toEqual(['/api/package?limit=50']);
 + expect(document.body.textContent).toContain('No deployments yet');
 +});
@@ -152,7 +152,7 @@ index 000000000..b042f1e1f
 + expect(listUrls()).toEqual(['/api/package?scope=tenant&limit=50','/api/package?scope=tenant&limit=100','/api/package?scope=tenant&limit=150','/api/package?limit=50']);
 +});
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index 93f7400e8..1024c6986 100644
+index 93f7400e8..978eb6fee 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
 @@ -1,5 +1,11 @@
@@ -167,6 +167,15 @@ index 93f7400e8..1024c6986 100644
  import { useState, useEffect, useCallback, useRef } from 'react';
  import { isIntuneApprovalFailure } from '@/lib/intune-approval';
  import { T, Var } from "gt-next";
+@@ -44,7 +50,7 @@ import { useMspOptional } from '@/hooks/useMspOptional';
+ import { ProgressStepper } from '@/components/ProgressStepper';
+ import { ErrorDisplay } from '@/components/ErrorDisplay';
+ import { EspProfileSelector } from '@/components/EspProfileSelector';
+-import { PageHeader, AnimatedStatCard, StatCardGrid, AnimatedEmptyState, SkeletonCard, SkeletonGrid } from '@/components/dashboard';
++import { PageHeader, AnimatedEmptyState, SkeletonCard, SkeletonGrid } from '@/components/dashboard';
+ import type { PackageAssignment } from '@/types/upload';
+ import type { CustomerQaStatus } from '@/types/customer-qa';
+ 
 @@ -78,6 +84,7 @@ interface PackagingJob {
    updated_at: string;
    packaging_started_at?: string;
@@ -448,27 +457,74 @@ index 93f7400e8..1024c6986 100644
              </Button>
            </motion.div>
          )}
-@@ -555,16 +571,16 @@ export default function UploadsPage() {
+@@ -510,61 +526,20 @@ export default function UploadsPage() {
+         )}
+       </AnimatePresence>
+ 
+-      {/* Stats */}
+-      <StatCardGrid columns={4}>
+-        <AnimatedStatCard
+-          title={<T>Total</T>}
+-          value={stats.total}
+-          icon={Package}
+-          color="cyan"
+-          delay={0}
+-          onClick={() => setFilter('all')}
+-          isActive={filter === 'all'}
+-        />
+-        <AnimatedStatCard
+-          title={<T>Active</T>}
+-          value={stats.active}
+-          icon={Clock}
+-          color="violet"
+-          delay={0.1}
+-          onClick={() => setFilter('active')}
+-          isActive={filter === 'active'}
+-        />
+-        <AnimatedStatCard
+-          title={<T>Completed</T>}
+-          value={stats.completed}
+-          icon={CheckCircle2}
+-          color="success"
+-          delay={0.2}
+-          onClick={() => setFilter('completed')}
+-          isActive={filter === 'completed'}
+-        />
+-        <AnimatedStatCard
+-          title={<T>Failed</T>}
+-          value={stats.failed}
+-          icon={XCircle}
+-          color="error"
+-          delay={0.3}
+-          onClick={() => setFilter('failed')}
+-          isActive={filter === 'failed'}
+-        />
+-      </StatCardGrid>
+-
+       {/* Scope toggle: my deployments vs everyone in the tenant */}
+       <motion.div
          initial={{ opacity: 0 }}
          animate={{ opacity: 1 }}
          transition={{ delay: 0.15 }}
 -        className="flex items-center gap-2"
+-        role="tablist"
 +        className="flex flex-wrap items-center gap-2"
-         role="tablist"
++        role="group"
          aria-label="Choose whose deployments to show"
        >
 -        {(['mine', 'tenant'] as const).map((scope) => (
 +        {(['tenant', 'mine'] as const).map((scope) => (
            <button
              key={scope}
-             role="tab"
-             aria-selected={viewScope === scope}
+-            role="tab"
+-            aria-selected={viewScope === scope}
 -            onClick={() => setViewScope(scope)}
++            aria-pressed={viewScope === scope}
 +            onClick={() => handleScopeChange(scope)}
              className={cn(
                'px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:outline-none',
                viewScope === scope
-@@ -575,6 +591,11 @@ export default function UploadsPage() {
+@@ -575,6 +550,11 @@ export default function UploadsPage() {
              {scope === 'mine' ? <T>My deployments</T> : <T>All in tenant</T>}
            </button>
          ))}
@@ -480,7 +536,7 @@ index 93f7400e8..1024c6986 100644
        </motion.div>
  
        {/* Filters */}
-@@ -583,15 +604,13 @@ export default function UploadsPage() {
+@@ -583,15 +563,13 @@ export default function UploadsPage() {
          animate={{ opacity: 1 }}
          transition={{ delay: 0.2 }}
          className="flex flex-wrap gap-2"
@@ -499,7 +555,7 @@ index 93f7400e8..1024c6986 100644
              onClick={() => setFilter(f)}
              className={cn(
                'px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:outline-none',
-@@ -600,7 +619,7 @@ export default function UploadsPage() {
+@@ -600,7 +578,7 @@ export default function UploadsPage() {
                  : 'bg-overlay/5 text-text-secondary hover:text-text-primary hover:bg-overlay/10 border border-overlay/5'
              )}
            >
@@ -508,7 +564,7 @@ index 93f7400e8..1024c6986 100644
            </button>
          ))}
        </motion.div>
-@@ -609,21 +628,25 @@ export default function UploadsPage() {
+@@ -609,21 +587,25 @@ export default function UploadsPage() {
        {filteredJobs.length === 0 ? (
          <AnimatedEmptyState
            icon={Upload}
@@ -544,7 +600,7 @@ index 93f7400e8..1024c6986 100644
            }
          />
        ) : (
-@@ -653,11 +676,22 @@ export default function UploadsPage() {
+@@ -653,11 +635,22 @@ export default function UploadsPage() {
                  onRedeploy={handleRedeploy}
                  isRedeploying={redeployingJobId === job.id}
                  showOwner={viewScope === 'tenant'}
@@ -567,7 +623,7 @@ index 93f7400e8..1024c6986 100644
      </div>
    );
  }
-@@ -671,6 +705,7 @@ function UploadJobCard({
+@@ -671,6 +664,7 @@ function UploadJobCard({
    onRedeploy,
    isRedeploying,
    showOwner,
@@ -575,7 +631,7 @@ index 93f7400e8..1024c6986 100644
  }: {
    job: PackagingJob;
    index: number;
-@@ -680,6 +715,7 @@ function UploadJobCard({
+@@ -680,6 +674,7 @@ function UploadJobCard({
    onRedeploy: (job: PackagingJob, forceCreate?: boolean) => void;
    isRedeploying?: boolean;
    showOwner?: boolean;
@@ -583,7 +639,7 @@ index 93f7400e8..1024c6986 100644
  }) {
    const prefersReducedMotion = useReducedMotion();
  
-@@ -725,7 +761,8 @@ function UploadJobCard({
+@@ -725,7 +720,8 @@ function UploadJobCard({
      },
      uploading: {
        icon: Upload,
@@ -593,7 +649,7 @@ index 93f7400e8..1024c6986 100644
        color: 'text-accent-violet',
        bg: 'bg-accent-violet/10',
        border: 'border-l-accent-violet',
-@@ -760,21 +797,22 @@ function UploadJobCard({
+@@ -760,21 +756,22 @@ function UploadJobCard({
      },
      duplicate_skipped: {
        icon: AlertCircle,
@@ -622,7 +678,7 @@ index 93f7400e8..1024c6986 100644
  
    const itemVariants = {
      hidden: { opacity: 0, y: prefersReducedMotion ? 0 : 20 },
-@@ -819,9 +857,9 @@ function UploadJobCard({
+@@ -819,9 +816,9 @@ function UploadJobCard({
                className="absolute inset-0 rounded-xl"
                animate={{
                  boxShadow: [
@@ -635,16 +691,23 @@ index 93f7400e8..1024c6986 100644
                  ],
                }}
                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-@@ -833,7 +871,7 @@ function UploadJobCard({
+@@ -833,13 +830,9 @@ function UploadJobCard({
          <div className="flex-1 min-w-0">
            <div className="flex items-start justify-between gap-4">
              <div>
 -              <h3 className="text-text-primary text-[15px] font-semibold">{job.display_name}</h3>
 +              <h3 className="text-text-primary text-[15px] font-semibold">{workspaceId ? <Link href={appWorkspaceUrl(workspaceId)} aria-label={`${job.display_name} · Open app workspace`} className="rounded hover:text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{job.display_name}</Link> : job.display_name}</h3>
                <p className="text-text-secondary text-sm mt-0.5">
-                 {job.publisher}
-                 {job.app_source !== 'store' && job.installer_type && (
-@@ -864,10 +902,8 @@ function UploadJobCard({
+-                {job.publisher}
+-                {job.app_source !== 'store' && job.installer_type && (
+-                  <><span className="text-overlay/20"> | </span>v{job.version}</>
+-                )}
+-                <span className="text-overlay/20"> | </span>{job.architecture}
++                {[job.publisher, job.app_source !== 'store' && job.version ? `v${job.version}` : '', job.architecture].filter(Boolean).join(' · ')}
+               </p>
+               {showOwner && job.user_email && (
+                 <p className="text-text-muted text-xs mt-0.5">
+@@ -864,10 +857,8 @@ function UploadJobCard({
                        {assignment.type === 'allUsers' && <Users className="w-3 h-3" />}
                        {assignment.type === 'allDevices' && <Monitor className="w-3 h-3" />}
                        {assignment.type === 'group' && <UserCircle className="w-3 h-3" />}
@@ -657,7 +720,7 @@ index 93f7400e8..1024c6986 100644
                      </span>
                    ))}
                  </div>
-@@ -900,21 +936,21 @@ function UploadJobCard({
+@@ -900,21 +891,21 @@ function UploadJobCard({
                    <AlertDialogContent>
                      <AlertDialogHeader>
                        <AlertDialogTitle>
@@ -683,7 +746,7 @@ index 93f7400e8..1024c6986 100644
                        </AlertDialogAction>
                      </AlertDialogFooter>
                    </AlertDialogContent>
-@@ -1004,7 +1040,9 @@ function UploadJobCard({
+@@ -1004,7 +995,9 @@ function UploadJobCard({
            )}
  
            {/* Retry button for failures */}
@@ -693,7 +756,7 @@ index 93f7400e8..1024c6986 100644
                !isIntuneApprovalFailure(job) && (
              <div className="mt-3">
                <Button
-@@ -1044,6 +1082,48 @@ function UploadJobCard({
+@@ -1044,6 +1037,48 @@ function UploadJobCard({
            {job.status === 'duplicate_skipped' && (() => {
              const details = job.error_details as Record<string, unknown> | undefined;
              const existingVersion = details?.existingVersion ? String(details.existingVersion) : null;
@@ -742,7 +805,7 @@ index 93f7400e8..1024c6986 100644
              return (
              <div className="mt-4 p-3 bg-status-warning/10 border border-status-warning/20 rounded-lg">
                <div className="flex items-start gap-2">
-@@ -1053,7 +1133,7 @@ function UploadJobCard({
+@@ -1053,7 +1088,7 @@ function UploadJobCard({
                      <T>Duplicate app already exists in Intune</T>
                    </p>
                    <p className="text-status-warning/70 text-xs mt-1">
@@ -751,7 +814,7 @@ index 93f7400e8..1024c6986 100644
                      {existingVersion && (
                        <span> <T>Existing version: <Var>{existingVersion}</Var></T></span>
                      )}
-@@ -1108,6 +1188,7 @@ function UploadJobCard({
+@@ -1108,6 +1143,7 @@ function UploadJobCard({
              ) : null;
            })()}
  
@@ -759,7 +822,7 @@ index 93f7400e8..1024c6986 100644
            {/* Success - deployed to Intune */}
            {job.intune_app_url && job.status !== 'duplicate_skipped' && (
              <div className="mt-4 p-3 bg-status-success/[0.05] border border-status-success/10 rounded-lg">
-@@ -1118,7 +1199,7 @@ function UploadJobCard({
+@@ -1118,7 +1154,7 @@ function UploadJobCard({
                  className="inline-flex items-center gap-2 text-accent-cyan hover:text-accent-cyan-bright text-sm font-medium transition-colors"
                >
                  <ExternalLink className="w-4 h-4" />
@@ -4352,7 +4415,7 @@ index 68bc640bf..207e55c4c 100644
    );
  }
 diff --git a/components/CustomAppModal.tsx b/components/CustomAppModal.tsx
-index 9957a5ab1..a18bf63e1 100644
+index 9957a5ab1..1efce648c 100644
 --- a/components/CustomAppModal.tsx
 +++ b/components/CustomAppModal.tsx
 @@ -20,10 +20,13 @@ import {
@@ -4426,7 +4489,7 @@ index 9957a5ab1..a18bf63e1 100644
          ),
        });
        toast.success(`${item.displayName} added`, {
-@@ -179,7 +188,7 @@ export function CustomAppModal({ onClose }: CustomAppModalProps) {
+@@ -179,10 +188,10 @@ export function CustomAppModal({ onClose }: CustomAppModalProps) {
    return (
      <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="custom-app-title">
        {/* Backdrop */}
@@ -4434,14 +4497,18 @@ index 9957a5ab1..a18bf63e1 100644
 +      <div className="absolute inset-0 bg-black/30" onClick={onClose} aria-hidden="true" />
  
        {/* Modal */}
-       <div ref={modalRef} className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/10 shadow-2xl overflow-hidden flex flex-col animate-slide-in-right">
+-      <div ref={modalRef} className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/10 shadow-2xl overflow-hidden flex flex-col animate-slide-in-right">
++      <div ref={modalRef} className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/10 shadow-2xl overflow-hidden flex flex-col motion-safe:animate-slide-in-right">
+         {/* Header */}
+         <div className="flex-shrink-0 bg-bg-surface/95 backdrop-blur-sm border-b border-overlay/10 px-6 py-4">
+           <div className="flex items-start justify-between gap-4">
 @@ -191,8 +200,12 @@ export function CustomAppModal({ onClose }: CustomAppModalProps) {
                  <FilePlus2 className="w-6 h-6 text-accent-cyan" />
                </div>
                <div>
 -                <h2 id="custom-app-title" className="text-xl font-bold text-text-primary">Add Custom App</h2>
 -                <p className="text-text-muted text-sm">Deploy an app from a direct installer URL</p>
-+                <h2 id="custom-app-title" className="text-xl font-bold text-text-primary">{prefill ? `New version of ${prefill.input.displayName}` : 'Add Custom App'}</h2>
++                <h2 id="custom-app-title" className="text-xl font-bold text-text-primary">{prefill ? `New version of ${prefill.input.displayName}` : 'Add custom app'}</h2>
 +                <p className="text-text-muted text-sm">{prefill
 +                  ? prefill.release
 +                    ? `Filled in from the GitHub release ${prefill.release.version}. Check the details, then add it. It replaces v${prefill.previousVersion} and takes its groups.`
@@ -4465,6 +4532,15 @@ index 9957a5ab1..a18bf63e1 100644
                  </p>
                  {errors.silentSwitches && (
                    <p className="text-xs text-red-500 mt-1">{errors.silentSwitches}</p>
+@@ -483,7 +498,7 @@ export function CustomAppModal({ onClose }: CustomAppModalProps) {
+               ) : (
+                 <>
+                   <Plus className="w-5 h-5 mr-2" />
+-                  Add to Cart
++                  Add to Deployment list
+                 </>
+               )}
+             </Button>
 diff --git a/components/ErrorDisplay.test.ts b/components/ErrorDisplay.test.ts
 index 43ef55e76..0d0bd5fa8 100644
 --- a/components/ErrorDisplay.test.ts
@@ -4532,7 +4608,7 @@ index 43ef55e76..0d0bd5fa8 100644
    });
  });
 diff --git a/components/ErrorDisplay.tsx b/components/ErrorDisplay.tsx
-index 086e99f85..4c0514bca 100644
+index 086e99f85..14a3f1916 100644
 --- a/components/ErrorDisplay.tsx
 +++ b/components/ErrorDisplay.tsx
 @@ -96,7 +96,10 @@ const errorCodeMessages: Record<string, string> = {
@@ -4570,6 +4646,15 @@ index 086e99f85..4c0514bca 100644
      message: blockedBeforeTest
        ? 'A security check stopped this deployment before the installation test ran.'
        : errorMessage?.includes('MANIFEST_CHANGED')
+@@ -190,7 +201,7 @@ export function ErrorDisplay({
+   return (
+     <div className="mt-4 p-4 bg-status-error/[0.07] border border-status-error/15 rounded-xl space-y-3">
+       {/* Header with stage and code */}
+-      <div className="flex items-start justify-between gap-3">
++      <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+         <div className="flex items-center gap-2">
+           <div className="w-8 h-8 rounded-lg bg-status-error/20 flex items-center justify-center">
+             <StageIcon className="w-4 h-4 text-status-error" />
 @@ -211,6 +222,9 @@ export function ErrorDisplay({
        {/* Main error message */}
        <div className="text-sm text-status-error/90">
@@ -8973,3 +9058,24 @@ index 366a1c73a..dcc22f90c 100644
        .eq('tenant_id', tenantResolution.tenantId)
        .eq('winget_id', wingetId)
        .eq('status', 'deployed');
+diff --git a/components/ProgressStepper.tsx b/components/ProgressStepper.tsx
+index 96ff97ad2..8919bff41 100644
+--- a/components/ProgressStepper.tsx
++++ b/components/ProgressStepper.tsx
+@@ -65,7 +65,7 @@ export function ProgressStepper({
+   return (
+     <div className="mt-5 space-y-3">
+       {/* Stage Stepper - Two Row Layout */}
+-      <div className="space-y-2">
++      <div className="overflow-x-auto pb-1"><div className="min-w-[32rem] space-y-2">
+         {/* Row 1: Circles and connector lines */}
+         <div className="flex items-center">
+           {stages.map((stage, index) => {
+@@ -172,6 +172,7 @@ export function ProgressStepper({
+         </div>
+       </div>
+ 
++      </div>
+       {/* Status Message and Time */}
+       <div className="flex items-center justify-between text-sm">
+         <div className="flex min-w-0 items-center gap-2" aria-live="polite" aria-atomic="true">

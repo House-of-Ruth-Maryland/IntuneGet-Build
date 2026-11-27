@@ -1023,10 +1023,10 @@ index 000000000..9560f16dd
 +});
 diff --git a/components/hrm/AppTimingPanel.tsx b/components/hrm/AppTimingPanel.tsx
 new file mode 100644
-index 000000000..5f4ab32c6
+index 000000000..752d641fa
 --- /dev/null
 +++ b/components/hrm/AppTimingPanel.tsx
-@@ -0,0 +1,181 @@
+@@ -0,0 +1,182 @@
 +'use client';
 +import { useEffect, useRef, useState } from 'react';
 +import { useQueryClient } from '@tanstack/react-query';
@@ -1110,7 +1110,8 @@ index 000000000..5f4ab32c6
 +  const [stale, setStale] = useState(false);
 +  const row = rows?.find(r => r.id === selected);
 +  // The field is already labelled Group, so the row's own "Group " prefix is dropped once the name is known.
-+  const label = (r: TimingRow) => r.label.replace(/^Group ([0-9a-f]{8}-[0-9a-f-]{27})/i, (all, id) => groupNames[id.toLowerCase()] ? id : all).replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, id => groupNames[id.toLowerCase()] || id);
++  const label = (row: TimingRow) => row.label.replace(/Group ([0-9a-f]{8}-[0-9a-f-]{27})/gi,
++    (_, id: string) => groupNames[id.toLowerCase()] || 'Group name unavailable');
 +  const choose = (r?: TimingRow) => { setSelected(r?.id ?? ''); setDraft(r ? { installTimeSettings: r.installTimeSettings, restartSettings: r.restartSettings } : null); };
 +  async function load(keepSaved = false, keep = selected) {
 +    setBusy(true); setError(''); if (!keepSaved) setSaved(false);
@@ -1210,7 +1211,7 @@ index 000000000..5f4ab32c6
 +}
 diff --git a/components/hrm/AppWorkspace.test.ts b/components/hrm/AppWorkspace.test.ts
 new file mode 100644
-index 000000000..d3055ea48
+index 000000000..23dd38bad
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.test.ts
 @@ -0,0 +1,62 @@
@@ -1244,7 +1245,7 @@ index 000000000..d3055ea48
 +  expect(node.textContent).toContain('Current release');
 +  expect(node.textContent).toContain('Future updates');
 +  // The page says what it controls, each control sits with its field, and the page links to App updates.
-+  expect(node.textContent).toContain('This page is for one app.');
++  expect(node.querySelector('h1')?.textContent).toBe('Fixture app');
 +  const field = (name: string) => [...node.querySelectorAll('dt')].find(dt => dt.textContent === name)!.parentElement!;
 +  expect(field('Who gets it').textContent).toContain('Edit groups');
 +  expect(field('Install dates').textContent).toContain('Install dates');
@@ -1273,12 +1274,12 @@ index 000000000..d3055ea48
 +
 +it('keeps a healthy current copy alongside failed newer and archived attempt evidence, with inactive saved deferrals',async()=>{state.defer=true;state.attempt={id:'attempt-v2',version:'2',status:'failed',createdAt:'2026-01-02T00:00:00Z',archived:true,owned:false,errorCode:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',errorMessage:'Unsupported assignment settings.'};const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Version 2');expect(node.textContent).toContain('Installed10');expect(node.textContent).toContain('Archived from deployment history');expect(node.textContent).toContain('Version in Intune');expect(node.textContent).toContain('Saved postponement is inactive');expect(node.textContent).not.toContain('The installer may ask employees');await act(async()=>root.unmount());});
 +
-+it('does not show a same-family policy from a different tenant',async()=>{state.policyTenant='foreign';const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Your update policy: Not reported');expect(node.textContent).not.toContain('Change how it installs');await act(async()=>root.unmount());});
++it('does not show a same-family policy from a different tenant',async()=>{state.policyTenant='foreign';const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Tenant update policy: Not reported');expect(node.textContent).not.toContain('Change how it installs');await act(async()=>root.unmount());});
 +
-+it('does not describe a policy read failure as no active policy',async()=>{state.policyError=true;const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Could not read your update policy');expect(node.textContent).not.toContain('Auto-update is not on');expect(node.textContent).not.toContain('Change how it installs');await act(async()=>root.unmount());});
++it('does not describe a policy read failure as no active policy',async()=>{state.policyError=true;const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Could not read the tenant update policy');expect(node.textContent).not.toContain('Auto-update is not on');expect(node.textContent).not.toContain('Change how it installs');await act(async()=>root.unmount());});
 diff --git a/components/hrm/AppWorkspace.tsx b/components/hrm/AppWorkspace.tsx
 new file mode 100644
-index 000000000..2e4a0ead3
+index 000000000..55f0b083b
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.tsx
 @@ -0,0 +1,104 @@
@@ -1333,7 +1334,7 @@ index 000000000..2e4a0ead3
 +  const config = current.deployedConfig && 'psadtConfig' in current.deployedConfig ? current.deployedConfig.psadtConfig : null;
 +  if (details.isLoading) return <p role="status" className="p-6 text-text-secondary">Loading app workspace…</p>;
 +  if (!app || app.id.toLowerCase() !== appId.toLowerCase()) return <section className={section}><h1 className="text-xl font-semibold text-text-primary">App workspace unavailable</h1><p role="alert" className="text-text-secondary">{details.error?.message || 'This copy could not be confirmed.'}</p><Button variant="outline" onClick={() => void details.refetch()}>Try again</Button><Link className="block text-accent-cyan" href="/dashboard/inventory">Back to Inventory</Link></section>;
-+  const savedGroups = policy?.deployment_config?.assignments?.map(row => `${row.groupName || row.groupId || ({allDevices:'All devices',allUsers:'All users',group:'Group',exclusionGroup:'Excluded group'} as Record<string,string>)[row.type] || 'Target not reported'} · ${row.type === 'exclusionGroup' ? 'Excluded' : row.intent.charAt(0).toUpperCase() + row.intent.slice(1)}`) ?? policy?.deployment_config?.assignedGroups?.map(row => `${row.groupName || row.groupId} · ${row.assignmentType}`) ?? [];
++  const savedGroups = policy?.deployment_config?.assignments?.map(row => `${row.groupName || (row.groupId ? 'Group name unavailable' : '') || ({allDevices:'All devices',allUsers:'All users',group:'Group',exclusionGroup:'Excluded group'} as Record<string,string>)[row.type] || 'Target not reported'} · ${row.type === 'exclusionGroup' ? 'Excluded' : row.intent.charAt(0).toUpperCase() + row.intent.slice(1)}`) ?? policy?.deployment_config?.assignedGroups?.map(row => `${row.groupName || 'Group name unavailable'} · ${row.assignmentType}`) ?? [];
 +  const timed = (app.assignments ?? []).filter(row => row.intent === 'required' && row.settings && Object.hasOwn(row.settings, 'installTimeSettings'));
 +  const times = [...new Set(timed.map(row => { const value = row.settings?.installTimeSettings; const format = (date: string | null | undefined) => date ? `${date.replace('T', ' ').replace(/:00(?:\.000)?Z$/, '')} ${value?.useLocalTime ? "on each computer's clock" : 'UTC'}` : 'as soon as possible'; return `Available from ${format(value?.startDateTime)} · must install by ${format(value?.deadlineDateTime)}`; }))];
 +  const ASAP = 'Available from as soon as possible · must install by as soon as possible';
@@ -1349,7 +1350,7 @@ index 000000000..2e4a0ead3
 +      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-overlay/10 bg-bg-elevated">{icon.data?.icon?.value && !iconFailed ? <img onError={() => setIconFailed(true)} src={`data:${icon.data.icon.type || 'image/png'};base64,${icon.data.icon.value}`} alt={app.displayName} className="h-10 w-10 object-contain" /> : <AppIcon packageId={family || app.displayName} packageName={app.displayName} size="xl" className="h-12 w-12" />}</div>
 +      <div className="min-w-0"><h1 className="break-words text-2xl font-semibold text-text-primary">{app.displayName}</h1><p className="mt-1 text-sm text-text-secondary">App workspace · {app.displayVersion || 'Version unavailable'}</p></div>
 +    </header>
-+    <p className="text-sm text-text-secondary">This page is for one app. Current release is the version in Intune now: who gets it and its install dates. Future updates is how new versions arrive and install.</p>
++
 +    {ownTenant && <LatestAppAttempt attempt={insights.data?.appId === appId ? insights.data.latestAttempt : null} loading={insights.isLoading} error={Boolean(insights.error)} supported={insights.data?.supported} />}
 +    <section className={section} aria-label="Current release outcomes">{ownTenant ? <InstallStatusBar appId={appId} compact /> : <p>Install results are available only for your signed-in tenant.</p>}</section>
 +    <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
@@ -1370,8 +1371,8 @@ index 000000000..2e4a0ead3
 +      <section className={section} aria-labelledby="next-rollout">
 +        <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="next-rollout" className="scroll-mt-24 text-lg font-semibold text-text-primary">Future updates</h2><span className="rounded-md bg-overlay/5 px-2 py-1 text-xs text-text-secondary">Saved settings</span></div>
 +        <p className="text-xs text-text-muted">How new versions of this app reach Intune and install. Nothing here changes the current release.</p>
-+        {ownTenant && <p className="text-sm text-text-secondary">Your update policy: {policies.error ? 'Unavailable' : policy ? <Term term="autoUpdate">{({auto_update:'Auto-update',notify:'Notify only',ignore:'Ignore',pin_version:'Pin version'} as const)[policy.policy_type]}</Term> : 'Not reported'}. Update policies are saved for each IT admin; this one is yours. <Link href="/dashboard/updates" className="text-accent-cyan hover:underline">Change it in App updates</Link></p>}
-+        {!ownTenant ? <p className="text-sm text-text-secondary">Automatic installation policies are available only for your signed-in tenant.</p> : policies.isLoading || insights.isLoading ? <p role="status">Loading future update settings…</p> : policies.error ? <p role="alert">Could not read your update policy. Refresh before editing.</p> : !family ? <p className="text-sm text-text-secondary">IntuneGet has no verified match for this app, so future update settings are not shown here.</p> : !automatic ? <p className="text-sm text-text-secondary">Auto-update is not on for this app under your account, so IntuneGet does not deploy its new versions on its own.</p> : <dl className="space-y-3 text-sm">
++        {ownTenant && <p className="text-sm text-text-secondary">Tenant update policy: {policies.error ? 'Unavailable' : policy ? <Term term="autoUpdate">{({auto_update:'Auto-update',notify:'Notify only',ignore:'Ignore',pin_version:'Pin version'} as const)[policy.policy_type]}</Term> : 'Not reported'}. <Link href="/dashboard/updates" className="text-accent-cyan hover:underline">Change it in App updates</Link></p>}
++        {!ownTenant ? <p className="text-sm text-text-secondary">Automatic installation policies are available only for your signed-in tenant.</p> : policies.isLoading || insights.isLoading ? <p role="status">Loading future update settings…</p> : policies.error ? <p role="alert">Could not read the tenant update policy. Refresh before editing.</p> : !family ? <p className="text-sm text-text-secondary">IntuneGet has no verified match for this app, so future update settings are not shown here.</p> : !automatic ? <p className="text-sm text-text-secondary">Auto-update is not on for this app in this tenant, so IntuneGet does not deploy its new versions on its own.</p> : <dl className="space-y-3 text-sm">
 +          <div><dt className="font-medium text-text-primary">Automatic updates</dt><dd className="mt-1 text-text-secondary">{policy?.is_enabled ? effective?.policy.mode === 'restart' ? 'On · broad updates held for restart Beta pilot' : 'On' : 'Off'}</dd></div>
 +          <div><dt className="font-medium text-text-primary">How it installs</dt><dd className="mt-1 space-y-2 text-text-secondary"><p>{nextSummary}{' · '}<span className="ml-2 text-xs text-text-muted">{effective?.source}</span></p>{!insights.error && <InstallationPolicyPanel apps={policy ? [policy] : []} appId={family} intuneAppId={appId} compact />}</dd></div>
 +          <div><dt className="font-medium text-text-primary">Who gets it</dt><dd className="mt-1 text-text-secondary">{effective?.policy.mode === 'restart' ? effective.policy.restartPilot ? `${effective.policy.restartPilot.groupName} · Required pilot only` : 'Choose a pilot group in Change how it installs.' : savedGroups.length ? savedGroups.join(', ') : 'No saved groups reported. Review groups before deployment.'}</dd></div>
@@ -1550,7 +1551,7 @@ index 000000000..114d53fed
 +});
 diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
 new file mode 100644
-index 000000000..670b02588
+index 000000000..8110eff38
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.tsx
 @@ -0,0 +1,126 @@
@@ -1612,7 +1613,7 @@ index 000000000..670b02588
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
 +            <div className="text-sm"><h3 className="font-medium text-text-primary">1. Scope</h3>{draft.mode === 'restart' && <p className="mt-1 text-text-secondary">App-scoped restart Beta pilot only. Save the rule, then explicitly start its selected pilot.</p>}<p role="status" className="mt-1 text-text-muted">{dirty && !saved ? 'Unsaved changes' : 'Saved settings'}</p></div>{appId ? <div className="text-sm"><span className="text-text-muted">Applies to</span><p className="mt-1 font-medium text-text-primary">{apps.find(app => app.winget_id.toLowerCase() === appId.toLowerCase())?.deployment_config?.displayName || appId}</p></div> : <label className="block text-sm text-text-secondary">Apply to
 +              <select className="mt-2 w-full rounded-lg border border-overlay/15 bg-bg-elevated p-3 text-text-primary" value={selected} disabled={action.isPending} onChange={e => choose(e.target.value)}>
-+                {!appId && <option value="">All apps with Automatic updates on · Shared policy</option>}
++                {!appId && <option value="">All apps with Auto-update on</option>}
 +                {apps.map(app => <option key={app.id} value={app.winget_id}>{app.deployment_config?.displayName || app.winget_id}{exceptions.some(p => p.appId.toLowerCase() === app.winget_id.toLowerCase()) ? ' · App exception' : ' · Uses shared policy'}</option>)}
 +              </select></label>}
 +            {!appId && !selected && exceptions.length > 0 && <div className="text-sm"><h3 className="font-medium text-text-primary">App exceptions</h3><ul className="mt-1 divide-y divide-overlay/10">{exceptions.map(exception => <li key={exception.appId} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><span className="text-text-primary">{apps.find(a => a.winget_id.toLowerCase() === exception.appId.toLowerCase())?.deployment_config?.displayName || exception.appId}</span><p className="text-xs text-text-muted">{installationPolicySummary(exception)}</p></div><button type="button" className="text-xs text-accent-cyan hover:underline disabled:opacity-50" disabled={action.isPending} onClick={() => choose(exception.appId)}>Edit app exception</button></li>)}</ul></div>}
@@ -1708,10 +1709,10 @@ index 000000000..9dcf1ee0b
 +}
 diff --git a/components/hrm/StartupInstallations.test.ts b/components/hrm/StartupInstallations.test.ts
 new file mode 100644
-index 000000000..0b8ff074b
+index 000000000..ef18a46ad
 --- /dev/null
 +++ b/components/hrm/StartupInstallations.test.ts
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,87 @@
 +// @vitest-environment happy-dom
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { act, createElement } from 'react';
@@ -1774,6 +1775,14 @@ index 000000000..0b8ff074b
 +  await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
 + });
 +
++ it('explains an unsupported startup report when opened by a shared link', async () => {
++  state.data={supported:false,configured:false};
++  window.history.replaceState(null, '', '/dashboard/updates#startup-installations');
++  await render(StartupInstallations);
++  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Startup reports are unavailable on this server.');
++  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Check startup reports');
++ });
++
 + it('opens from the link in How automatic updates install and from the alert', async () => {
 +  state.data={supported:true,configured:false,packages:[]};
 +  await act(async () => root.render(createElement('div', null, createElement(StartupInstallations), createElement(StartupInstallationsLink))));
@@ -1783,17 +1792,17 @@ index 000000000..0b8ff074b
 +  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Startup install results · Beta');
 + });
 +
-+ it('does nothing where the server has no Startup Beta', async () => {
++ it('hides the entry and explains a direct request on an unsupported server', async () => {
 +  state.data={supported:false} as StartupReportView;
 +  expect(await render(StartupInstallationsLink)).toBe('');
 +  expect(await render(StartupInstallations)).toBe('');
 +  await act(async () => openStartupInstallations());
-+  expect(document.querySelector('[role="dialog"]')).toBeNull();
++  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Startup reports are unavailable on this server.');
 + });
 +});
 diff --git a/components/hrm/StartupInstallations.tsx b/components/hrm/StartupInstallations.tsx
 new file mode 100644
-index 000000000..564afd476
+index 000000000..e5b274d32
 --- /dev/null
 +++ b/components/hrm/StartupInstallations.tsx
 @@ -0,0 +1,108 @@
@@ -1822,7 +1831,7 @@ index 000000000..564afd476
 +/** The full results: counts, packages, cancellation and setup. Shown in the side panel. */
 +export function StartupInstallationsPanel() {
 +  const { data, error, isLoading, refresh, cancellation } = useStartupInstallations();
-+  if (data?.supported === false) return null;
++  if (data?.supported === false) return <p className="text-sm text-text-secondary">Startup reports are unavailable on this server.</p>;
 +  const rows = data?.packages?.map(job => data.report?.rows.find(row => row.id === job.id) ?? { ...job, ...emptyStartupCounts(), lastActivityAt: undefined }) ?? data?.report?.rows ?? [];
 +  return <div className="space-y-4">
 +    <p className="text-sm text-text-secondary">{summaryText(data, isLoading)} · Beta</p>
@@ -1865,7 +1874,7 @@ index 000000000..564afd476
 +    window.addEventListener(OPEN_EVENT, fromEvent);
 +    return () => { window.removeEventListener('hashchange', fromHash); window.removeEventListener(OPEN_EVENT, fromEvent); };
 +  }, []);
-+  if (data?.supported === false) return null;
++  if (data?.supported === false && !open) return null;
 +  const close = (value: boolean) => {
 +    setOpen(value);
 +    // A link to #startup-installations opens the panel again only if the hash changes, so it is cleared on close.
@@ -5314,30 +5323,42 @@ index 000000000..4d71aea12
 +$results|ConvertTo-Json -Depth 5|Set-Content $Out
 diff --git a/components/hrm/Term.tsx b/components/hrm/Term.tsx
 new file mode 100644
-index 000000000..f621cb6c9
+index 000000000..6e28a54d2
 --- /dev/null
 +++ b/components/hrm/Term.tsx
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,35 @@
 +'use client';
 +// One place for the Intune words IntuneGet shows as they are. Each keeps Intune's own name on screen
 +// and explains it on hover or keyboard focus, so screens do not invent a second name for it.
-+import type { ReactNode } from 'react';
++import { useRef, useState, type ReactNode } from 'react';
 +import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 +
 +export const INTUNE_TERMS = {
++  excluded: "Intune leaves this group out of the assignment.",
++  uninstall: "Intune removes the app from eligible devices in this group.",
 +  required: "Intune installs the app on the group's eligible computers without staff choosing it. The package may still let staff postpone.",
 +  available: "The app is listed in Company Portal. Staff choose whether to install it.",
 +  availableFrom: "Intune calls this availability. Required apps can start downloading from this date. Available apps appear in Company Portal from this date.",
 +  mustInstallBy: "Intune calls this the installation deadline. A Required app installs at this time, or when a computer next connects after it. Blank means as soon as it is available.",
 +  restartGrace: "Intune calls this the restart grace period. It gives staff time before Intune restarts the computer after an install. It cannot stop a restart the installer forces.",
-+  autoUpdate: "Auto-update deploys each new version to Intune when the publishing window allows. Notify only lists it in App updates until you press Update. Ignore leaves the app out of App updates.",
++  autoUpdate: "Auto-update deploys each new version to Intune when the publishing window allows. Notify only lists it in App updates until you review an update. Ignore leaves the app out of App updates.",
 +  postpone: "Staff can choose Install or Defer when the update starts. The prompt may be skipped when nobody is signed in. After the last allowed day, the next Intune attempt installs it.",
 +} as const;
 +export type IntuneTerm = keyof typeof INTUNE_TERMS;
 +
 +export function Term({ term, children }: { term: IntuneTerm; children: ReactNode }) {
-+  return <TooltipProvider delayDuration={150}><Tooltip>
-+    <TooltipTrigger asChild><span tabIndex={0} className="cursor-help rounded-sm underline decoration-dotted decoration-text-muted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{children}</span></TooltipTrigger>
++  const [open, setOpen] = useState(false);
++  const touch = useRef(false);
++  return <TooltipProvider delayDuration={150}><Tooltip open={open} onOpenChange={setOpen}>
++    <TooltipTrigger asChild
++      onPointerDown={event => { touch.current = event.pointerType === 'touch'; }}
++      onClick={event => {
++        if (touch.current) {
++          event.preventDefault();
++          touch.current = false;
++          setOpen(true);
++        }
++      }}><span tabIndex={0} className="cursor-help rounded-sm underline decoration-dotted decoration-text-muted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{children}</span></TooltipTrigger>
 +    <TooltipContent className="max-w-72 border border-overlay/10 text-sm font-normal leading-relaxed">{INTUNE_TERMS[term]}</TooltipContent>
 +  </Tooltip></TooltipProvider>;
 +}
@@ -6162,7 +6183,7 @@ index 000000000..a9fd68ecc
 +}
 diff --git a/lib/hrm/group-edit.ts b/lib/hrm/group-edit.ts
 new file mode 100644
-index 000000000..eded9d821
+index 000000000..76c275c08
 --- /dev/null
 +++ b/lib/hrm/group-edit.ts
 @@ -0,0 +1,115 @@
@@ -6190,7 +6211,7 @@ index 000000000..eded9d821
 +export const intentLabel = (intent: string) => INTENT[intent] ?? intent;
 +
 +/** Counts as a group that receives the app (same rule as Inventory's "no groups" warning). */
-+export const installs = (row: GraphAssignment) => !String(row.target?.['@odata.type']).includes('exclusionGroup') && ['required', 'available', 'availableWithoutEnrollment'].includes(row.intent);
++export const installs = (row: Pick<GraphAssignment, 'target' | 'intent'>) => !String(row.target?.['@odata.type']).includes('exclusionGroup') && ['required', 'available', 'availableWithoutEnrollment'].includes(row.intent);
 +
 +export function targetName(row: GraphAssignment, names: Record<string, string> = {}): string {
 +  const type = String(row.target?.['@odata.type'] ?? '');
