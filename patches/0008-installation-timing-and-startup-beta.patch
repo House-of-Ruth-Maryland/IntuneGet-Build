@@ -1709,7 +1709,7 @@ index 000000000..9dcf1ee0b
 +}
 diff --git a/components/hrm/StartupInstallations.test.ts b/components/hrm/StartupInstallations.test.ts
 new file mode 100644
-index 000000000..c7a607048
+index 000000000..ef18a46ad
 --- /dev/null
 +++ b/components/hrm/StartupInstallations.test.ts
 @@ -0,0 +1,87 @@
@@ -1792,12 +1792,12 @@ index 000000000..c7a607048
 +  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Startup install results · Beta');
 + });
 +
-+ it('does nothing where the server has no Startup Beta', async () => {
++ it('hides the entry and explains a direct request on an unsupported server', async () => {
 +  state.data={supported:false} as StartupReportView;
 +  expect(await render(StartupInstallationsLink)).toBe('');
 +  expect(await render(StartupInstallations)).toBe('');
 +  await act(async () => openStartupInstallations());
-+  expect(document.querySelector('[role="dialog"]')).toBeNull();
++  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Startup reports are unavailable on this server.');
 + });
 +});
 diff --git a/components/hrm/StartupInstallations.tsx b/components/hrm/StartupInstallations.tsx
