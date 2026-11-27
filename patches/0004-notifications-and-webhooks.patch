@@ -668,7 +668,7 @@ index 4c1fcf4f1..5c1ca26a8 100644
  
  export default WebhookFormModal;
 diff --git a/components/settings/WebhookManager.tsx b/components/settings/WebhookManager.tsx
-index 5c95c6717..23964b86d 100644
+index 5c95c6717..23d5afd1f 100644
 --- a/components/settings/WebhookManager.tsx
 +++ b/components/settings/WebhookManager.tsx
 @@ -38,6 +38,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
@@ -714,7 +714,91 @@ index 5c95c6717..23964b86d 100644
      } finally {
        setIsLoading(false);
      }
-@@ -264,25 +270,25 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+@@ -108,7 +114,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+       }
+ 
+       const result = await response.json();
+-      setWebhooks([result.webhook, ...webhooks]);
++      setWebhooks(current => [result.webhook, ...current]);
+       setIsModalOpen(false);
+     } catch (err) {
+       throw err;
+@@ -143,7 +149,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+       }
+ 
+       const result = await response.json();
+-      setWebhooks(webhooks.map((w) => (w.id === editingWebhook.id ? result.webhook : w)));
++      setWebhooks(current => current.map((w) => (w.id === editingWebhook.id ? result.webhook : w)));
+       setEditingWebhook(null);
+       setIsModalOpen(false);
+     } catch (err) {
+@@ -154,10 +160,11 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+   const handleDeleteWebhook = async (id: string) => {
+     if (!confirm('Are you sure you want to delete this webhook?')) return;
+ 
++    setError(null);
+     setDeletingId(id);
+     try {
+       const token = await getAccessToken();
+-      if (!token) return;
++      if (!token) throw new Error('Sign-in required');
+ 
+       const response = await fetch(`/api/webhooks/${id}`, {
+         method: 'DELETE',
+@@ -167,20 +174,23 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+       });
+ 
+       if (response.ok) {
+-        setWebhooks(webhooks.filter((w) => w.id !== id));
++        setWebhooks(current => current.filter((w) => w.id !== id));
++      } else {
++        setError('Could not delete the webhook. Try again.');
+       }
+-    } catch (err) {
+-      console.error('Failed to delete webhook:', err);
++    } catch {
++      setError('Could not delete the webhook. Try again.');
+     } finally {
+       setDeletingId(null);
+     }
+   };
+ 
+   const handleToggleWebhook = async (webhook: WebhookConfiguration) => {
++    setError(null);
+     setTogglingId(webhook.id);
+     try {
+       const token = await getAccessToken();
+-      if (!token) return;
++      if (!token) throw new Error('Sign-in required');
+ 
+       const response = await fetch(`/api/webhooks/${webhook.id}`, {
+         method: 'PUT',
+@@ -193,10 +203,12 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+ 
+       if (response.ok) {
+         const result = await response.json();
+-        setWebhooks(webhooks.map((w) => (w.id === webhook.id ? result.webhook : w)));
++        setWebhooks(current => current.map((w) => (w.id === webhook.id ? result.webhook : w)));
++      } else {
++        setError('Could not change the webhook. Try again.');
+       }
+-    } catch (err) {
+-      console.error('Failed to toggle webhook:', err);
++    } catch {
++      setError('Could not change the webhook. Try again.');
+     } finally {
+       setTogglingId(null);
+     }
+@@ -208,7 +220,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+ 
+     try {
+       const token = await getAccessToken();
+-      if (!token) return;
++      if (!token) throw new Error('Sign-in required');
+ 
+       const response = await fetch(`/api/webhooks/${id}/test`, {
+         method: 'POST',
+@@ -264,25 +276,25 @@ export function WebhookManager({ className }: WebhookManagerProps) {
  
    return (
      <div className={cn('glass-light rounded-xl p-6 border border-overlay/5 hover:border-accent-violet/20 transition-colors', className)}>
@@ -744,11 +828,12 @@ index 5c95c6717..23964b86d 100644
          </Button>
        </div>
  
-@@ -303,7 +309,11 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+@@ -303,7 +315,12 @@ export function WebhookManager({ className }: WebhookManagerProps) {
          </div>
        )}
  
 -      {unavailableMessage ? null : webhooks.length === 0 ? (
++      {error && <p role="alert" className="mb-3 text-sm text-status-error">{error}</p>}
 +      {loadFailed && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-text-secondary">
 +        Could not load webhook notifications.
 +        <Button size="sm" variant="outline" onClick={() => void fetchWebhooks()}>Try again</Button>
@@ -757,7 +842,7 @@ index 5c95c6717..23964b86d 100644
          <div className="text-center py-8">
            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-overlay/5 flex items-center justify-center">
              <Webhook className="w-6 h-6 text-text-muted" />
-@@ -325,7 +335,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+@@ -325,7 +342,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
                    : 'bg-bg-surface border-overlay/5 opacity-60'
                )}
              >
@@ -766,7 +851,7 @@ index 5c95c6717..23964b86d 100644
                  <div className="flex-1 min-w-0">
                    <div className="flex items-center gap-2 mb-1">
                      <h3 className="font-medium text-text-primary truncate">{webhook.name}</h3>
-@@ -381,13 +391,13 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+@@ -381,13 +398,13 @@ export function WebhookManager({ className }: WebhookManagerProps) {
                    )}
                  </div>
  
@@ -782,7 +867,7 @@ index 5c95c6717..23964b86d 100644
                    >
                      {testingId === webhook.id ? (
                        <Loader2 className="w-4 h-4 animate-spin" />
-@@ -400,7 +410,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+@@ -400,7 +417,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
                    <button
                      onClick={() => openEditModal(webhook)}
                      className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-overlay/5 transition-colors"
@@ -791,7 +876,7 @@ index 5c95c6717..23964b86d 100644
                    >
                      <Edit2 className="w-4 h-4" />
                    </button>
-@@ -410,7 +420,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+@@ -410,7 +427,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
                      onClick={() => handleToggleWebhook(webhook)}
                      disabled={togglingId === webhook.id}
                      className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-overlay/5 transition-colors disabled:opacity-50"
@@ -800,7 +885,7 @@ index 5c95c6717..23964b86d 100644
                    >
                      {togglingId === webhook.id ? (
                        <Loader2 className="w-4 h-4 animate-spin" />
-@@ -426,7 +436,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
+@@ -426,7 +443,7 @@ export function WebhookManager({ className }: WebhookManagerProps) {
                      onClick={() => handleDeleteWebhook(webhook.id)}
                      disabled={deletingId === webhook.id}
                      className="p-2 rounded-lg text-text-muted hover:text-status-error hover:bg-status-error/10 transition-colors disabled:opacity-50"

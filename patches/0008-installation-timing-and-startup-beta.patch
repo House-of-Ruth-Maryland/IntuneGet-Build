@@ -1709,10 +1709,10 @@ index 000000000..9dcf1ee0b
 +}
 diff --git a/components/hrm/StartupInstallations.test.ts b/components/hrm/StartupInstallations.test.ts
 new file mode 100644
-index 000000000..0b8ff074b
+index 000000000..c7a607048
 --- /dev/null
 +++ b/components/hrm/StartupInstallations.test.ts
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,87 @@
 +// @vitest-environment happy-dom
 +import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 +import { act, createElement } from 'react';
@@ -1775,6 +1775,14 @@ index 000000000..0b8ff074b
 +  await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
 + });
 +
++ it('explains an unsupported startup report when opened by a shared link', async () => {
++  state.data={supported:false,configured:false};
++  window.history.replaceState(null, '', '/dashboard/updates#startup-installations');
++  await render(StartupInstallations);
++  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Startup reports are unavailable on this server.');
++  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Check startup reports');
++ });
++
 + it('opens from the link in How automatic updates install and from the alert', async () => {
 +  state.data={supported:true,configured:false,packages:[]};
 +  await act(async () => root.render(createElement('div', null, createElement(StartupInstallations), createElement(StartupInstallationsLink))));
@@ -1794,7 +1802,7 @@ index 000000000..0b8ff074b
 +});
 diff --git a/components/hrm/StartupInstallations.tsx b/components/hrm/StartupInstallations.tsx
 new file mode 100644
-index 000000000..564afd476
+index 000000000..e5b274d32
 --- /dev/null
 +++ b/components/hrm/StartupInstallations.tsx
 @@ -0,0 +1,108 @@
@@ -1823,7 +1831,7 @@ index 000000000..564afd476
 +/** The full results: counts, packages, cancellation and setup. Shown in the side panel. */
 +export function StartupInstallationsPanel() {
 +  const { data, error, isLoading, refresh, cancellation } = useStartupInstallations();
-+  if (data?.supported === false) return null;
++  if (data?.supported === false) return <p className="text-sm text-text-secondary">Startup reports are unavailable on this server.</p>;
 +  const rows = data?.packages?.map(job => data.report?.rows.find(row => row.id === job.id) ?? { ...job, ...emptyStartupCounts(), lastActivityAt: undefined }) ?? data?.report?.rows ?? [];
 +  return <div className="space-y-4">
 +    <p className="text-sm text-text-secondary">{summaryText(data, isLoading)} · Beta</p>
@@ -1866,7 +1874,7 @@ index 000000000..564afd476
 +    window.addEventListener(OPEN_EVENT, fromEvent);
 +    return () => { window.removeEventListener('hashchange', fromHash); window.removeEventListener(OPEN_EVENT, fromEvent); };
 +  }, []);
-+  if (data?.supported === false) return null;
++  if (data?.supported === false && !open) return null;
 +  const close = (value: boolean) => {
 +    setOpen(value);
 +    // A link to #startup-installations opens the panel again only if the hash changes, so it is cleared on close.

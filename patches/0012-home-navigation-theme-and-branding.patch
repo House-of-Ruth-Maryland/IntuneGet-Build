@@ -447,7 +447,7 @@ index bade6e949..8cc952981 100644
          toastOptions={{
            className: 'bg-bg-surface border border-overlay/10 text-text-primary',
 diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
-index 24e1de8db..ab66c5a26 100644
+index 24e1de8db..6efba5adc 100644
 --- a/app/(app)/dashboard/page.tsx
 +++ b/app/(app)/dashboard/page.tsx
 @@ -10,11 +10,9 @@ import {
@@ -750,7 +750,24 @@ index 24e1de8db..ab66c5a26 100644
            value={stats?.thisMonth ?? 0}
            icon={Upload}
            color="success"
-@@ -212,163 +334,13 @@ export default function DashboardPage() {
+@@ -195,7 +317,7 @@ export default function DashboardPage() {
+           loading={statsLoading}
+           mounted={mounted}
+           delay={3}
+-          href="/dashboard/uploads?status=pending"
++          href={statisticsScope === 'mine' ? '/dashboard/uploads?status=pending&scope=mine' : '/dashboard/uploads?status=pending'}
+         />
+         <StatCard
+           title={<T>Failed</T>}
+@@ -205,170 +327,20 @@ export default function DashboardPage() {
+           loading={statsLoading}
+           mounted={mounted}
+           delay={4}
+-          href="/dashboard/uploads?status=failed"
++          href={statisticsScope === 'mine' ? '/dashboard/uploads?status=failed&scope=mine' : '/dashboard/uploads?status=failed'}
+         />
+       </div>}
+ 
        {statisticsScope === 'tenant' && !statsError && stats?.perUser && (
          <section className="glass-light rounded-xl p-6" aria-label="Deployments by user">
            <h2 className="text-lg font-semibold mb-4"><T>Deployments by user</T></h2>

@@ -490,7 +490,7 @@ index 000000000..e38e48f96
 +  return <TooltipProvider delayDuration={150}><Tooltip open={open} onOpenChange={setOpen}><TooltipTrigger asChild><button type="button" onClick={event => { event.stopPropagation(); setOpen(true); }} className={cn('inline-flex items-center gap-1 rounded-full border border-status-success/20 bg-status-success/10 px-2 py-0.5 text-xs font-medium text-status-success focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan', className)}><ShieldCheck className="h-3 w-3" aria-hidden="true" />Curated</button></TooltipTrigger><TooltipContent className="max-w-64">{CURATED_HINT}</TooltipContent></Tooltip></TooltipProvider>;
 +}
 diff --git a/components/CuratedCatalog.tsx b/components/CuratedCatalog.tsx
-index 9a1d66d2e..086a40c2f 100644
+index 9a1d66d2e..8a553b5c2 100644
 --- a/components/CuratedCatalog.tsx
 +++ b/components/CuratedCatalog.tsx
 @@ -1,4 +1,5 @@
@@ -510,15 +510,33 @@ index 9a1d66d2e..086a40c2f 100644
              ) : (
                <span className="inline-flex items-center gap-1 text-xs text-text-secondary bg-bg-surface px-2 py-0.5 rounded-full border border-overlay/10">
                  <Clock className="h-3 w-3" />
-@@ -289,7 +288,7 @@ export function CuratedCatalog() {
+@@ -289,14 +288,14 @@ export function CuratedCatalog() {
          <div className="absolute right-0 top-0 h-28 w-28 md:h-40 md:w-40 bg-gradient-to-bl from-accent-violet/10 via-accent-cyan/5 to-transparent blur-2xl" />
  
          <div className="relative">
 -          <h1 className="text-display-sm text-text-primary"><T>Curated Catalog</T></h1>
 +          <h1 className="text-display-sm text-text-primary"><T>Curated apps</T></h1>
            <p className="text-text-secondary mt-2 max-w-2xl">
-             <T>Applications downloaded straight from their publishers. New releases are checked every 30 minutes and become available once they pass an automated install, upgrade and uninstall test in an isolated virtual machine.</T>
+-            <T>Applications downloaded straight from their publishers. New releases are checked every 30 minutes and become available once they pass an automated install, upgrade and uninstall test in an isolated virtual machine.</T>
++            <T>Publisher releases appear here after they pass install, upgrade and uninstall tests.</T>
            </p>
+ 
+           <div className="mt-5 flex flex-wrap items-center gap-2">
+             <Link href="/dashboard/apps" className="inline-flex items-center gap-2 rounded-full border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary hover:text-text-primary hover:bg-overlay/5">
+-              <ArrowLeft className="h-4 w-4" /><T>Winget catalog</T>
++              <ArrowLeft className="h-4 w-4" /><T>App catalog</T>
+             </Link>
+             <span className="inline-flex items-center gap-2 rounded-full border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
+               <ShieldCheck className="w-4 h-4 text-status-success" />
+@@ -332,7 +331,7 @@ export function CuratedCatalog() {
+         <p><T>The curated catalog is temporarily unavailable. Please try again later.</T></p>
+         <button disabled={isFetching} onClick={() => void refetch()} className="mt-2 text-sm text-accent-cyan disabled:opacity-50"><T>Try again</T></button>
+       </div>}
+-      {!error && !isPending && visible.length === 0 && <p className="text-text-secondary"><T>No curated applications match your search.</T></p>}
++      {!error && !expired && !isPending && visible.length === 0 && <p className="text-text-secondary">{query.trim() ? <T>No curated apps match your search.</T> : <T>No curated apps are available.</T>}</p>}
+       {!error && <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+         {visible.map(entry => {
+           const { app, release, cartItem } = entry;
 diff --git a/components/sccm/SccmManualMatchModal.tsx b/components/sccm/SccmManualMatchModal.tsx
 index 1a3f51635..b11ffa850 100644
 --- a/components/sccm/SccmManualMatchModal.tsx
