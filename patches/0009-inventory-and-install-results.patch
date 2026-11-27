@@ -1176,10 +1176,10 @@ index 000000000..68f1e9636
 +}
 diff --git a/components/hrm/AppInsights.test.ts b/components/hrm/AppInsights.test.ts
 new file mode 100644
-index 000000000..1de56fc7b
+index 000000000..58fe1db45
 --- /dev/null
 +++ b/components/hrm/AppInsights.test.ts
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,55 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -1203,6 +1203,20 @@ index 000000000..1de56fc7b
 +    await act(async () => review.click());
 +    expect(state.mutate).toHaveBeenCalledWith({ action: 'review', appId: A, revision: 3 });
 +  });
++  it('shows changed settings inline for the same group and hides unchanged defaults', async () => {
++    const group = { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: A };
++    const assignment = (notifications: string) => summarizeAssignments([{ intent: 'required', target: group,
++      settings: { notifications, deliveryOptimizationPriority: 'notConfigured' } }], { [A]: 'Example team' });
++    const row = snapshot();
++    row.change = { before: assignment('showAll'), after: assignment('hideAll'), observedAt: row.checkedAt };
++    state.value.data = { supported: true, alerts: [row] };
++    await act(async () => root.render(createElement(AppDriftPanel, { onOpen: vi.fn() })));
++    expect(document.body.textContent).toContain('Notifications: Show all');
++    expect(document.body.textContent).toContain('Notifications: Hide all');
++    expect(document.body.textContent).not.toContain('optimization');
++    expect(document.body.textContent).not.toContain(A);
++  });
++
 +  it('offers activity when the app is gone and keeps persistent missing warnings after review', async () => {
 +    state.value.data = { supported: true, alerts: [{ ...snapshot(), exists: false, reviewedRevision: 3 }] };
 +    const open = vi.fn(); await act(async () => root.render(createElement(AppDriftPanel, { onOpen: open })));
@@ -1223,13 +1237,14 @@ index 000000000..1de56fc7b
 +});
 diff --git a/components/hrm/AppInsights.tsx b/components/hrm/AppInsights.tsx
 new file mode 100644
-index 000000000..e43f15427
+index 000000000..2707fbc8e
 --- /dev/null
 +++ b/components/hrm/AppInsights.tsx
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,172 @@
 +'use client';
 +import { useAppInsights } from '@/hooks/useAppInsights';
 +import { GUID, needsReview, type AssignmentSummary, type AppSnapshot } from '@/lib/hrm/app-insights';
++import { Term } from './Term';
 +import { intuneAppUrl, OPEN_IN_INTUNE } from '@/lib/hrm/intune-link';
 +
 +const date = (at: string) => new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -1239,22 +1254,56 @@ index 000000000..e43f15427
 +// say so from the live Intune read, so the same warning isn't shown twice.
 +const hasUnreviewedChange = (s: AppSnapshot) => s.change !== null && s.reviewedRevision < s.revision;
 +
++// Saved snapshots include the original display label and a stable JSON key. Match a
++// settings edit only when one assignment on each side identifies the same target.
++function targetKey(assignment: AssignmentSummary) {
++  try {
++    const { target, intent } = JSON.parse(assignment.key);
++    return target && typeof intent === 'string' ? JSON.stringify([target, intent]) : null;
++  } catch {
++    return null;
++  }
++}
++
++function assignmentParts(label: string) {
++  const parts = label.split(' · ');
++  const intentIndex = parts.findIndex((part, index) => index > 0 &&
++    ['Required', 'Available', 'Available without enrollment', 'Excluded', 'Uninstall'].includes(part));
++  return intentIndex < 0 ? { target: label, intent: '', settings: [] } : {
++    target: parts.slice(0, intentIndex).join(' · '),
++    intent: parts[intentIndex],
++    settings: parts.slice(intentIndex + 1),
++  };
++}
++
++function readableSetting(value: string) {
++  const [name, ...parts] = value.split(': ');
++  if (!parts.length) return value;
++  const setting = parts.join(': ');
++  const label = name.charAt(0).toUpperCase() + name.slice(1);
++  const descriptions: Record<string, string> = {
++    'show All': 'Show all', 'hide All': 'Hide all', 'show Reboot': 'Show restart notifications',
++    'not Configured': 'Not configured',
++  };
++  return `${label}: ${descriptions[setting] ?? setting}`;
++}
++
 +function SavedAssignment({ assignment, counterpart }: { assignment: AssignmentSummary; counterpart?: AssignmentSummary }) {
-+  const [target, intent, ...settings] = assignment.label.split(' · ');
++  const { target, intent, settings } = assignmentParts(assignment.label);
 +  const groupId = target.startsWith('Group ') ? target.slice(6) : '';
 +  const unavailable = GUID.test(groupId);
-+  const previousSettings = new Set(counterpart?.label.split(' · ').slice(2));
-+  const readable = settings.filter(value => !counterpart || !previousSettings.has(value)).map(value => value
-+    .replace('notifications: show All', 'Notifications: Show all')
-+    .replace('notifications: hide All', 'Notifications: Hide all')
-+    .replace('notifications: show Reboot', 'Notifications: Show restart notifications')
-+    .replace('delivery optimization priority: not Configured', 'Delivery optimization priority: Not configured'));
++  const previousSettings = new Set(counterpart ? assignmentParts(counterpart.label).settings : []);
++  const differences = settings.filter(value => !previousSettings.has(value));
++  const term = { Required: 'required', Available: 'available', Uninstall: 'uninstall', Excluded: 'excluded' } as const;
++  const nativeTerm = term[intent as keyof typeof term];
 +  return <li className="break-words">
-+    <span>{unavailable ? 'Group name unavailable' : target}</span>{intent && <> · {intent}</>}
-+    {(unavailable || readable.length > 0) && <details className="text-xs text-text-secondary" open={counterpart && readable.length > 0 ? true : undefined}>
++    <span>{unavailable ? 'Group name unavailable' : target}</span>
++    {intent && <> · {nativeTerm ? <Term term={nativeTerm}>{intent}</Term> : intent}</>}
++    {counterpart && differences.map((value, index) => <p className="text-xs text-text-secondary" key={index}>{readableSetting(value)}</p>)}
++    {(unavailable || (!counterpart && settings.length > 0)) && <details className="text-xs text-text-secondary">
 +      <summary className="cursor-pointer py-1">Assignment details</summary>
 +      {unavailable && <p>Group ID: {groupId}</p>}
-+      {readable.map((value, index) => <p key={index}>{value}</p>)}
++      {!counterpart && settings.map((value, index) => <p key={index}>{readableSetting(value)}</p>)}
 +    </details>}
 +  </li>;
 +}
@@ -1272,9 +1321,14 @@ index 000000000..e43f15427
 +          const otherKeys = new Set(other.map(row => row.key));
 +          const changed = change[key].filter(row => !otherKeys.has(row.key));
 +          return <div key={key}>
-+          <p className="font-medium">{key === 'before' ? 'Previously' : 'Now'}</p>
-+          {changed.length ? <ul className="space-y-1">{changed.map(assignment => <SavedAssignment key={assignment.key} assignment={assignment} counterpart={other.find(row => row.label.split(' · ').slice(0, 2).join(' · ') === assignment.label.split(' · ').slice(0, 2).join(' · '))} />)}</ul> : <p className="text-text-muted">{key === 'before' ? 'No removed assignments' : 'No added assignments'}</p>}
-+        </div>;
++            <p className="font-medium">{key === 'before' ? 'Previously' : 'Now'}</p>
++            {changed.length > 0 ? <ul className="space-y-1">{changed.map(assignment => {
++              const identity = targetKey(assignment);
++              const counterparts = identity ? other.filter(row => targetKey(row) === identity) : [];
++              const unambiguous = counterparts.length === 1 && changed.filter(row => targetKey(row) === identity).length === 1;
++              return <SavedAssignment key={assignment.key} assignment={assignment} counterpart={unambiguous ? counterparts[0] : undefined} />;
++            })}</ul> : <p className="text-text-muted">{key === 'before' ? 'No removed assignments' : 'No added assignments'}</p>}
++          </div>;
 +        })}
 +      </div>
 +    </>}
@@ -4336,11 +4390,49 @@ index 2c3370e23..bee5fc450 100644
 +  return `${prefix}: ${reason}`;
  }
 diff --git a/components/inventory/InventoryFilters.tsx b/components/inventory/InventoryFilters.tsx
-index c0d1725cd..3f427d08f 100644
+index c0d1725cd..aed0c8884 100644
 --- a/components/inventory/InventoryFilters.tsx
 +++ b/components/inventory/InventoryFilters.tsx
-@@ -91,15 +91,15 @@ export function InventoryFilters({
+@@ -1,6 +1,6 @@
+ 'use client';
  
+-import { useState, useEffect, useRef } from 'react';
++import { useState, useEffect } from 'react';
+ import { Search, SortAsc, SortDesc, LayoutGrid, List } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { Input } from '@/components/ui/input';
+@@ -50,7 +50,6 @@ export function InventoryFilters({
+ }: InventoryFiltersProps) {
+   // Local state for immediate input feedback
+   const [localSearch, setLocalSearch] = useState(search);
+-  const searchInputRef = useRef<HTMLInputElement>(null);
+ 
+   // Debounce the search value
+   const debouncedSearch = useDebounce(localSearch, SEARCH_DEBOUNCE_MS);
+@@ -69,37 +68,16 @@ export function InventoryFilters({
+     }
+   }, [debouncedSearch]);
+ 
+-  // "/" keyboard shortcut to focus search
+-  useEffect(() => {
+-    function handleKeyDown(e: KeyboardEvent) {
+-      if (
+-        e.key === '/' &&
+-        !e.ctrlKey &&
+-        !e.metaKey &&
+-        !e.altKey &&
+-        document.activeElement?.tagName !== 'INPUT' &&
+-        document.activeElement?.tagName !== 'TEXTAREA'
+-      ) {
+-        e.preventDefault();
+-        searchInputRef.current?.focus();
+-      }
+-    }
+-
+-    document.addEventListener('keydown', handleKeyDown);
+-    return () => document.removeEventListener('keydown', handleKeyDown);
+-  }, []);
+-
    return (
      <div className="glass-light rounded-xl p-4 border border-overlay/5">
 -      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
@@ -4351,14 +4443,26 @@ index c0d1725cd..3f427d08f 100644
            <div className="relative w-full sm:w-80">
              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
              <Input
-               ref={searchInputRef}
+-              ref={searchInputRef}
                type="text"
 -              placeholder="Search apps... (press / to focus)"
 +              aria-label="Search inventory" placeholder="Search apps"
                value={localSearch}
                onChange={(e) => setLocalSearch(e.target.value)}
                className="pl-10 bg-bg-elevated border-overlay/10 text-text-primary placeholder:text-text-muted focus:border-accent-cyan/50 focus:ring-accent-cyan/20"
-@@ -140,7 +140,7 @@ export function InventoryFilters({
+@@ -114,9 +92,9 @@ export function InventoryFilters({
+ 
+         {/* Sort controls + View toggle */}
+         <div className="flex flex-wrap items-center gap-2">
+-          <span className="text-sm text-text-muted">
++          {(search || selectedPublisher) && <span role="status" className="text-sm text-text-muted">
+             {filteredCount} of {totalCount} apps
+-          </span>
++          </span>}
+           <div className="flex flex-wrap items-center gap-1 sm:ml-4">
+             <span className="text-sm text-text-muted">Sort:</span>
+             {sortOptions.map((option) => (
+@@ -140,7 +118,7 @@ export function InventoryFilters({
                variant="ghost"
                size="sm"
                onClick={onSortOrderToggle}

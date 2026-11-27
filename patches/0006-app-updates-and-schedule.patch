@@ -2464,7 +2464,7 @@ index 000000000..73ff9aead
 +}
 diff --git a/components/hrm/VersionDiscovery.tsx b/components/hrm/VersionDiscovery.tsx
 new file mode 100644
-index 000000000..6bcf0a603
+index 000000000..c612321bc
 --- /dev/null
 +++ b/components/hrm/VersionDiscovery.tsx
 @@ -0,0 +1,64 @@
@@ -2497,7 +2497,7 @@ index 000000000..6bcf0a603
 +      </div>)}
 +      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 py-2.5">
 +        <div className="min-w-0"><dt className="font-medium text-text-primary">New version checks</dt><dd className="text-text-secondary">{VERSION_CHECK_TIMES}. Fixed on the server.</dd></div>
-+        <dd><Link href="/dashboard/updates" className="text-accent-cyan hover:underline">See the last check in App updates</Link></dd>
++        <dd><Link href="/dashboard/updates#version-checks" className="text-accent-cyan hover:underline">See the last check in App updates</Link></dd>
 +      </div>
 +      {mode === 'sqlite' && <div className="py-2.5"><dt className="font-medium text-text-primary">What an update replaces</dt><dd className="text-text-secondary">An update replaces the previous version and keeps its groups. Fixed on this server.</dd></div>}
 +    </dl>

@@ -16,7 +16,7 @@ index 13c7c31f8..34e7b2627 100644
    );
  }
 diff --git a/app/(app)/dashboard/apps/page.tsx b/app/(app)/dashboard/apps/page.tsx
-index f818738c1..21cbdadae 100644
+index f818738c1..b604bd8f8 100644
 --- a/app/(app)/dashboard/apps/page.tsx
 +++ b/app/(app)/dashboard/apps/page.tsx
 @@ -3,6 +3,7 @@
@@ -60,7 +60,55 @@ index f818738c1..21cbdadae 100644
      } else {
        toast.warning(
          `Added ${result.succeeded.length} of ${selected.length} apps`,
-@@ -638,14 +647,14 @@ export default function AppCatalogPage() {
+@@ -540,6 +549,7 @@ export default function AppCatalogPage() {
+ 
+       <div className="border-t border-overlay/10 pt-3 space-y-2">
+         <button
++          aria-expanded={isSortSectionOpen}
+           onClick={() => setIsSortSectionOpen((prev) => !prev)}
+           className="w-full flex items-center justify-between text-sm font-medium text-text-primary"
+         >
+@@ -551,6 +561,7 @@ export default function AppCatalogPage() {
+             {SORT_OPTIONS.map(({ key, label, icon: Icon }) => (
+               <button
+                 key={key}
++                aria-pressed={sortBy === key}
+                 onClick={() => handleSortChange(key)}
+                 className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                   sortBy === key
+@@ -562,7 +573,6 @@ export default function AppCatalogPage() {
+                   <Icon className="w-4 h-4" />
+                   {label}
+                 </span>
+-                {sortBy === key && <span className="text-[11px] font-semibold uppercase tracking-wide"><T>Active</T></span>}
+               </button>
+             ))}
+           </div>
+@@ -571,6 +581,7 @@ export default function AppCatalogPage() {
+ 
+       <div className="border-t border-overlay/10 pt-3 space-y-2">
+         <button
++          aria-expanded={isCategoriesSectionOpen}
+           onClick={() => setIsCategoriesSectionOpen((prev) => !prev)}
+           className="w-full flex items-center justify-between text-sm font-medium text-text-primary"
+         >
+@@ -580,6 +591,7 @@ export default function AppCatalogPage() {
+         {isCategoriesSectionOpen && (
+           <div className="max-h-[380px] overflow-y-auto pr-1 space-y-1">
+             <button
++              aria-pressed={selectedCategory === null}
+               onClick={() => handleCategoryChange(null)}
+               className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                 selectedCategory === null
+@@ -594,6 +606,7 @@ export default function AppCatalogPage() {
+             {(categoriesData?.categories || []).map((cat) => (
+               <button
+                 key={cat.category}
++                aria-pressed={selectedCategory === cat.category}
+                 onClick={() => handleCategoryChange(cat.category)}
+                 className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                   selectedCategory === cat.category
+@@ -638,14 +651,14 @@ export default function AppCatalogPage() {
            <div className="absolute right-0 top-0 h-28 w-28 md:h-40 md:w-40 bg-gradient-to-bl from-accent-violet/10 via-accent-cyan/5 to-transparent blur-2xl" />
  
            <div className="relative">
@@ -78,7 +126,15 @@ index f818738c1..21cbdadae 100644
                </Link>
                <span className="inline-flex items-center gap-2 rounded-full border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
                  <Package className="w-4 h-4 text-accent-cyan" />
-@@ -756,19 +765,11 @@ export default function AppCatalogPage() {
+@@ -673,6 +686,7 @@ export default function AppCatalogPage() {
+ 
+               <div className="flex items-center gap-2 self-end lg:self-auto">
+                 <button
++                  aria-haspopup="dialog" aria-expanded={isMobileFiltersOpen}
+                   ref={mobileFilterTriggerRef}
+                   onClick={() => setIsMobileFiltersOpen(true)}
+                   className="lg:hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-overlay/10 bg-bg-surface text-sm text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-colors"
+@@ -756,19 +770,11 @@ export default function AppCatalogPage() {
                    </>
                  ) : (
                    <>
@@ -99,7 +155,7 @@ index f818738c1..21cbdadae 100644
                {!showSearchResults && (
                  <span className="inline-flex items-center gap-2 rounded-lg border border-overlay/10 bg-bg-surface px-3 py-1.5 text-sm text-text-secondary">
                    <Package className="w-4 h-4 text-accent-cyan" />
-@@ -835,13 +836,13 @@ export default function AppCatalogPage() {
+@@ -835,13 +841,13 @@ export default function AppCatalogPage() {
                  onClick={() => setSearchQuery('')}
                  className="px-4 py-2 text-sm font-medium text-text-primary bg-bg-elevated hover:bg-overlay/5 rounded-lg border border-overlay/10 transition-colors"
                >
@@ -115,7 +171,7 @@ index f818738c1..21cbdadae 100644
                </button>
              </div>
            </div>
-@@ -862,7 +863,7 @@ export default function AppCatalogPage() {
+@@ -862,7 +868,7 @@ export default function AppCatalogPage() {
                        onClick={() => setSelectedCategory(null)}
                        className="text-text-secondary hover:text-accent-cyan transition-colors"
                      >
@@ -124,7 +180,7 @@ index f818738c1..21cbdadae 100644
                      </button>
                      <ChevronRight className="w-3.5 h-3.5 text-text-muted" />
                      <span className="text-text-primary font-medium">{activeCategoryLabel}</span>
-@@ -881,10 +882,10 @@ export default function AppCatalogPage() {
+@@ -881,10 +887,10 @@ export default function AppCatalogPage() {
  
                      <h2 className="text-xl font-bold tracking-tight text-text-primary">
                        {showSearchResults
@@ -137,7 +193,7 @@ index f818738c1..21cbdadae 100644
                      </h2>
                    </div>
                    {!showSearchResults && (
-@@ -963,7 +964,7 @@ export default function AppCatalogPage() {
+@@ -963,7 +969,7 @@ export default function AppCatalogPage() {
              <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-labelledby="mobile-filters-title">
                <button
                  aria-label="Close filters"
@@ -146,7 +202,7 @@ index f818738c1..21cbdadae 100644
                  onClick={() => {
                    setIsMobileFiltersOpen(false);
                    mobileFilterTriggerRef.current?.focus();
-@@ -993,7 +994,7 @@ export default function AppCatalogPage() {
+@@ -993,7 +999,7 @@ export default function AppCatalogPage() {
        )}
  
        {isCustomAppModalOpen && (
@@ -155,7 +211,7 @@ index f818738c1..21cbdadae 100644
        )}
  
        {deploymentIntentId &&
-@@ -1005,7 +1006,7 @@ export default function AppCatalogPage() {
+@@ -1005,7 +1011,7 @@ export default function AppCatalogPage() {
              aria-modal="true"
              aria-label="Loading selected catalog app"
            >
@@ -164,7 +220,7 @@ index f818738c1..21cbdadae 100644
              <div className="absolute bottom-0 right-0 top-0 flex w-full max-w-2xl items-center justify-center border-l border-overlay/5 bg-bg-surface shadow-2xl">
                <div className="px-6 text-center" role="status" aria-live="polite">
                  <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-accent-cyan motion-reduce:animate-none" aria-hidden="true" />
-@@ -1033,7 +1034,7 @@ export default function AppCatalogPage() {
+@@ -1033,7 +1039,7 @@ export default function AppCatalogPage() {
  
        {selectedPackage && ((isSelectedStoreApp && isLoadingStoreManifest) || (!isSelectedStoreApp && isLoadingInstallers) || (isSelectedDeployed && isLoadingDeployedConfig)) && (
          <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="Loading package details">
@@ -173,7 +229,7 @@ index f818738c1..21cbdadae 100644
            <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/5 shadow-2xl flex items-center justify-center animate-slide-in-right">
              <div className="text-center">
                <div className="relative">
-@@ -1048,7 +1049,7 @@ export default function AppCatalogPage() {
+@@ -1048,7 +1054,7 @@ export default function AppCatalogPage() {
  
        {selectedPackage && !isSelectedStoreApp && !isLoadingInstallers && selectedInstallers.length === 0 && (
          <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="No installers found">
@@ -182,7 +238,7 @@ index f818738c1..21cbdadae 100644
            <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-bg-surface border-l border-overlay/5 shadow-2xl flex items-center justify-center animate-slide-in-right">
              <div className="text-center px-6">
                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-status-error/10 flex items-center justify-center">
-@@ -1089,7 +1090,7 @@ export default function AppCatalogPage() {
+@@ -1089,7 +1095,7 @@ export default function AppCatalogPage() {
              onClick={handleSelectAllVisible}
              className="text-sm text-text-secondary hover:text-accent-cyan transition-colors whitespace-nowrap"
            >
@@ -191,7 +247,7 @@ index f818738c1..21cbdadae 100644
            </button>
            <button
              onClick={handleClearBulkSelection}
-@@ -1111,7 +1112,7 @@ export default function AppCatalogPage() {
+@@ -1111,7 +1117,7 @@ export default function AppCatalogPage() {
              ) : (
                <>
                  <Check className="w-4 h-4" />
@@ -201,9 +257,18 @@ index f818738c1..21cbdadae 100644
              )}
            </button>
 diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
-index bade6e949..4f9982c65 100644
+index bade6e949..8cc952981 100644
 --- a/app/(app)/dashboard/layout.tsx
 +++ b/app/(app)/dashboard/layout.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+ import { useRouter } from 'next/navigation';
+-import { useCallback, useEffect, useState } from 'react';
++import { useCallback, useEffect, useRef, useState } from 'react';
+ import { motion, useReducedMotion } from 'framer-motion';
+ import {
+   ShoppingCart,
 @@ -12,28 +12,33 @@ import {
  import { T } from 'gt-next';
  import { Button } from '@/components/ui/button';
@@ -241,7 +306,21 @@ index bade6e949..4f9982c65 100644
    const {
      isOnboardingComplete,
      isChecking: isCheckingOnboarding,
-@@ -60,6 +65,8 @@ export default function DashboardLayout({
+@@ -47,6 +52,7 @@ export default function DashboardLayout({
+   const [isLoading, setIsLoading] = useState(true);
+   const [showRetryBanner, setShowRetryBanner] = useState(false);
+   const [isRetrying, setIsRetrying] = useState(false);
++  const paletteTrigger = useRef<HTMLElement | null>(null);
+   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+ 
+   const isCartOpen = useCartStore((state) => state.isOpen);
+@@ -57,9 +63,14 @@ export default function DashboardLayout({
+   const { hostedServices } = getClientFeatureFlags();
+ 
+   const handleOpenCommandPalette = useCallback(() => {
++    if (document.activeElement instanceof HTMLElement && !document.activeElement.closest('[role="dialog"]')) {
++      paletteTrigger.current = document.activeElement;
++    }
      setCommandPaletteOpen(true);
    }, []);
  
@@ -250,7 +329,7 @@ index bade6e949..4f9982c65 100644
    useKeyboardShortcuts({
      onCommandPalette: handleOpenCommandPalette,
      onToggleCart: toggleCart,
-@@ -69,6 +76,8 @@ export default function DashboardLayout({
+@@ -69,6 +80,8 @@ export default function DashboardLayout({
      setIsLoading(false);
    }, []);
  
@@ -259,7 +338,7 @@ index bade6e949..4f9982c65 100644
    useEffect(() => {
      if (!isLoading && !isInitializing && !isAuthenticated && !isSigningOut) {
        router.push('/auth/signin?callbackUrl=/dashboard');
-@@ -77,6 +86,8 @@ export default function DashboardLayout({
+@@ -77,6 +90,8 @@ export default function DashboardLayout({
  
    useEffect(() => {
      if (isLoading || !isAuthenticated || isCheckingOnboarding) return;
@@ -268,7 +347,7 @@ index bade6e949..4f9982c65 100644
  
      if (isOnboardingComplete) {
        setShowRetryBanner(false);
-@@ -102,7 +113,7 @@ export default function DashboardLayout({
+@@ -102,7 +117,7 @@ export default function DashboardLayout({
  
      // consent_not_granted or insufficient_intune_permissions: real consent gap.
      router.push('/onboarding');
@@ -277,7 +356,7 @@ index bade6e949..4f9982c65 100644
  
    useEffect(() => {
      if (isAuthenticated && !isLoading) {
-@@ -124,7 +135,11 @@ export default function DashboardLayout({
+@@ -124,7 +139,11 @@ export default function DashboardLayout({
      await signOut();
    };
  
@@ -290,7 +369,7 @@ index bade6e949..4f9982c65 100644
      return (
        <div className="min-h-screen flex items-center justify-center bg-bg-deepest">
          <div className="relative">
-@@ -160,16 +175,18 @@ export default function DashboardLayout({
+@@ -160,16 +179,16 @@ export default function DashboardLayout({
          className="max-lg:!pl-0"
        >
          {/* Top bar */}
@@ -298,8 +377,6 @@ index bade6e949..4f9982c65 100644
 +        <header className="sticky top-0 z-30 h-16 glass-light !bg-bg-deepest">
            <div className="flex items-center justify-between h-full pl-14 pr-3 sm:pr-4 lg:px-6">
 -            {/* Command palette trigger */}
-+            {/* Command palette trigger. HRM patch 0036: called "Search" everywhere, with Ctrl or Cmd
-+                for the computer in use. */}
              <button
                onClick={handleOpenCommandPalette}
 -              className="hidden lg:flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted hover:text-text-secondary bg-overlay/[0.03] hover:bg-overlay/5 rounded-lg border border-overlay/5 transition-colors"
@@ -315,7 +392,7 @@ index bade6e949..4f9982c65 100644
                </kbd>
              </button>
              <div className="flex-1 lg:hidden" />
-@@ -177,12 +194,12 @@ export default function DashboardLayout({
+@@ -177,12 +196,12 @@ export default function DashboardLayout({
              <div className="flex min-w-0 items-center gap-1 sm:gap-3">
                <TenantSwitcher />
                <DeploymentStatusIndicator />
@@ -330,7 +407,7 @@ index bade6e949..4f9982c65 100644
                  className="relative h-11 w-11 shrink-0 px-0 text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-all"
                >
                  <ShoppingCart className="w-5 h-5" />
-@@ -239,12 +256,13 @@ export default function DashboardLayout({
+@@ -239,12 +258,13 @@ export default function DashboardLayout({
                <div className="flex items-start sm:items-center gap-3 min-w-0">
                  <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5 sm:mt-0" />
                  <div className="min-w-0">
@@ -347,7 +424,7 @@ index bade6e949..4f9982c65 100644
                        : <T>Please check your connection and try again.</T>}
                    </p>
                  </div>
-@@ -273,6 +291,7 @@ export default function DashboardLayout({
+@@ -273,6 +293,7 @@ export default function DashboardLayout({
  
          {/* Page content */}
          <main className="p-4 lg:p-6 relative">
@@ -355,7 +432,12 @@ index bade6e949..4f9982c65 100644
            {children}
          </main>
        </motion.div>
-@@ -285,7 +304,7 @@ export default function DashboardLayout({
+@@ -281,11 +302,11 @@ export default function DashboardLayout({
+       {(isCartOpen || cartLoaded) && <UploadCart />}
+ 
+       {/* Command Palette */}
+-      {commandPaletteOpen && <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />}
++      {commandPaletteOpen && <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} restoreFocus={() => paletteTrigger.current?.focus()} />}
  
        {/* Toast notifications */}
        <Toaster
@@ -1930,7 +2012,7 @@ index 27c710577..776a9b69c 100644
        />
      </>
 diff --git a/components/dashboard/CommandPalette.tsx b/components/dashboard/CommandPalette.tsx
-index 33d0890cc..8c2a0a5ad 100644
+index 33d0890cc..664243e11 100644
 --- a/components/dashboard/CommandPalette.tsx
 +++ b/components/dashboard/CommandPalette.tsx
 @@ -2,8 +2,9 @@
@@ -1940,11 +2022,11 @@ index 33d0890cc..8c2a0a5ad 100644
 -import { useRouter } from 'next/navigation';
 +import { useRouter, usePathname } from 'next/navigation';
  import { Command } from 'cmdk';
-+import { Title as DialogTitle } from '@radix-ui/react-dialog';
++import * as Dialog from '@radix-ui/react-dialog';
  import {
    LayoutDashboard,
    Package,
-@@ -13,24 +14,28 @@ import {
+@@ -13,50 +14,50 @@ import {
    ArrowUpCircle,
    BarChart3,
    Settings,
@@ -1985,9 +2067,13 @@ index 33d0890cc..8c2a0a5ad 100644
  ];
  
  interface CommandPaletteProps {
-@@ -40,23 +45,18 @@ interface CommandPaletteProps {
+   open: boolean;
++  restoreFocus?: () => void;
+   onOpenChange: (open: boolean) => void;
+ }
  
- export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
++export function CommandPalette({ open, onOpenChange, restoreFocus }: CommandPaletteProps) {
    const router = useRouter();
 +  const pathname = usePathname();
 +  const scopedApp = /^\/dashboard\/inventory\/([0-9a-f-]{36})$/i.exec(pathname ?? '')?.[1];
@@ -2018,7 +2104,7 @@ index 33d0890cc..8c2a0a5ad 100644
  
    const handleSelect = useCallback(
      (href: string) => {
-@@ -66,29 +66,31 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -66,29 +67,29 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
      [onOpenChange, router]
    );
  
@@ -2043,16 +2129,14 @@ index 33d0890cc..8c2a0a5ad 100644
 -          className="w-full max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden"
 -          loop
 -        >
-+    <Command.Dialog
-+      open={open}
-+      onOpenChange={onOpenChange}
-+      label="Find a page or guide"
-+      loop
-+      overlayClassName="fixed inset-0 z-[60] bg-black/50"
-+      contentClassName="fixed inset-x-4 top-16 sm:top-[20vh] z-[60] mx-auto max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden focus:outline-none"
-+      aria-describedby={undefined}
-+    >
-+      <DialogTitle className="sr-only">Find a page or guide</DialogTitle>
++    <Dialog.Root open={open} onOpenChange={onOpenChange}>
++      <Dialog.Portal>
++        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/50" />
++        <Dialog.Content aria-describedby={undefined}
++          onCloseAutoFocus={event => { if (restoreFocus) { event.preventDefault(); restoreFocus(); } }}
++          className="fixed inset-x-4 top-16 sm:top-[20vh] z-[60] mx-auto max-w-lg rounded-xl border border-overlay/10 bg-bg-surface shadow-2xl overflow-hidden focus:outline-none">
++          <Dialog.Title className="sr-only">Find a page or guide</Dialog.Title>
++          <Command label="Find a page or guide" loop>
            {/* Search input */}
            <div className="flex items-center gap-3 px-4 border-b border-overlay/5">
              <Search className="w-4 h-4 text-text-muted flex-shrink-0" />
@@ -2066,7 +2150,7 @@ index 33d0890cc..8c2a0a5ad 100644
                className="flex-1 py-3 text-sm bg-transparent text-text-primary placeholder:text-text-muted outline-none"
              />
              <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-text-muted bg-overlay/10 rounded border border-overlay/5">
-@@ -96,7 +98,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -96,7 +97,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
              </kbd>
            </div>
  
@@ -2075,7 +2159,7 @@ index 33d0890cc..8c2a0a5ad 100644
              <Command.Empty className="py-6 text-center text-sm text-text-muted">
                <T>No results found</T>
              </Command.Empty>
-@@ -106,9 +108,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -106,9 +107,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                heading={<T>Navigation</T>}
                className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
              >
@@ -2087,7 +2171,7 @@ index 33d0890cc..8c2a0a5ad 100644
                    value={`${item.name} ${item.keywords}`}
                    onSelect={() => handleSelect(item.href)}
                    className="flex items-center gap-3 px-2 py-2 text-sm text-text-secondary rounded-lg cursor-pointer data-[selected=true]:bg-overlay/5 data-[selected=true]:text-text-primary transition-colors"
-@@ -122,7 +124,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -122,7 +123,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
              {/* Keyboard shortcuts group */}
              {!search && (
                <Command.Group
@@ -2096,7 +2180,7 @@ index 33d0890cc..8c2a0a5ad 100644
                  className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-text-muted [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:mt-2"
                >
                  {SHORTCUT_HINTS.map((hint) => (
-@@ -142,7 +144,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -142,7 +143,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                            key={key}
                            className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-overlay/10 rounded border border-overlay/5"
                          >
@@ -2105,14 +2189,17 @@ index 33d0890cc..8c2a0a5ad 100644
                          </kbd>
                        ))}
                      </div>
-@@ -151,8 +153,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+@@ -151,8 +152,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                </Command.Group>
              )}
            </Command.List>
 -        </Command>
 -      </div>
 -    </div>
-+    </Command.Dialog>
++          </Command>
++        </Dialog.Content>
++      </Dialog.Portal>
++    </Dialog.Root>
    );
  }
 diff --git a/components/dashboard/Sidebar.tsx b/components/dashboard/Sidebar.tsx
@@ -4124,7 +4211,7 @@ index 2e3513b5d..34010cfa1 100644
            )}
          >
 diff --git a/components/dashboard/SidebarNavItem.tsx b/components/dashboard/SidebarNavItem.tsx
-index 4514623bb..1889c9137 100644
+index 4514623bb..2abccc5e3 100644
 --- a/components/dashboard/SidebarNavItem.tsx
 +++ b/components/dashboard/SidebarNavItem.tsx
 @@ -4,6 +4,7 @@ import Link from 'next/link';
@@ -4154,3 +4241,11 @@ index 4514623bb..1889c9137 100644
          className={cn(
            'group relative flex items-center gap-3 rounded-lg transition-colors duration-150',
            isCollapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
+@@ -86,6 +85,7 @@ export function SidebarNavItem({
+           )}
+         </AnimatePresence>
+ 
++        {isCollapsed && <span className="sr-only">{name}</span>}
+         {!isCollapsed && badge}
+       </Link>
+     </motion.div>

@@ -1023,10 +1023,10 @@ index 000000000..9560f16dd
 +});
 diff --git a/components/hrm/AppTimingPanel.tsx b/components/hrm/AppTimingPanel.tsx
 new file mode 100644
-index 000000000..5f4ab32c6
+index 000000000..752d641fa
 --- /dev/null
 +++ b/components/hrm/AppTimingPanel.tsx
-@@ -0,0 +1,181 @@
+@@ -0,0 +1,182 @@
 +'use client';
 +import { useEffect, useRef, useState } from 'react';
 +import { useQueryClient } from '@tanstack/react-query';
@@ -1110,7 +1110,8 @@ index 000000000..5f4ab32c6
 +  const [stale, setStale] = useState(false);
 +  const row = rows?.find(r => r.id === selected);
 +  // The field is already labelled Group, so the row's own "Group " prefix is dropped once the name is known.
-+  const label = (r: TimingRow) => r.label.replace(/^Group ([0-9a-f]{8}-[0-9a-f-]{27})/i, (all, id) => groupNames[id.toLowerCase()] ? id : all).replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, id => groupNames[id.toLowerCase()] || id);
++  const label = (row: TimingRow) => row.label.replace(/Group ([0-9a-f]{8}-[0-9a-f-]{27})/gi,
++    (_, id: string) => groupNames[id.toLowerCase()] || 'Group name unavailable');
 +  const choose = (r?: TimingRow) => { setSelected(r?.id ?? ''); setDraft(r ? { installTimeSettings: r.installTimeSettings, restartSettings: r.restartSettings } : null); };
 +  async function load(keepSaved = false, keep = selected) {
 +    setBusy(true); setError(''); if (!keepSaved) setSaved(false);
@@ -5306,14 +5307,14 @@ index 000000000..4d71aea12
 +$results|ConvertTo-Json -Depth 5|Set-Content $Out
 diff --git a/components/hrm/Term.tsx b/components/hrm/Term.tsx
 new file mode 100644
-index 000000000..db10c44d4
+index 000000000..6e28a54d2
 --- /dev/null
 +++ b/components/hrm/Term.tsx
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,35 @@
 +'use client';
 +// One place for the Intune words IntuneGet shows as they are. Each keeps Intune's own name on screen
 +// and explains it on hover or keyboard focus, so screens do not invent a second name for it.
-+import { useState, type ReactNode } from 'react';
++import { useRef, useState, type ReactNode } from 'react';
 +import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 +
 +export const INTUNE_TERMS = {
@@ -5331,8 +5332,17 @@ index 000000000..db10c44d4
 +
 +export function Term({ term, children }: { term: IntuneTerm; children: ReactNode }) {
 +  const [open, setOpen] = useState(false);
++  const touch = useRef(false);
 +  return <TooltipProvider delayDuration={150}><Tooltip open={open} onOpenChange={setOpen}>
-+    <TooltipTrigger asChild><span tabIndex={0} onPointerUp={event => { if (event.pointerType === 'touch') setOpen(true); }} className="cursor-help rounded-sm underline decoration-dotted decoration-text-muted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{children}</span></TooltipTrigger>
++    <TooltipTrigger asChild
++      onPointerDown={event => { touch.current = event.pointerType === 'touch'; }}
++      onClick={event => {
++        if (touch.current) {
++          event.preventDefault();
++          touch.current = false;
++          setOpen(true);
++        }
++      }}><span tabIndex={0} className="cursor-help rounded-sm underline decoration-dotted decoration-text-muted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan">{children}</span></TooltipTrigger>
 +    <TooltipContent className="max-w-72 border border-overlay/10 text-sm font-normal leading-relaxed">{INTUNE_TERMS[term]}</TooltipContent>
 +  </Tooltip></TooltipProvider>;
 +}

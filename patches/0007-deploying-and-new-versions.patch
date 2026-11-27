@@ -13,7 +13,7 @@ index 764cbe59e..abc7c643f 100644
        logLabel="Uploads"
 diff --git a/app/(app)/dashboard/uploads/page.test.ts b/app/(app)/dashboard/uploads/page.test.ts
 new file mode 100644
-index 000000000..b042f1e1f
+index 000000000..854f2245d
 --- /dev/null
 +++ b/app/(app)/dashboard/uploads/page.test.ts
 @@ -0,0 +1,134 @@
@@ -123,13 +123,13 @@ index 000000000..b042f1e1f
 +const listUrls=()=>state.fetch.mock.calls.map(([url])=>url as string).filter(url=>url.startsWith('/api/package?'));
 +it.each(['','scope=tenant','scope=anything'])('opens on All in tenant for search "%s", so staff who deployed nothing still see the tenant list',async search=>{
 + state.search=search;state.jobs=[job('deployed','other')];await render();
-+ expect(button('All in tenant').getAttribute('aria-selected')).toBe('true');
++ expect(button('All in tenant').getAttribute('aria-pressed')).toBe('true');
 + expect(listUrls()).toEqual(['/api/package?scope=tenant&limit=50']);
 + expect([...document.querySelectorAll('h3')].map(e=>e.textContent)).toEqual(['deployed example']);
 +});
 +it('opens the signed-in user\u2019s own list only when the link asks for it, and points an empty one at All in tenant',async()=>{
 + state.search='scope=mine';await render();
-+ expect(button('My deployments').getAttribute('aria-selected')).toBe('true');
++ expect(button('My deployments').getAttribute('aria-pressed')).toBe('true');
 + expect(listUrls()).toEqual(['/api/package?limit=50']);
 + expect(document.body.textContent).toContain('No deployments yet');
 +});

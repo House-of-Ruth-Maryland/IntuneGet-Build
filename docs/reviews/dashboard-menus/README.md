@@ -16,7 +16,7 @@ The screenshots use a local dashboard signed in as Participant 01. The inventory
 | Reports | Date presets use the theme accent and announce selection. An empty failure list avoids claiming all deployments succeeded. CSV export reports a failed request. |
 | Discovered apps | The introductory guide starts closed and remembers an explicit choice. Sort controls expose the selected field and next direction. |
 | App catalog | Global search and catalog search have separate shortcuts. Sort is shown in one place. |
-| Settings | General, Permissions and Notifications fit a phone and announce the selected section. General identifies the signed-in tenant and reports whether copying its ID succeeded. |
+| Settings | General, Permissions and Notifications fit a phone and announce the selected section. General identifies the signed-in tenant and reports whether copying its ID succeeded. Notifications reports failed loads, labels webhook actions by name and keeps keyboard focus inside the form. |
 | Help | The guides, illustrated controls and reference match the menu names, group review, discovery, scopes and tenant policy. All existing guide IDs are preserved. |
 
 [Before screenshots](before/) · [After screenshots](after/)
