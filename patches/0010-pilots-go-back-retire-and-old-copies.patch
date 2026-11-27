@@ -1173,12 +1173,12 @@ index 000000000..464c2971c
 +});
 diff --git a/components/hrm/PilotRollouts.tsx b/components/hrm/PilotRollouts.tsx
 new file mode 100644
-index 000000000..45728cc53
+index 000000000..e4a460575
 --- /dev/null
 +++ b/components/hrm/PilotRollouts.tsx
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,95 @@
 +'use client';
-+import { useState } from 'react';
++import { useEffect, useRef, useState } from 'react';
 +import { PilotGroupPicker } from './PilotGroupPicker';
 +import { usePilots } from '@/hooks/usePilots';
 +import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription } from '@/components/ui/dialog';
@@ -1188,16 +1188,36 @@ index 000000000..45728cc53
 +import type { InstallCounts } from '@/lib/hrm/install-status';
 +const secondary = 'text-sm text-accent-cyan hover:underline disabled:opacity-50';
 +
-+export function StartPilot({ update }: { update: AvailableUpdate }) {
++/** Whether this update can start a pilot, and whether one is already running for the app. */
++export function usePilotStart(update: AvailableUpdate) {
++  const { data } = usePilots();
++  const active = !!data?.supported && data.pilots.some((p)=>p.winget_id===update.winget_id && p.phase!=='complete');
++  return { active, canStart: !!data?.supported && !active && update.has_prior_deployment && !!update.intune_app_id };
++}
++/** Stays on the update card (never inside a menu) while a pilot runs for the app. */
++export function PilotActiveNote({ update }: { update: AvailableUpdate }) {
++  const { active } = usePilotStart(update);
++  return active ? <p className="text-xs text-status-warning">Pilot active. Review Pilot rollouts above before another update.</p> : null;
++}
++/**
++ * Test with a pilot group. With `open` and `onOpenChange` it is only the dialog, opened from the update
++ * card's More menu; without them it shows its own link.
++ */
++export function StartPilot({ update, open: openProp, onOpenChange }: { update: AvailableUpdate; open?: boolean; onOpenChange?: (open: boolean) => void }) {
 +  const { data,action } = usePilots();
-+  const [open,setOpen] = useState(false);
++  const [openState,setOpenState] = useState(false);
 +  const [selected,setSelected] = useState<{id:string;displayName:string}|null>(null);
++  const controlled = openProp !== undefined;
++  const open = controlled ? openProp : openState;
++  const setOpen = (value: boolean) => { if (controlled) onOpenChange?.(value); else setOpenState(value); };
++  const wasOpen = useRef(false);
++  useEffect(() => { if (open && !wasOpen.current) { action.reset(); setSelected(null); } wasOpen.current = open; }, [open, action]);
 +  if (!data?.supported) return null;
 +  const active = data.pilots.some((p)=>p.winget_id===update.winget_id && p.phase!=='complete');
-+  if (active) return <p className="mt-2 text-xs text-status-warning">Pilot active. Review Pilot rollouts above before another update.</p>;
++  if (active) return controlled ? null : <p className="mt-2 text-xs text-status-warning">Pilot active. Review Pilot rollouts above before another update.</p>;
 +  if (!update.has_prior_deployment || !update.intune_app_id) return null;
 +  return <>
-+    <button className={`${secondary} mt-2`} onClick={()=>{action.reset();setSelected(null);setOpen(true);}}>Test with a pilot group</button>
++    {!controlled && <button className={`${secondary} mt-2`} onClick={()=>setOpen(true)}>Test with a pilot group</button>}
 +    <Dialog open={open} onOpenChange={(value)=>{if(!action.isPending)setOpen(value);}}><DialogContent className="max-w-lg"><DialogHeader>
 +      <DialogTitle>Test {update.display_name} with a pilot group</DialogTitle>
 +      <DialogDescription>The new version goes only to the security group you choose, as Required. Everyone else keeps the previous version. Other updates for this app are held until you approve wider rollout.</DialogDescription>
@@ -3839,7 +3859,7 @@ index 000000000..84423e037
 +}
 diff --git a/lib/hrm/__tests__/app-attempts.test.ts b/lib/hrm/__tests__/app-attempts.test.ts
 new file mode 100644
-index 0000000..12b44b3
+index 000000000..12b44b309
 --- /dev/null
 +++ b/lib/hrm/__tests__/app-attempts.test.ts
 @@ -0,0 +1,25 @@

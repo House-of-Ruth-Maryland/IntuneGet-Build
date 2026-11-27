@@ -97,12 +97,12 @@ Use these exactly; sentence case, as the screen shows them.
 | Installation and staff experience (app configuration: toolkit windows and effective staff summary) | Installation timing (for app configuration), installer decides |
 | App setup and checks (app configuration: background actions and package settings) | More settings |
 | Toolkit messages and appearance (app configuration: applicable toolkit presentation) | What staff see during install |
-| How automatic updates install (App updates row and its panel; How it installs and Change how it installs in the app workspace: prompts, postponement and startup install built into the package) | Installation timing, Edit next rollout, Device installation, Install behaviour, Installation behavior |
+| How automatic updates install (right half of the Automatic updates bar below the App updates list, and its panel, which lists App exceptions with Edit app exception; How it installs and Change how it installs in the app workspace: prompts, postponement and startup install built into the package) | Installation timing, Edit next rollout, Device installation, Install behaviour, Installation behavior |
 | Future updates (app workspace card for saved future-update settings) | Next automatic update, next rollout |
 | Edit groups (app workspace button and panel: add a group, remove a group, or switch a group between Required and Available on the copy in Intune) | Edit assignments, Add a group (as the button or panel name; "Add a group" is only the section inside Edit groups) |
 | App updates (the page and its sidebar entry) | Updates (as the page's name) |
 | New version checks (the fixed 3:30 checks) | Check for new app versions, discovery |
-| Install dates (panel opened from Inventory app details and App updates cards: one group's dates and restart grace for a copy already in Intune; also the per-group line and fields under Who gets it in the deploy form, for a new deployment) | Availability and deadline, Installation timing (for that panel), timing, schedule (for these dates) |
+| Install dates (panel opened from Inventory app details and an App updates card's More actions (…) menu: one group's dates and restart grace for a copy already in Intune; also the per-group line and fields under Who gets it in the deploy form, for a new deployment) | Availability and deadline, Installation timing (for that panel), timing, schedule (for these dates) |
 | Group (in Install dates) | assignment |
 | Each computer's own clock | Device local time |
 | Update history (App updates tab) | Publishing history |
@@ -113,14 +113,17 @@ Use these exactly; sentence case, as the screen shows them.
 | Home | Dashboard |
 | Custom app | non-WinGet app, manual app |
 | WinGet app, curated app | winget, Winget |
-| Deploy new version (custom apps), Update (WinGet and curated apps) | upgrade, redeploy |
+| Deploy new version (custom apps), Review update (WinGet and curated apps on SQLite servers, where it opens the review first; Update on Supabase) | upgrade, redeploy |
 | Supersede previous version on update (Settings, Supabase only) | supersedence (except when quoting Intune) |
 | Carry over assignments (Settings, Supabase only) | copy groups |
 | Update behavior (what Update and automatic updates do with the previous copy and its groups, set on App updates) | update settings, supersede settings |
 | pilot group | test group, ring, canary |
 | Pilot rollouts | staged rollouts, rings |
 | wider rollout | full rollout, promotion, broad deployment |
-| Update schedule, blackout | Publishing schedule, maintenance window, change freeze, quiet hours |
+| Update schedule, blackout (Help and the panel); Publishing window (the label on the Automatic updates bar) | Publishing schedule, maintenance window, change freeze, quiet hours |
+| Automatic updates bar (the bar below the App updates list, `#automatic-updates`) | status strip, settings row |
+| Checked (the last-check time beside the App updates title) | Last check attempt (on App updates) |
+| More actions (…) (an update card's menu: Install dates, Test with a pilot group, Open app workspace) | overflow menu, kebab |
 | groups (people and devices an app is assigned to) | targets, audiences |
 | device group, user group | device-based group |
 | Required, Available | Mandatory, Optional |

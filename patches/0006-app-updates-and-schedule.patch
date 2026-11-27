@@ -16,13 +16,13 @@ index 7987a53b6..5b0d405c9 100644
    );
  }
 diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
-index b5d2996a2..ae710984c 100644
+index b5d2996a2..2e08f6a3a 100644
 --- a/app/(app)/dashboard/updates/page.tsx
 +++ b/app/(app)/dashboard/updates/page.tsx
 @@ -1,6 +1,12 @@
  'use client';
 +import { VersionCheckStatus } from '@/components/hrm/VersionDiscovery';
-+import { StartupInstallations } from '@/components/hrm/StartupInstallations';
++import { StartupInstallations, StartupInstallationsAlert } from '@/components/hrm/StartupInstallations';
 +import {ManualUpdateReview} from '@/components/hrm/ManualUpdateReview';
 +import {useInstallationPolicy} from '@/hooks/useInstallationPolicy';
 +import type {ManualReviewInput} from '@/lib/hrm/manual-update-review';
@@ -40,19 +40,21 @@ index b5d2996a2..ae710984c 100644
  } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import { Input } from '@/components/ui/input';
-@@ -41,7 +48,10 @@ import {
+@@ -41,7 +48,12 @@ import {
    DropdownMenuSeparator,
    DropdownMenuLabel,
  } from '@/components/ui/dropdown-menu';
 -import { PageHeader, AnimatedStatCard, StatCardGrid, AnimatedEmptyState } from '@/components/dashboard';
-+import { PageHeader, AnimatedEmptyState } from '@/components/dashboard';
++import { AnimatedEmptyState } from '@/components/dashboard';
 +import { PilotRollouts } from '@/components/hrm/PilotRollouts';
 +import { InstallationPolicyPanel } from '@/components/hrm/InstallationPolicyPanel';
-+import { UpdateSchedule } from '@/components/hrm/UpdateSchedule';
++import { AutomaticUpdatesPausedAlert, UpdateSchedule } from '@/components/hrm/UpdateSchedule';
++import { VERSION_CHECK_TIMES, clock as checkClock, useVersionCheckStatus } from '@/components/hrm/VersionDiscovery';
++import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
  import { UpdateCard, UpdateCardSkeleton, AutoUpdateHistory } from '@/components/updates';
  import { AutoUpdateAppsModal } from '@/components/updates/AutoUpdateAppsModal';
  import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-@@ -54,10 +64,11 @@ import {
+@@ -54,13 +66,16 @@ import {
    useUpdatePolicies,
  } from '@/hooks/use-updates';
  import { useMspOptional } from '@/hooks/useMspOptional';
@@ -65,7 +67,12 @@ index b5d2996a2..ae710984c 100644
  import type { AppUpdatePolicy, AvailableUpdate, TriggerUpdateResponse, UpdatePolicyType, UpdateType } from '@/types/update-policies';
  
  type SortOption = 'name' | 'severity' | 'type' | 'detected';
-@@ -69,6 +80,9 @@ const sortLabels: Record<SortOption, string> = {
++const CHECK_NOTE = 'Checks publishers now for new versions and may start your enabled automatic updates.';
++const HIGHLIGHT_MS = 2000;
+ 
+ const sortLabels: Record<SortOption, string> = {
+   name: 'Name (A-Z)',
+@@ -69,6 +84,9 @@ const sortLabels: Record<SortOption, string> = {
    detected: 'Oldest first',
  };
  
@@ -75,7 +82,7 @@ index b5d2996a2..ae710984c 100644
  export default function UpdatesPage() {
    const router = useRouter();
    const [search, setSearch] = useState('');
-@@ -80,8 +94,12 @@ export default function UpdatesPage() {
+@@ -80,8 +98,12 @@ export default function UpdatesPage() {
    const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
    const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
    const [autoUpdateModalOpen, setAutoUpdateModalOpen] = useState(false);
@@ -88,7 +95,7 @@ index b5d2996a2..ae710984c 100644
    const [bulkProgress, setBulkProgress] = useState<{
      phase: 'confirm' | 'updating' | 'done';
      completed: number;
-@@ -97,6 +115,14 @@ export default function UpdatesPage() {
+@@ -97,6 +119,14 @@ export default function UpdatesPage() {
      (tenant) => tenant.is_active && tenant.consent_status === 'granted' && Boolean(tenant.tenant_id)
    );
    const mspTenantSelectionRequired = isMspUser && hasGrantedManagedTenants && !selectedTenantId;
@@ -103,7 +110,7 @@ index b5d2996a2..ae710984c 100644
  
    // Data hooks
    const {
-@@ -107,8 +133,8 @@ export default function UpdatesPage() {
+@@ -107,8 +137,8 @@ export default function UpdatesPage() {
      isFetching: isFetchingUpdates,
    } = useAvailableUpdates({
      tenantId,
@@ -114,7 +121,7 @@ index b5d2996a2..ae710984c 100644
    });
  
    const {
-@@ -150,7 +176,7 @@ export default function UpdatesPage() {
+@@ -150,7 +180,7 @@ export default function UpdatesPage() {
  
      // Sort
      result = [...result].sort((a, b) => {
@@ -123,7 +130,7 @@ index b5d2996a2..ae710984c 100644
          case 'name':
            return a.display_name.localeCompare(b.display_name);
          case 'severity': {
-@@ -174,24 +200,20 @@ export default function UpdatesPage() {
+@@ -174,24 +204,20 @@ export default function UpdatesPage() {
      });
  
      return result;
@@ -159,7 +166,7 @@ index b5d2996a2..ae710984c 100644
  
    // Eligible updates for bulk action (exclude ignore and pinned).
    // "Update All" never includes unmanaged (fuzzy-matched) apps -- even when the
-@@ -199,6 +221,8 @@ export default function UpdatesPage() {
+@@ -199,6 +225,8 @@ export default function UpdatesPage() {
    const eligibleForBulkUpdate = filteredUpdates.filter(
      (u) =>
        u.is_managed &&
@@ -168,7 +175,7 @@ index b5d2996a2..ae710984c 100644
        u.policy?.policy_type !== 'ignore' &&
        u.policy?.policy_type !== 'pin_version'
    );
-@@ -215,7 +239,7 @@ export default function UpdatesPage() {
+@@ -215,7 +243,7 @@ export default function UpdatesPage() {
  
    // Oldest critical update age
    const oldestCriticalAge = (() => {
@@ -177,7 +184,7 @@ index b5d2996a2..ae710984c 100644
      if (criticals.length === 0) return null;
      const oldest = criticals.reduce((prev, curr) =>
        new Date(prev.detected_at) < new Date(curr.detected_at) ? prev : curr
-@@ -229,12 +253,17 @@ export default function UpdatesPage() {
+@@ -229,12 +257,17 @@ export default function UpdatesPage() {
    })();
  
    // Handlers
@@ -196,7 +203,7 @@ index b5d2996a2..ae710984c 100644
        });
        const result = response.results.find((r) => r.winget_id === update.winget_id)
          ?? response.results[0];
-@@ -253,7 +282,7 @@ export default function UpdatesPage() {
+@@ -253,7 +286,7 @@ export default function UpdatesPage() {
          return next;
        });
      }
@@ -205,7 +212,7 @@ index b5d2996a2..ae710984c 100644
  
    const handleTriggerUpdate = useCallback(async (update: AvailableUpdate) => {
      // Confirm before updating an app that is new to IntuneGet OR not managed by
-@@ -280,18 +309,20 @@ export default function UpdatesPage() {
+@@ -280,18 +313,20 @@ export default function UpdatesPage() {
    // pending update is for an app IntuneGet did not deploy/claim/map.
    const pendingIsUnmanaged = !!pendingNewAppUpdate && !pendingNewAppUpdate.is_managed;
  
@@ -232,7 +239,7 @@ index b5d2996a2..ae710984c 100644
          policy_type: policyType,
        });
        refetchUpdates();
-@@ -304,7 +335,20 @@ export default function UpdatesPage() {
+@@ -304,7 +339,20 @@ export default function UpdatesPage() {
      }
    }, [updatePolicy, refetchUpdates]);
  
@@ -253,7 +260,7 @@ index b5d2996a2..ae710984c 100644
      const total = eligibleForBulkUpdate.length;
      setBulkProgress({ phase: 'updating', completed: 0, failed: 0, total, errors: [] });
      setUpdatingIds(new Set(eligibleForBulkUpdate.map((u) => u.id)));
-@@ -323,6 +367,7 @@ export default function UpdatesPage() {
+@@ -323,6 +371,7 @@ export default function UpdatesPage() {
              updates: batch.map((u) => ({
                winget_id: u.winget_id,
                tenant_id: u.tenant_id,
@@ -261,7 +268,7 @@ index b5d2996a2..ae710984c 100644
              })),
            });
            completed += response.triggered;
-@@ -347,7 +392,7 @@ export default function UpdatesPage() {
+@@ -347,7 +396,7 @@ export default function UpdatesPage() {
        setUpdatingIds(new Set());
        setBulkProgress({ phase: 'done', completed, failed, total, errors });
      }
@@ -270,53 +277,131 @@ index b5d2996a2..ae710984c 100644
  
    const handleRefresh = useCallback(async () => {
      await refreshUpdates();
-@@ -370,7 +415,7 @@ export default function UpdatesPage() {
+@@ -369,8 +418,35 @@ export default function UpdatesPage() {
+     }
    }, [isLoadingUpdates, isRefreshing, mspTenantSelectionRequired, updates.length, handleRefresh]);
  
++  // #automatic-updates (Settings, the app workspace, the command palette, Help): scroll to the status bar once
++  // the list has loaded, and highlight it briefly. It opens no panel: two different rows link here.
++  const automaticRef = useRef<HTMLElement>(null);
++  const [highlight, setHighlight] = useState(false);
++  const [hashTarget, setHashTarget] = useState<string | null>(null);
++  useEffect(() => {
++    const read = () => setHashTarget(window.location.hash === '#automatic-updates' ? 'automatic-updates' : null);
++    read();
++    window.addEventListener('hashchange', read);
++    return () => window.removeEventListener('hashchange', read);
++  }, []);
++  useEffect(() => {
++    if (hashTarget !== 'automatic-updates' || isLoadingUpdates || !automaticRef.current) return;
++    const el = automaticRef.current;
++    el.scrollIntoView({ behavior: shouldReduceMotion ? 'auto' : 'smooth', block: 'center' });
++    el.focus({ preventScroll: true });
++    setHighlight(true);
++    setHashTarget(null);
++  }, [hashTarget, isLoadingUpdates, shouldReduceMotion]);
++  useEffect(() => {
++    if (!highlight) return;
++    const timer = setTimeout(() => setHighlight(false), HIGHLIGHT_MS);
++    return () => clearTimeout(timer);
++  }, [highlight]);
++
++  const { data: lastCheck } = useVersionCheckStatus();
++
    // Check if any filters are active
 -  const hasActiveFilters = search.trim() !== '' || showCriticalOnly || updateTypeFilter !== null;
 +  const hasActiveFilters = search.trim() !== '' || (supabaseMode && showCriticalOnly) || updateTypeFilter !== null;
  
    const clearAllFilters = () => {
      setSearch('');
-@@ -382,8 +427,8 @@ export default function UpdatesPage() {
-     <div className="space-y-6">
-       {/* Header */}
-       <PageHeader
+@@ -378,43 +454,57 @@ export default function UpdatesPage() {
+     setUpdateTypeFilter(null);
+   };
+ 
++  // Check for app updates: the visible hover note says what the button can start, not only the screen reader one.
++  const checkButton = (variant: 'outline' | 'ghost') => (
++    <TooltipProvider delayDuration={150}><Tooltip>
++      <TooltipTrigger asChild>
++        <Button
++          variant={variant}
++          onClick={() => {
++            void handleRefresh();
++          }}
++          disabled={isFetchingUpdates || isRefreshing}
++          aria-description={CHECK_NOTE}
++          className="whitespace-nowrap border-overlay/15 text-text-secondary hover:text-text-primary"
++        >
++          <RefreshCw
++            className={cn(
++              'w-4 h-4 mr-2',
++              (isFetchingUpdates || isRefreshing) && 'animate-spin'
++            )}
++          />
++          <T>Check for app updates</T>
++        </Button>
++      </TooltipTrigger>
++      <TooltipContent className="max-w-72 border border-overlay/10 text-sm font-normal leading-relaxed">{CHECK_NOTE}</TooltipContent>
++    </Tooltip></TooltipProvider>
++  );
++
+   return (
+-    <div className="space-y-6">
+-      {/* Header */}
+-      <PageHeader
 -        title={<T>App Updates</T>}
 -        description={<T>Manage app updates and auto-update policies</T>}
-+        title={<T>App updates</T>}
-+        description={<T>New versions from each app's publisher. Choose which apps update on their own, when IntuneGet deploys them to Intune and how they install.</T>}
-         gradient
-         gradientColors="cyan"
-         actions={
-@@ -394,6 +439,7 @@ export default function UpdatesPage() {
-                 void handleRefresh();
-               }}
-               disabled={isFetchingUpdates || isRefreshing}
-+              aria-description="Checks for new versions and may start your enabled automatic updates."
-               className="text-text-secondary hover:text-text-primary"
-             >
-               <RefreshCw
-@@ -402,7 +448,7 @@ export default function UpdatesPage() {
-                   (isFetchingUpdates || isRefreshing) && 'animate-spin'
-                 )}
-               />
+-        gradient
+-        gradientColors="cyan"
+-        actions={
+-          <div className="flex items-center gap-2">
+-            <Button
+-              variant="ghost"
+-              onClick={() => {
+-                void handleRefresh();
+-              }}
+-              disabled={isFetchingUpdates || isRefreshing}
+-              className="text-text-secondary hover:text-text-primary"
+-            >
+-              <RefreshCw
+-                className={cn(
+-                  'w-4 h-4 mr-2',
+-                  (isFetchingUpdates || isRefreshing) && 'animate-spin'
+-                )}
+-              />
 -              <T>Refresh</T>
-+              <T>Check for app updates</T>
-             </Button>
+-            </Button>
++    <div className="space-y-5">
++      {/* Header: title, when the last check ran, and the page's two actions. Buttons never wrap their
++          labels; on a phone they move under the title. */}
++      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
++        <div className="min-w-0">
++          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
++            <h1 className="text-2xl sm:text-3xl font-bold gradient-text-cyan"><T>App updates</T></h1>
++            {!mspTenantSelectionRequired && <VersionCheckStatus compact />}
++          </div>
++          <p className="mt-0.5 text-sm text-text-secondary">New versions ready to review or deploy.</p>
++        </div>
++          <div className="flex flex-wrap items-center gap-2 shrink-0">
++            {checkButton('outline')}
              {eligibleForBulkUpdate.length > 0 && (
                <>
-@@ -413,7 +459,7 @@ export default function UpdatesPage() {
+-                <Button
++                {activeTab === 'available' && <Button
+                   onClick={() => {
+                     setBulkProgress({ phase: 'confirm', completed: 0, failed: 0, total: eligibleForBulkUpdate.length, errors: [] });
+                     setBulkDialogOpen(true);
                    }}
-                   className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
+-                  className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
++                  className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium whitespace-nowrap"
                  >
 -                  <T>Update All</T> ({eligibleForBulkUpdate.length})
+-                </Button>
 +                  <T>Update all</T> ({eligibleForBulkUpdate.length})
-                 </Button>
++                </Button>}
                  <Dialog
                    open={bulkDialogOpen}
-@@ -443,11 +489,11 @@ export default function UpdatesPage() {
+                   onOpenChange={(open) => {
+@@ -443,11 +533,11 @@ export default function UpdatesPage() {
                                {eligibleForBulkUpdate.some(u => classifyUpdateType(u.current_version, u.latest_version) === 'major') && (
                                  <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-status-warning/10 border border-status-warning/20 rounded-lg text-sm text-status-warning">
                                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -330,7 +415,7 @@ index b5d2996a2..ae710984c 100644
                                  if (newAppsCount === 0) return null;
                                  return (
                                    <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-500">
-@@ -470,7 +516,7 @@ export default function UpdatesPage() {
+@@ -470,7 +560,7 @@ export default function UpdatesPage() {
                                          {type}
                                        </span>
                                        {u.display_name} ({u.current_version} &rarr; {u.latest_version})
@@ -339,7 +424,7 @@ index b5d2996a2..ae710984c 100644
                                          <span className="text-[10px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border text-violet-500 bg-violet-500/10 border-violet-500/20">
                                            NEW
                                          </span>
-@@ -482,6 +528,7 @@ export default function UpdatesPage() {
+@@ -482,6 +572,7 @@ export default function UpdatesPage() {
                              </div>
                            </DialogDescription>
                          </DialogHeader>
@@ -347,7 +432,7 @@ index b5d2996a2..ae710984c 100644
                          <DialogFooter>
                            <Button
                              variant="ghost"
-@@ -492,9 +539,10 @@ export default function UpdatesPage() {
+@@ -492,9 +583,10 @@ export default function UpdatesPage() {
                            </Button>
                            <Button
                              onClick={() => void handleBulkUpdate()}
@@ -359,7 +444,7 @@ index b5d2996a2..ae710984c 100644
                            </Button>
                          </DialogFooter>
                        </>
-@@ -582,7 +630,7 @@ export default function UpdatesPage() {
+@@ -582,7 +674,7 @@ export default function UpdatesPage() {
                                }}
                                className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
                              >
@@ -368,8 +453,13 @@ index b5d2996a2..ae710984c 100644
                                <ArrowRight className="w-4 h-4 ml-1.5" />
                              </Button>
                            )}
-@@ -598,6 +646,13 @@ export default function UpdatesPage() {
-       />
+@@ -594,10 +686,16 @@ export default function UpdatesPage() {
+               </>
+             )}
+           </div>
+-        }
+-      />
++      </div>
  
        {/* New App Info Dialog */}
 +      <Dialog open={Boolean(reviewUpdate)} onOpenChange={open=>{if(!open)setReviewUpdate(null)}}>
@@ -382,7 +472,7 @@ index b5d2996a2..ae710984c 100644
        <Dialog open={newAppDialogOpen} onOpenChange={setNewAppDialogOpen}>
          <DialogContent className="bg-bg-surface border-overlay/10">
            <DialogHeader>
-@@ -620,7 +675,7 @@ export default function UpdatesPage() {
+@@ -620,7 +718,7 @@ export default function UpdatesPage() {
                    <>
                      <p>
                        <T><Var><span className="font-medium text-text-primary">{pendingNewAppUpdate?.display_name}</span></Var> was matched
@@ -391,7 +481,7 @@ index b5d2996a2..ae710984c 100644
                      </p>
                      <ul className="space-y-1.5 text-sm">
                        <li className="flex items-start gap-2">
-@@ -698,7 +753,7 @@ export default function UpdatesPage() {
+@@ -698,7 +796,7 @@ export default function UpdatesPage() {
                    : 'bg-violet-600 hover:bg-violet-700'
                )}
              >
@@ -400,7 +490,16 @@ index b5d2996a2..ae710984c 100644
              </Button>
            </DialogFooter>
          </DialogContent>
-@@ -732,61 +787,26 @@ export default function UpdatesPage() {
+@@ -711,7 +809,7 @@ export default function UpdatesPage() {
+           initial={shouldReduceMotion ? { opacity: 1 } : 'hidden'}
+           animate={shouldReduceMotion ? { opacity: 1 } : 'visible'}
+           role="alert"
+-          className="glass-light rounded-xl p-4 border-l-[3px] border-l-status-warning border-t border-r border-b border-black/[0.08] bg-gradient-to-r from-status-warning/5 to-transparent"
++          className="glass-light rounded-xl p-4 border-l-[3px] border-l-status-warning border-t border-r border-b border-overlay/10 bg-gradient-to-r from-status-warning/5 to-transparent"
+         >
+           <div className="flex items-center justify-between gap-3">
+             <div className="flex items-center gap-3">
+@@ -732,114 +830,69 @@ export default function UpdatesPage() {
                  onClick={() => setShowCriticalOnly(true)}
                  className="text-status-warning hover:text-status-warning hover:bg-status-warning/10 text-xs font-medium flex-shrink-0"
                >
@@ -460,41 +559,72 @@ index b5d2996a2..ae710984c 100644
 -          onClick={() => setActiveTab('history')}
 -        />
 -      </StatCardGrid>
-+      {/* HRM patch 0058 (David's choice 4B): one status strip replaces the stat cards and the two step
-+          cards. Counts are on the tabs; the apps with Automatic updates on are in the schedule row. */}
-+      {!mspTenantSelectionRequired && (
-+        <section aria-label="Automatic updates" className="divide-y divide-overlay/10 rounded-2xl border border-overlay/10 bg-bg-surface">
-+          <VersionCheckStatus /><div id="automatic-updates" className="scroll-mt-6"><UpdateSchedule appsOn={isLoadingPolicies ? undefined : autoUpdateCount} onShowApps={() => setAutoUpdateModalOpen(true)} /></div>
-+          <InstallationPolicyPanel key={tenantId || 'current'} apps={autoUpdatePolicies} />
-+          <StartupInstallations key={`startup:${tenantId || 'current'}`} />
-+        </section>
-+      )}
-+      <p className="text-sm text-text-secondary">Who gets an app and its install dates are set in the app workspace. <Link href="/dashboard/inventory" className="text-accent-cyan hover:underline">Open Apps</Link></p>
++      {/* Shown only when something needs a look, so the update list stays at the top. */}
++      {!mspTenantSelectionRequired && <>
++        <AutomaticUpdatesPausedAlert />
++        <StartupInstallationsAlert />
++      </>}
 +      <PilotRollouts />
-+
-+
  
-       {/* Tabs */}
+-      {/* Tabs */}
++      {/* Tabs, with search and filters on the same row on wide screens */}
        <Tabs
-@@ -797,7 +817,7 @@ export default function UpdatesPage() {
-           <TabsList className="glass-light border border-overlay/5">
-             <TabsTrigger value="available" className="data-[state=active]:bg-overlay/10">
-               <Package className="w-4 h-4 mr-2" />
+         value={activeTab}
+         onValueChange={(v: string) => setActiveTab(v as 'available' | 'history')}
+       >
+-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+-          <TabsList className="glass-light border border-overlay/5">
+-            <TabsTrigger value="available" className="data-[state=active]:bg-overlay/10">
+-              <Package className="w-4 h-4 mr-2" />
 -              <T>Available</T>
++        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
++          <TabsList className="glass-light border border-overlay/10 w-full sm:w-auto shrink-0">
++            <TabsTrigger value="available" className="flex-1 sm:flex-initial whitespace-nowrap px-2.5 sm:px-3 text-xs sm:text-sm data-[state=active]:bg-overlay/10">
++              <Package className="hidden sm:block w-4 h-4 mr-2 shrink-0" />
 +              <T>Available updates</T>
                {!isLoadingUpdates && availableCount > 0 && (
-                 <span className="ml-1.5 text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
+-                <span className="ml-1.5 text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
++                <span className="ml-1.5 shrink-0 whitespace-nowrap text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
                    {availableCount}
-@@ -806,7 +826,7 @@ export default function UpdatesPage() {
+                 </span>
+               )}
              </TabsTrigger>
-             <TabsTrigger value="history" className="data-[state=active]:bg-overlay/10">
-               <History className="w-4 h-4 mr-2" />
+-            <TabsTrigger value="history" className="data-[state=active]:bg-overlay/10">
+-              <History className="w-4 h-4 mr-2" />
 -              <T>History</T>
++            <TabsTrigger value="history" className="flex-1 sm:flex-initial whitespace-nowrap px-2.5 sm:px-3 text-xs sm:text-sm data-[state=active]:bg-overlay/10">
++              <History className="hidden sm:block w-4 h-4 mr-2 shrink-0" />
 +              <T>Update history</T>
                {!isLoadingHistory && history.length > 0 && (
-                 <span className="ml-1.5 text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
+-                <span className="ml-1.5 text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
++                <span className="ml-1.5 shrink-0 whitespace-nowrap text-[11px] font-medium bg-overlay/[0.08] px-1.5 py-0.5 rounded-md tabular-nums">
                    {history.length}
-@@ -834,7 +854,7 @@ export default function UpdatesPage() {
+                 </span>
+               )}
+             </TabsTrigger>
+           </TabsList>
+-        </div>
+-
+-        {/* Available Updates Tab */}
+-        <TabsContent value="available" className="mt-0">
+           {/* Search & Filter Toolbar */}
+-          {activeTab === 'available' && !mspTenantSelectionRequired && (
+-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-4">
++          {activeTab === 'available' && !mspTenantSelectionRequired && (updates.length > 0 || ignoredPolicies.length > 0) && (
++            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center lg:flex-1 lg:justify-end">
+               {/* Search */}
+-              <div className="relative flex-1 w-full">
++              {updates.length > 0 && <div className="relative w-full sm:flex-1 lg:max-w-sm">
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                 <Input
+                   placeholder="Search by name or package ID..."
+                   value={search}
+                   onChange={(e) => setSearch(e.target.value)}
++                  aria-label="Search apps"
+                   className="pl-9 bg-bg-elevated border-overlay/10 text-text-primary placeholder:text-text-muted"
+                 />
+-              </div>
++              </div>}
  
                <div className="flex items-center gap-2 flex-wrap">
                  {/* Critical filter */}
@@ -503,7 +633,13 @@ index b5d2996a2..ae710984c 100644
                    variant={showCriticalOnly ? 'default' : 'ghost'}
                    size="sm"
                    onClick={() => setShowCriticalOnly(!showCriticalOnly)}
-@@ -850,15 +870,15 @@ export default function UpdatesPage() {
+                   className={cn(
+-                    'h-8 text-xs',
++                    'h-8 text-xs whitespace-nowrap',
+                     showCriticalOnly
+                       ? 'bg-status-warning/20 text-status-warning hover:bg-status-warning/30 border border-status-warning/20'
+                       : 'text-text-secondary hover:text-text-primary'
+@@ -850,17 +903,17 @@ export default function UpdatesPage() {
                    {criticalCount > 0 && (
                      <span className="ml-1 tabular-nums">{criticalCount}</span>
                    )}
@@ -520,9 +656,12 @@ index b5d2996a2..ae710984c 100644
 -                  title="Show updates for apps that were matched automatically and are not managed by IntuneGet. Hidden by default and never included in Update All."
 +                  title="Show updates for apps that were matched automatically and are not managed by IntuneGet. Hidden by default and never included in Update all."
                    className={cn(
-                     'h-8 text-xs',
+-                    'h-8 text-xs',
++                    'h-8 text-xs whitespace-nowrap',
                      showUnmanaged
-@@ -868,7 +888,20 @@ export default function UpdatesPage() {
+                       ? 'bg-accent-violet/20 text-accent-violet hover:bg-accent-violet/30 border border-accent-violet/20'
+                       : 'text-text-secondary hover:text-text-primary'
+@@ -868,16 +921,29 @@ export default function UpdatesPage() {
                  >
                    <ShieldOff className="w-3.5 h-3.5 mr-1.5" />
                    <T>Unmanaged</T>
@@ -535,7 +674,7 @@ index b5d2996a2..ae710984c 100644
 +                    variant="ghost"
 +                    size="sm"
 +                    onClick={() => setIgnoredModalOpen(true)}
-+                    className="h-8 text-xs text-text-secondary hover:text-text-primary"
++                    className="h-8 text-xs whitespace-nowrap text-text-secondary hover:text-text-primary"
 +                  >
 +                    <BellOff className="w-3.5 h-3.5 mr-1.5" />
 +                    <T>Ignored apps</T> ({ignoredPolicies.length})
@@ -543,8 +682,19 @@ index b5d2996a2..ae710984c 100644
 +                )}
  
                  {/* Update type filter */}
-                 <DropdownMenu>
-@@ -888,7 +921,7 @@ export default function UpdatesPage() {
+-                <DropdownMenu>
++                {updates.length > 0 && <DropdownMenu>
+                   <DropdownMenuTrigger asChild>
+                     <Button
+                       variant={updateTypeFilter ? 'default' : 'ghost'}
+                       size="sm"
+                       className={cn(
+-                        'h-8 text-xs',
++                        'h-8 text-xs whitespace-nowrap',
+                         updateTypeFilter
+                           ? 'bg-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/30 border border-accent-cyan/20'
+                           : 'text-text-secondary hover:text-text-primary'
+@@ -888,7 +954,7 @@ export default function UpdatesPage() {
                      </Button>
                    </DropdownMenuTrigger>
                    <DropdownMenuContent align="end" className="w-44 bg-bg-elevated border-overlay/10 shadow-soft-lg">
@@ -553,9 +703,19 @@ index b5d2996a2..ae710984c 100644
                      <DropdownMenuSeparator className="bg-overlay/[0.06]" />
                      <DropdownMenuItem
                        onClick={() => setUpdateTypeFilter(null)}
-@@ -926,20 +959,20 @@ export default function UpdatesPage() {
+@@ -919,31 +985,31 @@ export default function UpdatesPage() {
+                       <span className="ml-auto text-[11px] text-text-muted tabular-nums">{updateTypeCounts.patch}</span>
+                     </DropdownMenuItem>
+                   </DropdownMenuContent>
+-                </DropdownMenu>
++                </DropdownMenu>}
+ 
+                 {/* Sort */}
+-                <DropdownMenu>
++                {updates.length > 0 && <DropdownMenu>
                    <DropdownMenuTrigger asChild>
-                     <Button variant="ghost" size="sm" className="h-8 text-xs text-text-secondary hover:text-text-primary">
+-                    <Button variant="ghost" size="sm" className="h-8 text-xs text-text-secondary hover:text-text-primary">
++                    <Button variant="ghost" size="sm" className="h-8 text-xs whitespace-nowrap text-text-secondary hover:text-text-primary">
                        <ArrowUpDown className="w-3.5 h-3.5 mr-1.5" />
 -                      {sortLabels[sortBy]}
 +                      {sortLabels[effectiveSort]}
@@ -579,7 +739,23 @@ index b5d2996a2..ae710984c 100644
                        </DropdownMenuItem>
                      ))}
                    </DropdownMenuContent>
-@@ -988,7 +1021,7 @@ export default function UpdatesPage() {
+-                </DropdownMenu>
++                </DropdownMenu>}
+ 
+                 {/* Results count + clear */}
+                 {!isLoadingUpdates && updates.length > 0 && (
+@@ -971,6 +1037,10 @@ export default function UpdatesPage() {
+             </div>
+           )}
+ 
++        </div>
++
++        {/* Available Updates Tab */}
++        <TabsContent value="available" className="mt-0">
+           {mspTenantSelectionRequired ? (
+             <AnimatedEmptyState
+               icon={Package}
+@@ -988,7 +1058,7 @@ export default function UpdatesPage() {
                description={updatesError.message}
                color="neutral"
                action={{
@@ -588,7 +764,24 @@ index b5d2996a2..ae710984c 100644
                  onClick: () => refetchUpdates(),
                  variant: 'secondary',
                }}
-@@ -1018,7 +1051,7 @@ export default function UpdatesPage() {
+@@ -997,7 +1067,7 @@ export default function UpdatesPage() {
+             <motion.div
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
++              className="grid grid-cols-1 xl:grid-cols-2 gap-4"
+             >
+               {filteredUpdates.map((update, index) => (
+                 <UpdateCard
+@@ -1007,6 +1077,7 @@ export default function UpdatesPage() {
+                   onPolicyChange={handlePolicyChange}
+                   isUpdating={updatingIds.has(update.id)}
+                   index={index}
++                  reviewFirst={manualReviewEnabled}
+                 />
+               ))}
+             </motion.div>
+@@ -1018,28 +1089,34 @@ export default function UpdatesPage() {
                color="neutral"
                showOrbs={false}
                action={{
@@ -597,11 +790,31 @@ index b5d2996a2..ae710984c 100644
                  onClick: clearAllFilters,
                  variant: 'secondary',
                }}
-@@ -1035,11 +1068,12 @@ export default function UpdatesPage() {
+             />
+           ) : (
+-            <AnimatedEmptyState
+-              icon={CheckCircle2}
+-              title={<T>All apps are up to date</T>}
+-              description={<T>No updates are currently available for your deployed apps</T>}
+-              color="cyan"
+-            />
++            <section aria-label="All apps are up to date" className="glass-light rounded-xl border border-overlay/10 px-4 py-10 text-center">
++              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-status-success/20 bg-status-success/10">
++                <CheckCircle2 className="h-7 w-7 text-status-success" aria-hidden="true" />
++              </div>
++              <h2 className="text-lg font-semibold text-text-primary"><T>All apps are up to date</T></h2>
++              <p className="mx-auto mt-2 max-w-md text-sm text-text-secondary">No newer versions were found at the last check{lastCheck?.lastAttemptAt && lastCheck.result === 'success' ? ` (${checkClock(lastCheck.lastAttemptAt)})` : ''}. Scheduled checks run {VERSION_CHECK_TIMES.charAt(0).toLowerCase() + VERSION_CHECK_TIMES.slice(1)}.</p>
++              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
++                {checkButton('outline')}
++                {history.length > 0 && <Button variant="ghost" className="whitespace-nowrap text-accent-cyan hover:text-accent-cyan" onClick={() => setActiveTab('history')}>View update history ({history.length})</Button>}
++              </div>
++            </section>
+           )}
+         </TabsContent>
  
          {/* History Tab */}
          <TabsContent value="history" className="mt-0">
-+          <p className="mb-4 text-sm text-text-secondary">Expand a deployed version for its install results.</p>
++          <p className="mb-4 text-sm text-text-secondary">Expand a deployed version to see its install results and saved installation policy.</p>
            {mspTenantSelectionRequired ? (
              <AnimatedEmptyState
                icon={History}
@@ -611,11 +824,34 @@ index b5d2996a2..ae710984c 100644
                color="neutral"
                showOrbs={false}
              />
-@@ -1054,30 +1088,20 @@ export default function UpdatesPage() {
+@@ -1054,30 +1131,43 @@ export default function UpdatesPage() {
          </TabsContent>
        </Tabs>
  
 -      {/* Auto-update apps list, opened from the stat card */}
++      {/* Automatic updates: the publishing window and how updates install, below the list. Settings, the app
++          workspace, the command palette and Help link here with #automatic-updates. */}
++      {!mspTenantSelectionRequired && (
++        <section
++          id="automatic-updates"
++          ref={automaticRef}
++          tabIndex={-1}
++          aria-label="Automatic updates"
++          className={cn(
++            'scroll-mt-24 rounded-xl border bg-bg-surface px-4 py-3 transition-shadow duration-500 focus-visible:outline-none',
++            highlight ? 'border-accent-cyan/50 ring-2 ring-accent-cyan/40' : 'border-overlay/10'
++          )}
++        >
++          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
++            <div className="min-w-0 lg:flex-1"><UpdateSchedule appsOn={isLoadingPolicies ? undefined : autoUpdateCount} onShowApps={() => setAutoUpdateModalOpen(true)} /></div>
++            <div className="min-w-0 border-t border-overlay/10 pt-3 lg:max-w-[50%] lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
++              <InstallationPolicyPanel key={tenantId || 'current'} apps={autoUpdatePolicies} />
++            </div>
++          </div>
++          <StartupInstallations key={`startup:${tenantId || 'current'}`} />
++        </section>
++      )}
++
 +      {/* Apps with Automatic updates on, opened from the schedule row */}
        <AutoUpdateAppsModal
          open={autoUpdateModalOpen}
@@ -1511,17 +1747,17 @@ index 000000000..b5a5ceba5
 +}
 diff --git a/components/hrm/UpdateSchedule.render.test.ts b/components/hrm/UpdateSchedule.render.test.ts
 new file mode 100644
-index 000000000..7b88b81d2
+index 000000000..0aee37b64
 --- /dev/null
 +++ b/components/hrm/UpdateSchedule.render.test.ts
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,66 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
 +import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 +const state = vi.hoisted(() => ({ paused: false, schedule: { enabled: false, paused: false, days: [0,1,2,3,4,5,6], startHour: 0, endHour: 24 }, mutate: vi.fn(), reset: vi.fn() }));
 +vi.mock('@/hooks/useUpdateSchedule', () => ({ useUpdateSchedule: () => ({ data: { supported: true, schedule: Object.assign(state.schedule, { paused: state.paused }), blackouts: [], window: { open: !state.paused } }, action: { mutate: state.mutate, reset: state.reset, isPending: false } }) }));
-+import { UpdateSchedule } from './UpdateSchedule';
++import { AutomaticUpdatesPausedAlert, UpdateSchedule, openPublishingWindow } from './UpdateSchedule';
 +(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 +let root: Root;
 +const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.textContent === label)!;
@@ -1529,17 +1765,17 @@ index 000000000..7b88b81d2
 +const render = () => act(async () => root.render(createElement(UpdateSchedule, { appsOn: 12, onShowApps: showApps })));
 +beforeEach(async () => { state.paused = false; Object.assign(state.schedule, { enabled: false, days: [0, 1, 2, 3, 4, 5, 6], startHour: 0, endHour: 24 }); state.mutate.mockReset(); showApps.mockReset(); const node = document.createElement('div'); document.body.append(node); root = createRoot(node); await render(); });
 +afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
-+// HRM patch 0058 (choice 4B): one strip row with the state and next action; details in the dialog.
-+it('shows the schedule as one strip row with the apps that have Automatic updates on', async () => {
++// App updates' status bar: the window in a few words and the next action; details in the dialog.
++it('shows the publishing window in a few words with the apps that have Automatic updates on', async () => {
 +  const row = document.querySelector('section[aria-label="When can IntuneGet send automatic updates to Intune?"]')!;
-+  expect(row.textContent).toContain('Deploys to Intune when a new version is found');
++  expect(row.textContent).toContain('Publishing window:Anytime');
 +  expect(row.textContent).toContain('On');
 +  await act(async () => button('12 apps with Automatic updates on').click());
 +  expect(showApps).toHaveBeenCalledOnce();
 +  expect(document.body.textContent).not.toContain('Check for new versions');
 +  state.schedule.enabled = true; state.schedule.days = [1, 2, 3, 4, 5]; state.schedule.startHour = 19; state.schedule.endHour = 5;
 +  await render();
-+  expect(row.textContent).toContain('Deploys to Intune Mon, Tue, Wed, Thu, Fri, 7 PM to 5 AM the next day, Maryland time');
++  expect(row.textContent).toContain('Publishing window:Mon to Fri, 7 PM to 5 AM, Maryland time');
 +});
 +it('explains server checks and offers a distinct global pause action in the dialog', async () => {
 +  await act(async () => button('Edit publishing window').click());
@@ -1549,13 +1785,15 @@ index 000000000..7b88b81d2
 +  await act(async () => button('Pause automatic updates').click());
 +  expect(state.mutate.mock.calls[0][0]).toEqual({ action: 'setPaused', paused: true });
 +});
-+it('keeps Resume on the row while paused', async () => {
++it('says Paused on the bar and keeps Resume in the alert above the list, not twice', async () => {
 +  state.paused = true;
-+  await render();
++  await act(async () => root.render(createElement('div', null, createElement(AutomaticUpdatesPausedAlert), createElement(UpdateSchedule, { appsOn: 12, onShowApps: showApps }))));
 +  const row = document.querySelector('section[aria-label="When can IntuneGet send automatic updates to Intune?"]')!;
 +  expect(row.textContent).toContain('Paused for all apps');
-+  expect(row.textContent).toContain('Paused');
-+  await act(async () => button('Resume automatic updates').click());
++  expect(row.textContent).not.toContain('Resume automatic updates');
++  const resume = [...document.querySelectorAll('button')].filter(b => b.textContent === 'Resume automatic updates');
++  expect(resume).toHaveLength(1);
++  await act(async () => resume[0].click());
 +  expect(state.mutate.mock.calls[0][0]).toEqual({ action: 'setPaused', paused: false });
 +});
 +it('saves an unrestricted schedule without resuming paused automatic updates', async () => {
@@ -1568,14 +1806,25 @@ index 000000000..7b88b81d2
 +  expect(state.mutate.mock.calls[0][0]).toMatchObject({ action: 'save', schedule: { enabled: false, paused: true } });
 +  expect(state.mutate.mock.calls.some(([body]) => body.action === 'setPaused')).toBe(false);
 +});
++it('opens the publishing window panel from the paused alert, which shows only while paused', async () => {
++  await act(async () => root.render(createElement('div', null, createElement(AutomaticUpdatesPausedAlert), createElement(UpdateSchedule, { appsOn: 1 }))));
++  expect(document.body.textContent).not.toContain('Automatic updates are paused for all apps.');
++  state.paused = true;
++  await act(async () => root.render(createElement('div', null, createElement(AutomaticUpdatesPausedAlert), createElement(UpdateSchedule, { appsOn: 1 }))));
++  expect(document.body.textContent).toContain('Automatic updates are paused for all apps.');
++  expect(document.body.textContent).toContain('1 app with Automatic updates on');
++  expect(document.querySelector('[role="dialog"]')).toBeNull();
++  await act(async () => openPublishingWindow());
++  expect(document.querySelector('[role="dialog"] h2')!.textContent).toBe('When can IntuneGet send automatic updates to Intune?');
++});
 diff --git a/components/hrm/UpdateSchedule.test.ts b/components/hrm/UpdateSchedule.test.ts
 new file mode 100644
-index 000000000..99c8ffb1f
+index 000000000..9f815af75
 --- /dev/null
 +++ b/components/hrm/UpdateSchedule.test.ts
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,21 @@
 +import { describe, expect, it } from 'vitest';
-+import { hourLabel, scheduleSummary } from './UpdateSchedule';
++import { hourLabel, scheduleSummary, windowLabel } from './UpdateSchedule';
 +describe('update schedule wording (HRM patch 0030)', () => {
 +  it('names hours plainly', () => {
 +    expect([0, 1, 12, 13, 24].map(hourLabel)).toEqual(['midnight', '1 AM', 'noon', '1 PM', 'midnight']);
@@ -1587,21 +1836,29 @@ index 000000000..99c8ffb1f
 +    expect(scheduleSummary({ enabled: true, days: [1, 2, 3, 4], startHour: 18, endHour: 22 })).toBe(`${start}Mon, Tue, Wed, Thu, 6 PM to 10 PM, Maryland time.`);
 +    expect(scheduleSummary({ enabled: true, days: [5], startHour: 20, endHour: 6 })).toBe(`${start}Fri, 8 PM to 6 AM the next day, Maryland time.`);
 +  });
++  it('names the publishing window in a few words for the status bar', () => {
++    expect(windowLabel({ enabled: false, days: [], startHour: 0, endHour: 24 })).toBe('Anytime');
++    expect(windowLabel({ enabled: true, days: [0, 1, 2, 3, 4, 5, 6], startHour: 0, endHour: 24 })).toBe('Every day, all day');
++    expect(windowLabel({ enabled: true, days: [5, 1, 2, 3, 4], startHour: 19, endHour: 5 })).toBe('Mon to Fri, 7 PM to 5 AM');
++    expect(windowLabel({ enabled: true, days: [1, 3], startHour: 18, endHour: 22 })).toBe('Mon, Wed, 6 PM to 10 PM');
++    expect(windowLabel({ enabled: true, days: [0, 6], startHour: 0, endHour: 12 })).toBe('Sun, Sat, midnight to noon');
++  });
 +});
 diff --git a/components/hrm/UpdateSchedule.tsx b/components/hrm/UpdateSchedule.tsx
 new file mode 100644
-index 000000000..39af544d6
+index 000000000..73ff9aead
 --- /dev/null
 +++ b/components/hrm/UpdateSchedule.tsx
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,147 @@
 +'use client';
 +import Link from 'next/link';
 +import { useEffect, useState } from 'react';
++import { AlertTriangle } from 'lucide-react';
 +import { useUpdateSchedule } from '@/hooks/useUpdateSchedule';
 +import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 +import { Button } from '@/components/ui/button';
 +import { BLACKOUT_LABEL_MAX, DAY_NAMES, type UpdateSchedule as Schedule } from '@/lib/hrm/update-window';
-+import { StatusStripRow, StripPill } from './StatusStripRow';
++import { StripPill } from './StatusStripRow';
 +import { VERSION_CHECK_TIMES } from './VersionDiscovery';
 +
 +/** HRM patch 0030: when automatic updates and pilot rollouts may start. */
@@ -1622,6 +1879,35 @@ index 000000000..39af544d6
 +  return `Allowed deployment hours: ${days}, ${hours}, Maryland time.`;
 +}
 +
++/** The publishing window in a few words for App updates' status bar, such as "Mon to Fri, 7 PM to 5 AM". */
++export function windowLabel(s: Schedule): string {
++  if (!s.enabled) return 'Anytime';
++  const days = [...s.days].sort((a, b) => a - b);
++  const short = (d: number) => DAY_NAMES[d].slice(0, 3);
++  const run = days.length >= 3 && days.every((d, i) => i === 0 || d === days[i - 1] + 1);
++  const dayText = days.length === 7 ? 'Every day' : run ? `${short(days[0])} to ${short(days[days.length - 1])}` : days.map(short).join(', ');
++  const hours = s.startHour === 0 && s.endHour === 24 ? 'all day' : `${hourLabel(s.startHour)} to ${hourLabel(s.endHour)}`;
++  return `${dayText}, ${hours}`;
++}
++
++const OPEN_EVENT = 'hrm:open-publishing-window';
++/** Opens the publishing window panel from the paused alert above the list. */
++export function openPublishingWindow() { window.dispatchEvent(new Event(OPEN_EVENT)); }
++
++/** Above the update list, only while automatic updates are paused, so a pause is never missed. */
++export function AutomaticUpdatesPausedAlert() {
++  const { data, action } = useUpdateSchedule();
++  if (data?.supported === false || !data?.schedule?.paused) return null;
++  return <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 px-4 py-2.5 text-sm">
++    <span className="flex min-w-0 items-center gap-2.5"><AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" /><span className="font-medium text-text-primary">Automatic updates are paused for all apps.</span><span className="hidden text-text-secondary sm:inline">Review update and Update all still work.</span></span>
++    <span className="flex flex-wrap items-center gap-2">
++      <Button variant="outline" size="sm" className="whitespace-nowrap" disabled={action.isPending} onClick={() => action.mutate({ action: 'setPaused', paused: false })}>{action.isPending ? 'Saving…' : 'Resume automatic updates'}</Button>
++      <Button variant="ghost" size="sm" className="whitespace-nowrap text-accent-cyan hover:text-accent-cyan" onClick={openPublishingWindow}>Edit publishing window</Button>
++    </span>
++    {action.error && <p role="alert" className="w-full text-sm text-status-error">{action.error.message}</p>}
++  </div>;
++}
++
 +const formatDate = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
 +
 +export function UpdateSchedule({ appsOn, onShowApps }: { appsOn?: number; onShowApps?: () => void } = {}) {
@@ -1630,6 +1916,12 @@ index 000000000..39af544d6
 +  const [draft, setDraft] = useState<Schedule | null>(null);
 +  const [blackout, setBlackout] = useState({ startsOn: '', endsOn: '', label: '' });
 +  useEffect(() => { if (data?.schedule && !editing) setDraft(data.schedule); }, [data?.schedule, editing]);
++  const schedule = data?.schedule;
++  useEffect(() => {
++    const open = () => { if (!schedule || action.isPending) return; action.reset(); setDraft(schedule); setEditing(true); };
++    window.addEventListener(OPEN_EVENT, open);
++    return () => window.removeEventListener(OPEN_EVENT, open);
++  }, [schedule, action]);
 +  if (data?.supported === false) return null;
 +  const w = data?.window;
 +  const hours = Array.from({ length: 25 }, (_, h) => h);
@@ -1662,23 +1954,24 @@ index 000000000..39af544d6
 +      </form>
 +      {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
 +    </div>;
-+  const schedule = data?.schedule;
 +  const pauseButton = schedule && <Button variant="outline" size="sm" disabled={action.isPending} onClick={() => action.mutate({ action: 'setPaused', paused: !schedule.paused })}>{action.isPending && action.variables?.action === 'setPaused' ? 'Saving…' : schedule.paused ? 'Resume automatic updates' : 'Pause automatic updates'}</Button>;
-+  // HRM patch 0058 (choice 4B): one strip row. State and the next action here; pausing, check times,
-+  // the editor and blackouts in the Edit schedule dialog. Resume stays on the row while paused.
-+  const summary = isLoading ? 'Loading the update schedule…' : !schedule ? null : <>
-+    {schedule.paused ? 'Paused for all apps' : !schedule.enabled ? 'Deploys to Intune when a new version is found' : `Deploys to Intune ${scheduleSummary(schedule).replace('Allowed deployment hours: ', '').replace(/^Every day/, 'every day').replace(/, Maryland time\.$/, '')}, Maryland time`}
-+    {appsOn !== undefined && <>{' · '}{onShowApps ? <button type="button" className="text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded" onClick={onShowApps}>{appsOn === 1 ? '1 app' : `${appsOn} apps`} with Automatic updates on</button> : `${appsOn === 1 ? '1 app' : `${appsOn} apps`} with Automatic updates on`}</>}
-+  </>;
++  // App updates' status bar: the window's state and a few words, the apps with Automatic updates on, and
++  // the editor. Pausing, check times and blackouts are in the panel; while paused, Resume is in the alert above the list.
++  const appsText = appsOn === undefined ? null : `${appsOn === 1 ? '1 app' : `${appsOn} apps`} with Automatic updates on`;
++  const summary = isLoading ? 'Loading the update schedule…' : !schedule ? null : schedule.paused ? 'Paused for all apps' : `${windowLabel(schedule)}${schedule.enabled ? ', Maryland time' : ''}`;
 +  const state = schedule && (schedule.paused ? <StripPill tone="warn">Paused</StripPill> : w && !w.open ? <StripPill tone="warn">Waiting</StripPill> : <StripPill tone="ok">On</StripPill>);
-+  return <StatusStripRow
-+    label="When can IntuneGet send automatic updates to Intune?"
-+    summary={summary}
-+    status={state}
-+    action={schedule && <div className="flex flex-wrap gap-2">
-+      {schedule.paused && pauseButton}
++  return <section aria-label="When can IntuneGet send automatic updates to Intune?" className="min-w-0 space-y-1">
++    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
++      {state}
++      <h3 className="whitespace-nowrap font-medium text-text-primary">Publishing window:</h3>
++      <span className="text-text-secondary">{summary}</span>
++      {appsText && <>
++        <span aria-hidden="true" className="text-text-muted">·</span>
++        {onShowApps ? <button type="button" className="text-left text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded" onClick={onShowApps}>{appsText}</button> : <span className="text-text-secondary">{appsText}</span>}
++      </>}
++      {schedule && <span className="flex flex-wrap items-center gap-2">
 +      <Dialog open={editing} onOpenChange={value => { if (!action.isPending) { if (value) { action.reset(); setDraft(schedule); } setEditing(value); } }}>
-+        <DialogTrigger asChild><Button variant="ghost" size="sm" aria-label="Edit publishing window">Edit publishing window</Button></DialogTrigger>
++        <DialogTrigger asChild><Button variant="ghost" size="sm" className="h-7 whitespace-nowrap px-0 text-accent-cyan hover:bg-transparent hover:text-accent-cyan hover:underline">Edit publishing window</Button></DialogTrigger>
 +        <DialogContent side="right" hideCloseButton={action.isPending} onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }}>
 +          <DialogHeader className="pr-12"><DialogTitle>When can IntuneGet send automatic updates to Intune?</DialogTitle><DialogDescription>Controls when new automatic update packages and pilots can deploy to Intune. How automatic updates install is a separate setting on this page.</DialogDescription></DialogHeader>
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
@@ -1686,7 +1979,7 @@ index 000000000..39af544d6
 +              <p className={`text-sm font-semibold ${schedule.paused ? 'text-status-warning' : 'text-status-success'}`}>{schedule.paused ? 'Paused for all apps' : w && !w.open ? 'Waiting to deploy' : 'Automatic updates are on'}</p>
 +              {pauseButton}
 +            </div>
-+            <details className="text-xs text-text-muted"><summary className="cursor-pointer text-text-secondary">What does pausing change?</summary><p className="mt-2 leading-relaxed">Holds new automatic updates, pilot starts and wider rollouts. Checks continue. Queued work and installations on computers can continue; manual Update and Update all still work. For one app, choose Notify only instead of Auto-update.</p></details>
++            <details className="text-xs text-text-muted"><summary className="cursor-pointer text-text-secondary">What does pausing change?</summary><p className="mt-2 leading-relaxed">Holds new automatic updates, pilot starts and wider rollouts. Checks continue. Queued work and installations on computers can continue; Review update and Update all still work. For one app, choose Notify only instead of Auto-update.</p></details>
 +            <dl className="divide-y divide-overlay/10 text-sm">
 +              <div className="flex flex-wrap justify-between gap-3 py-3"><dt className="text-text-muted">New version checks</dt><dd className="text-right text-text-primary">{VERSION_CHECK_TIMES}<span className="block text-xs font-normal text-text-muted">Fixed on the server</span></dd></div>
 +              {schedule.enabled && <div className="flex flex-wrap justify-between gap-3 py-3"><dt className="text-text-muted">Held updates</dt><dd className="text-right text-text-primary">Rechecked hourly</dd></div>}
@@ -1697,25 +1990,25 @@ index 000000000..39af544d6
 +          </div>
 +        </DialogContent>
 +      </Dialog>
-+    </div>}
-+  >
++      </span>}
++    </div>
 +    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
-+    {schedule && w && !w.open && !schedule.paused && <p className="text-sm text-status-warning">{w.reason}</p>}
 +    {schedule && !!data?.blackouts?.length && <p className="text-xs text-text-muted">{data.blackouts.length === 1 ? '1 blackout' : `${data.blackouts.length} blackouts`} current or upcoming.</p>}
 +    {action.error && !editing && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
-+  </StatusStripRow>;
++  </section>;
 +}
 diff --git a/components/hrm/VersionDiscovery.tsx b/components/hrm/VersionDiscovery.tsx
 new file mode 100644
-index 000000000..3e2da90c7
+index 000000000..6bcf0a603
 --- /dev/null
 +++ b/components/hrm/VersionDiscovery.tsx
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,64 @@
 +'use client';
 +import Link from 'next/link';
 +import { useQuery } from '@tanstack/react-query';
 +import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
 +import { useDatabaseMode } from '@/hooks/use-database-mode';
++import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 +
 +export const VERSION_CHECK_TIMES = 'Daily at 3:30 AM and 3:30 PM, Maryland time';
 +const ELSEWHERE: { what: string; detail: string; href?: string; link?: string }[] = [
@@ -1746,10 +2039,11 @@ index 000000000..3e2da90c7
 +  </section>;
 +}
 +interface CheckStatus { supported: boolean; reported: boolean; lastAttemptAt: string | null; result: string | null; nextExpectedAt: string }
-+const clock = (value: string) => new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-+export function VersionCheckStatus() {
++export const clock = (value: string) => new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
++/** The last and next new-version check, shared by the header and the empty list. */
++export function useVersionCheckStatus() {
 +  const { getAccessToken, isAuthenticated, account } = useMicrosoftAuth();
-+  const query = useQuery<CheckStatus>({ queryKey: ['hrm', 'version-check-status', account?.tenantId, account?.localAccountId], enabled: isAuthenticated, staleTime: 60000,
++  return useQuery<CheckStatus>({ queryKey: ['hrm', 'version-check-status', account?.tenantId, account?.localAccountId], enabled: isAuthenticated, staleTime: 60000,
 +    queryFn: async () => {
 +      const token = await getAccessToken();
 +      if (!token) throw new Error('Sign in to view version check status.');
@@ -1757,8 +2051,20 @@ index 000000000..3e2da90c7
 +      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Version check status unavailable.');
 +      return response.json();
 +    } });
++}
++export function VersionCheckStatus({ compact = false }: { compact?: boolean } = {}) {
++  const query = useVersionCheckStatus();
 +  if (query.data?.supported === false) return null;
 +  const status = query.data;
++  if (compact) {
++    // App updates' header: when the last check ran, with the fixed schedule on hover or keyboard focus.
++    const failed = !!status?.lastAttemptAt && status.result !== 'success';
++    const text = query.isLoading ? 'Checking status…' : query.error ? 'Check status unavailable' : status?.lastAttemptAt ? `${failed ? 'Last check did not complete' : 'Checked'} ${clock(status.lastAttemptAt)}` : 'Last check not reported';
++    return <TooltipProvider delayDuration={150}><Tooltip>
++      <TooltipTrigger asChild><span tabIndex={0} aria-label={`New version checks: ${text}`} className={`cursor-help whitespace-nowrap rounded-sm text-xs underline decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan ${failed || query.error ? 'text-status-warning decoration-status-warning/60' : 'text-text-muted decoration-text-muted'}`}>{text}</span></TooltipTrigger>
++      <TooltipContent className="max-w-80 border border-overlay/10 text-sm font-normal leading-relaxed">{VERSION_CHECK_TIMES}. Fixed on the server.{status?.nextExpectedAt ? ` Next check: ${clock(status.nextExpectedAt)}.` : ''} A check finds new versions and can start Auto-update deployments to Intune. It does not install anything on computers itself.</TooltipContent>
++    </Tooltip></TooltipProvider>;
++  }
 +  return <div className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4 text-sm text-text-secondary" aria-label="New version checks"><span className="font-medium text-text-primary">New version checks</span><span>{query.isLoading ? 'Loading check status…' : query.error ? 'Check status unavailable' : status?.lastAttemptAt ? `Last check attempt: ${clock(status.lastAttemptAt)} Maryland time · ${status.result === 'success' ? 'completed' : status.result || 'outcome unknown'}` : 'Last check not reported'}</span>{status?.nextExpectedAt && <span>Next expected check: {clock(status.nextExpectedAt)} Maryland time</span>}<span className="text-xs text-text-muted">{VERSION_CHECK_TIMES}. Fixed on the server. A check finds new versions and can start Auto-update deployments to Intune. It does not install anything on computers itself.</span></div>;
 +}
 diff --git a/components/updates/AutoUpdateAppsModal.test.ts b/components/updates/AutoUpdateAppsModal.test.ts
@@ -1945,7 +2251,7 @@ index 561b90e5e..55cf98df2 100644
            )}
          </div>
 diff --git a/components/updates/AutoUpdateHistory.tsx b/components/updates/AutoUpdateHistory.tsx
-index 6666d0d8f..6c5a5f26c 100644
+index 6666d0d8f..57dc33d36 100644
 --- a/components/updates/AutoUpdateHistory.tsx
 +++ b/components/updates/AutoUpdateHistory.tsx
 @@ -1,5 +1,7 @@
@@ -1991,7 +2297,13 @@ index 6666d0d8f..6c5a5f26c 100644
    },
    failed: {
      icon: XCircle,
-@@ -95,7 +98,7 @@ const updateTypeColors: Record<string, string> = {
+@@ -90,12 +93,12 @@ const updateTypeLabels: Record<string, string> = {
+ };
+ 
+ const updateTypeColors: Record<string, string> = {
+-  patch: 'text-text-muted bg-overlay/[0.04] border-black/[0.08]',
++  patch: 'text-status-success bg-status-success/10 border-status-success/20',
+   minor: 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/20',
    major: 'text-status-warning bg-status-warning/10 border-status-warning/20',
  };
  
@@ -2035,7 +2347,7 @@ index 6666d0d8f..6c5a5f26c 100644
        </div>
      );
    }
-@@ -164,7 +168,7 @@ export function AutoUpdateHistory({
+@@ -164,19 +168,19 @@ export function AutoUpdateHistory({
            {/* Date group heading with count badge */}
            <div className="flex items-center gap-3 mb-3 pl-1">
              <Calendar className="w-3.5 h-3.5 text-text-muted" />
@@ -2044,7 +2356,43 @@ index 6666d0d8f..6c5a5f26c 100644
                <T>{group}</T>
              </h3>
              <span className="text-[10px] font-medium text-text-muted bg-overlay/[0.06] px-1.5 py-0.5 rounded-md tabular-nums">
-@@ -236,7 +240,7 @@ export function AutoUpdateHistory({
+               {items.length}
+             </span>
+-            <div className="flex-1 h-px bg-black/[0.06]" />
++            <div className="flex-1 h-px bg-overlay/10" />
+           </div>
+ 
+           {/* Timeline items */}
+           <div className="relative">
+             {/* Vertical connecting line */}
+-            <div className="absolute left-[7px] top-4 bottom-4 w-[1.5px] bg-gradient-to-b from-black/[0.08] via-black/[0.06] to-transparent" />
++            <div className="absolute left-[7px] top-4 bottom-4 w-[1.5px] bg-gradient-to-b from-overlay/15 via-overlay/10 to-transparent" />
+ 
+             <div className="space-y-2">
+               {items.map((item) => {
+@@ -211,12 +215,12 @@ export function AutoUpdateHistory({
+ 
+                     {/* Card */}
+                     <div className={cn(
+-                      'glass-light rounded-lg border border-black/[0.08] overflow-hidden transition-all duration-200',
+-                      isExpanded && 'border-black/[0.12] shadow-soft'
++                      'glass-light rounded-lg border border-overlay/10 overflow-hidden transition-all duration-200',
++                      isExpanded && 'border-overlay/15 shadow-soft'
+                     )}>
+                       <button
+                         onClick={() => setExpandedId(isExpanded ? null : item.id)}
+-                        className="w-full flex items-center justify-between p-3.5 text-left hover:bg-overlay/[0.02] transition-colors"
++                        className="w-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3.5 text-left hover:bg-overlay/[0.02] transition-colors"
+                       >
+                         <div className="flex items-center gap-3 min-w-0 flex-1">
+                           {/* Status Icon */}
+@@ -231,12 +235,12 @@ export function AutoUpdateHistory({
+                           {/* App Info */}
+                           <div className="min-w-0 flex-1">
+                             <div className="flex items-center gap-2 mb-0.5">
+-                              <span className="text-sm font-medium text-text-primary truncate">
++                              <span className="text-sm font-medium text-text-primary truncate min-w-0">
+                                 {item.display_name || item.policy.winget_id}
                                </span>
                                <span
                                  className={cn(
@@ -2053,8 +2401,36 @@ index 6666d0d8f..6c5a5f26c 100644
                                    updateTypeColors[item.update_type]
                                  )}
                                >
-@@ -290,26 +294,27 @@ export function AutoUpdateHistory({
-                             <div className="px-3.5 pb-3.5 pt-0 border-t border-black/[0.06]">
+@@ -251,18 +255,18 @@ export function AutoUpdateHistory({
+                           </div>
+                         </div>
+ 
+-                        <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+-                          {/* Status label + Timestamp */}
+-                          <div className="text-right">
++                        <div className="flex items-center justify-between gap-3 flex-shrink-0 pl-7 sm:pl-0 sm:ml-3">
++                          {/* Status label + Timestamp: below the name on a phone, at the right on wider screens */}
++                          <div className="flex items-center gap-2 sm:block sm:text-right">
+                             <span
+                               className={cn(
+-                                'inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md',
++                                'inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md whitespace-nowrap',
+                                 status.color, status.bgColor
+                               )}
+                             >
+                               {status.label}
+                             </span>
+-                            <p className="text-[11px] text-text-muted mt-0.5 tabular-nums">
++                            <p className="text-[11px] text-text-muted sm:mt-0.5 tabular-nums whitespace-nowrap">
+                               {formatTime(item.triggered_at)}
+                             </p>
+                           </div>
+@@ -287,29 +291,30 @@ export function AutoUpdateHistory({
+                             transition={{ duration: 0.2, ease: 'easeInOut' }}
+                             className="overflow-hidden"
+                           >
+-                            <div className="px-3.5 pb-3.5 pt-0 border-t border-black/[0.06]">
++                            <div className="px-3.5 pb-3.5 pt-0 border-t border-overlay/10">
                                <div className="mt-3 bg-overlay/[0.02] rounded-lg p-3.5 grid grid-cols-2 gap-3">
                                  <div>
 -                                  <span className="text-text-muted text-[11px] font-medium uppercase tracking-wide"><T>Winget ID</T></span>
@@ -2114,6 +2490,44 @@ index 6666d0d8f..6c5a5f26c 100644
              )}
            </Button>
          </div>
+@@ -390,15 +397,15 @@ function AutoUpdateHistorySkeleton() {
+           <div className="w-3.5 h-3.5 bg-overlay/[0.06] rounded animate-pulse" />
+           <div className="h-3 w-12 bg-overlay/[0.06] rounded animate-pulse" />
+           <div className="h-4 w-5 bg-overlay/[0.04] rounded-md animate-pulse" />
+-          <div className="flex-1 h-px bg-black/[0.06]" />
++          <div className="flex-1 h-px bg-overlay/10" />
+         </div>
+         <div className="relative">
+-          <div className="absolute left-[7px] top-4 bottom-4 w-[1.5px] bg-black/[0.06]" />
++          <div className="absolute left-[7px] top-4 bottom-4 w-[1.5px] bg-overlay/10" />
+           <div className="space-y-2">
+             {Array.from({ length: 3 }).map((_, i) => (
+               <div key={`g1-${i}`} className="relative pl-6">
+                 <div className="absolute left-0 top-[18px] w-[15px] h-[15px] rounded-full bg-overlay/[0.06] animate-pulse" />
+-                <div className="glass-light rounded-lg border border-black/[0.08] p-3.5">
++                <div className="glass-light rounded-lg border border-overlay/10 p-3.5">
+                   <div className="flex items-center gap-3">
+                     <div className="w-4 h-4 bg-overlay/[0.06] rounded-full animate-pulse flex-shrink-0" />
+                     <div className="flex-1">
+@@ -423,15 +430,15 @@ function AutoUpdateHistorySkeleton() {
+           <div className="w-3.5 h-3.5 bg-overlay/[0.06] rounded animate-pulse" />
+           <div className="h-3 w-16 bg-overlay/[0.06] rounded animate-pulse" />
+           <div className="h-4 w-5 bg-overlay/[0.04] rounded-md animate-pulse" />
+-          <div className="flex-1 h-px bg-black/[0.06]" />
++          <div className="flex-1 h-px bg-overlay/10" />
+         </div>
+         <div className="relative">
+-          <div className="absolute left-[7px] top-4 bottom-4 w-[1.5px] bg-black/[0.06]" />
++          <div className="absolute left-[7px] top-4 bottom-4 w-[1.5px] bg-overlay/10" />
+           <div className="space-y-2">
+             {Array.from({ length: 2 }).map((_, i) => (
+               <div key={`g2-${i}`} className="relative pl-6">
+                 <div className="absolute left-0 top-[18px] w-[15px] h-[15px] rounded-full bg-overlay/[0.06] animate-pulse" />
+-                <div className="glass-light rounded-lg border border-black/[0.08] p-3.5">
++                <div className="glass-light rounded-lg border border-overlay/10 p-3.5">
+                   <div className="flex items-center gap-3">
+                     <div className="w-4 h-4 bg-overlay/[0.06] rounded-full animate-pulse flex-shrink-0" />
+                     <div className="flex-1">
 diff --git a/components/updates/CartUpdatePolicyPicker.test.ts b/components/updates/CartUpdatePolicyPicker.test.ts
 new file mode 100644
 index 000000000..086810293
@@ -2293,10 +2707,10 @@ index 2f6dbf69d..31bf9520e 100644
    );
 diff --git a/components/updates/UpdateCard.test.ts b/components/updates/UpdateCard.test.ts
 new file mode 100644
-index 000000000..01b2ee741
+index 000000000..45237b5d2
 --- /dev/null
 +++ b/components/updates/UpdateCard.test.ts
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,180 @@
 +// @vitest-environment happy-dom
 +// HRM patch 0036: policy badges use the menu's names, auto-update turned off by failures says so,
 +// and Critical, Unmanaged and "new app" markers show only in Supabase mode.
@@ -2312,17 +2726,47 @@ index 000000000..01b2ee741
 +  const strip = (tag: string) => ({ children, className }: { children?: ReactNode; className?: string }) => h(tag, { className }, children);
 +  return { motion: { div: strip('div'), span: strip('span') }, useReducedMotion: () => true, AnimatePresence: ({ children }: { children: ReactNode }) => children };
 +});
-+vi.mock('@/components/hrm/PilotRollouts', () => ({ StartPilot: () => null }));
++const pilot = vi.hoisted(() => ({ value: { active: false, canStart: true } }));
++vi.mock('@/components/hrm/PilotRollouts', async () => {
++  const { createElement: h } = await import('react');
++  return {
++    usePilotStart: () => pilot.value,
++    PilotActiveNote: () => pilot.value.active ? h('p', null, 'Pilot active. Review Pilot rollouts above before another update.') : null,
++    StartPilot: ({ open }: { open?: boolean }) => open ? h('div', { role: 'dialog' }, 'Pilot dialog') : null,
++  };
++});
++vi.mock('@/components/hrm/AppTimingPanel', async () => {
++  const { createElement: h } = await import('react');
++  return { INSTALL_DATES: 'Install dates', AppTimingPanel: ({ open }: { open?: boolean }) => open ? h('div', { role: 'dialog' }, 'Install dates panel') : null };
++});
++const schedule = vi.hoisted(() => ({ value: { supported: true, schedule: { enabled: true, paused: false, days: [1, 2, 3, 4, 5], startHour: 19, endHour: 5 }, window: { open: false, reason: 'x', blackout: null, nextOpen: null } } as Record<string, unknown> }));
++vi.mock('@/hooks/useUpdateSchedule', () => ({ useUpdateSchedule: () => ({ data: schedule.value }) }));
++vi.mock('@/components/ui/dropdown-menu', async () => {
++  const { createElement: h } = await import('react');
++  const pass = ({ children }: { children?: ReactNode }) => h('div', null, children);
++  return {
++    DropdownMenu: pass, DropdownMenuTrigger: pass, DropdownMenuContent: ({ children }: { children?: ReactNode }) => h('div', { role: 'menu' }, children),
++    DropdownMenuItem: ({ children, onSelect, asChild }: { children?: ReactNode; onSelect?: () => void; asChild?: boolean }) => asChild ? h('div', { role: 'menuitem' }, children) : h('button', { role: 'menuitem', onClick: onSelect }, children),
++  };
++});
 +vi.mock('@/components/hrm/AppGroupsLine', () => ({ AppGroupsLine: () => null }));
 +vi.mock('@/components/AppIcon', () => ({ AppIcon: () => null }));
-+vi.mock('./UpdatePolicySelector', () => ({ UpdatePolicySelector: () => null }));
++vi.mock('./UpdatePolicySelector', async () => {
++  const { createElement: h } = await import('react');
++  return { UpdatePolicySelector: ({ currentPolicy, isEnabled, showLabel, variant }: { currentPolicy: string | null; isEnabled: boolean; showLabel: boolean; variant: string }) =>
++    h('span', { 'data-selector': `${variant}:${showLabel}` }, currentPolicy === 'auto_update' ? (isEnabled ? 'Auto-update' : 'Auto-update off') : 'Notify only') };
++});
 +vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { shared: { mode: 'prompt', days: 3 }, exceptions: [] } }) }));
 +import { UpdateCard } from './UpdateCard';
 +import type { AvailableUpdate } from '@/types/update-policies';
 +
 +let root: Root;
 +(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-+beforeEach(() => { const el = document.createElement('div'); document.body.append(el); root = createRoot(el); mode.value = 'sqlite'; });
++beforeEach(() => {
++  const el = document.createElement('div'); document.body.append(el); root = createRoot(el); mode.value = 'sqlite';
++  pilot.value = { active: false, canStart: true };
++  schedule.value = { supported: true, schedule: { enabled: true, paused: false, days: [1, 2, 3, 4, 5], startHour: 19, endHour: 5 }, window: { open: false, reason: 'x', blackout: null, nextOpen: null } };
++});
 +afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
 +
 +const update = (over: Partial<AvailableUpdate> = {}): AvailableUpdate => ({
@@ -2334,10 +2778,11 @@ index 000000000..01b2ee741
 +  id: 'p-1', policy_type: 'auto_update' as const, is_enabled: true, pinned_version: null, last_auto_update_at: null,
 +  last_auto_update_version: null, consecutive_failures: 0, ...over,
 +});
-+async function render(u: AvailableUpdate) {
-+  await act(async () => root.render(createElement(UpdateCard, { update: u, onTriggerUpdate: vi.fn(), onPolicyChange: vi.fn() })));
++async function render(u: AvailableUpdate, reviewFirst = true) {
++  await act(async () => root.render(createElement(UpdateCard, { update: u, onTriggerUpdate: vi.fn(), onPolicyChange: vi.fn(), reviewFirst })));
 +  return document.body.textContent ?? '';
 +}
++const buttons = (label: string) => [...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === label);
 +
 +describe('UpdateCard', () => {
 +  it('names the policy the same way as the menu', async () => {
@@ -2376,24 +2821,103 @@ index 000000000..01b2ee741
 +      for (const el of badges) expect(el.className).not.toMatch(/\buppercase\b/);
 +    }
 +  });
++
++  it('labels the policy menu on the card and shows the update type at the top', async () => {
++    await render(update({ policy: policy({ policy_type: 'notify' }), current_version: '1.0.0', latest_version: '1.0.1' }));
++    expect(document.querySelector('[data-selector]')!.getAttribute('data-selector')).toBe('pill:true');
++    const badges = [...document.querySelectorAll('span')].filter((el) => el.textContent?.trim() === 'Patch');
++    expect(badges).toHaveLength(1);
++  });
++
++  it('labels the card button Review update where it opens the review, and quiets it when Auto-update is on', async () => {
++    await render(update({ policy: policy({ policy_type: 'notify' }) }));
++    const [review] = buttons('Review update');
++    expect(review).toBeTruthy();
++    expect(review.getAttribute('aria-label')).toBe('Review update Example App to 2.0.0');
++    expect(review.className).toContain('bg-accent-cyan');
++    await render(update({ policy: policy() }));
++    expect(buttons('Review update')[0].className).not.toContain('bg-accent-cyan hover');
++    await render(update({ policy: policy({ auto_update_scope: 'minor' }), current_version: '1.0.0', latest_version: '1.0.1' }));
++    expect(buttons('Review update')[0].className).toContain('bg-accent-cyan hover');
++    await render(update({ policy: policy({ policy_type: 'notify' }) }), false);
++    expect(buttons('Review update')).toHaveLength(0);
++    expect(buttons('Update')).toHaveLength(1);
++  });
++
++  it('keeps Install dates, Test with a pilot group and Open app workspace in the More menu, each working', async () => {
++    await render(update({ policy: policy({ policy_type: 'notify' }) }));
++    expect(document.querySelector('[aria-label="More actions for Example App"]')).not.toBeNull();
++    const menu = document.querySelector('[role="menu"]')!;
++    expect([...menu.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)).toEqual(['Install dates', 'Test with a pilot group', 'Open app workspace']);
++    // The workspace link appears once, in the menu; the app name is the other way there.
++    const workspaceLinks = [...document.querySelectorAll('a')].filter((a) => a.textContent === 'Open app workspace');
++    expect(workspaceLinks).toHaveLength(1);
++    expect(workspaceLinks[0].getAttribute('href')).toContain('app-1');
++    expect(document.body.textContent).not.toContain('Install dates panel');
++    await act(async () => buttons('Install dates')[0].click());
++    expect(document.body.textContent).toContain('Install dates panel');
++    await act(async () => buttons('Test with a pilot group')[0].click());
++    expect(document.body.textContent).toContain('Pilot dialog');
++  });
++
++  it('offers only what works: no pilot item while a pilot runs (the note stays on the card) and no menu for a custom app', async () => {
++    pilot.value = { active: true, canStart: false };
++    let text = await render(update({ policy: policy({ policy_type: 'notify' }) }));
++    expect(text).toContain('Pilot active. Review Pilot rollouts above');
++    expect(buttons('Test with a pilot group')).toHaveLength(0);
++    text = await render(update({ winget_id: 'Custom.Example', policy: null }));
++    expect(document.querySelector('[aria-label^="More actions"]')).toBeNull();
++    expect(text).toContain('Deploy new version');
++  });
++
++  it('says honestly what happens next for an Auto-update app', async () => {
++    expect(await render(update({ policy: policy(), current_version: '1.0.0', latest_version: '1.0.1' }))).toContain('Waiting for publishing window (Mon to Fri, 7 PM to 5 AM, Maryland time). Held updates are rechecked hourly.');
++    schedule.value = { ...schedule.value, schedule: { enabled: true, paused: true, days: [1], startHour: 0, endHour: 24 } };
++    expect(await render(update({ policy: policy(), current_version: '1.0.0', latest_version: '1.0.1' }))).toContain('Held: automatic updates are paused for all apps. Review update still works.');
++    schedule.value = { supported: true, schedule: { enabled: false, paused: false, days: [], startHour: 0, endHour: 24 }, window: { open: true, reason: null, blackout: null, nextOpen: null } };
++    expect(await render(update({ policy: policy(), current_version: '1.0.0', latest_version: '1.0.1' }))).toContain('Starts at the next update check unless a safety check holds it.');
++    const held = await render(update({ policy: policy({ auto_update_scope: 'minor' }), current_version: '1.0.0', latest_version: '1.0.1' }));
++    expect(held).toContain('Held by scope');
++    expect(held).not.toContain('Starts at the next update check');
++  });
++
++  it('says a Notify only update waits for review', async () => {
++    expect(await render(update({ policy: policy({ policy_type: 'notify' }) }))).toContain('Waiting for your review · Detected today');
++    expect(await render(update({ policy: null, detected_at: new Date(Date.now() - 2 * 86400000).toISOString() }))).toContain('Waiting for your review · Detected 2 days ago');
++  });
++
++  it('uses theme borders that stay visible in dark mode', async () => {
++    await render(update({ policy: policy({ policy_type: 'notify' }) }));
++    expect(document.body.innerHTML).not.toMatch(/border-black|bg-black/);
++  });
 +});
 diff --git a/components/updates/UpdateCard.tsx b/components/updates/UpdateCard.tsx
-index 479225ee5..5041c409e 100644
+index 479225ee5..74e163039 100644
 --- a/components/updates/UpdateCard.tsx
 +++ b/components/updates/UpdateCard.tsx
-@@ -14,15 +14,22 @@ import {
-   BellOff,
-   Pin,
-   ChevronRight,
+@@ -10,19 +10,28 @@ import {
+   RefreshCw,
+   XCircle,
+   Clock,
+-  Bell,
+-  BellOff,
+-  Pin,
+-  ChevronRight,
 -  Zap,
    Plus,
    ShieldOff,
++  MoreHorizontal,
  } from 'lucide-react';
 +import Link from 'next/link';
 +import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
  import { Button } from '@/components/ui/button';
 +import { isCustomAppId } from '@/lib/hrm/new-version';
-+import { StartPilot } from '@/components/hrm/PilotRollouts';
++import { useState } from 'react';
++import { PilotActiveNote, StartPilot, usePilotStart } from '@/components/hrm/PilotRollouts';
++import { INSTALL_DATES } from '@/components/hrm/AppTimingPanel';
++import { windowLabel } from '@/components/hrm/UpdateSchedule';
++import { useUpdateSchedule } from '@/hooks/useUpdateSchedule';
++import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 +import { AutoUpdateTimingSummary } from '@/components/hrm/InstallationPolicyPanel';
 +import { AppTimingPanel } from '@/components/hrm/AppTimingPanel';
 +import { AppGroupsLine } from '@/components/hrm/AppGroupsLine';
@@ -2402,25 +2926,47 @@ index 479225ee5..5041c409e 100644
  import { cn } from '@/lib/utils';
 -import { autoUpdateScopeReason, classifyUpdateType } from '@/types/update-policies';
 +import { useDatabaseMode } from '@/hooks/use-database-mode';
-+import { UPDATE_POLICY_LABELS, autoUpdateScopeReason, classifyUpdateType, isAutoUpdateTurnedOff } from '@/types/update-policies';
++import { autoUpdateScopeReason, classifyUpdateType, isAutoUpdateTurnedOff } from '@/types/update-policies';
  import { fadeUp, springPresets } from '@/lib/animations/variants';
  import type { AvailableUpdate, UpdatePolicyType } from '@/types/update-policies';
  
-@@ -42,10 +49,9 @@ const policyIcons: Record<string, typeof RefreshCw> = {
-   pin_version: Pin,
- };
+@@ -33,29 +42,10 @@ interface UpdateCardProps {
+   onDismiss?: (update: AvailableUpdate) => void;
+   isUpdating?: boolean;
+   index?: number;
++  /** The card's button opens Review update first (SQLite servers), so it is labeled Review update. */
++  reviewFirst?: boolean;
+ }
  
-+// HRM patch 0036: the same names as the policy menu (Pinned reads better as a state than Pin version).
- const policyLabels: Record<string, string> = {
+-const policyIcons: Record<string, typeof RefreshCw> = {
+-  auto_update: RefreshCw,
+-  notify: Bell,
+-  ignore: BellOff,
+-  pin_version: Pin,
+-};
+-
+-const policyLabels: Record<string, string> = {
 -  auto_update: 'Auto',
 -  notify: 'Notify',
 -  ignore: 'Ignore',
-+  ...UPDATE_POLICY_LABELS,
-   pin_version: 'Pinned',
- };
- 
-@@ -89,19 +95,26 @@ export function UpdateCard({
+-  pin_version: 'Pinned',
+-};
+-
+-const policyColors: Record<string, string> = {
+-  auto_update: 'text-status-success bg-status-success/10 border-status-success/20',
+-  notify: 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/20',
+-  ignore: 'text-text-muted bg-overlay/5 border-overlay/10',
+-  pin_version: 'text-status-warning bg-status-warning/10 border-status-warning/20',
+-};
+-
+ const updateTypeConfig: Record<string, { label: string; color: string; bgColor: string; borderColor: string; dotColor: string }> = {
+   patch: {
+     label: 'Patch',
+@@ -87,21 +77,36 @@ export function UpdateCard({
+   onDismiss,
+   isUpdating = false,
    index = 0,
++  reviewFirst = false,
  }: UpdateCardProps) {
    const shouldReduceMotion = useReducedMotion();
 +  // HRM patch 0036: on a SQLite server "critical" only means a major version jump (already shown as Major),
@@ -2444,23 +2990,36 @@ index 479225ee5..5041c409e 100644
    const updateType = classifyUpdateType(update.current_version, update.latest_version);
    const typeConfig = updateTypeConfig[updateType];
 -  const PolicyIcon = policyStatus?.policy_type ? policyIcons[policyStatus.policy_type] : null;
-+  const PolicyIcon = autoUpdateTurnedOff ? AlertTriangle : policyStatus?.policy_type ? policyIcons[policyStatus.policy_type] : null;
++  const isCustom = isCustomAppId(update.winget_id);
++  // A quiet button only where IntuneGet will deploy it itself; an update held by scope needs IT.
++  const quiet = isAutoUpdateEnabled && !scopeReason;
++  const [datesOpen, setDatesOpen] = useState(false);
++  const [pilotOpen, setPilotOpen] = useState(false);
++  const pilot = usePilotStart(update);
++  // HRM: the More menu holds only actions that work for this copy; with none, it is not shown.
++  const moreActions = !isCustom && update.is_managed !== false && (!!update.intune_app_id || pilot.canStart);
  
    // Calculate how old the detected update is
    const detectedDaysAgo = Math.floor(
-@@ -117,9 +130,9 @@ export function UpdateCard({
+@@ -116,29 +121,30 @@ export function UpdateCard({
+       transition={shouldReduceMotion ? undefined : { delay: index * 0.04 }}
        whileHover={shouldReduceMotion ? undefined : { y: -2, transition: springPresets.snappy }}
        className={cn(
-         'glass-light rounded-xl border transition-all duration-200 relative group overflow-hidden',
+-        'glass-light rounded-xl border transition-all duration-200 relative group overflow-hidden',
 -        update.is_critical
++        'glass-light rounded-xl border transition-all duration-200 relative group overflow-hidden flex flex-col',
 +        isCritical
            ? 'border-l-[3px] border-l-status-warning border-t-status-warning/15 border-r-status-warning/15 border-b-status-warning/15'
 -          : !update.has_prior_deployment
 +          : isNewToIntuneGet
              ? 'border-l-[3px] border-l-violet-500 border-t-violet-500/15 border-r-violet-500/15 border-b-violet-500/15'
-             : 'border-black/[0.08] hover:border-accent-cyan/20 hover:shadow-soft-md'
+-            : 'border-black/[0.08] hover:border-accent-cyan/20 hover:shadow-soft-md'
++            : 'border-overlay/10 hover:border-accent-cyan/20 hover:shadow-soft-md'
        )}
-@@ -128,9 +141,9 @@ export function UpdateCard({
+     >
+-      {scopeReason && <p className="px-4 py-2 text-xs text-status-warning" role="status"><T>{scopeReason}</T></p>}
++      {/* A major jump gets an amber edge, so it stands out in the list */}
++      {updateType === 'major' && !isCritical && !isNewToIntuneGet && <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-status-warning" />}
        {/* Subtle gradient overlay on hover */}
        <div className={cn(
          'absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none',
@@ -2472,7 +3031,17 @@ index 479225ee5..5041c409e 100644
              ? 'bg-gradient-to-br from-violet-500/[0.03] via-transparent to-transparent'
              : 'bg-gradient-to-br from-accent-cyan/[0.03] via-transparent to-transparent'
        )} />
-@@ -156,18 +169,18 @@ export function UpdateCard({
+ 
+       {/* Main content */}
+-      <div className="relative p-5">
++      <div className="relative flex-1 p-4 sm:p-5">
+         {/* Top row: Icon, name, badges */}
+-        <div className="flex items-start gap-3 mb-3.5">
++        <div className="flex items-start gap-3 mb-3">
+           {/* App Icon with subtle ring */}
+           <div className="relative flex-shrink-0">
+             <AppIcon
+@@ -156,170 +162,218 @@ export function UpdateCard({
            <div className="flex-1 min-w-0">
              <div className="flex items-center gap-2 mb-0.5">
                <h3 className="text-sm font-semibold text-text-primary truncate">
@@ -2497,113 +3066,174 @@ index 479225ee5..5041c409e 100644
                  >
                    <ShieldOff className="w-2.5 h-2.5" />
                    <T>Unmanaged</T>
-@@ -182,11 +195,14 @@ export function UpdateCard({
-             <span
-               className={cn(
-                 'flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg border flex-shrink-0',
--                policyColors[policyStatus.policy_type] || 'text-text-muted bg-overlay/5 border-overlay/10'
-+                autoUpdateTurnedOff
-+                  ? 'text-status-warning bg-status-warning/10 border-status-warning/20'
-+                  : policyColors[policyStatus.policy_type] || 'text-text-muted bg-overlay/5 border-overlay/10'
+                 </span>
                )}
-             >
-               <PolicyIcon className="w-3 h-3" />
--              {policyLabels[policyStatus.policy_type]}
-+              {/* HRM patch 0036: short badge; the line below the title explains and turns it back on */}
-+              {autoUpdateTurnedOff ? 'Auto-update off' : policyLabels[policyStatus.policy_type]}
-             </span>
-           )}
-         </div>
-@@ -203,7 +219,7 @@ export function UpdateCard({
-             <div className="flex items-center gap-1.5 flex-shrink-0">
-               <div className={cn('h-px w-3', typeConfig.dotColor, 'opacity-40')} />
-               <span className={cn(
--                'flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-widest rounded-md border',
-+                'flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded-md border',
-                 typeConfig.color, typeConfig.bgColor, typeConfig.borderColor
-               )}>
-                 <ChevronRight className="w-2.5 h-2.5" />
-@@ -222,26 +238,28 @@ export function UpdateCard({
+             </div>
+-            <span className="text-xs font-mono text-text-muted leading-none">{update.winget_id}</span>
++            <span className="block truncate text-xs font-mono text-text-muted leading-none">{update.winget_id}</span>
            </div>
+ 
+-          {/* Policy badge */}
+-          {policyStatus?.policy_type && PolicyIcon && (
+-            <span
+-              className={cn(
+-                'flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg border flex-shrink-0',
+-                policyColors[policyStatus.policy_type] || 'text-text-muted bg-overlay/5 border-overlay/10'
+-              )}
+-            >
+-              <PolicyIcon className="w-3 h-3" />
+-              {policyLabels[policyStatus.policy_type]}
+-            </span>
+-          )}
++          {/* Update type: how big the jump is, at a glance */}
++          <span className={cn('flex-shrink-0 px-2 py-0.5 text-[11px] font-semibold rounded-md border', typeConfig.color, typeConfig.bgColor, typeConfig.borderColor)}>
++            {typeConfig.label}
++          </span>
+         </div>
+ 
+-        {/* Version comparison - redesigned as a horizontal flow */}
+-        <div className="flex items-center gap-2 mb-3.5 px-0.5">
+-          <div className="flex items-center gap-2 flex-1 min-w-0">
+-            {/* Current version */}
+-            <span className="px-2.5 py-1 text-[13px] font-mono bg-overlay/[0.04] text-text-secondary border border-black/[0.08] rounded-md truncate">
+-              {update.current_version}
+-            </span>
+-
+-            {/* Arrow with type indicator */}
+-            <div className="flex items-center gap-1.5 flex-shrink-0">
+-              <div className={cn('h-px w-3', typeConfig.dotColor, 'opacity-40')} />
+-              <span className={cn(
+-                'flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-widest rounded-md border',
+-                typeConfig.color, typeConfig.bgColor, typeConfig.borderColor
+-              )}>
+-                <ChevronRight className="w-2.5 h-2.5" />
+-                {typeConfig.label}
+-              </span>
+-              <div className={cn('h-px w-3', typeConfig.dotColor, 'opacity-40')} />
+-            </div>
+-
+-            {/* New version */}
+-            <span className={cn(
+-              'px-2.5 py-1 text-[13px] font-mono rounded-md border font-semibold truncate',
+-              typeConfig.bgColor, typeConfig.color, typeConfig.borderColor
+-            )}>
+-              {update.latest_version}
+-            </span>
+-          </div>
++        {/* Version jump: wraps on narrow phones instead of cutting digits */}
++        <div className="flex flex-wrap items-center gap-2 mb-3 px-0.5 text-[13px] font-mono">
++          <span className="px-2 py-0.5 bg-overlay/[0.04] text-text-secondary border border-overlay/10 rounded-md break-all">
++            {update.current_version}
++          </span>
++          <ArrowRight className="w-3.5 h-3.5 flex-shrink-0 text-text-muted" aria-label="to" />
++          <span className={cn('px-2 py-0.5 rounded-md border font-semibold break-all', typeConfig.bgColor, typeConfig.color, typeConfig.borderColor)}>
++            {update.latest_version}
++          </span>
          </div>
  
 -        {/* Status metadata line */}
-+        {/* Status metadata line. HRM patch 0036: no separate "Auto-update" here; the policy badge says it. */}
-         <div className="flex items-center gap-2.5 mb-3.5 flex-wrap">
+-        <div className="flex items-center gap-2.5 mb-3.5 flex-wrap">
 -          {!update.has_prior_deployment && update.is_managed && (
-+          {isNewToIntuneGet && update.is_managed && (
-             <span className="flex items-center gap-1 text-[11px] font-medium text-violet-500">
-               <Plus className="w-3 h-3" />
-               <T>New to IntuneGet</T>
-             </span>
-           )}
+-            <span className="flex items-center gap-1 text-[11px] font-medium text-violet-500">
+-              <Plus className="w-3 h-3" />
+-              <T>New to IntuneGet</T>
+-            </span>
+-          )}
 -          {isAutoUpdateEnabled && (
 -            <span className="flex items-center gap-1 text-[11px] font-medium text-status-success">
 -              <Zap className="w-3 h-3" />
 -              <T>Auto-update</T>
 -            </span>
 -          )}
-           {hasFailures && (
-             <span className="flex items-center gap-1 text-[11px] font-medium text-status-error">
-               <XCircle className="w-3 h-3" />
-               {policyStatus?.consecutive_failures} <T>failed</T>
-             </span>
-           )}
-+          {autoUpdateTurnedOff && (
-+            <span className="flex items-center gap-2 text-[11px] font-medium text-status-warning">
+-          {hasFailures && (
+-            <span className="flex items-center gap-1 text-[11px] font-medium text-status-error">
+-              <XCircle className="w-3 h-3" />
+-              {policyStatus?.consecutive_failures} <T>failed</T>
+-            </span>
+-          )}
+-          {policyStatus?.last_auto_update_at && (
+-            <span className="flex items-center gap-1 text-[11px] text-text-muted">
+-              <Clock className="w-3 h-3" />
+-              <T>Last:</T> {new Date(policyStatus.last_auto_update_at).toLocaleDateString()}
+-            </span>
+-          )}
+-          {detectedDaysAgo > 0 && !policyStatus?.last_auto_update_at && !hasFailures && !isAutoUpdateEnabled && (
+-            <span className="flex items-center gap-1 text-[11px] text-text-muted">
+-              <Clock className="w-3 h-3" />
+-              <T>Detected <Var>{detectedDaysAgo === 1 ? '1 day' : `${detectedDaysAgo} days`}</Var> ago</T>
+-            </span>
++        {/* Status: who handles this update and what happens next */}
++        <div className="space-y-1.5 mb-3">
++          {update.is_managed !== false && <AppGroupsLine intuneAppId={update.intune_app_id} />}
++          {autoUpdateTurnedOff ? (
++            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-status-warning">
++              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
 +              Auto-update turned off after failed updates
 +              <button type="button" className="text-accent-cyan hover:underline" onClick={() => void handlePolicyChange('auto_update')}>
 +                Turn auto-update back on
 +              </button>
-+            </span>
-+          )}
-           {policyStatus?.last_auto_update_at && (
-             <span className="flex items-center gap-1 text-[11px] text-text-muted">
-               <Clock className="w-3 h-3" />
-@@ -256,54 +274,79 @@ export function UpdateCard({
++            </p>
++          ) : isAutoUpdateEnabled && !isCustom ? (
++            <>
++              {scopeReason ? <p className="flex items-start gap-1.5 text-xs text-status-warning" role="status"><Clock className="mt-0.5 w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" /><T>{scopeReason}</T></p> : <AutoUpdateStateLine />}
++              <AutoUpdateTimingSummary appId={update.winget_id} />
++            </>
++          ) : !isCustom && (
++            <p className="flex items-center gap-1.5 text-xs text-text-muted">
++              <Clock className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
++              <span>Waiting for your review · {detectedDaysAgo > 0 ? <T>Detected <Var>{detectedDaysAgo === 1 ? '1 day' : `${detectedDaysAgo} days`}</Var> ago</T> : 'Detected today'}</span>
++            </p>
            )}
++          {(isNewToIntuneGet && update.is_managed || hasFailures || policyStatus?.last_auto_update_at) && <div className="flex items-center gap-2.5 flex-wrap">
++            {isNewToIntuneGet && update.is_managed && (
++              <span className="flex items-center gap-1 text-[11px] font-medium text-violet-500">
++                <Plus className="w-3 h-3" />
++                <T>New to IntuneGet</T>
++              </span>
++            )}
++            {hasFailures && (
++              <span className="flex items-center gap-1 text-[11px] font-medium text-status-error">
++                <XCircle className="w-3 h-3" />
++                {policyStatus?.consecutive_failures} <T>failed</T>
++              </span>
++            )}
++            {policyStatus?.last_auto_update_at && (
++              <span className="flex items-center gap-1 text-[11px] text-text-muted">
++                <Clock className="w-3 h-3" />
++                <T>Last:</T> {new Date(policyStatus.last_auto_update_at).toLocaleDateString()}
++              </span>
++            )}
++          </div>}
++          {!isCustom && <PilotActiveNote update={update} />}
          </div>
++      </div>
  
-+        {/* HRM patch 0023: where this update lands, read live from Intune */}
-+        {update.is_managed !== false && (
-+          <div className="pb-3">
-+            <AppGroupsLine intuneAppId={update.intune_app_id} />{update.intune_app_id && <Link className="mt-2 inline-block text-sm text-accent-cyan hover:underline" href={appWorkspaceUrl(update.intune_app_id)}>Open app workspace</Link>}
-+            {isAutoUpdateEnabled && <AutoUpdateTimingSummary appId={update.winget_id} />}
-+            {update.intune_app_id && <div className="mt-2"><AppTimingPanel appId={update.intune_app_id} /></div>}
-+        {!isCustomAppId(update.winget_id) && <StartPilot update={update} />}
-+          </div>
-+        )}
-+
-         {/* Action row */}
+-        {/* Action row */}
 -        <div className="flex items-center justify-between pt-3 border-t border-black/[0.06]">
--          <UpdatePolicySelector
--            currentPolicy={policyStatus?.policy_type || null}
--            currentScope={policyStatus?.auto_update_scope}
--            onPolicyChange={handlePolicyChange}
--            size="sm"
++      {/* Action row */}
++      {isCustom ? (
++        // HRM patch 0020: a custom app's new GitHub release opens the filled-in custom app form; never automatic.
++        <div className="relative flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 border-t border-overlay/10">
++          <span className="text-xs text-text-muted">New GitHub release. You check it before it deploys.</span>
++          <Button asChild size="sm" className="font-medium text-[13px] h-8 px-3.5 whitespace-nowrap bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest shadow-sm">
++            <Link href={`/dashboard/apps?newVersionOfApp=${encodeURIComponent(update.intune_app_id)}`}>
++              Deploy new version
++              <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
++            </Link>
++          </Button>
++        </div>
++      ) : (
++        <div className="relative flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 border-t border-overlay/10 bg-overlay/[0.015]">
+           <UpdatePolicySelector
+             currentPolicy={policyStatus?.policy_type || null}
+             currentScope={policyStatus?.auto_update_scope}
++            isEnabled={policyStatus?.is_enabled !== false}
+             onPolicyChange={handlePolicyChange}
+             size="sm"
 -            showLabel={false}
--          />
-+        {isCustomAppId(update.winget_id) ? (
-+          // HRM patch 0020: a custom app's new GitHub release opens the filled-in custom app form; never automatic.
-+          <div className="flex items-center justify-between gap-3 pt-3 border-t border-black/[0.06]">
-+            <span className="text-xs text-text-muted">New GitHub release. You check it before it deploys.</span>
-+            <Button asChild size="sm" className="font-medium text-[13px] h-8 px-3.5 bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest shadow-sm">
-+              <Link href={`/dashboard/apps?newVersionOfApp=${encodeURIComponent(update.intune_app_id)}`}>
-+                Deploy new version
-+                <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
-+              </Link>
-+            </Button>
-+          </div>
-+        ) : (
-+          <div className="flex items-center justify-between pt-3 border-t border-black/[0.06]">
-+            <UpdatePolicySelector
-+              currentPolicy={policyStatus?.policy_type || null}
-+              currentScope={policyStatus?.auto_update_scope}
-+              isEnabled={policyStatus?.is_enabled !== false}
-+              onPolicyChange={handlePolicyChange}
-+              size="sm"
-+              showLabel={false}
-+            />
++            showLabel
++            variant="pill"
+           />
  
 -          <Button
 -            size="sm"
@@ -2614,7 +3244,21 @@ index 479225ee5..5041c409e 100644
 -              isUpdating
 -                ? 'bg-accent-cyan/50 text-bg-deepest/70'
 -                : 'bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest shadow-sm hover:shadow-glow-cyan transition-shadow'
--            )}
++          <div className="ml-auto flex items-center gap-2">
++            {moreActions && (
++              <DropdownMenu modal={false}>
++                <DropdownMenuTrigger asChild>
++                  <Button variant="outline" size="sm" className="h-8 w-8 p-0 border-overlay/10 text-text-secondary hover:text-text-primary" aria-label={`More actions for ${update.display_name}`}>
++                    <MoreHorizontal className="w-4 h-4" />
++                  </Button>
++                </DropdownMenuTrigger>
++                <DropdownMenuContent align="end" className="w-52 bg-bg-elevated border-overlay/10 shadow-soft-lg">
++                  {update.intune_app_id && <DropdownMenuItem onSelect={() => setDatesOpen(true)}>{INSTALL_DATES}</DropdownMenuItem>}
++                  {pilot.canStart && <DropdownMenuItem onSelect={() => setPilotOpen(true)}>Test with a pilot group</DropdownMenuItem>}
++                  {update.intune_app_id && <DropdownMenuItem asChild><Link href={appWorkspaceUrl(update.intune_app_id)}>Open app workspace</Link></DropdownMenuItem>}
++                </DropdownMenuContent>
++              </DropdownMenu>
+             )}
 -          >
 -            <AnimatePresence mode="wait" initial={false}>
 -              {isUpdating ? (
@@ -2639,20 +3283,23 @@ index 479225ee5..5041c409e 100644
 -                  <T>Update</T>
 -                  <ArrowRight className="w-3.5 h-3.5" />
 -                </motion.span>
++
 +            <Button
 +              size="sm"
-+              aria-label={`Update ${update.display_name} to ${update.latest_version}`}
++              variant={quiet ? 'outline' : 'default'}
++              aria-label={`${reviewFirst ? 'Review update' : 'Update'} ${update.display_name} to ${update.latest_version}`}
 +              onClick={() => onTriggerUpdate(update)}
 +              disabled={isUpdating}
 +              className={cn(
-+                'font-medium text-[13px] h-8 px-3.5',
++                'font-medium text-xs sm:text-[13px] h-8 px-3 sm:px-3.5 whitespace-nowrap',
 +                isUpdating
 +                  ? 'bg-accent-cyan/50 text-bg-deepest/70'
-+                  : 'bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest shadow-sm hover:shadow-glow-cyan transition-shadow'
++                  : quiet
++                    ? 'border-overlay/15 text-text-primary hover:bg-overlay/5'
++                    : 'bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest shadow-sm hover:shadow-glow-cyan transition-shadow'
                )}
 -            </AnimatePresence>
 -          </Button>
--        </div>
 +            >
 +              <AnimatePresence mode="wait" initial={false}>
 +                {isUpdating ? (
@@ -2674,19 +3321,76 @@ index 479225ee5..5041c409e 100644
 +                    exit={{ opacity: 0, scale: 0.9 }}
 +                    className="flex items-center gap-1.5"
 +                  >
-+                    <T>Update</T>
++                    {reviewFirst ? 'Review update' : <T>Update</T>}
 +                    <ArrowRight className="w-3.5 h-3.5" />
 +                  </motion.span>
 +                )}
 +              </AnimatePresence>
 +            </Button>
 +          </div>
-+        )}
-       </div>
+         </div>
+-      </div>
++      )}
++      {/* Opened from the More menu; they live outside it so closing the menu does not close them. */}
++      {update.intune_app_id && !isCustom && <AppTimingPanel appId={update.intune_app_id} open={datesOpen} onOpenChange={setDatesOpen} />}
++      {pilot.canStart && <StartPilot update={update} open={pilotOpen} onOpenChange={setPilotOpen} />}
      </motion.div>
    );
+ }
+ 
++/**
++ * What happens next for an app with Auto-update on, from the server's real rules: the twice-daily check
++ * starts it when the publishing window is open; outside the window, or while paused, it waits and the
++ * hourly start picks it up once the window opens.
++ */
++function AutoUpdateStateLine() {
++  const { data } = useUpdateSchedule();
++  const schedule = data?.supported ? data.schedule : undefined;
++  const w = data?.window;
++  if (!schedule || !w) return null;
++  const hourly = schedule.enabled ? ' Held updates are rechecked hourly.' : '';
++  const text = schedule.paused
++    ? 'Held: automatic updates are paused for all apps. Review update still works.'
++    : !w.open
++      ? w.blackout ? `${w.reason ?? 'Held for a blackout.'}${hourly}` : `Waiting for publishing window (${windowLabel(schedule)}, Maryland time).${hourly}`
++      : schedule.enabled
++        ? 'Publishing window open. Starts at the next hourly start unless a safety check holds it.'
++        : 'Starts at the next update check unless a safety check holds it.';
++  return (
++    <p className={cn('flex items-start gap-1.5 text-xs', w.open ? 'text-text-secondary' : 'text-status-warning')} role="status">
++      <Clock className="mt-0.5 w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
++      <span>{text}</span>
++    </p>
++  );
++}
++
+ interface UpdateCardSkeletonProps {
+   count?: number;
+ }
+ 
+ export function UpdateCardSkeleton({ count = 3 }: UpdateCardSkeletonProps) {
+   return (
+-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
++    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+       {Array.from({ length: count }).map((_, i) => (
+         <div
+           key={i}
+-          className="glass-light rounded-xl border border-black/[0.08] overflow-hidden"
++          className="glass-light rounded-xl border border-overlay/10 overflow-hidden"
+         >
+           <div className="p-5">
+             {/* Top row */}
+@@ -343,7 +397,7 @@ export function UpdateCardSkeleton({ count = 3 }: UpdateCardSkeletonProps) {
+             <div className="h-3 w-28 bg-overlay/[0.04] rounded-md animate-pulse mb-3.5" />
+ 
+             {/* Bottom row */}
+-            <div className="flex items-center justify-between pt-3 border-t border-black/[0.06]">
++            <div className="flex items-center justify-between pt-3 border-t border-overlay/10">
+               <div className="h-8 w-8 bg-overlay/[0.06] rounded-md animate-pulse" />
+               <div className="h-8 w-20 bg-overlay/[0.06] rounded-md animate-pulse" />
+             </div>
 diff --git a/components/updates/UpdatePolicySelector.test.ts b/components/updates/UpdatePolicySelector.test.ts
-index 65c42d510..1c5c9623c 100644
+index 65c42d510..55d1a58e5 100644
 --- a/components/updates/UpdatePolicySelector.test.ts
 +++ b/components/updates/UpdatePolicySelector.test.ts
 @@ -11,6 +11,8 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
@@ -2698,7 +3402,7 @@ index 65c42d510..1c5c9623c 100644
  import { UpdatePolicySelector } from './UpdatePolicySelector';
  let root: Root;
  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-@@ -31,3 +33,30 @@ it('shows the security warning for major scope and hides scope choices for notif
+@@ -31,3 +33,42 @@ it('shows the security warning for major scope and hides scope choices for notif
    await act(async () => root.render(createElement(UpdatePolicySelector, { currentPolicy: 'notify', onPolicyChange: change })));
    expect(document.body.textContent).not.toContain('Automatic update scope');
  });
@@ -2729,8 +3433,20 @@ index 65c42d510..1c5c9623c 100644
 +  await act(async () => root.render(createElement(UpdatePolicySelector, { currentPolicy: 'notify', onPolicyChange: change })));
 +  expect(document.body.textContent).toContain('Pin version');
 +});
++
++it('labels the card pill with the current policy, and says when the safety limit turned auto-update off', async () => {
++  const change = vi.fn(async () => {});
++  await act(async () => root.render(createElement(UpdatePolicySelector, { currentPolicy: 'notify', onPolicyChange: change, variant: 'pill' })));
++  expect(document.querySelector('[aria-label="Automatic update policy: Notify only"]')?.textContent).toContain('Notify only');
++  await act(async () => root.render(createElement(UpdatePolicySelector, { currentPolicy: null, onPolicyChange: change, variant: 'pill' })));
++  expect(document.querySelector('[aria-label="Automatic update policy: Notify only"]')).not.toBeNull();
++  await act(async () => root.render(createElement(UpdatePolicySelector, { currentPolicy: 'auto_update', isEnabled: false, onPolicyChange: change, variant: 'pill' })));
++  const pill = document.querySelector('[aria-label="Automatic update policy: Auto-update off"]')!;
++  expect(pill.textContent).toContain('Auto-update off');
++  expect(pill.className).toContain('text-status-warning');
++});
 diff --git a/components/updates/UpdatePolicySelector.tsx b/components/updates/UpdatePolicySelector.tsx
-index 45fe6f642..8c086b906 100644
+index 45fe6f642..e9dab0940 100644
 --- a/components/updates/UpdatePolicySelector.tsx
 +++ b/components/updates/UpdatePolicySelector.tsx
 @@ -21,6 +21,8 @@ import {
@@ -2742,7 +3458,7 @@ index 45fe6f642..8c086b906 100644
  import type { AutoUpdateScope, UpdatePolicyType } from '@/types/update-policies';
  
  interface UpdatePolicySelectorProps {
-@@ -28,10 +30,13 @@ interface UpdatePolicySelectorProps {
+@@ -28,10 +30,15 @@ interface UpdatePolicySelectorProps {
    currentScope?: AutoUpdateScope;
    onPolicyChange: (policyType: UpdatePolicyType, scope?: AutoUpdateScope) => Promise<void>;
    disabled?: boolean;
@@ -2750,13 +3466,15 @@ index 45fe6f642..8c086b906 100644
 +  isEnabled?: boolean;
    size?: 'sm' | 'default';
    showLabel?: boolean;
++  /** A bordered, colored pill with its label, as on update cards. */
++  variant?: 'ghost' | 'pill';
  }
  
 +// HRM patch 0036: labels come from UPDATE_POLICY_LABELS so every screen uses the same names.
  const policyOptions: {
    type: UpdatePolicyType;
    label: string;
-@@ -43,8 +48,8 @@ const policyOptions: {
+@@ -43,8 +50,8 @@ const policyOptions: {
  }[] = [
    {
      type: 'auto_update',
@@ -2767,7 +3485,7 @@ index 45fe6f642..8c086b906 100644
      icon: RefreshCw,
      color: 'text-status-success',
      bgColor: 'bg-status-success/10',
-@@ -52,8 +57,8 @@ const policyOptions: {
+@@ -52,8 +59,8 @@ const policyOptions: {
    },
    {
      type: 'notify',
@@ -2778,7 +3496,7 @@ index 45fe6f642..8c086b906 100644
      icon: Bell,
      color: 'text-accent-cyan',
      bgColor: 'bg-accent-cyan/10',
-@@ -61,8 +66,8 @@ const policyOptions: {
+@@ -61,8 +68,8 @@ const policyOptions: {
    },
    {
      type: 'ignore',
@@ -2789,7 +3507,7 @@ index 45fe6f642..8c086b906 100644
      icon: BellOff,
      color: 'text-text-muted',
      bgColor: 'bg-overlay/5',
-@@ -70,8 +75,8 @@ const policyOptions: {
+@@ -70,8 +77,8 @@ const policyOptions: {
    },
    {
      type: 'pin_version',
@@ -2800,13 +3518,14 @@ index 45fe6f642..8c086b906 100644
      icon: Pin,
      color: 'text-status-warning',
      bgColor: 'bg-status-warning/10',
-@@ -84,15 +89,23 @@ export function UpdatePolicySelector({
+@@ -84,15 +91,28 @@ export function UpdatePolicySelector({
    currentScope = 'all',
    onPolicyChange,
    disabled = false,
 +  isEnabled = true,
    size = 'default',
    showLabel = true,
++  variant = 'ghost',
  }: UpdatePolicySelectorProps) {
    const [isUpdating, setIsUpdating] = useState(false);
 +  // HRM patch 0036: a SQLite server stores Pin version but never acts on it, so it is offered only in
@@ -2818,6 +3537,10 @@ index 45fe6f642..8c086b906 100644
 +  // Auto-update that the safety limit turned off is not "selected": choosing it again turns it back on.
 +  // HRM patch 0032/0036: a policy that was turned off isn't current, so choosing it again turns it back on
 +  const isCurrent = (type: UpdatePolicyType) => type === currentPolicy && isEnabled;
++  const turnedOff = currentPolicy === 'auto_update' && !isEnabled;
++  const pillTone = turnedOff ? 'text-status-warning border-status-warning/30 bg-status-warning/10 hover:bg-status-warning/15'
++    : currentPolicy === 'auto_update' ? 'text-status-success border-status-success/30 bg-status-success/10 hover:bg-status-success/15'
++    : 'text-text-secondary border-overlay/15 bg-overlay/[0.04] hover:bg-overlay/[0.08] hover:text-text-primary';
  
    const handleSelect = async (policyType: UpdatePolicyType) => {
 -    if (policyType === currentPolicy) return;
@@ -2825,7 +3548,7 @@ index 45fe6f642..8c086b906 100644
  
      setIsUpdating(true);
      try {
-@@ -110,13 +123,18 @@ export function UpdatePolicySelector({
+@@ -110,38 +130,50 @@ export function UpdatePolicySelector({
    };
  
    const activeOptions = policyOptions.filter((o) => o.group === 'active');
@@ -2841,11 +3564,48 @@ index 45fe6f642..8c086b906 100644
        <DropdownMenuTrigger asChild>
          <Button
            variant="ghost"
-+          aria-label={`Automatic update policy: ${selectedOption.label}`}
++          aria-label={`Automatic update policy: ${turnedOff ? 'Auto-update off' : selectedOption.label}`}
            disabled={disabled || isUpdating}
            className={cn(
-             'text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-all',
-@@ -151,7 +169,7 @@ export function UpdatePolicySelector({
+-            'text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-all',
+-            size === 'sm' && 'h-8 px-2 text-sm'
++            variant === 'pill'
++              ? cn('whitespace-nowrap rounded-lg border transition-colors', pillTone)
++              : 'text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-all',
++            size === 'sm' && 'h-8 px-2 text-sm',
++            variant === 'pill' && 'px-2.5 gap-0'
+           )}
+         >
+           {isUpdating ? (
+             <Loader2 className="w-4 h-4 animate-spin" />
+           ) : (
+             <>
++              {variant === 'pill' ? (
++                <selectedOption.icon className="w-3.5 h-3.5 mr-1.5 shrink-0" />
++              ) : (
+               <div className={cn('w-5 h-5 rounded flex items-center justify-center mr-1.5', selectedOption.bgColor)}>
+                 <selectedOption.icon
+                   className={cn('w-3 h-3', selectedOption.color)}
+                 />
+               </div>
++              )}
+               {showLabel && (
+-                <span className="text-[13px]"><T>{selectedOption.label}</T></span>
++                <span className={variant === 'pill' ? 'text-xs sm:text-[13px]' : 'text-[13px]'}>{turnedOff ? 'Auto-update off' : <T>{selectedOption.label}</T>}</span>
+               )}
+-              <ChevronDown className="w-3.5 h-3.5 ml-1 opacity-40" />
++              <ChevronDown className={cn('w-3.5 h-3.5 opacity-40', variant === 'pill' ? 'ml-1 shrink-0' : 'ml-1')} />
+             </>
+           )}
+         </Button>
+       </DropdownMenuTrigger>
+       <DropdownMenuContent
+-        align="end"
++        align={variant === 'pill' ? 'start' : 'end'}
+         className="w-60 bg-bg-elevated border-overlay/10 shadow-soft-lg p-1"
+       >
+         {activeOptions.map((option) => (
+@@ -151,7 +183,7 @@ export function UpdatePolicySelector({
              className={cn(
                'flex items-start gap-2.5 p-2.5 cursor-pointer rounded-md',
                'hover:bg-overlay/5 focus:bg-overlay/5',
@@ -2854,7 +3614,7 @@ index 45fe6f642..8c086b906 100644
              )}
            >
              <div className={cn('w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5', option.bgColor)}>
-@@ -162,12 +180,12 @@ export function UpdatePolicySelector({
+@@ -162,12 +194,12 @@ export function UpdatePolicySelector({
                  <span className="text-sm font-medium text-text-primary">
                    <T>{option.label}</T>
                  </span>
@@ -2869,7 +3629,7 @@ index 45fe6f642..8c086b906 100644
                </p>
              </div>
            </DropdownMenuItem>
-@@ -194,7 +212,7 @@ export function UpdatePolicySelector({
+@@ -194,7 +226,7 @@ export function UpdatePolicySelector({
              className={cn(
                'flex items-start gap-2.5 p-2.5 cursor-pointer rounded-md',
                'hover:bg-overlay/5 focus:bg-overlay/5',
@@ -2878,7 +3638,7 @@ index 45fe6f642..8c086b906 100644
              )}
            >
              <div className={cn('w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5', option.bgColor)}>
-@@ -205,12 +223,12 @@ export function UpdatePolicySelector({
+@@ -205,12 +237,12 @@ export function UpdatePolicySelector({
                  <span className="text-sm font-medium text-text-primary">
                    <T>{option.label}</T>
                  </span>

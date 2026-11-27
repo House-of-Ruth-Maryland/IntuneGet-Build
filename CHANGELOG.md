@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- App updates redesign (approved Nov 26). The update list now comes first. The last check sits
+  beside the title as "Checked Nov 26, 3:30 PM", with the fixed schedule on hover. The four-row
+  status strip above the list is gone: one Automatic updates bar below the list holds the
+  publishing window ("Publishing window: Mon to Fri, 7 PM to 5 AM"), the apps with Automatic
+  updates on, How automatic updates install and their editors. Links to `#automatic-updates`
+  scroll to that bar and highlight it, without opening a panel. An alert above the list shows only
+  while automatic updates are paused or startup reports need a look. Startup install results
+  (Beta) shows only while a startup package is recorded or its reports need review, and opens in a
+  side panel from the bar, the How automatic updates install panel, the alert or any
+  `#startup-installations` link. The tabs share a row with search and filters. Update cards show
+  the update type at the top (an amber edge on a Major update), versions that wrap on a phone, a
+  status line that says honestly what happens next (waiting for review, waiting for the
+  publishing window, paused, held by scope), a labeled policy pill, and a More actions menu with
+  Install dates, Test with a pilot group (only when a pilot can start) and Open app workspace.
+  The empty list says when checks run and offers Check for app updates and View update history.
+  Check for app updates has a visible hover note that it may start automatic updates. Fixes: the
+  card button said Update but opened Review update, so it is now Review update (solid for Notify
+  only, outline for Auto-update); "1 app exceptions" now reads "1 app exception"; Required and
+  Available on cards explain themselves on hover or keyboard focus; the duplicate Open app
+  workspace link is gone; card and Update history borders no longer vanish in dark mode; buttons,
+  tabs and counts no longer wrap at phone width. While paused, Resume automatic updates is in the
+  alert only. Update all shows only on Available updates. An Auto-update card held by scope keeps
+  the solid Review update button, since IntuneGet will not deploy it itself. How automatic updates install now lists app
+  exceptions in its panel. No server behavior changed. Help updated by help-writer, which also
+  corrected the Version sync window in Help to 24 hours.
+
 - Edit groups, Switch to Available and Switch to Required: fixed. In v0.8.6-hrm.6 a switch added
   the new assignment before removing the old one, and Intune refused it on the first live test
   (the pilot group stayed Required and nothing changed), most likely because Intune does not hold
