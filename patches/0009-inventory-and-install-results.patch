@@ -998,10 +998,10 @@ index c8e12c2fe..0b4c90f05 100644
    SectionTransition,
 diff --git a/components/hrm/AppGroupsLine.test.ts b/components/hrm/AppGroupsLine.test.ts
 new file mode 100644
-index 000000000..a0136363a
+index 000000000..7af5c8c32
 --- /dev/null
 +++ b/components/hrm/AppGroupsLine.test.ts
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,85 @@
 +// @vitest-environment happy-dom
 +const insights = vi.hoisted(() => ({ value: { data: { supported: false }, action: {} } as Record<string, unknown> }));
 +vi.mock('@/hooks/useAppInsights', () => ({ useAppInsights: () => insights.value }));
@@ -1037,6 +1037,14 @@ index 000000000..a0136363a
 +    state.value = { data: { app: { assignments: [group('g1', 'required'), group('g2', 'available')],
 +      assignmentGroupNames: { g1: 'APP-Example', g2: 'Staff-Example' } } } };
 +    expect(await render()).toBe('APP-Example · Required, Staff-Example · Available');
++  });
++
++  it('explains Required and Available on hover or keyboard focus, with Intune\'s own names', async () => {
++    state.value = { data: { app: { assignments: [group('g1', 'required'), group('g2', 'available')],
++      assignmentGroupNames: { g1: 'APP-Example', g2: 'Staff-Example' } } } };
++    await render();
++    const terms = Array.from(document.body.querySelectorAll('[tabindex="0"]')).map((el) => el.textContent);
++    expect(terms).toEqual(['Required', 'Available']);
 +  });
 +
 +  it('shortens a long list', async () => {
@@ -1081,10 +1089,10 @@ index 000000000..a0136363a
 +});
 diff --git a/components/hrm/AppGroupsLine.tsx b/components/hrm/AppGroupsLine.tsx
 new file mode 100644
-index 000000000..f32c15e0e
+index 000000000..bf0840055
 --- /dev/null
 +++ b/components/hrm/AppGroupsLine.tsx
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,64 @@
 +'use client';
 +
 +// HRM patch 0023: which groups an Intune app is assigned to, in one line, read live from Intune.
@@ -1093,6 +1101,8 @@ index 000000000..f32c15e0e
 +import { AlertTriangle, Users } from 'lucide-react';
 +import { useAppDetails } from '@/hooks/use-inventory';
 +import { assignmentTargetLabel } from '@/lib/intune/assignment-group-names';
++import { Fragment, type ReactNode } from 'react';
++import { Term } from './Term';
 +
 +const INTENT: Record<string, string> = { required: 'Required', available: 'Available', uninstall: 'Uninstall', availableWithoutEnrollment: 'Available' };
 +const SHOWN = 3;
@@ -1128,17 +1138,20 @@ index 000000000..f32c15e0e
 +      </p>
 +    );
 +  }
-+  const labels = assignments.map((a) => {
++  const labels = assignments.map((a): ReactNode => {
 +    const label = assignmentTargetLabel(a.target, app.assignmentGroupNames, app.assignmentGroupLookupFailures);
 +    // An exclusion is Excluded, not Required: Intune stores an intent for it that means nothing to staff.
 +    if (label.startsWith('Excluded group: ')) return `${label.slice('Excluded group: '.length)} · Excluded`;
-+    return `${label.replace(/^Group: /, '')} · ${INTENT[a.intent] ?? a.intent}`;
++    const intent = INTENT[a.intent] ?? a.intent;
++    // Required and Available keep Intune's names and explain themselves on hover or keyboard focus.
++    const term = intent === 'Required' ? 'required' : intent === 'Available' ? 'available' : null;
++    return <>{label.replace(/^Group: /, '')} · {term ? <Term term={term}>{intent}</Term> : intent}</>;
 +  });
 +  return (
 +    <p className="flex items-start gap-1.5 text-xs text-text-secondary">
 +      <Users className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-text-muted" aria-hidden="true" />
-+      <span>
-+        {labels.slice(0, SHOWN).join(', ')}
++      <span className="min-w-0 break-words">
++        {labels.slice(0, SHOWN).map((label, i) => <Fragment key={i}>{i > 0 && ', '}{label}</Fragment>)}
 +        {labels.length > SHOWN && <span className="text-text-muted"> and {labels.length - SHOWN} more</span>}
 +      </span>
 +    </p>

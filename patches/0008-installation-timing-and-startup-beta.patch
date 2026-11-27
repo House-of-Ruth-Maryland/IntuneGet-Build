@@ -1006,10 +1006,10 @@ index 000000000..9560f16dd
 +});
 diff --git a/components/hrm/AppTimingPanel.tsx b/components/hrm/AppTimingPanel.tsx
 new file mode 100644
-index 000000000..4292bdd60
+index 000000000..5f4ab32c6
 --- /dev/null
 +++ b/components/hrm/AppTimingPanel.tsx
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,181 @@
 +'use client';
 +import { useEffect, useRef, useState } from 'react';
 +import { useQueryClient } from '@tanstack/react-query';
@@ -1025,8 +1025,10 @@ index 000000000..4292bdd60
 +
 +export const INSTALL_DATES = 'Install dates';
 +
-+export function AppTimingPanel({ appId, groupNames = {} }: { appId: string; groupNames?: Record<string, string> }) {
-+  return <Dialog><DialogTrigger asChild><Button size="sm" variant="outline">{INSTALL_DATES}</Button></DialogTrigger>
++/** With `open` and `onOpenChange` it is only the panel, opened from an update card's More menu. */
++export function AppTimingPanel({ appId, groupNames = {}, open, onOpenChange }: { appId: string; groupNames?: Record<string, string>; open?: boolean; onOpenChange?: (open: boolean) => void }) {
++  const controlled = open !== undefined;
++  return <Dialog {...(controlled ? { open, onOpenChange } : {})}>{!controlled && <DialogTrigger asChild><Button size="sm" variant="outline">{INSTALL_DATES}</Button></DialogTrigger>}
 +    <DialogContent side="right" onOpenAutoFocus={e => { e.preventDefault(); (e.currentTarget as HTMLElement | null)?.focus(); }}><DialogHeader className="pr-12"><DialogTitle className="text-xl">{INSTALL_DATES}</DialogTitle><DialogDescription className="mt-1 text-[15px] leading-relaxed">When this version becomes available and when it must install, for one group at a time.</DialogDescription></DialogHeader>
 +    <div className="flex-1 min-h-0 overflow-y-auto p-6"><AppTimingContent appId={appId} groupNames={groupNames} /></div></DialogContent></Dialog>;
 +}
@@ -1369,10 +1371,10 @@ index 000000000..2e4a0ead3
 +}
 diff --git a/components/hrm/InstallationPolicyPanel.test.ts b/components/hrm/InstallationPolicyPanel.test.ts
 new file mode 100644
-index 000000000..954d28972
+index 000000000..114d53fed
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.test.ts
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,156 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -1380,6 +1382,7 @@ index 000000000..954d28972
 +import type { AppUpdatePolicy, DeploymentConfig } from '@/types/update-policies';
 +const state = vi.hoisted(() => ({ mutate: vi.fn(), reset: vi.fn(), exceptionMode: 'silent', restartPilotSupported: undefined as boolean | undefined, eligibility: undefined as { appId: string; problem: string | null }[] | undefined }));
 +vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { supported: true, shared: { mode: 'existing', days: 3 }, exceptions: [{ appId: 'vendor.app', mode: state.exceptionMode, days: 3 }], restartEligibility: state.eligibility, restartPilotSupported: state.restartPilotSupported }, action: { mutate: state.mutate, reset: state.reset, isPending: false } }) }));
++vi.mock('./StartupInstallations', () => ({ StartupInstallationsLink: () => createElement('button', null, 'Startup install results (Beta)') }));
 +vi.mock('./PilotGroupPicker', () => ({ PilotGroupPicker: ({ onSelect }: { onSelect: (value: unknown) => void }) => createElement('button', { onClick: () => onSelect({ id: '33333333-3333-4333-8333-333333333333', displayName: 'Fixture pilot' }) }, 'Select fixture pilot') }));
 +import { InstallationPolicyPanel } from './InstallationPolicyPanel';
 +let root: Root;
@@ -1405,8 +1408,19 @@ index 000000000..954d28972
 +  await act(async () => button('Close').click());
 +  expect(document.querySelector('[role="dialog"]')).toBeNull();
 +});
++it('counts app exceptions in the status bar with the right plural and lists them in the panel', async () => {
++  const bar = document.querySelector('section[aria-label="How automatic updates install"]')!;
++  expect(bar.textContent).toContain('Use each app’s saved settings · 1 app exception');
++  expect(bar.textContent).not.toContain('1 app exceptions');
++  expect(bar.textContent).not.toContain('Review app exceptions');
++  await act(async () => button('Edit shared policy').click());
++  const panel = document.querySelector('[role="dialog"]')!;
++  expect(panel.textContent).toContain('App exceptions');
++  expect(panel.textContent).toContain('Vendor App');
++  expect(panel.textContent).toContain('Startup install results (Beta)');
++});
 +it('lets an app return to inheritance without rewriting the shared policy', async () => {
-+  await act(async () => button('Edit app exception').click());
++  await act(async () => button('Edit shared policy').click()); await act(async () => button('Edit app exception').click());
 +  const inherit = [...document.querySelectorAll('input')].find(i => i.type === 'checkbox')!;
 +  await act(async () => inherit.click());
 +  await act(async () => button('Use shared policy').click());
@@ -1420,7 +1434,7 @@ index 000000000..954d28972
 +  state.exceptionMode = 'restart';
 +  apps[0].deployment_config = { ...apps[0].deployment_config, ...fields } as DeploymentConfig;
 +  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps })));
-+  await act(async () => button('Edit app exception').click());
++  await act(async () => button('Edit shared policy').click()); await act(async () => button('Edit app exception').click());
 +  expect(document.querySelector<HTMLInputElement>('input[value="restart"]')!.disabled).toBe(true);
 +  expect(document.body.textContent).toContain(message);
 +  expect(button('Save for this app').disabled).toBe(true);
@@ -1433,14 +1447,14 @@ index 000000000..954d28972
 +it('shows restrictions found in the current package by the server', async () => {
 +  state.eligibility = [{ appId: 'vendor.app', problem: 'The startup installer Beta cannot be used for New computer setup.' }];
 +  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps })));
-+  await act(async () => button('Edit app exception').click());
++  await act(async () => button('Edit shared policy').click()); await act(async () => button('Edit app exception').click());
 +  expect(document.querySelector<HTMLInputElement>('input[value="restart"]')!.disabled).toBe(true);
 +  expect(document.body.textContent).toContain('New computer setup');
 +});
 +it('allows restart for an eligible saved update relationship', async () => {
 +  apps[0].deployment_config = { ...apps[0].deployment_config, relationships: [{ relationshipType: 'supersedence', supersedenceType: 'update', targetId: 'fixture-app', targetDisplayName: 'Fixture' }] } as DeploymentConfig;
 +  await act(async () => root.render(createElement(InstallationPolicyPanel, { apps })));
-+  await act(async () => button('Edit app exception').click());
++  await act(async () => button('Edit shared policy').click()); await act(async () => button('Edit app exception').click());
 +  const restart = document.querySelector<HTMLInputElement>('input[value="restart"]')!;
 +  expect(restart.disabled).toBe(false);
 +  await act(async () => restart.click());
@@ -1490,7 +1504,7 @@ index 000000000..954d28972
 +  await act(async () => state.mutate.mock.calls[0][1].onSuccess());
 +  expect(document.body.textContent).toContain('Shared policy saved for future automatic packages. Apps with their own exceptions keep their settings.');
 +  await act(async () => button('Done').click());
-+  await act(async () => button('Edit app exception').click());
++  await act(async () => button('Edit shared policy').click()); await act(async () => button('Edit app exception').click());
 +  await act(async () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
 +  await act(async () => button('Use shared policy').click());
 +  expect(state.mutate.mock.calls[1][0]).toMatchObject({ action: 'inherit', appId: 'vendor.app' });
@@ -1500,7 +1514,7 @@ index 000000000..954d28972
 +});
 +
 +it('names the row and the panel the same and does not offer the restart Beta where the server cannot run it', async () => {
-+  expect(document.querySelector('section[aria-label="How automatic updates install"] h3')!.textContent).toBe('How automatic updates install');
++  expect(document.querySelector('section[aria-label="How automatic updates install"] h3')!.textContent).toBe('How automatic updates install:');
 +  state.restartPilotSupported = false;
 +  await act(async () => button('Edit shared policy').click());
 +  const panel = document.querySelector('[role="dialog"]')!;
@@ -1519,10 +1533,10 @@ index 000000000..954d28972
 +});
 diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
 new file mode 100644
-index 000000000..79a0684e8
+index 000000000..f9ae221c4
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.tsx
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,126 @@
 +'use client';
 +import { useState } from 'react';
 +import Link from 'next/link';
@@ -1535,10 +1549,12 @@ index 000000000..79a0684e8
 +import { PilotGroupPicker } from './PilotGroupPicker';
 +import { usePilots } from '@/hooks/usePilots';
 +import { StatusStripRow } from './StatusStripRow';
++import { StartupInstallationsLink } from './StartupInstallations';
 +
 +// One name for this setting on every screen: the App updates row, the app page and the panel title.
 +export const HOW_UPDATES_INSTALL = 'How automatic updates install';
 +export const CHANGE_HOW_IT_INSTALLS = 'Change how it installs';
++export const appExceptionCount = (n: number) => n === 1 ? '1 app exception' : `${n} app exceptions`;
 +
 +export function InstallationPolicyPanel({ apps, appId, intuneAppId, compact = false }: { apps: AppUpdatePolicy[]; appId?: string; intuneAppId?: string; compact?: boolean }) {
 +  const { data, isLoading, error, action } = useInstallationPolicy();
@@ -1573,7 +1589,7 @@ index 000000000..79a0684e8
 +  const summaryPolicy = (appId ? exceptions.find(p => p.appId.toLowerCase() === appId.toLowerCase()) : undefined) ?? data?.shared;
 +  const sharedSummary = !summaryPolicy ? null : summaryPolicy.mode === 'existing' ? 'Use each app’s saved settings' : summaryPolicy.mode === 'prompt' ? `Users can postpone · ${summaryPolicy.days} days` : summaryPolicy.mode === 'restart' ? 'Install after next restart · Beta' : 'Install without postponement';
 +  const editor = <Dialog open={open} onOpenChange={value => { if (!action.isPending) { setOpen(value); if (value) choose(appId ?? ''); } }}>
-+        <DialogTrigger asChild><Button variant={compact ? 'outline' : 'ghost'} size="sm" disabled={!data?.shared}>{appId ? CHANGE_HOW_IT_INSTALLS : 'Edit shared policy'}</Button></DialogTrigger>
++        <DialogTrigger asChild><Button variant={compact ? 'outline' : 'ghost'} size="sm" className={compact ? undefined : 'h-7 whitespace-nowrap px-2 text-accent-cyan hover:text-accent-cyan'} disabled={!data?.shared}>{appId ? CHANGE_HOW_IT_INSTALLS : 'Edit shared policy'}</Button></DialogTrigger>
 +        <DialogContent side="right" onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }} hideCloseButton={action.isPending}>
 +          <DialogHeader className="pr-12"><DialogTitle>{HOW_UPDATES_INSTALL}</DialogTitle><DialogDescription>{selected ? `For ${selectedName} only. ` : 'Shared policy, for every app with Auto-update on. '}{effectiveMode === 'restart' ? 'Applies only to an explicitly started restart Beta pilot.' : 'Applies to future automatic packages.'} Current and queued packages stay unchanged.</DialogDescription></DialogHeader>
 +          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
@@ -1582,6 +1598,7 @@ index 000000000..79a0684e8
 +                {!appId && <option value="">All apps with Automatic updates on · Shared policy</option>}
 +                {apps.map(app => <option key={app.id} value={app.winget_id}>{app.deployment_config?.displayName || app.winget_id}{exceptions.some(p => p.appId.toLowerCase() === app.winget_id.toLowerCase()) ? ' · App exception' : ' · Uses shared policy'}</option>)}
 +              </select></label>}
++            {!appId && !selected && exceptions.length > 0 && <div className="text-sm"><h3 className="font-medium text-text-primary">App exceptions</h3><ul className="mt-1 divide-y divide-overlay/10">{exceptions.map(exception => <li key={exception.appId} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><span className="text-text-primary">{apps.find(a => a.winget_id.toLowerCase() === exception.appId.toLowerCase())?.deployment_config?.displayName || exception.appId}</span><p className="text-xs text-text-muted">{installationPolicySummary(exception)}</p></div><button type="button" className="text-xs text-accent-cyan hover:underline disabled:opacity-50" disabled={action.isPending} onClick={() => choose(exception.appId)}>Edit app exception</button></li>)}</ul></div>}
 +            {selected && <label className="flex items-center gap-2 text-sm text-text-primary"><input type="checkbox" checked={inherit} disabled={action.isPending} onChange={e => { setInherit(e.target.checked); setSaved(false); action.reset(); }} />Use shared policy</label>}
 +            <fieldset disabled={action.isPending || (!!selected && inherit)} className="space-y-4 disabled:opacity-50">
 +              <legend className="mb-2 text-sm font-medium text-text-primary">2. What staff see</legend>
@@ -1606,7 +1623,7 @@ index 000000000..79a0684e8
 +            {data?.shared && <dl className="divide-y divide-overlay/10 text-sm">
 +              <div className="flex justify-between gap-3 py-3"><dt className="text-text-muted">Intune delivery</dt><dd className="text-right font-medium text-text-primary">When Intune runs the assignment<span className="block text-xs font-normal text-text-muted">No fixed computer installation time</span></dd></div>
 +            </dl>}
-+            <div className="flex flex-wrap gap-4 text-xs"><Link href="/dashboard/inventory" className="text-accent-cyan hover:underline">Open Inventory for install results</Link><Link href="/dashboard/help#automatic-installation-policy" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline">Automatic installation guide<span className="sr-only"> (opens in a new tab)</span></Link></div>
++            <div className="flex flex-wrap gap-4 text-xs"><Link href="/dashboard/inventory" className="text-accent-cyan hover:underline">Open Inventory for install results</Link><Link href="/dashboard/help#automatic-installation-policy" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline">Automatic installation guide<span className="sr-only"> (opens in a new tab)</span></Link>{!appId && <StartupInstallationsLink onOpen={() => setOpen(false)} />}</div>
 +            {appId && draft.mode === 'restart' && !inherit && !dirty && stored?.mode === 'restart' && stored.restartPilot && (intuneAppId ? <RestartPilotStart wingetId={appId} appId={intuneAppId} groupId={stored.restartPilot.groupId} groupName={stored.restartPilot.groupName} /> : <p className="text-sm text-text-muted">Open the app workspace to start the saved restart Beta pilot.</p>)}
 +            {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
 +          </div>
@@ -1617,10 +1634,19 @@ index 000000000..79a0684e8
 +        </DialogContent>
 +      </Dialog>;
 +  if (compact) return editor;
-+  return <StatusStripRow label={HOW_UPDATES_INSTALL} summary={isLoading ? 'Loading…' : sharedSummary && <>{sharedSummary}{!appId && exceptions.length > 0 && ` · ${exceptions.length} app exceptions`}</>} action={editor}>
++  if (appId) return <StatusStripRow label={HOW_UPDATES_INSTALL} summary={isLoading ? 'Loading…' : sharedSummary} action={editor}>
 +    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
-+    {!appId && exceptions.length > 0 && <details className="text-sm"><summary className="cursor-pointer text-accent-cyan">Review app exceptions</summary><ul className="mt-2 divide-y divide-overlay/10">{exceptions.map(exception => <li key={exception.appId} className="flex flex-wrap justify-between gap-2 py-2 text-sm"><div><span className="text-text-primary">{apps.find(a => a.winget_id.toLowerCase() === exception.appId.toLowerCase())?.deployment_config?.displayName || exception.appId}</span><p className="text-xs text-text-muted">{installationPolicySummary(exception)}</p></div><button className="text-xs text-accent-cyan hover:underline" onClick={() => { choose(exception.appId); setOpen(true); }}>Edit app exception</button></li>)}</ul></details>}
 +  </StatusStripRow>;
++  // App updates' status bar: one line with the shared rule and how many apps have their own. The exceptions
++  // are listed, and edited, in the panel.
++  return <section aria-label={HOW_UPDATES_INSTALL} className="min-w-0 space-y-1">
++    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
++      <h3 className="whitespace-nowrap font-medium text-text-primary">{HOW_UPDATES_INSTALL}:</h3>
++      <span className="text-text-secondary">{isLoading ? 'Loading…' : sharedSummary}{!isLoading && exceptions.length > 0 && <>{' · '}<span className="whitespace-nowrap">{appExceptionCount(exceptions.length)}</span></>}</span>
++      {editor}
++    </div>
++    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
++  </section>;
 +}
 +
 +/** Reuses the shared query cache so cards name their actual inherited rule. */
@@ -1665,48 +1691,125 @@ index 000000000..9dcf1ee0b
 +}
 diff --git a/components/hrm/StartupInstallations.test.ts b/components/hrm/StartupInstallations.test.ts
 new file mode 100644
-index 000000000..bd2829de5
+index 000000000..0b8ff074b
 --- /dev/null
 +++ b/components/hrm/StartupInstallations.test.ts
-@@ -0,0 +1,19 @@
-+import { expect, it, vi } from 'vitest';
-+import { createElement } from 'react';
+@@ -0,0 +1,79 @@
++// @vitest-environment happy-dom
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { act, createElement } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
 +import { renderToStaticMarkup } from 'react-dom/server';
 +import { emptyStartupCounts, type StartupReportView } from '@/lib/hrm/startup-report';
 +const state=vi.hoisted(()=>({data:{supported:true,configured:false,packages:[{id:'fixture',name:'Pilot app',version:'2'}]} as StartupReportView}));
 +vi.mock('@/hooks/useStartupInstallations',()=>({useStartupInstallations:()=>({data:state.data,isLoading:false,refresh:{isPending:false,mutate:vi.fn()},cancellation:{isPending:false,mutate:vi.fn()}})}));
-+import { StartupInstallations } from './StartupInstallations';
++import { StartupInstallations, StartupInstallationsAlert, StartupInstallationsLink, StartupInstallationsPanel, openStartupInstallations } from './StartupInstallations';
++const report=(over:Partial<NonNullable<StartupReportView['report']>>={})=>({rows:[],summary:emptyStartupCounts(),reportingDevices:1,unknownDevices:0,omitted:0,...over});
++
 +it('keeps cancellation visible when optional device reporting is unconfigured or denied',()=>{
 + for(const error of [undefined,'access_denied'] as const){
 +  state.data={supported:true,configured:!!error,error,packages:[{id:'fixture',name:'Pilot app',version:'2'}]};
-+  const html=renderToStaticMarkup(createElement(StartupInstallations));
++  const html=renderToStaticMarkup(createElement(StartupInstallationsPanel));
 +  expect(html).toContain('Pilot app');expect(html).toContain('Download cancellation script');expect(html).toContain('No reports yet');
 + }
 +});
-+it('shows a review indicator in the collapsed overview for incomplete reports',()=>{
-+ state.data={supported:true,configured:true,report:{rows:[],summary:emptyStartupCounts(),reportingDevices:1,unknownDevices:1,omitted:20}};
-+ const html=renderToStaticMarkup(createElement(StartupInstallations));
++it('shows a review indicator for incomplete reports',()=>{
++ state.data={supported:true,configured:true,report:report({unknownDevices:1,omitted:20})};
++ const html=renderToStaticMarkup(createElement(StartupInstallationsPanel));
 + expect(html).toContain('Reports need review');expect(html).not.toContain('0 waiting for restart');
++});
++
++describe('on App updates', () => {
++ let root: Root;
++ (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++ beforeEach(() => { const el = document.createElement('div'); document.body.append(el); root = createRoot(el); window.history.replaceState(null, '', '/dashboard/updates'); });
++ afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
++ const render = async (el: Parameters<typeof createElement>[0], props = {}) => { await act(async () => root.render(createElement(el, props))); return document.body.textContent ?? ''; };
++
++ it('hides the status bar line while no startup package is recorded and nothing needs review', async () => {
++  state.data={supported:true,configured:false,packages:[]};
++  let text=await render(StartupInstallations);
++  expect(text).not.toContain('Startup install results');
++  expect(document.getElementById('startup-installations')).not.toBeNull();
++  state.data={supported:true,configured:true,report:report()};
++  expect(await render(StartupInstallations)).not.toContain('Startup install results');
++  state.data={supported:true,configured:false,packages:[{id:'fixture',name:'Pilot app',version:'2'}]};
++  text=await render(StartupInstallations);
++  expect(text).toContain('Startup install results (Beta):');expect(text).toContain('Not set up');
++ });
++
++ it('shows the alert above the list only when reports need review or a computer failed', async () => {
++  state.data={supported:true,configured:true,report:report()};
++  expect(await render(StartupInstallationsAlert)).toBe('');
++  state.data={supported:true,configured:true,report:report({unknownDevices:2})};
++  expect(await render(StartupInstallationsAlert)).toContain('Startup install results need review.');
++  state.data={supported:true,configured:true,report:report({summary:{...emptyStartupCounts(),failed:1}})};
++  expect(await render(StartupInstallationsAlert)).toContain('Startup Beta: 1 computer failed to install.');
++ });
++
++ it('opens the panel from a #startup-installations link even when the line is hidden, and clears the hash on close', async () => {
++  state.data={supported:true,configured:false,packages:[]};
++  window.history.replaceState(null, '', '/dashboard/updates#startup-installations');
++  await render(StartupInstallations);
++  const dialog=document.querySelector('[role="dialog"]');
++  expect(dialog?.textContent).toContain('Set up startup reporting');
++  await act(async () => { (document.body.querySelector('[role="dialog"] button[aria-label="Close"], [role="dialog"] button.absolute') as HTMLButtonElement | null)?.click(); });
++  await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
++ });
++
++ it('opens from the link in How automatic updates install and from the alert', async () => {
++  state.data={supported:true,configured:false,packages:[]};
++  await act(async () => root.render(createElement('div', null, createElement(StartupInstallations), createElement(StartupInstallationsLink))));
++  expect(document.querySelector('[role="dialog"]')).toBeNull();
++  const link=[...document.querySelectorAll('button')].find(b=>b.textContent==='Startup install results (Beta)')!;
++  await act(async () => { link.click(); await new Promise(r=>setTimeout(r,5)); });
++  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Startup install results · Beta');
++ });
++
++ it('does nothing where the server has no Startup Beta', async () => {
++  state.data={supported:false} as StartupReportView;
++  expect(await render(StartupInstallationsLink)).toBe('');
++  expect(await render(StartupInstallations)).toBe('');
++  await act(async () => openStartupInstallations());
++  expect(document.querySelector('[role="dialog"]')).toBeNull();
++ });
 +});
 diff --git a/components/hrm/StartupInstallations.tsx b/components/hrm/StartupInstallations.tsx
 new file mode 100644
-index 000000000..be9004b00
+index 000000000..713204fb9
 --- /dev/null
 +++ b/components/hrm/StartupInstallations.tsx
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,108 @@
 +'use client';
++import { useEffect, useState } from 'react';
++import { AlertTriangle } from 'lucide-react';
 +import { Button } from '@/components/ui/button';
++import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 +import { useStartupInstallations } from '@/hooks/useStartupInstallations';
-+import { emptyStartupCounts, startupReportNeedsReview, type StartupState } from '@/lib/hrm/startup-report';
++import { emptyStartupCounts, startupReportNeedsReview, type StartupReportView, type StartupState } from '@/lib/hrm/startup-report';
 +const columns: { key: StartupState; label: string }[] = [{key:'waiting',label:'Waiting for restart'},{key:'installing',label:'Installing'},{key:'installed',label:'Installed'},{key:'failed',label:'Failed'},{key:'cancelled',label:'Cancelled'},{key:'outdated',label:'Status out of date'}];
-+export function StartupInstallations() {
++export const STARTUP_INSTALL_RESULTS = 'Startup install results';
++const OPEN_EVENT = 'hrm:open-startup-installations';
++const HASH = '#startup-installations';
++/** Opens the Startup install results panel from anywhere on App updates. */
++export function openStartupInstallations() { window.dispatchEvent(new Event(OPEN_EVENT)); }
++/** Reports that need a look: incomplete or out-of-date reports, or a computer that failed to install. */
++export function startupNeedsAttention(data: Partial<StartupReportView> | undefined): boolean {
++  return !!data && (startupReportNeedsReview(data as StartupReportView) || (data.report?.summary.failed ?? 0) > 0);
++}
++const hasPackages = (data: Partial<StartupReportView> | undefined) => (data?.packages?.length ?? 0) > 0;
++function summaryText(data: StartupReportView | undefined, isLoading: boolean) {
++  return isLoading ? 'Loading reports…' : data && startupReportNeedsReview(data) ? 'Reports need review' : data?.report ? `${data.report.summary.waiting} waiting for restart · ${data.report.summary.failed} failed` : data?.configured ? 'No reports yet' : 'Not set up';
++}
++
++/** The full results: counts, packages, cancellation and setup. Shown in the side panel. */
++export function StartupInstallationsPanel() {
 +  const { data, error, isLoading, refresh, cancellation } = useStartupInstallations();
 +  if (data?.supported === false) return null;
 +  const rows = data?.packages?.map(job => data.report?.rows.find(row => row.id === job.id) ?? { ...job, ...emptyStartupCounts(), lastActivityAt: undefined }) ?? data?.report?.rows ?? [];
-+  // HRM patch 0058 (choice 4B): the last row of App updates' status strip; Open shows the reports.
-+  const summary = isLoading ? 'Loading reports…' : data && startupReportNeedsReview(data) ? 'Reports need review' : data?.report ? `${data.report.summary.waiting} waiting for restart · ${data.report.summary.failed} failed` : data?.configured ? 'No reports yet' : 'Not set up';
-+  return <section id="startup-installations" aria-label="Startup install results · Beta" className="p-4">
-+    <details className="group"><summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 rounded text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan [&::-webkit-details-marker]:hidden"><span className="w-full shrink-0 font-semibold text-text-primary sm:w-44">Startup install results</span><span className="min-w-0 flex-1 text-text-secondary">{summary} · Beta</span><span className="text-accent-cyan group-open:hidden">Open</span><span className="hidden text-accent-cyan group-open:inline">Close</span></summary><div className="mt-4 space-y-4">
++  return <div className="space-y-4">
++    <p className="text-sm text-text-secondary">{summaryText(data, isLoading)} · Beta</p>
++
 +    <p className="text-xs text-status-warning">Beta: Windows pilot testing required. Validate staging, restart installation and cancellation on a pilot computer before wider rollout.</p>
 +
 +    <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-text-muted">Reported by computers at startup. Separate from Update history.</p><Button variant="outline" disabled={!data?.configured || refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isPending ? 'Checking Intune…' : 'Check startup reports'}</Button></div>
@@ -1726,8 +1829,64 @@ index 000000000..be9004b00
 +        return <tr key={row.id} className="border-b border-overlay/10"><td className="py-3 pr-3 text-text-primary">{row.name}<span className="mt-1 block text-text-muted">{row.version}{!anyReports ? ' · No reports yet' : ''}</span><details className="mt-2 text-xs"><summary className="cursor-pointer text-accent-cyan">Cancel before installation</summary><p className="mt-2 text-text-secondary">Remove the Required assignment first. Download this package’s cancellation script and deploy it as a SYSTEM platform script to the pilot group. It stops pending installation, including later retries, without uninstalling an installed app. If installation is already running, retry after it finishes.</p><Button size="sm" variant="outline" className="mt-2" disabled={cancellation?.isPending} onClick={() => cancellation.mutate(row.id)}>Download cancellation script</Button></details></td><td className="p-3 text-text-muted">{row.lastActivityAt ? new Date(row.lastActivityAt).toLocaleString() : 'No report'}</td>{columns.map(c => <td key={c.key} className="p-3 tabular-nums text-text-secondary">{anyReports ? row[c.key] : '—'}</td>)}</tr>;
 +      })}</tbody></table></div> : <p className="text-sm text-text-muted">No startup Beta packages are recorded for this tenant.</p>)}
 +    <details className="rounded-lg border border-overlay/10 p-3 text-sm"><summary className="cursor-pointer text-accent-cyan">Set up startup reporting</summary><ol className="mt-3 list-decimal space-y-2 pl-5 text-text-secondary"><li>Confirm that pilot users have an eligible Remediations license.</li><li><a className="text-accent-cyan hover:underline" href="/startup-beta/Detect-StartupInstallations.ps1" download>Download the startup reporting script</a> and create a detection-only Remediations package in Intune.</li><li>Run it as SYSTEM in 64-bit PowerShell, hourly, assigned only to the pilot device group.</li><li>Have the server administrator connect its script ID and grant the app the read-only DeviceManagementScripts.Read.All permission. The Help section has the server setup steps.</li><li>Use Check startup reports after the script runs. Waiting is not installation success; status can be delayed by offline devices and Intune reporting.</li></ol><a className="mt-3 inline-block text-accent-cyan hover:underline" href="/dashboard/help#startup-beta">Startup installation Beta help</a></details>
-+    </div></details>
-+  </section>;
++  </div>;
++}
++
++/**
++ * App updates' status bar: a Startup Beta line only while a startup package is recorded or its reports need a
++ * look. The panel itself opens from that line, from How automatic updates install, from the alert above the
++ * list, or from a #startup-installations link (Help and the IT dashboard report use it).
++ */
++export function StartupInstallations() {
++  const { data, isLoading } = useStartupInstallations();
++  const [open, setOpen] = useState(false);
++  useEffect(() => {
++    const fromHash = () => { if (window.location.hash === HASH) setOpen(true); };
++    const fromEvent = () => setOpen(true);
++    fromHash();
++    window.addEventListener('hashchange', fromHash);
++    window.addEventListener(OPEN_EVENT, fromEvent);
++    return () => { window.removeEventListener('hashchange', fromHash); window.removeEventListener(OPEN_EVENT, fromEvent); };
++  }, []);
++  if (data?.supported === false) return null;
++  const close = (value: boolean) => {
++    setOpen(value);
++    // A link to #startup-installations opens the panel again only if the hash changes, so it is cleared on close.
++    if (!value && window.location.hash === HASH) window.history.replaceState(null, '', window.location.pathname + window.location.search);
++  };
++  const shown = hasPackages(data) || startupNeedsAttention(data);
++  return <>
++    <span id="startup-installations" className="block scroll-mt-24" aria-hidden="true" />
++    {shown && <section aria-label={`${STARTUP_INSTALL_RESULTS} · Beta`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
++      <h3 className="whitespace-nowrap font-medium text-text-primary">{STARTUP_INSTALL_RESULTS} (Beta):</h3>
++      <span className="text-text-secondary">{summaryText(data, isLoading)}</span>
++      <Button variant="ghost" size="sm" className="h-7 whitespace-nowrap px-2 text-accent-cyan hover:text-accent-cyan" onClick={() => setOpen(true)}>Open</Button>
++    </section>}
++    <Dialog open={open} onOpenChange={close}>
++      <DialogContent side="right">
++        <DialogHeader className="pr-12"><DialogTitle>{STARTUP_INSTALL_RESULTS} · Beta</DialogTitle><DialogDescription>What computers report when a startup Beta package installs after a restart.</DialogDescription></DialogHeader>
++        <div className="flex-1 min-h-0 overflow-y-auto p-6">{open && <StartupInstallationsPanel />}</div>
++      </DialogContent>
++    </Dialog>
++  </>;
++}
++
++/** Above the update list, only when startup reports need a look. */
++export function StartupInstallationsAlert() {
++  const { data } = useStartupInstallations();
++  if (data?.supported === false || !startupNeedsAttention(data)) return null;
++  const failed = data?.report?.summary.failed ?? 0;
++  return <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 px-4 py-2.5 text-sm">
++    <span className="flex min-w-0 items-center gap-2.5"><AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" /><span className="font-medium text-text-primary">{failed > 0 ? `Startup Beta: ${failed === 1 ? '1 computer' : `${failed} computers`} failed to install.` : 'Startup install results need review.'}</span></span>
++    <Button variant="outline" size="sm" className="whitespace-nowrap" onClick={openStartupInstallations}>Open startup results</Button>
++  </div>;
++}
++
++/** A link from How automatic updates install, shown wherever the Startup Beta is available on this server. */
++export function StartupInstallationsLink({ onOpen }: { onOpen?: () => void }) {
++  const { data } = useStartupInstallations();
++  if (data?.supported === false) return null;
++  return <button type="button" className="text-accent-cyan hover:underline" onClick={() => { onOpen?.(); setTimeout(openStartupInstallations, 0); }}>{STARTUP_INSTALL_RESULTS} (Beta)</button>;
 +}
 diff --git a/components/ui/alert-dialog.tsx b/components/ui/alert-dialog.tsx
 index a0098adc5..c3b61bfa1 100644
