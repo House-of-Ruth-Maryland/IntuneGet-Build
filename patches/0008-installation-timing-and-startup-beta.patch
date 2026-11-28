@@ -1023,10 +1023,10 @@ index 000000000..9560f16dd
 +});
 diff --git a/components/hrm/AppTimingPanel.tsx b/components/hrm/AppTimingPanel.tsx
 new file mode 100644
-index 000000000..752d641fa
+index 000000000..ec4612cd0
 --- /dev/null
 +++ b/components/hrm/AppTimingPanel.tsx
-@@ -0,0 +1,182 @@
+@@ -0,0 +1,184 @@
 +'use client';
 +import { useEffect, useRef, useState } from 'react';
 +import { useQueryClient } from '@tanstack/react-query';
@@ -1042,14 +1042,14 @@ index 000000000..752d641fa
 +
 +export const INSTALL_DATES = 'Install dates';
 +
-+/** With `open` and `onOpenChange` it is only the panel, opened from an update card's More menu. */
-+export function AppTimingPanel({ appId, groupNames = {}, open, onOpenChange }: { appId: string; groupNames?: Record<string, string>; open?: boolean; onOpenChange?: (open: boolean) => void }) {
++/** With `open` and `onOpenChange` it is only the panel, opened from an update card's More menu or Review update. */
++export function AppTimingPanel({ appId, groupNames = {}, open, onOpenChange, onSaved }: { appId: string; groupNames?: Record<string, string>; open?: boolean; onOpenChange?: (open: boolean) => void; onSaved?: () => void }) {
 +  const controlled = open !== undefined;
 +  return <Dialog {...(controlled ? { open, onOpenChange } : {})}>{!controlled && <DialogTrigger asChild><Button size="sm" variant="outline">{INSTALL_DATES}</Button></DialogTrigger>}
 +    <DialogContent side="right" onOpenAutoFocus={e => { e.preventDefault(); (e.currentTarget as HTMLElement | null)?.focus(); }}><DialogHeader className="pr-12"><DialogTitle className="text-xl">{INSTALL_DATES}</DialogTitle><DialogDescription className="mt-1 text-[15px] leading-relaxed">When this version becomes available and when it must install, for one group at a time.</DialogDescription></DialogHeader>
-+    <div className="flex-1 min-h-0 overflow-y-auto p-6"><AppTimingContent appId={appId} groupNames={groupNames} /></div></DialogContent></Dialog>;
++    <div className="flex-1 min-h-0 overflow-y-auto p-6"><AppTimingContent appId={appId} groupNames={groupNames} onSaved={onSaved} /></div></DialogContent></Dialog>;
 +}
-+function AppTimingContent({ appId, groupNames }: { appId: string; groupNames: Record<string, string> }) {
++function AppTimingContent({ appId, groupNames, onSaved }: { appId: string; groupNames: Record<string, string>; onSaved?: () => void }) {
 +  const { getAccessToken } = useMicrosoftAuth();
 +  const { isMspUser, selectedTenantId } = useMspOptional();
 +  const client = useQueryClient();
@@ -1068,18 +1068,20 @@ index 000000000..752d641fa
 +    if (body) {
 +      void client.invalidateQueries({ queryKey: ['hrm', 'app-insights'] });
 +      void client.invalidateQueries({ queryKey: ['inventory'] });
++      onSaved?.();
 +    }
 +    return data;
 +  }} />;
 +}
 +
 +/** Shows a stored clock time as written, never shifted into the browser's time zone. */
-+function clock(value: string | null | undefined, local: boolean) {
++export function formatTimingClock(value: string | null | undefined, local: boolean) {
 +  const input = timingInput(value);
 +  if (!input) return null;
 +  const text = new Date(`${input}:00Z`).toLocaleString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 +  return local ? text : `${text} UTC`;
 +}
++const clock = formatTimingClock;
 +function minutes(n: number) {
 +  if (n % 1440 === 0) return n === 1440 ? '1 day' : `${n / 1440} days`;
 +  if (n % 60 === 0) return n === 60 ? '1 hour' : `${n / 60} hours`;
@@ -1279,7 +1281,7 @@ index 000000000..23dd38bad
 +it('does not describe a policy read failure as no active policy',async()=>{state.policyError=true;const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Could not read the tenant update policy');expect(node.textContent).not.toContain('Auto-update is not on');expect(node.textContent).not.toContain('Change how it installs');await act(async()=>root.unmount());});
 diff --git a/components/hrm/AppWorkspace.tsx b/components/hrm/AppWorkspace.tsx
 new file mode 100644
-index 000000000..55f0b083b
+index 000000000..596e913ab
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.tsx
 @@ -0,0 +1,104 @@
@@ -1297,7 +1299,7 @@ index 000000000..55f0b083b
 +import { useMspOptional } from '@/hooks/useMspOptional';
 +import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
 +import { installationPolicySummary } from '@/lib/hrm/installation-policy';
-+import { effectiveInstallationRule, savedInstallationSummary } from '@/lib/hrm/rollout-workspace';
++import { effectiveInstallationRule, formatRestartBehavior, savedInstallationSummary } from '@/lib/hrm/rollout-workspace';
 +import type { AppUpdatePolicy } from '@/types/update-policies';
 +import { LatestAppAttempt } from "./LatestAppAttempt";
 +import { EditAssignments } from "./EditAssignments";
@@ -1339,7 +1341,7 @@ index 000000000..55f0b083b
 +  const times = [...new Set(timed.map(row => { const value = row.settings?.installTimeSettings; const format = (date: string | null | undefined) => date ? `${date.replace('T', ' ').replace(/:00(?:\.000)?Z$/, '')} ${value?.useLocalTime ? "on each computer's clock" : 'UTC'}` : 'as soon as possible'; return `Available from ${format(value?.startDateTime)} · must install by ${format(value?.deadlineDateTime)}`; }))];
 +  const ASAP = 'Available from as soon as possible · must install by as soon as possible';
 +  const currentTiming = times.length === 1 ? times[0] === ASAP ? 'As soon as possible' : times[0] : times.length > 1 ? 'Different for each Required group. Open Install dates to see them.' : 'Open Install dates to read them from Intune.';
-+  const restart = ({ suppress: 'Suppressed', allow: 'Installer may restart', force: 'Intune forces restart', basedOnReturnCode: 'Based on installer result' } as Record<string, string>)[app.installExperience?.deviceRestartBehavior ?? ''] || 'Not reported';
++  const restart = app.installExperience?.deviceRestartBehavior ? formatRestartBehavior(app.installExperience.deviceRestartBehavior) : 'Not reported';
 +  const behavior = (value: typeof config) => !value ? 'Not reported' : value.installAfterRestartBeta ? 'After next restart · Beta' : value.deployMode === 'Silent' ? 'No toolkit windows' : value.deployMode === 'NonInteractive' ? 'No toolkit questions' : value.allowDefer ? 'Postponement when interactive' : 'Automatic toolkit mode';
 +  const nextSummary = effective?.policy.mode === 'existing' ? behavior(policy?.deployment_config?.psadtConfig ?? null) : effective?.policy.mode === 'restart' ? 'After next restart · Beta' : effective?.policy.mode === 'prompt' ? `Install or Defer · ${effective.policy.days} days` : effective?.policy.mode === 'silent' ? 'Silent' : 'Not reported';
 +  const preview = savedInstallationSummary(config);
@@ -1357,11 +1359,11 @@ index 000000000..55f0b083b
 +      <section className={section} aria-labelledby="current-copy">
 +        <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="current-copy" className="scroll-mt-24 text-lg font-semibold text-text-primary">Current release</h2><span className="rounded-md bg-overlay/5 px-2 py-1 text-xs text-text-secondary">Saved in Intune</span></div>
 +        <p className="text-xs text-text-muted">Version in Intune</p><p className="font-medium text-text-primary">{app.displayVersion || 'Version unavailable'}</p><PreviousCopyNote appId={appId} />
-+        <p className="text-xs text-text-muted">Per-computer installed versions are not collected here. Install results describe this Intune copy; a failed update does not erase a healthy installation report.</p>
++        <p className="text-xs text-text-muted">Install results describe this Intune copy. Per-computer versions are not collected.</p>
 +        <dl className="grid gap-x-5 gap-y-4 text-sm sm:grid-cols-2">
 +          <div><dt className="font-medium text-text-primary">Who gets it</dt><dd className="mt-1 space-y-2"><AppGroupsLine intuneAppId={appId} /><p className="text-xs text-text-muted">Each group is <Term term="required">Required</Term> or <Term term="available">Available</Term>.</p><EditAssignments appId={appId} /></dd></div>
 +          <div><dt className="font-medium text-text-primary">Install dates</dt><dd className="mt-1 space-y-2 text-text-secondary"><p>{currentTiming}</p><AppTimingPanel appId={appId} groupNames={app.assignmentGroupNames} /></dd></div>
-+          <div><dt className="font-medium text-text-primary">Install behavior</dt><dd className="mt-1 text-text-secondary">{current.isLoading ? 'Loading saved settings…' : behavior(config)}<span className="mt-1 block text-xs text-text-muted">Built into this version's package. It cannot change without deploying a new package.</span></dd></div>
++          <div><dt className="font-medium text-text-primary">Install behavior</dt><dd className="mt-1 text-text-secondary">{current.isLoading ? 'Loading saved settings…' : behavior(config)}<span className="mt-1 block text-xs text-text-muted">Built into this package; changes take effect on the next deployment.</span></dd></div>
 +          <div><dt className="font-medium text-text-primary">Restart after installation</dt><dd className="mt-1 text-text-secondary">{restart}</dd></div>
 +
 +        </dl>
@@ -1383,7 +1385,7 @@ index 000000000..55f0b083b
 +      </section>
 +    </div>
 +    <section className={section} aria-label="Pilot status"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-base font-semibold text-text-primary">Pilot status</h2><Link href="/dashboard/updates" className="text-sm text-accent-cyan hover:underline">Open App updates</Link></div>{pilots.isLoading ? <p role="status">Loading pilot status…</p> : pilots.error ? <p role="alert">Pilot status unavailable.</p> : appPilots.length ? appPilots.map(row => <p key={row.id} className="text-sm text-text-secondary">{row.group_name} · {row.phase} · package {row.job_status || 'not reported'}</p>) : <p className="text-sm text-text-muted">No pilot reported for this copy.</p>}</section>
-+    <details className={section}><summary className="cursor-pointer text-sm font-medium text-text-primary">Timing and policy details</summary><div className="space-y-3 text-sm text-text-secondary"><p>{savedInstallationSummary(config)}</p><Link href="/dashboard/updates#automatic-updates" className="text-accent-cyan hover:underline">When can IntuneGet send automatic updates to Intune?</Link><p>Install dates edits live assignment availability, deadlines and restart grace for this copy. Publishing a package, device availability and installation are separate events.</p><p>Offline devices process assignments when available. No exact install time is guaranteed. A restart after installation is separate from installing at a later startup.</p><p>Intune in-use handling, Intune restart grace and toolkit postponement are separate. Assignment in-use values alone do not establish the app’s full in-use behavior.</p><p>Employee time selection, a 72-hour allowance capped by an IT cutoff and bounded startup catch-up require a validated device capability; they are not enabled here.</p><Link href="/dashboard/help#automatic-installation-policy" className="text-accent-cyan hover:underline">Installation policy help</Link></div></details>
++    <details className={section}><summary className="cursor-pointer text-sm font-medium text-text-primary">Timing and policy details</summary><div className="space-y-3 text-sm text-text-secondary"><p>{savedInstallationSummary(config)}</p><p>Install dates edits live availability, deadlines and restart grace for this copy. Offline computers install after reconnecting.</p><p>Intune in-use handling, restart grace and toolkit postponement are separate settings.</p><div className="flex flex-wrap gap-x-4 gap-y-2"><Link href="/dashboard/updates#automatic-updates" className="text-accent-cyan hover:underline">When can IntuneGet send automatic updates to Intune?</Link><Link href="/dashboard/help#automatic-installation-policy" className="text-accent-cyan hover:underline">Installation policy help</Link></div></div></details>
 +    {ownTenant && <details className={section}><summary className="cursor-pointer text-sm font-medium text-text-primary">App activity</summary><div className="pt-3"><AppActivityTimeline appId={appId} /></div></details>}
 +  </div>;
 +}
@@ -1551,10 +1553,10 @@ index 000000000..114d53fed
 +});
 diff --git a/components/hrm/InstallationPolicyPanel.tsx b/components/hrm/InstallationPolicyPanel.tsx
 new file mode 100644
-index 000000000..8110eff38
+index 000000000..788b92dca
 --- /dev/null
 +++ b/components/hrm/InstallationPolicyPanel.tsx
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,125 @@
 +'use client';
 +import { useState } from 'react';
 +import Link from 'next/link';
@@ -1655,14 +1657,13 @@ index 000000000..8110eff38
 +  if (appId) return <StatusStripRow label={HOW_UPDATES_INSTALL} summary={isLoading ? 'Loading…' : sharedSummary} action={editor}>
 +    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
 +  </StatusStripRow>;
-+  // App updates' status bar: one line with the shared rule and how many apps have their own. The exceptions
-+  // are listed, and edited, in the panel.
-+  return <section aria-label={HOW_UPDATES_INSTALL} className="min-w-0 space-y-1">
-+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-+      <h3 className="whitespace-nowrap font-medium text-text-primary">{HOW_UPDATES_INSTALL}:</h3>
-+      <span className="text-text-secondary">{isLoading ? 'Loading…' : sharedSummary}{!isLoading && exceptions.length > 0 && <>{' · '}<span className="whitespace-nowrap">{appExceptionCount(exceptions.length)}</span></>}</span>
++  // App updates' 2-column card: title + Edit action on top, shared rule and exception count cleanly underneath.
++  return <section aria-label={HOW_UPDATES_INSTALL} className="min-w-0 space-y-2">
++    <div className="flex flex-wrap items-start justify-between gap-2 text-sm">
++      <h3 className="font-medium text-text-primary">{HOW_UPDATES_INSTALL}:</h3>
 +      {editor}
 +    </div>
++    <p className="text-sm text-text-secondary break-words">{isLoading ? 'Loading…' : sharedSummary}{!isLoading && exceptions.length > 0 && <>{' · '}<span className="whitespace-nowrap">{appExceptionCount(exceptions.length)}</span></>}</p>
 +    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
 +  </section>;
 +}
@@ -2363,12 +2364,12 @@ index 000000000..af0b65064
 +});
 diff --git a/lib/hrm/__tests__/rollout-workspace.test.ts b/lib/hrm/__tests__/rollout-workspace.test.ts
 new file mode 100644
-index 000000000..8aff934e9
+index 000000000..27f2feb16
 --- /dev/null
 +++ b/lib/hrm/__tests__/rollout-workspace.test.ts
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,49 @@
 +import { expect, it } from 'vitest';
-+import { appWorkspaceUrl, attemptWorkspaceId, effectiveInstallationRule, savedInstallationSummary } from '../rollout-workspace';
++import { appWorkspaceUrl, attemptWorkspaceId, conciseInstallationSummary, effectiveInstallationRule, formatRestartBehavior, savedInstallationSummary } from '../rollout-workspace';
 +import { nextVersionCheck } from '../version-check';
 +it('links failed updates by exact source identity without guessing names or conflicting IDs',()=>{
 + const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222';
@@ -2398,6 +2399,19 @@ index 000000000..8aff934e9
 +  expect(config.allowDefer).toBe(true);
 + }
 +});
++it('formats concise install behavior and restart labels cleanly', () => {
++  expect(conciseInstallationSummary(null)).toBe('Saved settings unavailable');
++  expect(conciseInstallationSummary({ deployMode: 'Silent', allowDefer: false })).toBe('No toolkit windows');
++  expect(conciseInstallationSummary({ deployMode: 'Silent', allowDefer: true })).toContain('postponement inactive');
++  expect(conciseInstallationSummary({ deployMode: 'Interactive', allowDefer: true, deferDays: 3, deferByDaysOnly: true })).toBe('Prompt with postponement · 3 days');
++  expect(conciseInstallationSummary({ installAfterRestartBeta: true })).toBe('Install after next restart · Beta');
++  expect(formatRestartBehavior('suppress')).toBe('Suppressed');
++  expect(formatRestartBehavior('allow')).toBe('Installer may restart');
++  expect(formatRestartBehavior('force')).toBe('Intune forces restart');
++  expect(formatRestartBehavior('basedOnReturnCode')).toBe('Based on installer result');
++  expect(formatRestartBehavior(null)).toBe('Installer default');
++});
++
 +it('uses Eastern wall-clock cadence across daylight saving and advances past the current slot', () => {
 +  expect(nextVersionCheck(new Date('2026-11-23T20:30:00Z'))).toBe('2026-11-24T08:30:00.000Z');
 +  expect(nextVersionCheck(new Date('2026-03-08T06:00:00Z'))).toBe('2026-03-08T07:30:00.000Z');
@@ -2696,10 +2710,10 @@ index 000000000..c907b9d4a
 +export const startupPilotValidated = () => process.env.HRM_STARTUP_PILOT_CAPABILITY === 'natural-boot-v1';
 diff --git a/lib/hrm/rollout-workspace.ts b/lib/hrm/rollout-workspace.ts
 new file mode 100644
-index 000000000..9cd12ffe7
+index 000000000..5216fda5c
 --- /dev/null
 +++ b/lib/hrm/rollout-workspace.ts
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,54 @@
 +import type { PSADTConfig } from '@/types/psadt';
 +import type { InstallationPolicy } from './installation-policy';
 +import { GUID } from './app-insights';
@@ -2714,9 +2728,36 @@ index 000000000..9cd12ffe7
 +export function savedInstallationSummary(config?: Partial<PSADTConfig> | null): string {
 +  if (!config) return 'Saved installer settings are unavailable for this copy.';
 +  if (config.installAfterRestartBeta) return 'Install after next restart · Beta. No enforced startup deadline.';
-+  if (config.deployMode === 'Silent' || config.deployMode === 'NonInteractive') return `${config.deployMode === 'Silent' ? 'No toolkit windows' : 'No toolkit questions'}.${config.allowDefer ? ' Saved postponement is inactive in this mode.' : ' No postponement prompt.'} Vendor installer windows and Intune notifications are separate.`;
++  if (config.deployMode === 'Silent' || config.deployMode === 'NonInteractive') return `${config.deployMode === 'Silent' ? 'No toolkit windows' : 'No toolkit questions'}.${config.allowDefer ? ' Saved postponement is inactive in this mode.' : ' No postponement prompt.'}`;
 +  if (config.allowDefer) return `Installer postponement${config.deferDays ? ` · ${config.deferDays} days` : ''}${!config.deferByDaysOnly && config.deferTimes ? ` · up to ${config.deferTimes} postponements` : ''}.`;
 +  return 'Use the saved installer behavior, without postponement.';
++}
++
++/** Concise one-line label for install prompts in review sheets and summaries. */
++export function conciseInstallationSummary(config?: Partial<PSADTConfig> | null): string {
++  if (!config) return 'Saved settings unavailable';
++  if (config.installAfterRestartBeta) return 'Install after next restart · Beta';
++  if (config.deployMode === 'Silent') return config.allowDefer ? 'No toolkit windows (postponement inactive)' : 'No toolkit windows';
++  if (config.deployMode === 'NonInteractive') return config.allowDefer ? 'No toolkit questions (postponement inactive)' : 'No toolkit questions';
++  if (config.allowDefer) {
++    const days = config.deferDays ? ` · ${config.deferDays} ${config.deferDays === 1 ? 'day' : 'days'}` : '';
++    const times = !config.deferByDaysOnly && config.deferTimes ? ` · up to ${config.deferTimes}x` : '';
++    return `Prompt with postponement${days}${times}`;
++  }
++  return 'No postponement prompt';
++}
++
++const RESTART_LABELS: Record<string, string> = {
++  suppress: 'Suppressed',
++  allow: 'Installer may restart',
++  force: 'Intune forces restart',
++  basedOnReturnCode: 'Based on installer result',
++};
++
++/** Human-readable label for Intune's deviceRestartBehavior value. */
++export function formatRestartBehavior(value?: string | null): string {
++  if (!value) return 'Installer default';
++  return RESTART_LABELS[value] ?? value;
 +}
 +
 +export function effectiveInstallationRule(shared: InstallationPolicy, exceptions: (InstallationPolicy & { appId: string })[], appId: string) {
@@ -4931,10 +4972,10 @@ index 000000000..b0ac10ef1
 +}
 diff --git a/components/hrm/EditAssignments.test.ts b/components/hrm/EditAssignments.test.ts
 new file mode 100644
-index 000000000..7417e4e90
+index 000000000..4a9bf2b26
 --- /dev/null
 +++ b/components/hrm/EditAssignments.test.ts
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,144 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -4945,7 +4986,7 @@ index 000000000..7417e4e90
 +vi.mock('@/hooks/useMspOptional', () => ({ useMspOptional: () => ({ isMspUser: true, selectedTenantId: 'customer' }) }));
 +vi.mock('@/hooks/use-inventory', () => ({ useAppDetails: () => ({ data: null }) }));
 +vi.mock('./PilotGroupPicker', () => ({ PilotGroupPicker: (props: { onSelect: (value: unknown) => void; disabled: boolean; tenantId: string }) => createElement('button', { disabled: props.disabled, onClick: () => props.onSelect({ id: 'group', displayName: 'Selected group' }) }, `Choose group in ${props.tenantId}`) }));
-+import { AssignmentEditor } from './EditAssignments';
++import { AssignmentEditor, EditAssignments } from './EditAssignments';
 +(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 +const G1 = '20000000-0000-0000-0000-000000000001', G2 = '20000000-0000-0000-0000-000000000002', G3 = '20000000-0000-0000-0000-000000000003';
 +const target = (groupId: string) => ({ '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId });
@@ -5065,12 +5106,26 @@ index 000000000..7417e4e90
 +  expect(text.indexOf('Review change')).toBeLessThan(text.indexOf('One change at a time.'));
 +  expect(text).toContain('Exclusions, Uninstall groups and groups that come from another assignment can only be changed in Intune.');
 +});
++
++it('calls onSaved after a successful save and supports controlled open mode on EditAssignments', async () => {
++  const onSaved = vi.fn();
++  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(AssignmentEditor, { appId: 'app', tenantId: 'customer', rows, names, onSaved }))));
++  await click('Remove Pilot computers');
++  expect(onSaved).not.toHaveBeenCalled();
++  await click('Save to Intune');
++  expect(onSaved).toHaveBeenCalledOnce();
++
++  const onOpenChange = vi.fn();
++  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(EditAssignments, { appId: 'app', open: true, onOpenChange, onSaved }))));
++  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
++  expect(button('Edit groups')).toBeUndefined();
++});
 diff --git a/components/hrm/EditAssignments.tsx b/components/hrm/EditAssignments.tsx
 new file mode 100644
-index 000000000..d23eb640c
+index 000000000..39bcebbd7
 --- /dev/null
 +++ b/components/hrm/EditAssignments.tsx
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,130 @@
 +'use client';
 +import { useRef, useState } from 'react';
 +import { useQueryClient } from '@tanstack/react-query';
@@ -5088,20 +5143,33 @@ index 000000000..d23eb640c
 +type Change = { change: 'add'; groupId: string; intent: string } | { change: 'remove'; assignmentId: string } | { change: 'switch'; assignmentId: string; intent: string };
 +interface Review { change?: 'remove' | 'switch'; appName: string; version: string; token: string; group?: string; from?: string; to?: string | null; kept?: string[]; dropped?: string[]; alreadyBoth?: boolean; leavesNoGroups?: boolean; remaining?: string[]; groupName?: string; groupId?: string; intent?: string }
 +
-+export function EditAssignments({ appId }: { appId: string }) {
++export function EditAssignments({
++  appId,
++  open: openProp,
++  onOpenChange,
++  onSaved,
++}: {
++  appId: string;
++  open?: boolean;
++  onOpenChange?: (open: boolean) => void;
++  onSaved?: () => void;
++}) {
 +  const { isMspUser, selectedTenantId } = useMspOptional();
 +  const tenantId = isMspUser ? selectedTenantId : null;
-+  const [open, setOpen] = useState(false);
-+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button size="sm" variant="outline">{EDIT_GROUPS}</Button></DialogTrigger><DialogContent side="right" onOpenAutoFocus={event => { event.preventDefault(); (event.currentTarget as HTMLElement).focus(); }}><DialogHeader className="pr-12"><DialogTitle>{EDIT_GROUPS}</DialogTitle><DialogDescription>Who gets this version in Intune. Each change is checked with Intune before it is saved. No new package is made.</DialogDescription></DialogHeader><div className="flex-1 min-h-0 overflow-y-auto p-6">{open && <LiveEditor key={`${appId}:${tenantId}`} appId={appId} tenantId={tenantId} />}</div></DialogContent></Dialog>;
++  const [openState, setOpenState] = useState(false);
++  const controlled = openProp !== undefined;
++  const open = controlled ? openProp : openState;
++  const setOpen = (value: boolean) => { if (controlled) onOpenChange?.(value); else setOpenState(value); };
++  return <Dialog open={open} onOpenChange={setOpen}>{!controlled && <DialogTrigger asChild><Button size="sm" variant="outline">{EDIT_GROUPS}</Button></DialogTrigger>}<DialogContent side="right" onOpenAutoFocus={event => { event.preventDefault(); (event.currentTarget as HTMLElement).focus(); }}><DialogHeader className="pr-12"><DialogTitle>{EDIT_GROUPS}</DialogTitle><DialogDescription>Who gets this version in Intune. Each change is checked with Intune before it is saved. No new package is made.</DialogDescription></DialogHeader><div className="flex-1 min-h-0 overflow-y-auto p-6">{open && <LiveEditor key={`${appId}:${tenantId}`} appId={appId} tenantId={tenantId} onSaved={onSaved} />}</div></DialogContent></Dialog>;
 +}
-+function LiveEditor({ appId, tenantId }: { appId: string; tenantId?: string | null }) {
++function LiveEditor({ appId, tenantId, onSaved }: { appId: string; tenantId?: string | null; onSaved?: () => void }) {
 +  const details = useAppDetails(appId);
 +  const app = details.data?.app;
 +  if (!app) return details.error ? <p role="alert" className="text-sm text-status-error">Could not read this app&apos;s groups from Intune. Close this panel and try again.</p> : <p role="status" className="text-sm text-text-secondary">Reading the groups from Intune…</p>;
-+  return <AssignmentEditor appId={appId} tenantId={tenantId} rows={(app.assignments ?? []) as unknown as GraphAssignment[]} names={app.assignmentGroupNames ?? {}} />;
++  return <AssignmentEditor appId={appId} tenantId={tenantId} rows={(app.assignments ?? []) as unknown as GraphAssignment[]} names={app.assignmentGroupNames ?? {}} onSaved={onSaved} />;
 +}
 +
-+export function AssignmentEditor({ appId, tenantId, rows = [], names = {} }: { appId: string; tenantId?: string | null; rows?: GraphAssignment[]; names?: Record<string, string> }) {
++export function AssignmentEditor({ appId, tenantId, rows = [], names = {}, onSaved }: { appId: string; tenantId?: string | null; rows?: GraphAssignment[]; names?: Record<string, string>; onSaved?: () => void }) {
 +  const { getAccessToken } = useMicrosoftAuth();
 +  const client = useQueryClient();
 +  const [group, setGroup] = useState<PilotGroupSelection | null>(null);
@@ -5132,6 +5200,7 @@ index 000000000..d23eb640c
 +        setMessage(data.alreadyAssigned || data.alreadyDone ? 'Intune already has this change. Nothing else was changed.' : 'Saved to Intune.');
 +        await client.invalidateQueries({ queryKey: ['inventory'] });
 +        await client.invalidateQueries({ queryKey: ['hrm', 'app-insights'] });
++        onSaved?.();
 +      }
 +    } catch (e) {
 +      setError(e instanceof Error ? e.message : 'Could not confirm the change. Review it again before retrying.'); reset();
@@ -5323,10 +5392,10 @@ index 000000000..4d71aea12
 +$results|ConvertTo-Json -Depth 5|Set-Content $Out
 diff --git a/components/hrm/Term.tsx b/components/hrm/Term.tsx
 new file mode 100644
-index 000000000..6e28a54d2
+index 000000000..adb73e23e
 --- /dev/null
 +++ b/components/hrm/Term.tsx
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,40 @@
 +'use client';
 +// One place for the Intune words IntuneGet shows as they are. Each keeps Intune's own name on screen
 +// and explains it on hover or keyboard focus, so screens do not invent a second name for it.
@@ -5343,6 +5412,11 @@ index 000000000..6e28a54d2
 +  restartGrace: "Intune calls this the restart grace period. It gives staff time before Intune restarts the computer after an install. It cannot stop a restart the installer forces.",
 +  autoUpdate: "Auto-update deploys each new version to Intune when the publishing window allows. Notify only lists it in App updates until you review an update. Ignore leaves the app out of App updates.",
 +  postpone: "Staff can choose Install or Defer when the update starts. The prompt may be skipped when nobody is signed in. After the last allowed day, the next Intune attempt installs it.",
++  installPrompts: "Controls the installer toolkit windows built into the package. Vendor installer windows and Intune notifications are separate.",
++  restartBehavior: "Controls how Intune handles a computer restart after installation. Suppressed tells Intune not to restart, though it cannot stop a restart forced by the vendor installer.",
++  intuneNotifications: "Intune toast notifications are configured per assignment and are separate from toolkit prompts and vendor installer windows.",
++  deviceLocalTime: "Intune reads this time on each computer's own clock rather than UTC. A deadline may already be due in earlier time zones.",
++  settingsSource: "Curated apps use tested catalog defaults. Other apps reuse the deployment settings saved from their last IntuneGet deployment.",
 +} as const;
 +export type IntuneTerm = keyof typeof INTUNE_TERMS;
 +

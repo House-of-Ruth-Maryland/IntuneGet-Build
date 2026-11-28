@@ -78,9 +78,18 @@ index d1370f88f..e5e33ccf6 100644
    );
  }
 diff --git a/app/(app)/dashboard/unmanaged/page.tsx b/app/(app)/dashboard/unmanaged/page.tsx
-index e7bce7351..0a6664abd 100644
+index e7bce7351..cc191056c 100644
 --- a/app/(app)/dashboard/unmanaged/page.tsx
 +++ b/app/(app)/dashboard/unmanaged/page.tsx
+@@ -14,7 +14,7 @@ import {
+   AlertTriangle,
+   ExternalLink,
+   Sparkles,
+-  ShoppingCart,
++  ListChecks,
+   ArrowRight,
+ } from 'lucide-react';
+ import { VirtualAppList } from '@/components/VirtualAppList';
 @@ -32,6 +32,8 @@ import { UnmanagedToolbar } from '@/components/unmanaged/UnmanagedToolbar';
  import { UnmanagedListRow } from '@/components/unmanaged/UnmanagedListRow';
  import { UnmanagedEmptyState } from '@/components/unmanaged/UnmanagedEmptyState';
@@ -206,18 +215,24 @@ index e7bce7351..0a6664abd 100644
            value={computedStats.unmatched}
            icon={HelpCircle}
            color="neutral"
-@@ -365,7 +371,7 @@ export default function UnmanagedAppsPage() {
+@@ -363,9 +369,9 @@ export default function UnmanagedAppsPage() {
+           <AnimatedStatCard
+             title={<T>Claimed</T>}
              value={computedStats.claimed}
-             icon={ShoppingCart}
+-            icon={ShoppingCart}
++            icon={ListChecks}
              color="violet"
 -            description={<T><Var>{claimedPercentage}</Var>% of matched apps</T>}
 +            description={<T>In the Deployment list, not deployed yet</T>}
              delay={0.4}
              loading={isLoading}
            />
-@@ -378,7 +384,7 @@ export default function UnmanagedAppsPage() {
+@@ -376,9 +382,9 @@ export default function UnmanagedAppsPage() {
+       {computedStats.claimed > 0 && (
+         <div className="flex items-center justify-between gap-4 px-5 py-3 rounded-xl bg-gradient-to-r from-accent-violet/5 to-emerald-500/5 border border-accent-violet/10">
            <div className="flex items-center gap-3">
-             <ShoppingCart className="w-5 h-5 text-accent-violet" />
+-            <ShoppingCart className="w-5 h-5 text-accent-violet" />
++            <ListChecks className="w-5 h-5 text-accent-violet" />
              <p className="text-sm text-text-secondary">
 -              <T><span className="font-medium text-text-primary"><Var>{cartItemCount}</Var> {cartItemCount === 1 ? 'app' : 'apps'}</span> in your cart ready for deployment</T>
 +              <T><span className="font-medium text-text-primary"><Var>{cartItemCount}</Var> {cartItemCount === 1 ? 'app' : 'apps'}</span> in the Deployment list<Var>{cartRemovalCount > 0 ? ` (${cartRemovalCount} to remove)` : ''}</Var>. Nothing changes on computers until you deploy.</T>
@@ -573,9 +588,17 @@ index fc9fb18ac..2313b73be 100644
    manual: { label: 'Manual', icon: UserCheck, tone: 'accent' },
    excluded: { label: 'Excluded', icon: XCircle, tone: 'muted' },
 diff --git a/components/unmanaged/ClaimAllModal.tsx b/components/unmanaged/ClaimAllModal.tsx
-index d5ce89cbe..c8baec83c 100644
+index d5ce89cbe..b7432e332 100644
 --- a/components/unmanaged/ClaimAllModal.tsx
 +++ b/components/unmanaged/ClaimAllModal.tsx
+@@ -1,6 +1,6 @@
+ 'use client';
+ 
+-import { Loader2, CheckCircle2, XCircle, ShoppingCart, AlertTriangle, RefreshCw } from 'lucide-react';
++import { Loader2, CheckCircle2, XCircle, ListChecks, AlertTriangle, RefreshCw } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import {
+   Dialog,
 @@ -64,9 +64,9 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
          <DialogHeader>
            <DialogTitle>
@@ -588,7 +611,14 @@ index d5ce89cbe..c8baec83c 100644
                  : `Claiming ${apps.length} apps...`}
            </DialogTitle>
            <DialogDescription className="sr-only">
-@@ -87,7 +87,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+@@ -81,13 +81,13 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+           {phase === 'confirm' && (
+             <>
+               <div className="flex items-start gap-4 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
+-                <ShoppingCart className="w-6 h-6 text-emerald-400 flex-shrink-0 mt-0.5" />
++                <ListChecks className="w-6 h-6 text-emerald-400 flex-shrink-0 mt-0.5" />
+                 <div>
+                   <p className="text-text-primary font-medium">
                      {apps.length} {apps.length === 1 ? 'app' : 'apps'} will be claimed
                    </p>
                    <p className="text-text-secondary text-sm mt-1">
@@ -597,26 +627,49 @@ index d5ce89cbe..c8baec83c 100644
                    </p>
                  </div>
                </div>
-@@ -175,7 +175,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+@@ -96,7 +96,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+                 {apps.map((app) => (
+                   <div
+                     key={app.discoveredAppId}
+-                    className="flex items-center gap-3 p-2 rounded-lg bg-overlay/[0.02] border border-black/[0.03]"
++                    className="flex items-center gap-3 p-2 rounded-lg bg-overlay/[0.02] border border-overlay/[0.06]"
+                   >
+                     <AppIcon
+                       packageId={app.matchedPackageId || app.displayName}
+@@ -145,7 +145,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+                   return (
+                     <div
+                       key={app.discoveredAppId}
+-                      className="flex items-center gap-3 p-2 rounded-lg bg-overlay/[0.02] border border-black/[0.03]"
++                      className="flex items-center gap-3 p-2 rounded-lg bg-overlay/[0.02] border border-overlay/[0.06]"
+                     >
+                       <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                         {status === 'pending' && (
+@@ -173,9 +173,9 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+ 
+               {/* Summary */}
                {isComplete && (
-                 <div className="text-center p-4 rounded-lg bg-overlay/[0.02] border border-black/[0.03]">
+-                <div className="text-center p-4 rounded-lg bg-overlay/[0.02] border border-black/[0.03]">
++                <div className="text-center p-4 rounded-lg bg-overlay/[0.02] border border-overlay/[0.06]">
                    <p className="text-text-primary font-medium">
 -                    {successCount} of {apps.length} apps added to cart
 +                    {successCount} of {apps.length} apps added to the Deployment list
                    </p>
                    {failCount > 0 && (
                      <p className="text-red-400 text-sm mt-1">
-@@ -205,7 +205,7 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+@@ -204,8 +204,8 @@ export function ClaimAllModal({ state, onClose, onConfirm, onCancel, onRetryFail
+                 onClick={() => onConfirm(apps)}
                  className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white border-0"
                >
-                 <ShoppingCart className="w-4 h-4 mr-2" />
+-                <ShoppingCart className="w-4 h-4 mr-2" />
 -                Claim {apps.length} Apps
++                <ListChecks className="w-4 h-4 mr-2" />
 +                Claim {apps.length} apps
                </Button>
              </>
            )}
 diff --git a/components/unmanaged/ClaimAppModal.tsx b/components/unmanaged/ClaimAppModal.tsx
-index c6b4cbd92..8fc0c20dc 100644
+index c6b4cbd92..b9e533d77 100644
 --- a/components/unmanaged/ClaimAppModal.tsx
 +++ b/components/unmanaged/ClaimAppModal.tsx
 @@ -1,7 +1,7 @@
@@ -624,7 +677,7 @@ index c6b4cbd92..8fc0c20dc 100644
  
  import { useState } from 'react';
 -import { Monitor, Package, ShoppingCart, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
-+import { Monitor, Package, ShoppingCart, Loader2, AlertTriangle } from 'lucide-react';
++import { Monitor, Package, ListChecks, Loader2, AlertTriangle } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import {
    Dialog,
@@ -693,8 +746,9 @@ index c6b4cbd92..8fc0c20dc 100644
                </>
              ) : (
                <>
-                 <ShoppingCart className="w-4 h-4 mr-2" />
+-                <ShoppingCart className="w-4 h-4 mr-2" />
 -                {error ? 'Retry' : 'Add to Cart'}
++                <ListChecks className="w-4 h-4 mr-2" />
 +                {error ? 'Try again' : 'Add to Deployment list'}
                </>
              )}
@@ -863,9 +917,18 @@ index 000000000..bbc4dad6d
 +  { title: 'Watch it in Inventory, then delete it', detail: `Computers that have ${name} remove it when they check in. Inventory shows how many still have it. When none are left, press Delete from Intune.` },
 +];
 diff --git a/components/unmanaged/LinkPackageModal.tsx b/components/unmanaged/LinkPackageModal.tsx
-index b9ee4ff1a..6105df0db 100644
+index b9ee4ff1a..60d15350a 100644
 --- a/components/unmanaged/LinkPackageModal.tsx
 +++ b/components/unmanaged/LinkPackageModal.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+ import { useState, useEffect } from 'react';
+-import { Search, Check, Loader2, Package, AlertTriangle, RefreshCw, ShoppingCart } from 'lucide-react';
++import { Search, Check, Loader2, Package, AlertTriangle, RefreshCw, ListChecks } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { Input } from '@/components/ui/input';
+ import {
 @@ -121,7 +121,7 @@ export function LinkPackageModal({ app, isOpen, onClose, onLink, onLinkAndClaim
          }}
        >
@@ -875,6 +938,15 @@ index b9ee4ff1a..6105df0db 100644
            <DialogDescription>
              Search for a WinGet package to link with &ldquo;{app.displayName}&rdquo;
            </DialogDescription>
+@@ -264,7 +264,7 @@ export function LinkPackageModal({ app, isOpen, onClose, onLink, onLinkAndClaim
+               {isLinking ? (
+                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
+               ) : (
+-                <ShoppingCart className="w-4 h-4 mr-2" />
++                <ListChecks className="w-4 h-4 mr-2" />
+               )}
+               Link & Claim
+             </Button>
 @@ -278,7 +278,7 @@ export function LinkPackageModal({ app, isOpen, onClose, onLink, onLinkAndClaim
              {isLinking && !onLinkAndClaim ? (
                <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -1086,7 +1158,7 @@ index 000000000..0d8ff22bf
 +  );
 +}
 diff --git a/components/unmanaged/UnmanagedAppCard.tsx b/components/unmanaged/UnmanagedAppCard.tsx
-index cd49c673d..7e6276796 100644
+index cd49c673d..a77507fb9 100644
 --- a/components/unmanaged/UnmanagedAppCard.tsx
 +++ b/components/unmanaged/UnmanagedAppCard.tsx
 @@ -1,7 +1,9 @@
@@ -1096,7 +1168,7 @@ index cd49c673d..7e6276796 100644
 +import { DiscoveryDeploymentState } from './DiscoveryDeploymentState';
  import { memo } from 'react';
 -import { Monitor, Link as LinkIcon, ShoppingCart, Check, Loader2, Lightbulb } from 'lucide-react';
-+import { Monitor, Link as LinkIcon, ShoppingCart, Check, Loader2, Lightbulb, Trash2, HelpCircle } from 'lucide-react';
++import { Monitor, Link as LinkIcon, ListChecks, Check, Loader2, Lightbulb, Trash2, HelpCircle } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import { AppIcon } from '@/components/AppIcon';
  import { MatchStatusBadge } from './MatchStatusBadge';
@@ -1228,7 +1300,14 @@ index cd49c673d..7e6276796 100644
              </Button>
            )}
            {canClaim && (
-@@ -176,17 +195,7 @@ function UnmanagedAppCardComponent({
+@@ -170,23 +189,13 @@ function UnmanagedAppCardComponent({
+                 <Loader2 className="w-4 h-4 animate-spin" />
+               ) : (
+                 <>
+-                  <ShoppingCart className="w-4 h-4 mr-1.5" />
++                  <ListChecks className="w-4 h-4 mr-1.5" />
+                   Claim
+                 </>
                )}
              </Button>
            )}
@@ -1278,10 +1357,10 @@ index 1eb79dec7..9a715a087 100644
    'error': {
      icon: AlertTriangle,
 diff --git a/components/unmanaged/UnmanagedListRow.tsx b/components/unmanaged/UnmanagedListRow.tsx
-index 6b56bbc07..a8325fbeb 100644
+index 6b56bbc07..b2e4a12fd 100644
 --- a/components/unmanaged/UnmanagedListRow.tsx
 +++ b/components/unmanaged/UnmanagedListRow.tsx
-@@ -1,5 +1,7 @@
+@@ -1,14 +1,18 @@
  'use client';
  
 +import { canStageDiscovery } from '@/lib/discovery-state';
@@ -1289,7 +1368,10 @@ index 6b56bbc07..a8325fbeb 100644
  import { memo } from 'react';
  import { motion, useReducedMotion } from 'framer-motion';
  import {
-@@ -9,6 +11,8 @@ import {
+   Monitor,
+-  ShoppingCart,
++  ListChecks,
+   Link as LinkIcon,
    Loader2,
    CheckCircle2,
    Lightbulb,
@@ -1326,6 +1408,15 @@ index 6b56bbc07..a8325fbeb 100644
    const hasPartialSuggestions = app.partialMatches && app.partialMatches.length > 0;
  
    return (
+@@ -53,7 +63,7 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+       <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-transparent via-black/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+       <div
+         className={cn(
+-          'relative flex items-center gap-4 p-4 rounded-xl bg-overlay/[0.02] border border-black/[0.03] group-hover:border-overlay/10 transition-all duration-200 border-l-[3px]',
++          'relative flex items-center gap-4 p-4 rounded-xl bg-overlay/[0.02] border border-overlay/[0.06] group-hover:border-overlay/10 transition-all duration-200 border-l-[3px]',
+           statusBorderColor[app.matchStatus] || 'border-l-transparent',
+           app.isClaimed && 'opacity-70 group-hover:opacity-100'
+         )}
 @@ -67,8 +77,8 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
              className="group-hover:scale-105 transition-transform duration-200"
            />
@@ -1388,7 +1479,15 @@ index 6b56bbc07..a8325fbeb 100644
                </Button>
              )}
              {canClaim && (
-@@ -148,9 +174,12 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+@@ -141,16 +167,19 @@ export const UnmanagedListRow = memo(function UnmanagedListRow({
+                   <Loader2 className="w-4 h-4 animate-spin" />
+                 ) : (
+                   <>
+-                    <ShoppingCart className="w-3.5 h-3.5 mr-1.5" />
++                    <ListChecks className="w-3.5 h-3.5 mr-1.5" />
+                     Claim
+                   </>
+                 )}
                </Button>
              )}
              {app.isClaimed && (
@@ -1405,9 +1504,18 @@ index 6b56bbc07..a8325fbeb 100644
              )}
            </div>
 diff --git a/components/unmanaged/UnmanagedToolbar.tsx b/components/unmanaged/UnmanagedToolbar.tsx
-index 47deadceb..04d93594e 100644
+index 47deadceb..980c84de2 100644
 --- a/components/unmanaged/UnmanagedToolbar.tsx
 +++ b/components/unmanaged/UnmanagedToolbar.tsx
+@@ -8,7 +8,7 @@ import {
+   Rows3,
+   SortAsc,
+   SortDesc,
+-  ShoppingCart,
++  ListChecks,
+   CheckCircle2,
+   AlertCircle,
+   HelpCircle,
 @@ -57,8 +57,8 @@ function getFilterContextText(filters: UnmanagedAppsFilters): string {
    if (filters.matchStatus !== 'all') {
      const labels: Record<string, string> = {
@@ -1419,11 +1527,13 @@ index 47deadceb..04d93594e 100644
      };
      parts.push(labels[filters.matchStatus] || filters.matchStatus);
    }
-@@ -156,7 +156,7 @@ export function UnmanagedToolbar({
+@@ -155,8 +155,8 @@ export function UnmanagedToolbar({
+                 : 'bg-overlay/5 text-text-muted cursor-not-allowed'
              )}
            >
-             <ShoppingCart className="w-4 h-4 mr-2" />
+-            <ShoppingCart className="w-4 h-4 mr-2" />
 -            Claim All
++            <ListChecks className="w-4 h-4 mr-2" />
 +            Claim all matched apps
              {claimableCount > 0 && (
                <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-white/20 text-xs tabular-nums">

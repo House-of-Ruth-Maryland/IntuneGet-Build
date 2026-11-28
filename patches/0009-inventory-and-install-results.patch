@@ -1699,10 +1699,10 @@ index 267d2600e..d702001b5 100644
    );
  });
 diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
-index 5e9631f0e..f375e1955 100644
+index 5e9631f0e..0fdf4be11 100644
 --- a/components/inventory/InventoryAppDetails.tsx
 +++ b/components/inventory/InventoryAppDetails.tsx
-@@ -1,7 +1,19 @@
+@@ -1,7 +1,20 @@
  'use client';
  
 -import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users } from 'lucide-react';
@@ -1719,11 +1719,12 @@ index 5e9631f0e..f375e1955 100644
 +import { PreviousCopyNote } from '@/components/hrm/PreviousCopy';
 +import { RollbackPanel } from '@/components/hrm/RollbackPanel';
 +import { AppTimingPanel } from '@/components/hrm/AppTimingPanel';
++import { EditAssignments } from '@/components/hrm/EditAssignments';
 +import { RetirePanel } from '@/components/hrm/RetirePanel';
  import { Button } from '@/components/ui/button';
  import { SlidePanel } from '@/components/dashboard/animations/SlidePanel';
  import { useAppDetails } from '@/hooks/use-inventory';
-@@ -17,6 +29,8 @@ interface InventoryAppDetailsProps {
+@@ -17,6 +30,8 @@ interface InventoryAppDetailsProps {
  export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDetailsProps) {
    const { data, isLoading, error, refetch } = useAppDetails(appId);
    const app = data?.app;
@@ -1732,7 +1733,7 @@ index 5e9631f0e..f375e1955 100644
  
    const formatDate = (dateString: string) => {
      return new Date(dateString).toLocaleDateString('en-US', {
-@@ -38,10 +52,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -38,10 +53,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
  
    const getAssignmentIntent = (intent: IntuneAppAssignment['intent']) => {
      const intents: Record<string, { label: string; className: string }> = {
@@ -1747,7 +1748,7 @@ index 5e9631f0e..f375e1955 100644
      };
      return intents[intent] || { label: intent, className: 'bg-overlay/5 text-text-muted' };
    };
-@@ -61,7 +75,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -61,7 +76,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        </div>
        <div className="flex-1 min-w-0">
          <h3 className="text-xl font-semibold text-text-primary truncate">{app.displayName}</h3>
@@ -1756,7 +1757,7 @@ index 5e9631f0e..f375e1955 100644
          {app.displayVersion && (
            <span className="inline-block mt-1 text-xs bg-accent-cyan/10 text-accent-cyan px-2 py-0.5 rounded-full">
              v{app.displayVersion}
-@@ -73,20 +87,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -73,20 +88,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
          size="sm"
          onClick={() => refetch()}
          disabled={isLoading}
@@ -1795,7 +1796,7 @@ index 5e9631f0e..f375e1955 100644
      </Button>
    ) : undefined;
  
-@@ -96,8 +125,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -96,8 +126,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        onClose={onClose}
        width="lg"
        direction="right"
@@ -1806,7 +1807,7 @@ index 5e9631f0e..f375e1955 100644
      >
        {/* Loading State */}
        {isLoading && (
-@@ -110,25 +140,43 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -110,25 +141,43 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        {error && (
          <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
            <AlertCircle className="w-12 h-12 text-status-error mb-4" />
@@ -1854,7 +1855,7 @@ index 5e9631f0e..f375e1955 100644
                  Description
                </h4>
                <p className="text-sm text-text-secondary leading-relaxed">{app.description}</p>
-@@ -138,23 +186,36 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -138,23 +187,33 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
            {/* Commands */}
            <div className="space-y-4">
              {app.installCommandLine && (
@@ -1868,26 +1869,25 @@ index 5e9631f0e..f375e1955 100644
            </div>
  
 -          {/* Assignments */}
-+          {/* Assignments. HRM patch 0023: always shown, so an app with no groups is obvious. */}
-+          {(!app.assignments || !app.assignments.some(installs)) && (
-+            <div>
-+              <h4 className="text-sm font-semibold text-text-secondary mb-3 flex items-center gap-2">
-+                <Users className="w-3.5 h-3.5" />
-+                Groups
-+              </h4>
-+              <p className="text-sm text-text-secondary">
-+                {app.assignments ? 'No install assignments.' : 'Assignments unavailable.'}
-+              </p>
-+            </div>
-+          )}
-           {app.assignments && app.assignments.length > 0 && (
-             <div>
+-          {app.assignments && app.assignments.length > 0 && (
+-            <div>
 -              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-+              <h4 className="text-sm font-semibold text-text-secondary mb-3 flex items-center gap-2">
++          {/* Assignments. HRM patch 0023: always shown, so an app with no groups is obvious, with Edit groups inline. */}
++          <div>
++            <div className="flex items-center justify-between gap-2 mb-3">
++              <h4 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
                  <Users className="w-3.5 h-3.5" />
 -                Assignments ({app.assignments.length})
-+                Groups ({app.assignments.length})
++                {app.assignments && app.assignments.length > 0 ? `Groups (${app.assignments.length})` : 'Groups'}
                </h4>
++              {appId && <EditAssignments appId={appId} />}
++            </div>
++            {(!app.assignments || !app.assignments.some(installs)) && (
++              <p className="text-sm text-text-secondary mb-3">
++                {app.assignments ? 'No install assignments.' : 'Assignments unavailable.'}
++              </p>
++            )}
++            {app.assignments && app.assignments.length > 0 && (
                <div className="space-y-2">
                  {app.assignments.map((assignment) => {
                    const intentInfo = getAssignmentIntent(assignment.intent);
@@ -1896,7 +1896,7 @@ index 5e9631f0e..f375e1955 100644
                    return (
                      <div
                        key={assignment.id}
-@@ -173,12 +234,12 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -173,23 +232,23 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                                assignment.target,
                                app.assignmentGroupNames,
                                app.assignmentGroupLookupFailures
@@ -1912,7 +1912,12 @@ index 5e9631f0e..f375e1955 100644
                        </span>
                      </div>
                    );
-@@ -189,7 +250,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+                 })}
+               </div>
+-            </div>
+-          )}
++            )}
++          </div>
  
            {/* Metadata Grid */}
            <div>
@@ -1921,7 +1926,7 @@ index 5e9631f0e..f375e1955 100644
                Details
              </h4>
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-@@ -210,12 +271,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -210,12 +269,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                />
                <MetadataItem
                  icon={User}
@@ -2055,10 +2060,10 @@ index b19c39912..93d84eef2 100644
  });
 diff --git a/components/inventory/inventory-app-actions.test.ts b/components/inventory/inventory-app-actions.test.ts
 new file mode 100644
-index 000000000..d1581a5f1
+index 000000000..2bc0e23be
 --- /dev/null
 +++ b/components/inventory/inventory-app-actions.test.ts
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,68 @@
 +// @vitest-environment happy-dom
 +import { act, createElement, type ReactNode } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -2077,6 +2082,7 @@ index 000000000..d1581a5f1
 +vi.mock('@/components/hrm/PreviousCopy', () => ({ PreviousCopyNote: () => null }));
 +vi.mock('@/components/hrm/AppInsights', () => ({ AppActivityTimeline: () => null, AppDriftWarning: () => null }));
 +vi.mock('@/components/hrm/AppTimingPanel', () => ({ AppTimingPanel: () => createElement('p', null, 'Install dates') }));
++vi.mock('@/components/hrm/EditAssignments', () => ({ EditAssignments: () => createElement('button', null, 'Edit groups') }));
 +vi.mock('@/components/hrm/RollbackPanel', () => ({ RollbackPanel: () => createElement('p', null, 'Go back to previous version') }));
 +vi.mock('@/components/hrm/RetirePanel', () => ({ RetirePanel: () => createElement('p', null, 'Retire app') }));
 +vi.mock('@/components/dashboard/animations/SlidePanel', () => ({
@@ -2105,6 +2111,7 @@ index 000000000..d1581a5f1
 +    const section = c.querySelector('[data-testid="inventory-app-actions"]')!;
 +    expect(section.querySelector('h4')?.textContent).toBe('Actions');
 +    expect(actionTexts(c)).toEqual(['Install dates', 'Find in App catalog', 'Go back to previous version', 'Retire app']);
++    expect(c.textContent).toContain('Edit groups');
 +    expect(c.querySelector('footer')).toBeNull();
 +  });
 +
