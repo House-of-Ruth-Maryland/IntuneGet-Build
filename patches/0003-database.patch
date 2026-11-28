@@ -169,7 +169,7 @@ index 1fd336ac8..a26c95611 100644
      stored.close();
 diff --git a/lib/db/__tests__/sqlite-deployed-version-sync.test.ts b/lib/db/__tests__/sqlite-deployed-version-sync.test.ts
 new file mode 100644
-index 000000000..9774b803c
+index 000000000..77a0e3a31
 --- /dev/null
 +++ b/lib/db/__tests__/sqlite-deployed-version-sync.test.ts
 @@ -0,0 +1,108 @@
@@ -234,8 +234,8 @@ index 000000000..9774b803c
 +      userId: 'u2', tenantId: 't1', wingetId: 'Vendor.App', intuneAppId: 'app-2', version: '1.5.0', displayName: 'Vendor App',
 +    });
 +    expect(result.updated).toBe(1);
-+    expect(await all(db, 'u1', 't1')).toHaveLength(0);
-+    expect(await all(db, 'u3', 't1')).toHaveLength(0);
++    expect(await all(db, 'u1', 't1')).toHaveLength(1);
++    expect(await all(db, 'u3', 't1')).toEqual(await all(db, 'u1', 't1'));
 +    const [moved] = await all(db, 'u2', 't1');
 +    expect(moved).toMatchObject({
 +      id: row.id, intune_app_id: 'app-2', current_version: '1.5.0', latest_version: '2.0.0', is_critical: true,
@@ -757,10 +757,11 @@ index f598a05d4..2ce7d48af 100644
      (a, b) => a.version - b.version
    );
 diff --git a/lib/db/sqlite.ts b/lib/db/sqlite.ts
-index 5f548532d..de2c1fd3e 100644
+index 5f548532d..22a27579d 100644
 --- a/lib/db/sqlite.ts
 +++ b/lib/db/sqlite.ts
-@@ -1,10 +1,28 @@
+@@ -1,10 +1,29 @@
++import { newestTenantRows } from './tenant-updates';
 +import { orphanDeploymentEvidence } from './discovery-evidence';
 +import type { DiscoveryJobEvidence } from './types';
 +import { createStartupReportStore } from '@/lib/hrm/startup-report-store';
@@ -789,7 +790,7 @@ index 5f548532d..de2c1fd3e 100644
  import type { PackageAssignment, IntuneAppCategorySelection } from '@/types/upload';
  import type { Json } from '@/types/database';
  import type { SavedCustomAppDefinition } from '@/lib/custom-app-definitions';
-@@ -21,6 +39,8 @@ import type {
+@@ -21,6 +40,8 @@ import type {
    AutoUpdateHistoryQuery,
    UpdateCheckResult,
    UpdateCheckQuery,
@@ -798,7 +799,7 @@ index 5f548532d..de2c1fd3e 100644
    CuratedLicenceAttestationRecord,
    CuratedLicenceAttestationInput,
    ClaimedAppInput,
-@@ -32,6 +52,7 @@ import type {
+@@ -32,6 +53,7 @@ import type {
    AutoUpdateHistoryWithPolicy,
    AutoUpdateStatus,
  } from '@/types/update-policies';
@@ -806,7 +807,7 @@ index 5f548532d..de2c1fd3e 100644
  import { runSqliteMigrations } from './sqlite-migrations';
  import { INTUNE_APPROVAL_CHECKPOINT_STATUSES } from '@/lib/intune-approval';
  
-@@ -197,6 +218,191 @@ export const sqliteManualMappings = {
+@@ -197,6 +219,191 @@ export const sqliteManualMappings = {
    },
  };
  
@@ -998,7 +999,24 @@ index 5f548532d..de2c1fd3e 100644
  /** SQLite implementation of the database adapter. */
  export const sqliteDb: DatabaseAdapter = {
    customAppDefinitions: {
-@@ -278,6 +484,14 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -251,13 +458,13 @@ export const sqliteDb: DatabaseAdapter = {
+      * Get jobs by user ID
+      * Auto-excludes terminal-state jobs older than 7 days
+      */
+-    async getLatestDeployed(userId, tenantId, wingetId, intuneAppId) {
+-      const values: string[] = [userId, tenantId, wingetId];
++    async getLatestDeployed(userId, tenantId, wingetId, intuneAppId, scope) {
++      const values: string[] = scope === 'tenant' ? [tenantId, wingetId] : [userId, tenantId, wingetId];
+       const appFilter = intuneAppId === undefined ? '' : ' AND intune_app_id = ?';
+       if (intuneAppId !== undefined) values.push(intuneAppId);
+       const row = getDb().prepare(`
+         SELECT * FROM packaging_jobs
+-        WHERE user_id = ? AND tenant_id = ? AND winget_id = ?
++        WHERE ${scope === 'tenant' ? '' : 'user_id = ? AND '}tenant_id = ? AND winget_id = ?
+           AND status = 'deployed' AND archived_at IS NULL${appFilter}
+         ORDER BY completed_at DESC, created_at DESC, id DESC LIMIT 1
+       `).get(...values) as Record<string, unknown> | undefined;
+@@ -278,6 +485,14 @@ export const sqliteDb: DatabaseAdapter = {
        return rows.map(parseJobRow);
      },
  
@@ -1013,7 +1031,7 @@ index 5f548532d..de2c1fd3e 100644
      async getAnalyticsJobs(scope: AnalyticsJobScope): Promise<AnalyticsJob[]> {
        const key = scope.tenantId === undefined ? 'user_id' : 'tenant_id';
        const identity = scope.tenantId ?? scope.userId;
-@@ -291,6 +505,12 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -291,6 +506,12 @@ export const sqliteDb: DatabaseAdapter = {
        return rows;
      },
  
@@ -1026,7 +1044,7 @@ index 5f548532d..de2c1fd3e 100644
      async getByTenantId(tenantId: string, limit: number = 50): Promise<PackagingJob[]> {
        const database = getDb();
        // Every user's jobs in this tenant, most recent first, no age cutoff.
-@@ -647,6 +867,34 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -647,6 +868,34 @@ export const sqliteDb: DatabaseAdapter = {
        return row ?? null;
      },
  
@@ -1061,7 +1079,93 @@ index 5f548532d..de2c1fd3e 100644
      async listAll(limit: number = 1000): Promise<UploadHistoryRecord[]> {
        const database = getDb();
        return database
-@@ -805,6 +1053,11 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -660,18 +909,18 @@ export const sqliteDb: DatabaseAdapter = {
+       const database = getDb();
+       const stmt = tenantId
+         ? database.prepare(
+-            'SELECT * FROM app_update_policies WHERE user_id = ? AND tenant_id = ? ORDER BY updated_at DESC'
++            'SELECT * FROM app_update_policies WHERE tenant_id = ? ORDER BY updated_at DESC, id DESC'
+           )
+         : database.prepare('SELECT * FROM app_update_policies WHERE user_id = ? ORDER BY updated_at DESC');
+-      const rows = (tenantId ? stmt.all(userId, tenantId) : stmt.all(userId)) as Record<string, unknown>[];
+-      return rows.map(parsePolicyRow);
++      const rows = (tenantId ? stmt.all(tenantId) : stmt.all(userId)) as Record<string, unknown>[];
++      return newestTenantRows(rows.map(parsePolicyRow));
+     },
+ 
+-    async getById(id: string, userId: string): Promise<AppUpdatePolicy | null> {
++    async getById(id: string, userId: string, tenantId?: string): Promise<AppUpdatePolicy | null> {
+       const database = getDb();
+       const row = database
+-        .prepare('SELECT * FROM app_update_policies WHERE id = ? AND user_id = ?')
+-        .get(id, userId) as Record<string, unknown> | undefined;
++        .prepare(`SELECT * FROM app_update_policies WHERE id = ? AND ${tenantId ? 'tenant_id' : 'user_id'} = ?`)
++        .get(id, tenantId || userId) as Record<string, unknown> | undefined;
+       return row ? parsePolicyRow(row) : null;
+     },
+ 
+@@ -679,9 +928,9 @@ export const sqliteDb: DatabaseAdapter = {
+       const database = getDb();
+       const row = database
+         .prepare(
+-          'SELECT * FROM app_update_policies WHERE user_id = ? AND tenant_id = ? AND winget_id = ?'
++          'SELECT * FROM app_update_policies WHERE tenant_id = ? AND winget_id = ? COLLATE NOCASE ORDER BY updated_at DESC, id DESC LIMIT 1'
+         )
+-        .get(userId, tenantId, wingetId) as Record<string, unknown> | undefined;
++        .get(tenantId, wingetId) as Record<string, unknown> | undefined;
+       return row ? parsePolicyRow(row) : null;
+     },
+ 
+@@ -690,7 +939,7 @@ export const sqliteDb: DatabaseAdapter = {
+       const rows = database
+         .prepare('SELECT * FROM app_update_policies ORDER BY updated_at DESC')
+         .all() as Record<string, unknown>[];
+-      return rows.map(parsePolicyRow);
++      return newestTenantRows(rows.map(parsePolicyRow));
+     },
+ 
+     async upsert(
+@@ -743,31 +992,31 @@ export const sqliteDb: DatabaseAdapter = {
+       return parsePolicyRow(row);
+     },
+ 
+-    async update(id: string, userId: string, data: Partial<AppUpdatePolicy>): Promise<AppUpdatePolicy | null> {
++    async update(id: string, userId: string, data: Partial<AppUpdatePolicy>, tenantId?: string): Promise<AppUpdatePolicy | null> {
+       const database = getDb();
+       const { clause, values } = buildSetClause(data as Record<string, unknown>, {
+         json: new Set(['deployment_config']),
+         boolean: new Set(['is_enabled']),
+       });
+       if (!clause) {
+-        return this.getById(id, userId);
++        return this.getById(id, userId, tenantId);
+       }
+ 
+       const result = database
+-        .prepare(`UPDATE app_update_policies SET ${clause} WHERE id = ? AND user_id = ?`)
+-        .run(...values, id, userId);
++        .prepare(`UPDATE app_update_policies SET ${clause} WHERE id = ? AND ${tenantId ? 'tenant_id' : 'user_id'} = ?`)
++        .run(...values, id, tenantId || userId);
+ 
+       if (result.changes === 0) {
+         return null;
+       }
+-      return this.getById(id, userId);
++      return this.getById(id, userId, tenantId);
+     },
+ 
+-    async delete(id: string, userId: string): Promise<boolean> {
++    async delete(id: string, userId: string, tenantId?: string): Promise<boolean> {
+       const database = getDb();
+       const result = database
+-        .prepare('DELETE FROM app_update_policies WHERE id = ? AND user_id = ?')
+-        .run(id, userId);
++        .prepare(`DELETE FROM app_update_policies WHERE id = ? AND ${tenantId ? 'tenant_id' : 'user_id'} = ?`)
++        .run(id, tenantId || userId);
+       return result.changes > 0;
+     },
+   },
+@@ -805,6 +1054,11 @@ export const sqliteDb: DatabaseAdapter = {
        return parseHistoryRow(row);
      },
  
@@ -1073,7 +1177,23 @@ index 5f548532d..de2c1fd3e 100644
      async update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null> {
        const database = getDb();
        const { clause, values } = buildSetClause(data as Record<string, unknown>);
-@@ -848,10 +1101,12 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -827,13 +1081,9 @@ export const sqliteDb: DatabaseAdapter = {
+ 
+     async list(userId: string, query: AutoUpdateHistoryQuery): Promise<AutoUpdateHistoryWithPolicy[]> {
+       const database = getDb();
+-      const conditions = ['p.user_id = ?'];
+-      const values: unknown[] = [userId];
++      const conditions = [query.tenantId ? 'p.tenant_id = ?' : 'p.user_id = ?'];
++      const values: unknown[] = [query.tenantId || userId];
+ 
+-      if (query.tenantId) {
+-        conditions.push('p.tenant_id = ?');
+-        values.push(query.tenantId);
+-      }
+       if (query.wingetId) {
+         conditions.push('p.winget_id = ?');
+         values.push(query.wingetId);
+@@ -848,10 +1098,12 @@ export const sqliteDb: DatabaseAdapter = {
            h.*,
            p.winget_id AS policy_winget_id,
            p.tenant_id AS policy_tenant_id,
@@ -1088,7 +1208,7 @@ index 5f548532d..de2c1fd3e 100644
          WHERE ${conditions.join(' AND ')}
          ORDER BY h.triggered_at DESC
          LIMIT ? OFFSET ?
-@@ -874,6 +1129,13 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -874,6 +1126,13 @@ export const sqliteDb: DatabaseAdapter = {
            tenant_id: row.policy_tenant_id as string,
          },
          display_name: (row.packaging_display_name as string | null) ?? undefined,
@@ -1102,7 +1222,34 @@ index 5f548532d..de2c1fd3e 100644
        }));
      },
  
-@@ -941,6 +1203,11 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -897,12 +1156,8 @@ export const sqliteDb: DatabaseAdapter = {
+   updateCheckResults: {
+     async list(userId: string, query: UpdateCheckQuery): Promise<UpdateCheckResult[]> {
+       const database = getDb();
+-      const conditions = ['user_id = ?'];
+-      const values: unknown[] = [userId];
+-      if (query.tenantId) {
+-        conditions.push('tenant_id = ?');
+-        values.push(query.tenantId);
+-      }
++      const conditions = [query.tenantId ? 'tenant_id = ?' : 'user_id = ?'];
++      const values: unknown[] = [query.tenantId || userId];
+       if (!query.includeDismissed) {
+         conditions.push('dismissed_at IS NULL');
+       }
+@@ -911,9 +1166,9 @@ export const sqliteDb: DatabaseAdapter = {
+       }
+       const rows = database
+         .prepare(
+-          `SELECT * FROM update_check_results WHERE ${conditions.join(' AND ')} ORDER BY detected_at DESC`
++          `SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY tenant_id, lower(winget_id), lower(intune_app_id) ORDER BY updated_at DESC, id DESC) AS tenant_rank FROM update_check_results WHERE ${query.tenantId ? 'tenant_id' : 'user_id'} = ?) WHERE tenant_rank = 1 AND ${conditions.join(' AND ')} ORDER BY detected_at DESC, id DESC`
+         )
+-        .all(...values) as Record<string, unknown>[];
++        .all(query.tenantId || userId, ...values) as Record<string, unknown>[];
+       return rows.map(parseCheckResultRow);
+     },
+ 
+@@ -941,6 +1196,11 @@ export const sqliteDb: DatabaseAdapter = {
               latest_version = excluded.latest_version,
               is_critical = excluded.is_critical,
               is_managed = excluded.is_managed,
@@ -1114,7 +1261,28 @@ index 5f548532d..de2c1fd3e 100644
               updated_at = excluded.updated_at`
          )
          .run(
-@@ -1010,6 +1277,62 @@ export const sqliteDb: DatabaseAdapter = {
+@@ -971,7 +1231,7 @@ export const sqliteDb: DatabaseAdapter = {
+       return parseCheckResultRow(row);
+     },
+ 
+-    async setDismissed(ids: string[], userId: string, dismissedAt: string | null): Promise<number> {
++    async setDismissed(ids: string[], userId: string, dismissedAt: string | null, tenantId?: string): Promise<number> {
+       if (ids.length === 0) return 0;
+       const database = getDb();
+       const placeholders = ids.map(() => '?').join(', ');
+@@ -979,9 +1239,9 @@ export const sqliteDb: DatabaseAdapter = {
+         .prepare(
+           `UPDATE update_check_results
+            SET dismissed_at = ?, updated_at = ?
+-           WHERE user_id = ? AND id IN (${placeholders})`
++           WHERE ${tenantId ? 'tenant_id' : 'user_id'} = ? AND id IN (${placeholders})`
+         )
+-        .run(dismissedAt, new Date().toISOString(), userId, ...ids);
++        .run(dismissedAt, new Date().toISOString(), tenantId || userId, ...ids);
+       return result.changes;
+     },
+ 
+@@ -1010,6 +1270,62 @@ export const sqliteDb: DatabaseAdapter = {
          .run(userId, tenantId, ...values);
        return result.changes;
      },
@@ -1177,7 +1345,7 @@ index 5f548532d..de2c1fd3e 100644
    },
  
    curatedLicenceAttestations: {
-@@ -1138,3 +1461,7 @@ export function closeSqliteDb(): void {
+@@ -1138,3 +1454,7 @@ export function closeSqliteDb(): void {
      db = null;
    }
  }
@@ -1186,16 +1354,17 @@ index 5f548532d..de2c1fd3e 100644
 +
 +export const sqliteStartupReports = createStartupReportStore(getDb);
 diff --git a/lib/db/supabase-adapter.ts b/lib/db/supabase-adapter.ts
-index 590493b95..0faa8a50c 100644
+index 590493b95..d6d276b1d 100644
 --- a/lib/db/supabase-adapter.ts
 +++ b/lib/db/supabase-adapter.ts
-@@ -1,3 +1,5 @@
+@@ -1,3 +1,6 @@
++import { newestTenantRows } from './tenant-updates';
 +import { orphanDeploymentEvidence } from './discovery-evidence';
 +import type { DiscoveryJobEvidence } from './types';
  /**
   * Supabase Database Adapter
   * Wraps the existing Supabase client to conform to the DatabaseAdapter interface
-@@ -19,9 +21,13 @@ import type {
+@@ -19,9 +22,13 @@ import type {
    ClaimedAppRecord,
    CuratedLicenceAttestationInput,
    CuratedLicenceAttestationRecord,
@@ -1209,7 +1378,7 @@ index 590493b95..0faa8a50c 100644
  import type { PostgrestError } from '@supabase/supabase-js';
  import type { SavedCustomAppDefinition } from '@/lib/custom-app-definitions';
  
-@@ -123,6 +129,9 @@ function getUploadHistoryQuery(supabase: ReturnType<typeof createServerClient>):
+@@ -123,6 +130,9 @@ function getUploadHistoryQuery(supabase: ReturnType<typeof createServerClient>):
  /**
   * Supabase implementation of the database adapter
   */
@@ -1219,7 +1388,21 @@ index 590493b95..0faa8a50c 100644
  export const supabaseDb: DatabaseAdapter = {
    customAppDefinitions: {
      async list(userId, tenantId, limit, offset) {
-@@ -228,6 +237,18 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -195,10 +205,11 @@ export const supabaseDb: DatabaseAdapter = {
+      * Get jobs by user ID
+      * Auto-excludes terminal-state jobs older than 7 days
+      */
+-    async getLatestDeployed(userId, tenantId, wingetId, intuneAppId) {
++    async getLatestDeployed(userId, tenantId, wingetId, intuneAppId, scope) {
+       let query = createServerClient().from('packaging_jobs').select('*')
+-        .eq('user_id', userId).eq('tenant_id', tenantId).eq('winget_id', wingetId)
++        .eq('tenant_id', tenantId).eq('winget_id', wingetId)
+         .eq('status', 'deployed').is('archived_at', null);
++      if (scope !== 'tenant') query = query.eq('user_id', userId);
+       if (intuneAppId !== undefined) query = query.eq('intune_app_id', intuneAppId);
+       const { data, error } = await query
+         .order('completed_at', { ascending: false, nullsFirst: false })
+@@ -228,6 +239,18 @@ export const supabaseDb: DatabaseAdapter = {
        return ((data as unknown as PackagingJob[]) || []).filter((job) => !job.archived_at);
      },
  
@@ -1238,7 +1421,7 @@ index 590493b95..0faa8a50c 100644
      async getAnalyticsJobs(scope: AnalyticsJobScope): Promise<AnalyticsJob[]> {
        const key = scope.tenantId === undefined ? 'user_id' : 'tenant_id';
        const identity = scope.tenantId ?? scope.userId;
-@@ -251,6 +272,30 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -251,6 +274,30 @@ export const supabaseDb: DatabaseAdapter = {
        });
      },
  
@@ -1269,7 +1452,7 @@ index 590493b95..0faa8a50c 100644
      async getByTenantId(tenantId: string, limit: number = 50): Promise<PackagingJob[]> {
        const supabase = createServerClient();
  
-@@ -637,6 +682,46 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -637,6 +684,46 @@ export const supabaseDb: DatabaseAdapter = {
        return data ?? null;
      },
  
@@ -1316,7 +1499,90 @@ index 590493b95..0faa8a50c 100644
      async listAll(limit: number = 1000): Promise<UploadHistoryRecord[]> {
        const supabase = createServerClient();
        const query = getUploadHistoryQuery(supabase);
-@@ -822,6 +907,16 @@ export const supabaseDb: DatabaseAdapter = {
+@@ -655,25 +742,22 @@ export const supabaseDb: DatabaseAdapter = {
+   updatePolicies: {
+     async list(userId: string, tenantId?: string): Promise<AppUpdatePolicy[]> {
+       const supabase = createServerClient();
+-      let query = supabase.from('app_update_policies').select('*').eq('user_id', userId);
+-      if (tenantId) {
+-        query = query.eq('tenant_id', tenantId);
+-      }
++      let query = supabase.from('app_update_policies').select('*').eq(tenantId ? 'tenant_id' : 'user_id', tenantId || userId);
+       const { data, error } = await query.order('updated_at', { ascending: false });
+       if (isError(error)) {
+         console.error('Error listing update policies:', error);
+         throw error;
+       }
+-      return (data ?? []) as unknown as AppUpdatePolicy[];
++      return newestTenantRows((data ?? []) as unknown as AppUpdatePolicy[]);
+     },
+ 
+-    async getById(id: string, userId: string): Promise<AppUpdatePolicy | null> {
++    async getById(id: string, userId: string, tenantId?: string): Promise<AppUpdatePolicy | null> {
+       const supabase = createServerClient();
+       const { data, error } = await supabase
+         .from('app_update_policies')
+         .select('*')
+         .eq('id', id)
+-        .eq('user_id', userId)
++        .eq(tenantId ? 'tenant_id' : 'user_id', tenantId || userId)
+         .maybeSingle();
+       if (isError(error) && error.code !== 'PGRST116') {
+         console.error('Error fetching update policy:', error);
+@@ -687,10 +771,9 @@ export const supabaseDb: DatabaseAdapter = {
+       const { data, error } = await supabase
+         .from('app_update_policies')
+         .select('*')
+-        .eq('user_id', userId)
+         .eq('tenant_id', tenantId)
+         .eq('winget_id', wingetId)
+-        .maybeSingle();
++        .order('updated_at', { ascending: false }).order('id', { ascending: false }).limit(1).maybeSingle();
+       if (isError(error) && error.code !== 'PGRST116') {
+         console.error('Error fetching update policy:', error);
+         throw error;
+@@ -708,7 +791,7 @@ export const supabaseDb: DatabaseAdapter = {
+         console.error('Error listing update policies:', error);
+         throw error;
+       }
+-      return (data ?? []) as unknown as AppUpdatePolicy[];
++      return newestTenantRows((data ?? []) as unknown as AppUpdatePolicy[]);
+     },
+ 
+     async upsert(
+@@ -745,13 +828,13 @@ export const supabaseDb: DatabaseAdapter = {
+       return data as unknown as AppUpdatePolicy;
+     },
+ 
+-    async update(id: string, userId: string, data: Partial<AppUpdatePolicy>): Promise<AppUpdatePolicy | null> {
++    async update(id: string, userId: string, data: Partial<AppUpdatePolicy>, tenantId?: string): Promise<AppUpdatePolicy | null> {
+       const supabase = createServerClient();
+       const { data: updated, error } = await supabase
+         .from('app_update_policies')
+         .update({ ...data, updated_at: data.updated_at || new Date().toISOString() } as never)
+         .eq('id', id)
+-        .eq('user_id', userId)
++        .eq(tenantId ? 'tenant_id' : 'user_id', tenantId || userId)
+         .select()
+         .maybeSingle();
+       if (isError(error) && error.code !== 'PGRST116') {
+@@ -761,13 +844,13 @@ export const supabaseDb: DatabaseAdapter = {
+       return (updated as unknown as AppUpdatePolicy) ?? null;
+     },
+ 
+-    async delete(id: string, userId: string): Promise<boolean> {
++    async delete(id: string, userId: string, tenantId?: string): Promise<boolean> {
+       const supabase = createServerClient();
+       const { count, error } = await supabase
+         .from('app_update_policies')
+         .delete({ count: 'exact' })
+         .eq('id', id)
+-        .eq('user_id', userId);
++        .eq(tenantId ? 'tenant_id' : 'user_id', tenantId || userId);
+       if (isError(error)) {
+         console.error('Error deleting update policy:', error);
+         throw error;
+@@ -822,14 +905,23 @@ export const supabaseDb: DatabaseAdapter = {
        return (updated as unknown as AutoUpdateHistory) ?? null;
      },
  
@@ -1333,7 +1599,53 @@ index 590493b95..0faa8a50c 100644
      async list(userId: string, query: Parameters<DatabaseAdapter['autoUpdateHistory']['list']>[1]): Promise<AutoUpdateHistoryWithPolicy[]> {
        const supabase = createServerClient();
  
-@@ -1037,6 +1132,63 @@ export const supabaseDb: DatabaseAdapter = {
+       let policyQuery = supabase
+         .from('app_update_policies')
+         .select('id, winget_id, tenant_id')
+-        .eq('user_id', userId);
+-      if (query.tenantId) policyQuery = policyQuery.eq('tenant_id', query.tenantId);
++        .eq(query.tenantId ? 'tenant_id' : 'user_id', query.tenantId || userId);
+       if (query.wingetId) policyQuery = policyQuery.eq('winget_id', query.wingetId);
+ 
+       const { data: policies, error: policyError } = await policyQuery;
+@@ -902,17 +994,15 @@ export const supabaseDb: DatabaseAdapter = {
+   updateCheckResults: {
+     async list(userId: string, query: UpdateCheckQuery): Promise<UpdateCheckResult[]> {
+       const supabase = createServerClient();
+-      let builder = supabase.from('update_check_results').select('*').eq('user_id', userId);
+-      if (query.tenantId) builder = builder.eq('tenant_id', query.tenantId);
+-      if (!query.includeDismissed) builder = builder.is('dismissed_at', null);
+-      if (query.criticalOnly) builder = builder.eq('is_critical', true);
++      let builder = supabase.from('update_check_results').select('*').eq(query.tenantId ? 'tenant_id' : 'user_id', query.tenantId || userId);
++
+ 
+       const { data, error } = await builder.order('detected_at', { ascending: false });
+       if (isError(error)) {
+         console.error('Error listing update check results:', error);
+         throw error;
+       }
+-      return (data ?? []) as unknown as UpdateCheckResult[];
++      return newestTenantRows((data ?? []) as unknown as UpdateCheckResult[], true).filter(row => (query.includeDismissed || !row.dismissed_at) && (!query.criticalOnly || row.is_critical));
+     },
+ 
+     async upsert(
+@@ -991,13 +1081,13 @@ export const supabaseDb: DatabaseAdapter = {
+       return data as unknown as UpdateCheckResult;
+     },
+ 
+-    async setDismissed(ids: string[], userId: string, dismissedAt: string | null): Promise<number> {
++    async setDismissed(ids: string[], userId: string, dismissedAt: string | null, tenantId?: string): Promise<number> {
+       if (ids.length === 0) return 0;
+       const supabase = createServerClient();
+       const { count, error } = await supabase
+         .from('update_check_results')
+         .update({ dismissed_at: dismissedAt, updated_at: new Date().toISOString() }, { count: 'exact' })
+-        .eq('user_id', userId)
++        .eq(tenantId ? 'tenant_id' : 'user_id', tenantId || userId)
+         .in('id', ids);
+       if (isError(error)) {
+         console.error('Error dismissing update check results:', error);
+@@ -1037,6 +1127,63 @@ export const supabaseDb: DatabaseAdapter = {
        }
        return staleIds.length;
      },
@@ -1398,7 +1710,7 @@ index 590493b95..0faa8a50c 100644
  
    curatedLicenceAttestations: {
 diff --git a/lib/db/types.ts b/lib/db/types.ts
-index 1f174cb21..b8a308ef4 100644
+index 1f174cb21..7edcbe9f3 100644
 --- a/lib/db/types.ts
 +++ b/lib/db/types.ts
 @@ -45,6 +45,26 @@ export interface UpdateCheckResult {
@@ -1437,7 +1749,17 @@ index 1f174cb21..b8a308ef4 100644
  /**
   * A discovered app a user claimed for deployment, one per tenant and app
   */
-@@ -226,12 +248,16 @@ export interface DatabaseAdapter {
+@@ -214,7 +236,8 @@ export interface DatabaseAdapter {
+     getById(id: string): Promise<PackagingJob | null>;
+ 
+     /** Most recently completed, unarchived deployment within an exact owner and tenant. */
+-    getLatestDeployed(userId: string, tenantId: string, wingetId: string, intuneAppId?: string): Promise<PackagingJob | null>;
++    /** Tenant scope is for shared saved-settings reads; persistence retains the author guard. */
++    getLatestDeployed(userId: string, tenantId: string, wingetId: string, intuneAppId?: string, scope?: 'tenant'): Promise<PackagingJob | null>;
+ 
+     /**
+      * Get jobs by user ID
+@@ -226,12 +249,16 @@ export interface DatabaseAdapter {
       */
      getByTenantId(tenantId: string, limit?: number): Promise<PackagingJob[]>;
  
@@ -1454,7 +1776,7 @@ index 1f174cb21..b8a308ef4 100644
  
      /**
       * Create a new job
-@@ -300,11 +326,18 @@ export interface DatabaseAdapter {
+@@ -300,16 +327,24 @@ export interface DatabaseAdapter {
       */
      getLatest(userId: string, tenantId: string, wingetId: string): Promise<UploadHistoryRecord | null>;
  
@@ -1473,7 +1795,26 @@ index 1f174cb21..b8a308ef4 100644
    };
  
    updateCheckResults: {
-@@ -338,6 +371,12 @@ export interface DatabaseAdapter {
+     /**
+-     * List detected updates for a user with the optional filters.
++     * List detected updates for query.tenantId across all authors; without a tenant,
++     * this is a legacy author view for internal notification bookkeeping. Staff APIs must pass the authenticated tenant.
+      */
+     list(userId: string, query: UpdateCheckQuery): Promise<UpdateCheckResult[]>;
+ 
+@@ -326,9 +361,9 @@ export interface DatabaseAdapter {
+     ): Promise<UpdateCheckResult>;
+ 
+     /**
+-     * Dismiss or restore detected updates owned by the user. Returns the rows changed.
++     * Dismiss or restore updates in tenantId; omit tenantId only for internal author bookkeeping.
+      */
+-    setDismissed(ids: string[], userId: string, dismissedAt: string | null): Promise<number>;
++    setDismissed(ids: string[], userId: string, dismissedAt: string | null, tenantId?: string): Promise<number>;
+ 
+     /**
+      * Delete detected updates for a user and tenant that are no longer current.
+@@ -338,21 +373,28 @@ export interface DatabaseAdapter {
        tenantId: string,
        keep: Array<{ wingetId: string; intuneAppId: string }>
      ): Promise<number>;
@@ -1486,7 +1827,46 @@ index 1f174cb21..b8a308ef4 100644
    };
  
    updatePolicies: {
-@@ -394,6 +433,11 @@ export interface DatabaseAdapter {
+     /**
+-     * List every policy for a user, newest first, optionally scoped to a tenant
++     * List shared policies for tenantId, newest first, regardless of author.
++     * Omit tenantId only for legacy internal author bookkeeping.
+      */
+     list(userId: string, tenantId?: string): Promise<AppUpdatePolicy[]>;
+ 
+     /**
+-     * Get one policy owned by the user
++     * Get one policy in tenantId; without tenantId this is the internal author lookup.
+      */
+-    getById(id: string, userId: string): Promise<AppUpdatePolicy | null>;
++    getById(id: string, userId: string, tenantId?: string): Promise<AppUpdatePolicy | null>;
+ 
+     /**
+-     * Get the policy for a user, tenant, and app (the unique key)
++     * Get the newest shared policy for the tenant and app; userId is attribution only.
+      */
+     getByKey(userId: string, tenantId: string, wingetId: string): Promise<AppUpdatePolicy | null>;
+ 
+@@ -370,14 +412,14 @@ export interface DatabaseAdapter {
+     ): Promise<AppUpdatePolicy>;
+ 
+     /**
+-     * Update a policy owned by the user. Returns null when no row matched.
++     * Update a policy in tenantId (or its author for internal callers). Returns null when no row matched.
+      */
+-    update(id: string, userId: string, data: Partial<AppUpdatePolicy>): Promise<AppUpdatePolicy | null>;
++    update(id: string, userId: string, data: Partial<AppUpdatePolicy>, tenantId?: string): Promise<AppUpdatePolicy | null>;
+ 
+     /**
+-     * Delete a policy owned by the user. Returns false when no row matched.
++     * Delete a policy in tenantId (or its author for internal callers). Returns false when no row matched.
+      */
+-    delete(id: string, userId: string): Promise<boolean>;
++    delete(id: string, userId: string, tenantId?: string): Promise<boolean>;
+   };
+ 
+   autoUpdateHistory: {
+@@ -394,6 +436,11 @@ export interface DatabaseAdapter {
       */
      update(id: string, data: Partial<AutoUpdateHistory>): Promise<AutoUpdateHistory | null>;
  
@@ -1498,7 +1878,7 @@ index 1f174cb21..b8a308ef4 100644
      /**
       * List a user's history with the policy target and deployed app name,
       * newest first, honoring the optional filters and pagination.
-@@ -446,4 +490,14 @@ export interface DatabaseAdapter {
+@@ -446,4 +493,14 @@ export interface DatabaseAdapter {
        data: Partial<Pick<ClaimedAppRecord, 'status' | 'intune_app_id'>>
      ): Promise<ClaimedAppRecord | null>;
    };
@@ -1564,3 +1944,107 @@ index 000000000..a118352ce
 +  for(const user of ['owner','colleague']) expect((await sqliteDb.jobs.getByUserId(user,50)).every(j=>j.user_id===user)).toBe(true);
 + });
 +});
+diff --git a/lib/db/__tests__/supabase-deployed-settings.test.ts b/lib/db/__tests__/supabase-deployed-settings.test.ts
+index efe50896d..e9bf8e176 100644
+--- a/lib/db/__tests__/supabase-deployed-settings.test.ts
++++ b/lib/db/__tests__/supabase-deployed-settings.test.ts
+@@ -12,7 +12,7 @@ import { supabaseDb } from '@/lib/db/supabase-adapter';
+ afterEach(() => vi.clearAllMocks());
+ 
+ describe('scoped deployed settings query on Supabase', () => {
+-  it('selects an exact owner, tenant, package and Intune app without a user history cap', async () => {
++  it('selects an exact author, tenant, package and Intune app for settings persistence', async () => {
+     fetchMock.mockResolvedValue(Response.json({ id: 'fixture-job' }));
+     expect(await supabaseDb.jobs.getLatestDeployed('fixture-owner', 'fixture-tenant', 'Fixture.App', 'fixture-app'))
+       .toEqual({ id: 'fixture-job' });
+@@ -25,6 +25,14 @@ describe('scoped deployed settings query on Supabase', () => {
+     });
+   });
+ 
++  it('shares saved-settings reads across authors only with explicit tenant scope', async () => {
++    fetchMock.mockResolvedValue(Response.json(null));
++    await supabaseDb.jobs.getLatestDeployed('participant-02', 'fixture-tenant', 'Fixture.App', undefined, 'tenant');
++    const query = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
++    expect(query.get('tenant_id')).toBe('eq.fixture-tenant');
++    expect(query.has('user_id')).toBe(false);
++  });
++
+   it('allows the config reader to select the latest app within the tenant', async () => {
+     fetchMock.mockResolvedValue(Response.json(null));
+     expect(await supabaseDb.jobs.getLatestDeployed('fixture-owner', 'fixture-tenant', 'Fixture.App')).toBeNull();
+diff --git a/lib/db/__tests__/supabase-tenant-updates.test.ts b/lib/db/__tests__/supabase-tenant-updates.test.ts
+new file mode 100644
+index 000000000..0b1f1ca84
+--- /dev/null
++++ b/lib/db/__tests__/supabase-tenant-updates.test.ts
+@@ -0,0 +1,53 @@
++import { afterEach, describe, expect, it, vi } from 'vitest';
++const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
++vi.mock('@/lib/supabase', async () => {
++  const { createClient } = await import('@supabase/supabase-js');
++  return { createServerClient: () => createClient('https://database.example.test', 'fixture-key', {
++    auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: fetchMock },
++  }) };
++});
++import { supabaseDb as db } from '@/lib/db/supabase-adapter';
++afterEach(() => vi.clearAllMocks());
++
++describe('Supabase tenant update queries', () => {
++  it('uses the same tenant filter for two authors and a distinct filter for another tenant', async () => {
++    fetchMock.mockImplementation(async () => Response.json([]));
++    for (const user of ['participant-01', 'participant-02']) {
++      await db.updateCheckResults.list(user, { tenantId: 'tenant-one' });
++      await db.updatePolicies.list(user, 'tenant-one');
++    }
++    await db.updateCheckResults.list('participant-03', { tenantId: 'tenant-two' });
++    const urls = fetchMock.mock.calls.map(call => new URL(String(call[0])));
++    for (const url of urls.slice(0, 4)) {
++      expect(url.searchParams.get('tenant_id')).toBe('eq.tenant-one');
++      expect(url.searchParams.has('user_id')).toBe(false);
++    }
++    expect(urls[0].toString()).toBe(urls[2].toString());
++    expect(urls[1].toString()).toBe(urls[3].toString());
++    expect(urls[4].searchParams.get('tenant_id')).toBe('eq.tenant-two');
++  });
++
++  it('resolves legacy duplicates before dismissal/critical filtering, and uses the newest policy', async () => {
++    const base = { tenant_id: 'tenant-one', winget_id: 'Example.App', intune_app_id: 'fixture-app', id: 'older', updated_at: '2026-01-01', dismissed_at: null, is_critical: true };
++    fetchMock.mockResolvedValueOnce(Response.json([base, { ...base, id: 'newer', updated_at: '2026-02-01', dismissed_at: '2026-02-01', is_critical: false }]));
++    expect(await db.updateCheckResults.list('participant-02', { tenantId: 'tenant-one', criticalOnly: true })).toEqual([]);
++    const url = new URL(String(fetchMock.mock.calls[0][0]));
++    expect(url.searchParams.has('dismissed_at')).toBe(false);
++    expect(url.searchParams.has('is_critical')).toBe(false);
++    fetchMock.mockResolvedValueOnce(Response.json([{ ...base, policy_type: 'notify' }, { ...base, id: 'newer', updated_at: '2026-02-01', policy_type: 'ignore' }]));
++    expect(await db.updatePolicies.list('participant-02', 'tenant-one')).toMatchObject([{ policy_type: 'ignore' }]);
++  });
++
++  it('scopes policy IDs and dismissals to the authenticated tenant', async () => {
++    fetchMock.mockImplementation(async () => Response.json(null));
++    await db.updatePolicies.getById('policy-id', 'participant-02', 'tenant-one');
++    await db.updatePolicies.update('policy-id', 'participant-02', { policy_type: 'ignore' }, 'tenant-one');
++    await db.updatePolicies.delete('policy-id', 'participant-02', 'tenant-one');
++    await db.updateCheckResults.setDismissed(['check-id'], 'participant-02', '2026-01-01', 'tenant-one');
++    for (const call of fetchMock.mock.calls) {
++      const url = new URL(String(call[0]));
++      expect(url.searchParams.get('tenant_id')).toBe('eq.tenant-one');
++      expect(url.searchParams.has('user_id')).toBe(false);
++    }
++  });
++});
+diff --git a/lib/db/tenant-updates.ts b/lib/db/tenant-updates.ts
+new file mode 100644
+index 000000000..13e0203a0
+--- /dev/null
++++ b/lib/db/tenant-updates.ts
+@@ -0,0 +1,11 @@
++/** Shared tenant views of legacy, author-attributed update records. */
++export function newestTenantRows<T extends { tenant_id: string; winget_id: string; id: string; updated_at: string }>(rows: T[], copy = false): T[] {
++  const newest = new Map<string, T>();
++  for (const row of rows) {
++    const app = row as T & { intune_app_id?: string };
++    const key = JSON.stringify([row.tenant_id, row.winget_id.toLowerCase(), ...(copy ? [app.intune_app_id?.toLowerCase()] : [])]);
++    const seen = newest.get(key);
++    if (!seen || row.updated_at > seen.updated_at || (row.updated_at === seen.updated_at && row.id > seen.id)) newest.set(key, row);
++  }
++  return [...newest.values()].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? '') || (b.id ?? '').localeCompare(a.id ?? ''));
++}

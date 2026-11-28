@@ -1,5 +1,5 @@
 diff --git a/app/(app)/dashboard/inventory/page.tsx b/app/(app)/dashboard/inventory/page.tsx
-index d4fb43f0f..e10dbe537 100644
+index d4fb43f0f..450ee7ec2 100644
 --- a/app/(app)/dashboard/inventory/page.tsx
 +++ b/app/(app)/dashboard/inventory/page.tsx
 @@ -1,12 +1,14 @@
@@ -11,7 +11,8 @@ index d4fb43f0f..e10dbe537 100644
 +import { useRouter, useSearchParams } from 'next/navigation';
  import { T } from 'gt-next';
  import { motion, useReducedMotion } from 'framer-motion';
- import { AlertCircle, RefreshCw, Package, Server, Building2, Clock, Shield } from 'lucide-react';
+-import { AlertCircle, RefreshCw, Package, Server, Building2, Clock, Shield } from 'lucide-react';
++import { AlertCircle, RefreshCw, Package } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import { useInventoryApps } from '@/hooks/use-inventory';
 +import { AppDriftPanel } from '@/components/hrm/AppInsights';
@@ -19,8 +20,12 @@ index d4fb43f0f..e10dbe537 100644
  import {
    InventoryAppCard,
    InventoryAppDetails,
-@@ -18,14 +20,40 @@ import {
- import { PageHeader, AnimatedEmptyState, SkeletonGrid, AnimatedStatCard, StatCardGrid } from '@/components/dashboard';
+@@ -15,17 +17,43 @@ import {
+   InventoryPagination,
+   InventoryListHeader,
+ } from '@/components/inventory';
+-import { PageHeader, AnimatedEmptyState, SkeletonGrid, AnimatedStatCard, StatCardGrid } from '@/components/dashboard';
++import { PageHeader, AnimatedEmptyState, SkeletonGrid } from '@/components/dashboard';
  import { useUserSettings } from '@/components/providers/UserSettingsProvider';
  import { usePagination } from '@/hooks/use-pagination';
 +import { INVENTORY_PATH, linkedAppId } from '@/lib/hrm/inventory-link';
@@ -33,7 +38,7 @@ index d4fb43f0f..e10dbe537 100644
 +    <div className="space-y-6">
 +      <PageHeader
 +        title={<T>Inventory</T>}
-+        description={<T>Win32 applications deployed in your Intune tenant</T>}
++        description={<T>Win32 apps in your tenant.</T>}
 +      />
 +      <SkeletonGrid count={4} columns={4} variant="stat" />
 +      <SkeletonGrid count={6} columns={3} variant="content" />
@@ -97,6 +102,15 @@ index d4fb43f0f..e10dbe537 100644
    }
  
    if (error) {
+@@ -179,7 +204,7 @@ export default function InventoryPage() {
+       <div className="space-y-6">
+         <PageHeader
+           title={<T>Inventory</T>}
+-          description={<T>Win32 applications deployed in your Intune tenant</T>}
++          description={<T>Win32 apps in your tenant.</T>}
+         />
+         <AnimatedEmptyState
+           icon={AlertCircle}
 @@ -187,7 +212,7 @@ export default function InventoryPage() {
            description={error.message}
            color="neutral"
@@ -106,7 +120,14 @@ index d4fb43f0f..e10dbe537 100644
              onClick: () => refetch(),
              variant: 'secondary'
            }}
-@@ -208,7 +233,7 @@ export default function InventoryPage() {
+@@ -202,13 +227,13 @@ export default function InventoryPage() {
+       {/* Header */}
+       <PageHeader
+         title={<T>Inventory</T>}
+-        description={<T>Win32 applications deployed in your Intune tenant</T>}
++        description={<T>Win32 apps in your tenant.</T>}
+         gradient
+         gradientColors="mixed"
          actions={
            <Button
              variant="ghost"
@@ -115,45 +136,60 @@ index d4fb43f0f..e10dbe537 100644
              disabled={isFetching}
              className="text-text-secondary hover:text-text-primary"
            >
-@@ -222,7 +247,7 @@ export default function InventoryPage() {
-       {apps.length > 0 && (
-         <StatCardGrid columns={4}>
-           <AnimatedStatCard
--            title={<T>Total Apps</T>}
-+            title={<T>Total apps</T>}
-             value={stats.total}
-             icon={Server}
-             color="cyan"
-@@ -236,7 +261,7 @@ export default function InventoryPage() {
-             delay={0.1}
-           />
-           <AnimatedStatCard
--            title={<T>Recently Modified</T>}
-+            title={<T>Recently modified</T>}
-             value={stats.recentlyModified}
-             icon={Clock}
-             color="violet"
-@@ -244,7 +269,7 @@ export default function InventoryPage() {
-             description={<T>Last 30 days</T>}
-           />
-           <AnimatedStatCard
--            title={<T>System Install</T>}
-+            title={<T>System install</T>}
-             value={stats.systemInstall}
-             icon={Shield}
-             color="neutral"
-@@ -253,6 +278,10 @@ export default function InventoryPage() {
-         </StatCardGrid>
-       )}
+@@ -218,40 +243,18 @@ export default function InventoryPage() {
+         }
+       />
  
+-      {/* Stats Row */}
+-      {apps.length > 0 && (
+-        <StatCardGrid columns={4}>
+-          <AnimatedStatCard
+-            title={<T>Total Apps</T>}
+-            value={stats.total}
+-            icon={Server}
+-            color="cyan"
+-            delay={0}
+-          />
+-          <AnimatedStatCard
+-            title={<T>Publishers</T>}
+-            value={stats.publishers}
+-            icon={Building2}
+-            color="neutral"
+-            delay={0.1}
+-          />
+-          <AnimatedStatCard
+-            title={<T>Recently Modified</T>}
+-            value={stats.recentlyModified}
+-            icon={Clock}
+-            color="violet"
+-            delay={0.2}
+-            description={<T>Last 30 days</T>}
+-          />
+-          <AnimatedStatCard
+-            title={<T>System Install</T>}
+-            value={stats.systemInstall}
+-            icon={Shield}
+-            color="neutral"
+-            delay={0.3}
+-          />
+-        </StatCardGrid>
+-      )}
++      {apps.length > 0 && <dl aria-label="Inventory summary" className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-text-secondary">
++        {[
++          ['Total apps', stats.total], ['Publishers', stats.publishers],
++          ['Modified in 30 days', stats.recentlyModified], ['System install', stats.systemInstall],
++        ].map(([label, count]) => <div key={label} className="inline-flex items-baseline gap-1.5">
++          <dt>{label}</dt><dd className="font-semibold tabular-nums text-text-primary">{count}</dd>
++        </div>)}
++      </dl>}
++
 +      {/* HRM patch 0025: apps with more than one copy in Intune (only once the whole list has loaded) */}
 +      <AppDriftPanel onOpen={setSelectedAppId} />
 +      {isComplete && <DuplicatesPanel apps={apps} onOpen={setSelectedAppId} onChanged={() => refetch()} />}
-+
+ 
        {/* Filters */}
        <motion.div
-         initial={{ opacity: 0, y: 10 }}
-@@ -339,7 +368,7 @@ export default function InventoryPage() {
+@@ -339,7 +342,7 @@ export default function InventoryPage() {
            color="neutral"
            showOrbs={false}
            action={{
@@ -162,7 +198,7 @@ index d4fb43f0f..e10dbe537 100644
              onClick: () => {
                setSearch('');
                setSelectedPublisher(null);
-@@ -351,10 +380,10 @@ export default function InventoryPage() {
+@@ -351,10 +354,10 @@ export default function InventoryPage() {
          <AnimatedEmptyState
            icon={Package}
            title={<T>No Win32 apps found</T>}
@@ -175,7 +211,7 @@ index d4fb43f0f..e10dbe537 100644
              onClick: () => router.push('/dashboard/apps'),
            }}
          />
-@@ -363,7 +392,7 @@ export default function InventoryPage() {
+@@ -363,7 +366,7 @@ export default function InventoryPage() {
        {/* App Details Panel */}
        <InventoryAppDetails
          appId={selectedAppId}
@@ -211,7 +247,7 @@ index 000000000..06a5e72c5
 +}
 diff --git a/app/api/hrm/app-insights/route.test.ts b/app/api/hrm/app-insights/route.test.ts
 new file mode 100644
-index 0000000..eda0662
+index 000000000..eda0662c3
 --- /dev/null
 +++ b/app/api/hrm/app-insights/route.test.ts
 @@ -0,0 +1,61 @@
@@ -278,7 +314,7 @@ index 0000000..eda0662
 +});
 diff --git a/app/api/hrm/app-insights/route.ts b/app/api/hrm/app-insights/route.ts
 new file mode 100644
-index 0000000..fee0063
+index 000000000..fee006324
 --- /dev/null
 +++ b/app/api/hrm/app-insights/route.ts
 @@ -0,0 +1,36 @@
@@ -437,215 +473,6 @@ index 000000000..2b3dc11ca
 +    return reply({ error: "Couldn't check install results. The last results are kept. Try again in 5 minutes." }, 500);
 +  }
 +}
-diff --git a/app/api/intune/apps/[id]/route.ts b/app/api/intune/apps/[id]/route.ts
-index 40eb97483..401ac1edd 100644
---- a/app/api/intune/apps/[id]/route.ts
-+++ b/app/api/intune/apps/[id]/route.ts
-@@ -99,6 +99,14 @@ export async function GET(
-     }
- 
-     const appData = await appResponse.json();
-+    // HRM patch 0025: Inventory lists Win32 apps only, so a linked id for any
-+    // other app type gets the same answer as an unknown one.
-+    if (appData['@odata.type'] && appData['@odata.type'] !== '#microsoft.graph.win32LobApp') {
-+      return NextResponse.json(
-+        { error: 'App not found' },
-+        { status: 404 }
-+      );
-+    }
-     let assignments: IntuneAppAssignment[] = [];
- 
-     if (assignmentsResponse.ok) {
-diff --git a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
-index 7dd46a6..3147ac7 100644
---- a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
-+++ b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
-@@ -1,32 +1,33 @@
--import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
- import { NextRequest } from 'next/server';
- import { randomUUID } from 'node:crypto';
- 
- const state = vi.hoisted(() => {
-   vi.stubEnv('DATABASE_PATH', ':memory:');
-   vi.stubEnv('DATABASE_MODE', 'sqlite');
--  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false };
-+  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false,real:false,live:[] as unknown[] };
- });
- vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.authenticated
-   ? { userId: 'fixture-owner', tenantId: 'fixture-tenant' } : null }));
- vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
- vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'fixture-token' }));
--vi.mock('@/lib/intune-api', () => ({
-+vi.mock('@/lib/intune-api', async () => {const actual=await vi.importActual<typeof import('@/lib/intune-api')>('@/lib/intune-api');return ({
-+  getAppAssignments: async () => state.live,
-   getApp: async () => ({ displayName: 'Fixture app', rules: [] }),
--  convertToGraphAssignments: (assignments: unknown) => assignments,
-+  convertToGraphAssignments: (assignments: unknown) => state.real ? actual.convertToGraphAssignments(assignments as never) : assignments,
-   assignToGroups: async (...args: unknown[]) => {
-     await state.assign(...args);
-     if (state.graphFails) throw new Error('Fixture Graph failure');
-   },
-   syncAppCategories: state.categories, setAppRules: vi.fn(),
--}));
-+});});
- vi.mock('@/lib/requirement-rules', () => ({ buildCartItemRequirementRules: () => undefined }));
- vi.mock('@/lib/db', async () => {
-   const { sqliteDb } = await vi.importActual<typeof import('@/lib/db/sqlite')>('@/lib/db/sqlite');
-   return { getDatabase: () => sqliteDb, isSqliteMode: () => true };
- });
- 
--import { sqliteDb, closeSqliteDb, sqliteDeployedConfig } from '@/lib/db/sqlite';
-+import { sqliteDb, closeSqliteDb, sqliteDeployedConfig, sqliteAppInsights } from '@/lib/db/sqlite';
- import { PATCH } from './route';
- import { GET } from '../../deployed/config/route';
- 
-@@ -45,9 +46,34 @@ const create = async (overrides: Record<string, unknown> = {}) => {
- };
- 
- describe('deployed settings persistence with SQLite', () => {
--  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false; });
-+  it('preserves in-use, automatic-update and unknown untouched settings for both groups through the real converter and save entry point',async()=>{
-+    await create();state.real=true;
-+    const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222';
-+    state.live=[a,b].map((groupId,index)=>({id:`live-${index}`,intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId},settings:{'@odata.type':'#microsoft.graph.win32LobAppAssignmentSettings',notifications:'showAll',inUseSettings:index?null:{countdownMinutes:15,minutesBetweenDeferrals:60,numberOfDeferrals:3},autoUpdateSettings:{autoUpdateSupersededAppsState:'enabled'},futureBehavior:{keep:true}}}));
-+    vi.stubGlobal('fetch',vi.fn(async()=>Response.json({value:[]})));
-+    const response=await call({wingetId:'Fixture.App',assignments:[a,b].map(groupId=>({type:'group',groupId,intent:'required'}))});
-+    expect(response.status).toBe(200);
-+    const sent=state.assign.mock.calls[0][2];expect(sent).toHaveLength(2);
-+    for(let i=0;i<2;i++){expect(sent[i].settings).toMatchObject((state.live[i] as any).settings);expect(sent[i].target.groupId).toBe([a,b][i]);}
-+  });
-+  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false;state.real=false;state.live=[]; });
-+  afterEach(() => vi.unstubAllGlobals());
-   afterAll(() => { closeSqliteDb(); vi.unstubAllEnvs(); });
- 
-+  it('records before and after groups with the known IntuneGet actor', async () => {
-+    const appId = '11111111-1111-4111-8111-111111111111';
-+    const job = await create({ intune_app_id: appId });
-+    await sqliteDb.uploadHistory.create({ user_id: 'fixture-owner', intune_tenant_id: 'fixture-tenant', winget_id: 'Fixture.App',
-+      intune_app_id: appId, packaging_job_id: job.id, version: '1', display_name: 'Fixture app' });
-+    let current = [{ intent: 'required', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } }];
-+    vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('/assignments') ? { value: current } : { id: appId, displayVersion: '1' })));
-+    state.assign.mockImplementationOnce(() => { current = [{ intent: 'available', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } }]; });
-+    expect((await call(undefined, appId)).status).toBe(200);
-+    const events = sqliteAppInsights.activity('fixture-tenant', 'Fixture.App');
-+    expect(events.some((e) => e.title === 'Groups or assignment settings changed' && e.actor === 'Saved in IntuneGet by a staff member')).toBe(true);
-+    expect(sqliteAppInsights.alerts('fixture-tenant')).toEqual([]);
-+  });
-+
-   it('persists the edited assignment intent and preserves other configuration', async () => {
-     const job = await create();
-     expect((await call()).status).toBe(200);
-diff --git a/app/api/intune/apps/[id]/settings/route.ts b/app/api/intune/apps/[id]/settings/route.ts
-index 30c19873e..32a29f291 100644
---- a/app/api/intune/apps/[id]/settings/route.ts
-+++ b/app/api/intune/apps/[id]/settings/route.ts
-@@ -1,3 +1,4 @@
-+import { preserveTiming } from '@/lib/hrm/app-timing';
- /**
-  * Intune App Settings API Route
-  * Updates assignments and categories on an existing Intune app without repackaging
-@@ -5,11 +6,13 @@
- 
- import { NextRequest, NextResponse } from 'next/server';
- import { getServerClientOrNull } from '@/lib/supabase';
--import { getDatabase } from '@/lib/db';
-+import { checkAppInsights } from '@/lib/hrm/app-insights-check';
-+import { getDatabase, isSqliteMode } from '@/lib/db';
- import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
- import { getServicePrincipalToken } from '@/lib/intune/graph-client';
- import {
-   getApp,
-+  getAppAssignments,
-   assignToGroups,
-   convertToGraphAssignments,
-   syncAppCategories,
-@@ -77,6 +80,13 @@ export async function PATCH(
-       );
-     }
- 
-+    if (process.env.DATABASE_MODE?.toLowerCase() === 'sqlite') {
-+      const { sqlitePilotRollouts, sqliteRetirements } = await import('@/lib/db/sqlite');
-+      if ([intuneAppId].some((id) => sqlitePilotRollouts.holdsApp(tenantId,id))) return NextResponse.json({ error: 'This app is part of an active pilot. Review it in App updates first.' },{ status: 409 });
-+      // HRM patch 0038: Save to Intune would undo the Uninstall groups of an app being retired.
-+      if (sqliteRetirements.holdsApp(tenantId, intuneAppId)) return NextResponse.json({ error: 'This app is being retired. Cancel retiring it in Inventory first.' },{ status: 409 });
-+    }
-+
-     // Verify the app still exists in Intune
-     const existingApp = await getApp(graphToken, intuneAppId);
- 
-@@ -112,8 +122,20 @@ export async function PATCH(
-       );
-     }
- 
-+    const captureGroups = async (knownChange: boolean) => {
-+      if (!isSqliteMode()) return;
-+      try {
-+        const { sqliteAppInsights } = await import('@/lib/db/sqlite');
-+        await checkAppInsights(sqliteAppInsights, { tenantId, appId: intuneAppId,
-+          token: async () => graphToken, knownChange,
-+          actor: knownChange ? `Saved in IntuneGet by ${user.userEmail || 'a staff member'}` : undefined });
-+      } catch { /* Optional activity must never prevent saving Intune settings. */ }
-+    };
-+    const liveAssignments = assignments ? await getAppAssignments(graphToken, intuneAppId) : [];
-+    if (assignments) await captureGroups(false);
-     // Apply assignments
-     if (assignments) {
-+      const graphAssignments = preserveTiming(convertToGraphAssignments(assignments), liveAssignments);
-       const productCode = existingApp.msiInformation?.productCode;
-       const requirementRules = buildCartItemRequirementRules(
-         existingApp.displayName,
-@@ -134,8 +156,8 @@ export async function PATCH(
-         ]);
-       }
- 
--      const graphAssignments = convertToGraphAssignments(assignments);
-       await assignToGroups(graphToken, intuneAppId, graphAssignments);
-+      await captureGroups(true);
-     }
- 
-     // Sync categories
-diff --git a/app/api/intune/apps/[id]/win32-only.test.ts b/app/api/intune/apps/[id]/win32-only.test.ts
-new file mode 100644
-index 000000000..dd2461b5c
---- /dev/null
-+++ b/app/api/intune/apps/[id]/win32-only.test.ts
-@@ -0,0 +1,35 @@
-+import { NextRequest } from 'next/server';
-+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-+const mocks = vi.hoisted(() => ({ auth: vi.fn(), token: vi.fn() }));
-+vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
-+vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: mocks.token }));
-+vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
-+vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: vi.fn() }));
-+import { GET } from './route';
-+
-+// HRM patch 0025: Inventory links open Win32 apps only; any other app type reads as not found.
-+const id = '11111111-1111-4111-8111-111111111111';
-+const request = () => new NextRequest(`http://localhost/api/intune/apps/${id}`);
-+const params = { params: Promise.resolve({ id }) };
-+const graph = (type: string) => vi.fn(async (url: string) =>
-+  Response.json(url.endsWith('/assignments') ? { value: [] } : { '@odata.type': type, id, displayName: 'Fixture' }));
-+beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'user', tenantId: 'self' }); mocks.token.mockResolvedValue('token'); });
-+afterEach(() => vi.unstubAllGlobals());
-+
-+describe('app details for linked ids', () => {
-+  it('returns a Win32 app', async () => {
-+    vi.stubGlobal('fetch', graph('#microsoft.graph.win32LobApp'));
-+    const response = await GET(request(), params);
-+    expect(response.status).toBe(200);
-+    expect((await response.json()).app.displayName).toBe('Fixture');
-+  });
-+
-+  it('answers App not found for other app types', async () => {
-+    for (const type of ['#microsoft.graph.iosStoreApp', '#microsoft.graph.winGetApp', '#microsoft.graph.officeSuiteApp']) {
-+      vi.stubGlobal('fetch', graph(type));
-+      const response = await GET(request(), params);
-+      expect(response.status).toBe(404);
-+      expect(await response.json()).toEqual({ error: 'App not found' });
-+    }
-+  });
-+});
 diff --git a/components/dashboard/animations/SlidePanel.test.ts b/components/dashboard/animations/SlidePanel.test.ts
 new file mode 100644
 index 000000000..f74b6b387
@@ -743,7 +570,7 @@ index 000000000..f74b6b387
 +  expect(document.getElementById('review')).not.toBeNull();
 +});
 diff --git a/components/dashboard/animations/SlidePanel.tsx b/components/dashboard/animations/SlidePanel.tsx
-index c81730df4..701c5576c 100644
+index c81730df4..7951d0488 100644
 --- a/components/dashboard/animations/SlidePanel.tsx
 +++ b/components/dashboard/animations/SlidePanel.tsx
 @@ -1,62 +1,42 @@
@@ -819,7 +646,7 @@ index c81730df4..701c5576c 100644
    showOverlay = true,
    closeOnOverlayClick = true,
    closeOnEscape = true,
-@@ -65,290 +45,103 @@ export function SlidePanel({
+@@ -65,290 +45,105 @@ export function SlidePanel({
    headerClassName,
    contentClassName,
    header,
@@ -900,7 +727,9 @@ index c81730df4..701c5576c 100644
 +      }}
 +    >
 +      <Dialog.Portal>
-+        {showOverlay && <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />}
++        {/* HRM: a side panel dims the page lightly and does not blur it (same as ui/dialog's side
++            panels), so the page stays readable, also when a second panel opens from this one. */}
++        {showOverlay && <Dialog.Overlay className={side === 'bottom' ? 'fixed inset-0 z-50 bg-black/50' : 'fixed inset-0 z-50 bg-black/30'} />}
 +        <Dialog.Content
 +          asChild
 +          {...(!description ? { 'aria-describedby': undefined } : {})}
@@ -1189,10 +1018,10 @@ index c8e12c2fe..0b4c90f05 100644
    SectionTransition,
 diff --git a/components/hrm/AppGroupsLine.test.ts b/components/hrm/AppGroupsLine.test.ts
 new file mode 100644
-index 000000000..a0136363a
+index 000000000..efbf7cd28
 --- /dev/null
 +++ b/components/hrm/AppGroupsLine.test.ts
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,87 @@
 +// @vitest-environment happy-dom
 +const insights = vi.hoisted(() => ({ value: { data: { supported: false }, action: {} } as Record<string, unknown> }));
 +vi.mock('@/hooks/useAppInsights', () => ({ useAppInsights: () => insights.value }));
@@ -1214,6 +1043,7 @@ index 000000000..a0136363a
 +}
 +
 +beforeEach(() => {
++  insights.value = { data: { supported: false }, action: {} };
 +  const el = document.createElement('div');
 +  document.body.append(el);
 +  root = createRoot(el);
@@ -1230,6 +1060,14 @@ index 000000000..a0136363a
 +    expect(await render()).toBe('APP-Example · Required, Staff-Example · Available');
 +  });
 +
++  it('explains Required and Available on hover or keyboard focus, with Intune\'s own names', async () => {
++    state.value = { data: { app: { assignments: [group('g1', 'required'), group('g2', 'available')],
++      assignmentGroupNames: { g1: 'APP-Example', g2: 'Staff-Example' } } } };
++    await render();
++    const terms = Array.from(document.body.querySelectorAll('[tabindex="0"]')).map((el) => el.textContent);
++    expect(terms).toEqual(['Required', 'Available']);
++  });
++
 +  it('shortens a long list', async () => {
 +    state.value = { data: { app: { assignments: ['a', 'b', 'c', 'd', 'e'].map((g) => group(g, 'required')),
 +      assignmentGroupNames: { a: 'A', b: 'B', c: 'C', d: 'D', e: 'E' } } } };
@@ -1238,7 +1076,7 @@ index 000000000..a0136363a
 +
 +  it('warns when the copy has no groups or is gone from Intune', async () => {
 +    state.value = { data: { app: { assignments: [] } } };
-+    expect(await render()).toContain('No groups. This copy installs nowhere.');
++    expect(await render()).toContain('No install assignments.');
 +    state.value = { error: new Error('App not found') };
 +    expect(await render()).toContain('Not in Intune any more');
 +  });
@@ -1254,12 +1092,13 @@ index 000000000..a0136363a
 +    insights.value = { data: { supported: true, snapshot: { ...snapshot, exists: true } }, action: {} };
 +    state.value = { data: { app: { assignments: [] } } };
 +    text = await render();
-+    expect(text).toContain('No groups. This copy installs nowhere.');
++    expect(text).toContain('No install assignments.');
 +    expect(text).not.toContain('No groups receive this app');
 +    insights.value = { data: { supported: true, snapshot: { ...snapshot, exists: true, revision: 3,
 +      change: { before: [{ key: 'a', label: 'All devices · Required', installs: true }], after: [], observedAt: '2026-01-02T12:00:00Z' } } }, action: {} };
 +    text = await render();
-+    expect(text).toContain('Groups or assignment settings changed');
++    expect(text).toContain('Change observed');
++    expect(text).toContain('All devices');
 +    insights.value = { data: { supported: false }, action: {} };
 +  });
 +
@@ -1272,10 +1111,10 @@ index 000000000..a0136363a
 +});
 diff --git a/components/hrm/AppGroupsLine.tsx b/components/hrm/AppGroupsLine.tsx
 new file mode 100644
-index 000000000..fd1ad23a7
+index 000000000..68f1e9636
 --- /dev/null
 +++ b/components/hrm/AppGroupsLine.tsx
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,59 @@
 +'use client';
 +
 +// HRM patch 0023: which groups an Intune app is assigned to, in one line, read live from Intune.
@@ -1284,6 +1123,8 @@ index 000000000..fd1ad23a7
 +import { AlertTriangle, Users } from 'lucide-react';
 +import { useAppDetails } from '@/hooks/use-inventory';
 +import { assignmentTargetLabel } from '@/lib/intune/assignment-group-names';
++import { Fragment, type ReactNode } from 'react';
++import { Term } from './Term';
 +
 +const INTENT: Record<string, string> = { required: 'Required', available: 'Available', uninstall: 'Uninstall', availableWithoutEnrollment: 'Available' };
 +const SHOWN = 3;
@@ -1310,24 +1151,24 @@ index 000000000..fd1ad23a7
 +  }
 +  const app = data?.app;
 +  if (!app) return null;
-+  const assignments = app.assignments ?? [];
-+  if (assignments.length === 0) {
-+    return (
-+      <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-+        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-+        No groups. This copy installs nowhere.
-+      </p>
-+    );
++  const assignments = app.assignments;
++  if (!assignments?.length) {
++    return <p className="text-xs text-text-secondary">{assignments ? 'No install assignments.' : 'Assignments unavailable.'}</p>;
 +  }
-+  const labels = assignments.map((a) => {
-+    const target = assignmentTargetLabel(a.target, app.assignmentGroupNames, app.assignmentGroupLookupFailures).replace(/^Group: /, '');
-+    return `${target} · ${INTENT[a.intent] ?? a.intent}`;
++  const labels = assignments.map((a): ReactNode => {
++    const label = assignmentTargetLabel(a.target, app.assignmentGroupNames, app.assignmentGroupLookupFailures);
++    // An exclusion is Excluded, not Required: Intune stores an intent for it that means nothing to staff.
++    if (label.startsWith('Excluded group: ')) return <>{label.slice('Excluded group: '.length)} · <Term term="excluded">Excluded</Term></>;
++    const intent = INTENT[a.intent] ?? a.intent;
++    // Required and Available keep Intune's names and explain themselves on hover or keyboard focus.
++    const term = intent === 'Required' ? 'required' : intent === 'Available' ? 'available' : intent === 'Uninstall' ? 'uninstall' : null;
++    return <>{label.replace(/^Group: /, '')} · {term ? <Term term={term}>{intent}</Term> : intent}</>;
 +  });
 +  return (
 +    <p className="flex items-start gap-1.5 text-xs text-text-secondary">
 +      <Users className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-text-muted" aria-hidden="true" />
-+      <span>
-+        {labels.slice(0, SHOWN).join(', ')}
++      <span className="min-w-0 break-words">
++        {labels.slice(0, SHOWN).map((label, i) => <Fragment key={i}>{i > 0 && ', '}{label}</Fragment>)}
 +        {labels.length > SHOWN && <span className="text-text-muted"> and {labels.length - SHOWN} more</span>}
 +      </span>
 +    </p>
@@ -1335,10 +1176,10 @@ index 000000000..fd1ad23a7
 +}
 diff --git a/components/hrm/AppInsights.test.ts b/components/hrm/AppInsights.test.ts
 new file mode 100644
-index 000000000..1de56fc7b
+index 000000000..8fb41a1ff
 --- /dev/null
 +++ b/components/hrm/AppInsights.test.ts
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,74 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -1362,6 +1203,31 @@ index 000000000..1de56fc7b
 +    await act(async () => review.click());
 +    expect(state.mutate).toHaveBeenCalledWith({ action: 'review', appId: A, revision: 3 });
 +  });
++  it('omits a saved notice when the assignments returned to their previous state', async () => {
++    const row = snapshot();
++    const assignments = summarizeAssignments([{ intent: 'required', target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: A } }], { [A]: 'Cedar laptops' });
++    row.assignments = assignments;
++    row.change = { before: assignments, after: [...assignments], observedAt: row.checkedAt };
++    state.value.data = { supported: true, alerts: [row] };
++    await act(async () => root.render(createElement(AppDriftPanel, { onOpen: vi.fn() })));
++    expect(document.body.textContent).toContain('No group changes to review.');
++    expect(document.body.textContent).not.toContain('Mark reviewed');
++    expect(document.body.textContent).not.toContain('Previously');
++  });
++  it('shows changed settings inline for the same group and hides unchanged defaults', async () => {
++    const group = { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: A };
++    const assignment = (notifications: string) => summarizeAssignments([{ intent: 'required', target: group,
++      settings: { notifications, deliveryOptimizationPriority: 'notConfigured' } }], { [A]: 'Example team' });
++    const row = snapshot();
++    row.change = { before: assignment('showAll'), after: assignment('hideAll'), observedAt: row.checkedAt };
++    state.value.data = { supported: true, alerts: [row] };
++    await act(async () => root.render(createElement(AppDriftPanel, { onOpen: vi.fn() })));
++    expect(document.body.textContent).toContain('Notifications: Show all');
++    expect(document.body.textContent).toContain('Notifications: Hide all');
++    expect(document.body.textContent).not.toContain('optimization');
++    expect(document.body.textContent).not.toContain(A);
++  });
++
 +  it('offers activity when the app is gone and keeps persistent missing warnings after review', async () => {
 +    state.value.data = { supported: true, alerts: [{ ...snapshot(), exists: false, reviewedRevision: 3 }] };
 +    const open = vi.fn(); await act(async () => root.render(createElement(AppDriftPanel, { onOpen: open })));
@@ -1370,6 +1236,14 @@ index 000000000..1de56fc7b
 +    await act(async () => activity.click()); expect(open).toHaveBeenCalledWith(A);
 +    expect(document.body.textContent).not.toContain('Mark reviewed');
 +  });
++  it('retains the review for an unreviewed change on a missing copy', async () => {
++    state.value.data = { supported: true, alerts: [{ ...snapshot(), exists: false }] };
++    await act(async () => root.render(createElement(AppDriftPanel, { onOpen: vi.fn() })));
++    expect(document.body.textContent).toContain('Last recorded group change');
++    expect(document.body.textContent).toContain('Mark reviewed');
++    expect(document.body.textContent).not.toContain('No group changes to review');
++  });
++
 +  it('renders saved text safely and distinguishes errors from empty history', async () => {
 +    state.value = { data: { supported: true, activity: [{ id: '1', at: '2026-01-02T12:00:00Z', title: 'Deployed to Intune', detail: '<img src=x>', actor: 'IntuneGet' }] }, action: {} };
 +    await act(async () => root.render(createElement(AppActivityTimeline, { appId: A })));
@@ -1382,13 +1256,14 @@ index 000000000..1de56fc7b
 +});
 diff --git a/components/hrm/AppInsights.tsx b/components/hrm/AppInsights.tsx
 new file mode 100644
-index 000000000..37f25026e
+index 000000000..6dd9073e7
 --- /dev/null
 +++ b/components/hrm/AppInsights.tsx
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,171 @@
 +'use client';
 +import { useAppInsights } from '@/hooks/useAppInsights';
-+import { needsReview, type AppSnapshot } from '@/lib/hrm/app-insights';
++import { GUID, hasUnreviewedChange, needsReview, type AssignmentSummary, type AppSnapshot } from '@/lib/hrm/app-insights';
++import { Term } from './Term';
 +import { intuneAppUrl, OPEN_IN_INTUNE } from '@/lib/hrm/intune-link';
 +
 +const date = (at: string) => new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -1396,20 +1271,83 @@ index 000000000..37f25026e
 +
 +// HRM patch 0036: changesOnly leaves out "no longer in Intune" and "no groups", for screens that already
 +// say so from the live Intune read, so the same warning isn't shown twice.
-+const hasUnreviewedChange = (s: AppSnapshot) => s.change !== null && s.reviewedRevision < s.revision;
++
++// Saved snapshots include the original display label and a stable JSON key. Match a
++// settings edit only when one assignment on each side identifies the same target.
++function targetKey(assignment: AssignmentSummary) {
++  try {
++    const { target, intent } = JSON.parse(assignment.key);
++    return target && typeof intent === 'string' ? JSON.stringify([target, intent]) : null;
++  } catch {
++    return null;
++  }
++}
++
++function assignmentParts(label: string) {
++  const parts = label.split(' · ');
++  const intentIndex = parts.findIndex((part, index) => index > 0 &&
++    ['Required', 'Available', 'Available without enrollment', 'Excluded', 'Uninstall'].includes(part));
++  return intentIndex < 0 ? { target: label, intent: '', settings: [] } : {
++    target: parts.slice(0, intentIndex).join(' · '),
++    intent: parts[intentIndex],
++    settings: parts.slice(intentIndex + 1),
++  };
++}
++
++function readableSetting(value: string) {
++  const [name, ...parts] = value.split(': ');
++  if (!parts.length) return value;
++  const setting = parts.join(': ');
++  const label = name.charAt(0).toUpperCase() + name.slice(1);
++  const descriptions: Record<string, string> = {
++    'show All': 'Show all', 'hide All': 'Hide all', 'show Reboot': 'Show restart notifications',
++    'not Configured': 'Not configured',
++  };
++  return `${label}: ${descriptions[setting] ?? setting}`;
++}
++
++function SavedAssignment({ assignment, counterpart }: { assignment: AssignmentSummary; counterpart?: AssignmentSummary }) {
++  const { target, intent, settings } = assignmentParts(assignment.label);
++  const groupId = target.startsWith('Group ') ? target.slice(6) : '';
++  const unavailable = GUID.test(groupId);
++  const previousSettings = new Set(counterpart ? assignmentParts(counterpart.label).settings : []);
++  const differences = settings.filter(value => !previousSettings.has(value));
++  const term = { Required: 'required', Available: 'available', Uninstall: 'uninstall', Excluded: 'excluded' } as const;
++  const nativeTerm = term[intent as keyof typeof term];
++  return <li className="break-words">
++    <span>{unavailable ? 'Group name unavailable' : target}</span>
++    {intent && <> · {nativeTerm ? <Term term={nativeTerm}>{intent}</Term> : intent}</>}
++    {counterpart && differences.map((value, index) => <p className="text-xs text-text-secondary" key={index}>{readableSetting(value)}</p>)}
++    {(unavailable || (!counterpart && settings.length > 0)) && <details className="text-xs text-text-secondary">
++      <summary className="cursor-pointer py-1">Assignment details</summary>
++      {unavailable && <p>Group ID: {groupId}</p>}
++      {!counterpart && settings.map((value, index) => <p key={index}>{readableSetting(value)}</p>)}
++    </details>}
++  </li>;
++}
 +
 +export function AssignmentDifference({ snapshot, changesOnly = false }: { snapshot: AppSnapshot; changesOnly?: boolean }) {
 +  const change = snapshot.change;
 +  return <div className="space-y-2 text-sm">
 +    {!changesOnly && !snapshot.exists && <p>This copy is no longer in Intune. It may have been replaced or deleted. Check before deploying again.</p>}
-+    {!changesOnly && snapshot.exists && !snapshot.assignments.some((a) => a.installs) && <p>No groups receive this app for installation. Exclusions and uninstall assignments do not install it.</p>}
-+    {change && snapshot.reviewedRevision < snapshot.revision && <>
-+      <p>Groups or assignment settings changed since the previous check ({date(change.observedAt)}).</p>
++    {!changesOnly && snapshot.exists && !snapshot.assignments.some((a) => a.installs) && <p>No install assignments.</p>}
++    {change && hasUnreviewedChange(snapshot) && <>
++      <p>Change observed {date(change.observedAt)}.</p>
 +      <div className="grid gap-3 sm:grid-cols-2">
-+        {(['before', 'after'] as const).map((key) => <div key={key}>
-+          <p className="font-medium">{key === 'before' ? 'Previously' : 'Now'}</p>
-+          {change[key].length === 0 ? <p className="text-text-muted">No groups</p> : <ul className="list-disc pl-4 space-y-1 break-words">{change[key].map((a) => <li key={a.key}>{a.label}</li>)}</ul>}
-+        </div>)}
++        {(['before', 'after'] as const).map((key) => {
++          const other = change[key === 'before' ? 'after' : 'before'];
++          const otherKeys = new Set(other.map(row => row.key));
++          const changed = change[key].filter(row => !otherKeys.has(row.key));
++          return <div key={key}>
++            <p className="font-medium">{key === 'before' ? 'Previously' : 'Now'}</p>
++            {changed.length > 0 ? <ul className="space-y-1">{changed.map(assignment => {
++              const identity = targetKey(assignment);
++              const counterparts = identity ? other.filter(row => targetKey(row) === identity) : [];
++              const unambiguous = counterparts.length === 1 && changed.filter(row => targetKey(row) === identity).length === 1;
++              return <SavedAssignment key={assignment.key} assignment={assignment} counterpart={unambiguous ? counterparts[0] : undefined} />;
++            })}</ul> : <p className="text-text-muted">{key === 'before' ? 'No removed assignments' : 'No added assignments'}</p>}
++          </div>;
++        })}
 +      </div>
 +    </>}
 +  </div>;
@@ -1423,31 +1361,53 @@ index 000000000..37f25026e
 +  const { data, error } = useAppInsights(appId);
 +  if (error) return <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Could not check saved group changes. Review the live groups before deploying.</p>;
 +  if (!data?.snapshot || !(changesOnly ? hasUnreviewedChange(data.snapshot) : needsReview(data.snapshot))) return null;
-+  return <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-300"><AssignmentDifference snapshot={data.snapshot} changesOnly={changesOnly} /></div>;
++  return <div className="mt-2 rounded-lg border border-overlay/10 bg-bg-surface p-3 text-text-secondary"><AssignmentDifference snapshot={data.snapshot} changesOnly={changesOnly} /></div>;
 +}
 +
 +export function AppDriftPanel({ onOpen }: { onOpen: (id: string) => void }) {
 +  const { data, isLoading, error, refetch, action } = useAppInsights();
 +  if (data?.supported === false) return null;
++  const alerts = data?.alerts ?? [];
++  const changes = alerts.filter(s => s.exists && hasUnreviewedChange(s));
++  const missing = alerts.filter(s => !s.exists);
++  const unassigned = alerts.filter(s => s.exists && !hasUnreviewedChange(s) && !s.assignments.some(a => a.installs));
 +  return <section className="mb-6 rounded-xl border border-overlay/10 bg-bg-surface p-4" aria-label="Group changes to review">
 +    <div className="flex items-center justify-between gap-3">
 +      <h2 className="font-semibold text-text-primary">Group changes to review</h2>
 +      <button className={button} disabled={action.isPending} onClick={() => action.mutate({ action: 'check' })}>{action.isPending && action.variables?.action === 'check' ? 'Checking…' : 'Check now'}</button>
 +    </div>
-+    <p className="mt-1 text-xs text-text-muted">Apps deployed by IntuneGet. Checked at 3:30 AM and 3:30 PM, Maryland time. Changes are observed between checks; who changed them in Intune is not known.</p>
++    <p className="mt-1 text-xs text-text-muted">Checks run at 3:30 AM and 3:30 PM, Maryland time.</p>
 +    {isLoading && <p className="mt-3 text-sm text-text-muted">Loading saved checks…</p>}
 +    {error && <p role="alert" className="mt-3 text-sm text-status-error">{error.message} <button className={button} onClick={() => refetch()}>Try again</button></p>}
 +    {action.error && <p role="alert" className="mt-3 text-sm text-status-error">{action.error.message}</p>}
 +    {action.data && <p role="status" className="mt-2 text-xs text-text-secondary">{action.data.reviewed ? 'Change marked reviewed.' : `Checked ${action.data.checked ?? 0} apps.`}{action.data.errors > 0 ? ` Could not check ${action.data.errors}; their last successful checks are kept.` : ''}</p>}
-+    {data && data.alerts?.length === 0 && <p className="mt-3 text-sm text-text-secondary">No saved warnings. Use Check now to get the latest groups from Intune.</p>}
-+    <ul className="mt-3 space-y-3">{data?.alerts?.map((s) => <li key={s.appId} className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-300">
-+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2"><p className="font-medium">{s.displayName} {s.version}</p>
-+        <div className="flex gap-3"><button className={button} onClick={() => onOpen(s.appId)}>{s.exists ? 'Open app' : 'Open activity'}</button>{!s.exists && <a className={button} href={intuneAppUrl(s.appId)} target="_blank" rel="noopener noreferrer">{OPEN_IN_INTUNE}</a>}</div>
-+      </div>
++    {data && !alerts.some(hasUnreviewedChange) && <p className="mt-2 text-sm text-text-secondary">No group changes to review.</p>}
++    {changes.map(s => <details key={s.appId} className="mt-2 border-t border-overlay/10 pt-1">
++      <summary className="cursor-pointer py-2 text-sm font-medium text-text-primary">{s.displayName} {s.version}</summary>
 +      <AssignmentDifference snapshot={s} />
 +      <p className="mt-2 text-xs text-text-muted">Last successful check: {date(s.checkedAt)}</p>
-+      {s.change && s.reviewedRevision < s.revision && <button className={`${button} mt-2`} disabled={action.isPending} onClick={() => action.mutate({ action: 'review', appId: s.appId, revision: s.revision })}>Mark reviewed</button>}
-+    </li>)}</ul>
++      <div className="mt-2 flex flex-wrap items-center gap-4">
++        <button className={button} disabled={action.isPending} onClick={() => action.mutate({ action: 'review', appId: s.appId, revision: s.revision })}>Mark reviewed</button>
++        <button className={button} onClick={() => onOpen(s.appId)}>Open app</button>
++      </div>
++    </details>)}
++    {missing.length > 0 && <details className="mt-2 border-t border-overlay/10">
++      <summary className="cursor-pointer py-2 text-sm">Copies no longer in Intune ({missing.length})</summary>
++      {missing.map(s => <div key={s.appId} className="flex flex-wrap items-center gap-3 py-1 text-sm">
++        <span>{s.displayName} {s.version}</span><button className={button} onClick={() => onOpen(s.appId)}>Open activity</button>
++        <a className={button} href={intuneAppUrl(s.appId)} target="_blank" rel="noopener noreferrer">{OPEN_IN_INTUNE}</a>
++        {hasUnreviewedChange(s) && <details className="basis-full"><summary className="cursor-pointer">Last recorded group change</summary>
++          <AssignmentDifference snapshot={s} changesOnly />
++          <button className={button} disabled={action.isPending} onClick={() => action.mutate({ action: 'review', appId: s.appId, revision: s.revision })}>Mark reviewed</button>
++        </details>}
++      </div>)}
++    </details>}
++    {unassigned.length > 0 && <details className="mt-2 border-t border-overlay/10">
++      <summary className="cursor-pointer py-2 text-sm text-text-secondary">No install assignments ({unassigned.length})</summary>
++      {unassigned.map(s => <div key={s.appId} className="flex flex-wrap items-center gap-3 py-1 text-sm">
++        <span>{s.displayName} {s.version}</span><button className={button} onClick={() => onOpen(s.appId)}>Open app</button>
++      </div>)}
++    </details>}
 +  </section>;
 +}
 +
@@ -1739,10 +1699,10 @@ index 267d2600e..d702001b5 100644
    );
  });
 diff --git a/components/inventory/InventoryAppDetails.tsx b/components/inventory/InventoryAppDetails.tsx
-index 5e9631f0e..3dea1f77a 100644
+index 5e9631f0e..f375e1955 100644
 --- a/components/inventory/InventoryAppDetails.tsx
 +++ b/components/inventory/InventoryAppDetails.tsx
-@@ -1,7 +1,17 @@
+@@ -1,7 +1,19 @@
  'use client';
  
 -import { Package, Calendar, User, AlertCircle, Loader2, Search, RefreshCw, ExternalLink, Users } from 'lucide-react';
@@ -1752,6 +1712,8 @@ index 5e9631f0e..3dea1f77a 100644
 +import { useNewVersionPrefill } from '@/hooks/useNewVersionPrefill';
 +import { jobIdFromNotes } from '@/lib/hrm/new-version';
  import { CopyableCommand } from './CopyableCommand';
++import { Term } from '@/components/hrm/Term';
++import { installs } from '@/lib/hrm/group-edit';
 +import { AppActivityTimeline, AppDriftWarning } from '@/components/hrm/AppInsights';
 +import { InstallStatusBar } from '@/components/hrm/InstallStatusBar';
 +import { PreviousCopyNote } from '@/components/hrm/PreviousCopy';
@@ -1761,7 +1723,7 @@ index 5e9631f0e..3dea1f77a 100644
  import { Button } from '@/components/ui/button';
  import { SlidePanel } from '@/components/dashboard/animations/SlidePanel';
  import { useAppDetails } from '@/hooks/use-inventory';
-@@ -17,6 +27,8 @@ interface InventoryAppDetailsProps {
+@@ -17,6 +29,8 @@ interface InventoryAppDetailsProps {
  export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDetailsProps) {
    const { data, isLoading, error, refetch } = useAppDetails(appId);
    const app = data?.app;
@@ -1770,7 +1732,7 @@ index 5e9631f0e..3dea1f77a 100644
  
    const formatDate = (dateString: string) => {
      return new Date(dateString).toLocaleDateString('en-US', {
-@@ -38,10 +50,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -38,10 +52,10 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
  
    const getAssignmentIntent = (intent: IntuneAppAssignment['intent']) => {
      const intents: Record<string, { label: string; className: string }> = {
@@ -1785,7 +1747,7 @@ index 5e9631f0e..3dea1f77a 100644
      };
      return intents[intent] || { label: intent, className: 'bg-overlay/5 text-text-muted' };
    };
-@@ -61,7 +73,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -61,7 +75,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        </div>
        <div className="flex-1 min-w-0">
          <h3 className="text-xl font-semibold text-text-primary truncate">{app.displayName}</h3>
@@ -1794,7 +1756,7 @@ index 5e9631f0e..3dea1f77a 100644
          {app.displayVersion && (
            <span className="inline-block mt-1 text-xs bg-accent-cyan/10 text-accent-cyan px-2 py-0.5 rounded-full">
              v{app.displayVersion}
-@@ -73,20 +85,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -73,20 +87,35 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
          size="sm"
          onClick={() => refetch()}
          disabled={isLoading}
@@ -1833,7 +1795,7 @@ index 5e9631f0e..3dea1f77a 100644
      </Button>
    ) : undefined;
  
-@@ -96,8 +123,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -96,8 +125,9 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        onClose={onClose}
        width="lg"
        direction="right"
@@ -1844,7 +1806,7 @@ index 5e9631f0e..3dea1f77a 100644
      >
        {/* Loading State */}
        {isLoading && (
-@@ -110,25 +138,43 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -110,25 +140,43 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
        {error && (
          <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
            <AlertCircle className="w-12 h-12 text-status-error mb-4" />
@@ -1892,7 +1854,7 @@ index 5e9631f0e..3dea1f77a 100644
                  Description
                </h4>
                <p className="text-sm text-text-secondary leading-relaxed">{app.description}</p>
-@@ -138,19 +184,31 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -138,23 +186,36 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
            {/* Commands */}
            <div className="space-y-4">
              {app.installCommandLine && (
@@ -1907,15 +1869,14 @@ index 5e9631f0e..3dea1f77a 100644
  
 -          {/* Assignments */}
 +          {/* Assignments. HRM patch 0023: always shown, so an app with no groups is obvious. */}
-+          {(!app.assignments || app.assignments.length === 0) && (
++          {(!app.assignments || !app.assignments.some(installs)) && (
 +            <div>
 +              <h4 className="text-sm font-semibold text-text-secondary mb-3 flex items-center gap-2">
 +                <Users className="w-3.5 h-3.5" />
 +                Groups
 +              </h4>
-+              <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-700 dark:text-amber-300">
-+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
-+                No groups. This app installs nowhere until it&apos;s assigned to a group.
++              <p className="text-sm text-text-secondary">
++                {app.assignments ? 'No install assignments.' : 'Assignments unavailable.'}
 +              </p>
 +            </div>
 +          )}
@@ -1929,7 +1890,29 @@ index 5e9631f0e..3dea1f77a 100644
                </h4>
                <div className="space-y-2">
                  {app.assignments.map((assignment) => {
-@@ -189,7 +247,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+                   const intentInfo = getAssignmentIntent(assignment.intent);
++                  // HRM: an exclusion is Excluded, not Required.
++                  const excluded = String(assignment.target['@odata.type']).includes('exclusionGroup');
+                   return (
+                     <div
+                       key={assignment.id}
+@@ -173,12 +234,12 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+                               assignment.target,
+                               app.assignmentGroupNames,
+                               app.assignmentGroupLookupFailures
+-                            )}
++                            ).replace(/^Excluded group: /, 'Group: ')}
+                           </p>
+                         </div>
+                       </div>
+-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${intentInfo.className}`}>
+-                        {intentInfo.label}
++                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${excluded ? 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300' : intentInfo.className}`}>
++                        {excluded ? <Term term="excluded">Excluded</Term> : assignment.intent === 'required' || assignment.intent === 'available' || assignment.intent === 'uninstall' ? <Term term={assignment.intent}>{intentInfo.label}</Term> : intentInfo.label}
+                       </span>
+                     </div>
+                   );
+@@ -189,7 +250,7 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
  
            {/* Metadata Grid */}
            <div>
@@ -1938,7 +1921,7 @@ index 5e9631f0e..3dea1f77a 100644
                Details
              </h4>
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-@@ -210,12 +268,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
+@@ -210,12 +271,14 @@ export function InventoryAppDetails({ appId, onClose, onUpdate }: InventoryAppDe
                />
                <MetadataItem
                  icon={User}
@@ -2028,7 +2011,7 @@ index eba518fc0..ab871da75 100644
    );
  });
 diff --git a/components/inventory/assignment-group-labels.test.ts b/components/inventory/assignment-group-labels.test.ts
-index b19c39912..ad36b4c35 100644
+index b19c39912..93d84eef2 100644
 --- a/components/inventory/assignment-group-labels.test.ts
 +++ b/components/inventory/assignment-group-labels.test.ts
 @@ -1,9 +1,15 @@
@@ -2047,7 +2030,7 @@ index b19c39912..ad36b4c35 100644
  vi.mock('@/components/dashboard/animations/SlidePanel',()=>({SlidePanel:({children}:{children:React.ReactNode})=>children}));
  import {InventoryAppDetails} from './InventoryAppDetails';
  let root:Root;
-@@ -13,7 +19,7 @@ async function render(excluded=false,name?:string,failure?:'not_found'|'access_d
+@@ -13,17 +19,17 @@ async function render(excluded=false,name?:string,failure?:'not_found'|'access_d
    const id='11111111-1111-4111-8111-111111111111';
    state.app={id:'fixture-app',displayName:'Fixture',publisher:'Example',createdDateTime:'2026-01-01T00:00:00Z',lastModifiedDateTime:'2026-01-01T00:00:00Z',installExperience:{runAsAccount:'system'},assignments:[{id:'assignment',intent:'required',target:{'@odata.type':`#microsoft.graph.${excluded?'exclusionGroupAssignmentTarget':'groupAssignmentTarget'}`,groupId:id},settings:null}],assignmentGroupNames:name?{[id]:name}:undefined,assignmentGroupLookupFailures:failure?{[id]:failure}:undefined};
    vi.stubGlobal('fetch',vi.fn(()=>{throw Error('Network forbidden in renderer regression');}));
@@ -2056,6 +2039,20 @@ index b19c39912..ad36b4c35 100644
  }
  describe('actual inventory assignment rendering',()=>{
    it('shows a resolved assignment name',async()=>{expect(await render(false,'Fixture Group')).toContain('Group: Fixture Group');expect(fetch).not.toHaveBeenCalled();});
+-  it('keeps ID fallback for old cached responses',async()=>{expect(await render()).toContain('Group: 11111111... (name unavailable)');});
++  it('keeps the unavailable-name fallback for old cached responses',async()=>{expect(await render()).toContain('Group: name unavailable');});
+   it('explains deleted groups and missing permission while keeping the full ID available',async()=>{
+-    expect(await render(false,undefined,'not_found')).toContain('Group: 11111111... (group deleted or not found)');
++    expect(await render(false,undefined,'not_found')).toContain('Group: group deleted or not found');
+     expect(document.querySelector('[title="11111111-1111-4111-8111-111111111111"]')).not.toBeNull();
+     await act(async()=>root.unmount());document.body.innerHTML='';
+-    expect(await render(true,undefined,'access_denied')).toContain('Excluded group: 11111111... (no permission to read group name)');
++    expect(await render(true,undefined,'access_denied')).toContain('Group: no permission to read group name');
+   });
+-  it('identifies excluded groups',async()=>{expect(await render(true,'Finance')).toContain('Excluded group: Finance');});
++  it('identifies excluded groups',async()=>{const text=await render(true,'Finance');expect(text).toContain('Group: FinanceExcluded');expect(text).not.toContain('Required');});
+   it('renders group names as text',async()=>{expect(await render(false,'<img src=x onerror=alert(1)>')).toContain('<img src=x onerror=alert(1)>');expect(document.querySelector('img')).toBeNull();});
+ });
 diff --git a/components/inventory/inventory-app-actions.test.ts b/components/inventory/inventory-app-actions.test.ts
 new file mode 100644
 index 000000000..d1581a5f1
@@ -2344,7 +2341,7 @@ index 000000000..afc4388f4
 +}
 diff --git a/hooks/useInstallStatus.ts b/hooks/useInstallStatus.ts
 new file mode 100644
-index 0000000..914f69f
+index 000000000..914f69f5b
 --- /dev/null
 +++ b/hooks/useInstallStatus.ts
 @@ -0,0 +1,95 @@
@@ -2509,15 +2506,15 @@ index 000000000..fae9b131c
 +});
 diff --git a/lib/hrm/__tests__/app-insights.test.ts b/lib/hrm/__tests__/app-insights.test.ts
 new file mode 100644
-index 000000000..8c27f9a2b
+index 000000000..11b317dce
 --- /dev/null
 +++ b/lib/hrm/__tests__/app-insights.test.ts
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,159 @@
 +import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 +import Database from 'better-sqlite3';
 +import { runSqliteMigrations } from '@/lib/db/sqlite-migrations';
 +import { createAppInsightsStore } from '../app-insights-store';
-+import { summarizeAssignments, needsReview, type AppObservation } from '../app-insights';
++import { summarizeAssignments, needsReview, hasUnreviewedChange, type AppObservation, type AppSnapshot } from '../app-insights';
 +
 +const A = '11111111-1111-4111-8111-111111111111';
 +const B = '22222222-2222-4222-8222-222222222222';
@@ -2559,6 +2556,55 @@ index 000000000..8c27f9a2b
 +    store.observe('tenant', obs({ assignments: summarizeAssignments([group(B)]), checkedAt: '2026-01-02T12:00:00Z' }), 'Saved in IntuneGet by a staff member', true);
 +    expect(store.alerts('tenant')).toEqual([]);
 +    expect(store.activity('tenant', 'Example.App')[0]).toMatchObject({ actor: 'Saved in IntuneGet by a staff member', title: 'Groups or assignment settings changed' });
++  });
++  it('reuses group names from an earlier check when a later record has none (item 122)', () => {
++    store.observe('tenant', obs({ assignments: summarizeAssignments([group()], { [A]: 'Pilot group' }) }));
++    const saved = store.observe('tenant', obs({ assignments: summarizeAssignments([group(A, 'available')]), checkedAt: '2026-01-02T12:00:00Z' }), 'Saved in IntuneGet by a staff member', true);
++    expect(saved.assignments[0].label).toBe('Pilot group · Available');
++    expect(store.activity('tenant', 'Example.App')[0].detail).toBe('Previously: Pilot group · Required\nNow: Pilot group · Available');
++    // A group no check has named keeps its ID.
++    const added = store.observe('tenant', obs({ assignments: summarizeAssignments([group(A, 'available'), group(B)]), checkedAt: '2026-01-03T12:00:00Z' }), 'Saved', true);
++    expect(added.assignments.map((a) => a.label).sort()).toEqual(['Group ' + B + ' · Required', 'Pilot group · Available']);
++  });
++  it('clears a change to review once the groups are back where they started', () => {
++    store.observe('tenant', obs());
++    expect(needsReview(store.observe('tenant', obs({ assignments: summarizeAssignments([group(A, 'available')]), checkedAt: '2026-01-02T12:00:00Z' })))).toBe(true);
++    const back = store.observe('tenant', obs({ checkedAt: '2026-01-03T12:00:00Z' }), 'Saved in IntuneGet by a staff member', true);
++    expect(back.change).toBeNull();
++    expect(needsReview(back)).toBe(false);
++    expect(store.alerts('tenant')).toEqual([]);
++    // The same happens when it is put back in Intune itself.
++    store.observe('tenant', obs({ assignments: [], checkedAt: '2026-01-04T12:00:00Z' }));
++    expect(store.observe('tenant', obs({ checkedAt: '2026-01-05T12:00:00Z' })).change).toBeNull();
++  });
++  it.each([null, { notifications: 'showAll' }])('ignores defaults and nulls Intune adds to %j settings', (settings) => {
++    const row = group(A, 'required', { settings });
++    store.observe('tenant', obs({ assignments: summarizeAssignments([row]) }));
++    const normalized = {
++      ...row,
++      id: 'new-graph-id',
++      target: { ...row.target, deviceAndAppManagementAssignmentFilterId: null, deviceAndAppManagementAssignmentFilterType: 'none' },
++      settings: { notifications: 'showAll', deliveryOptimizationPriority: 'notConfigured', restartSettings: null, installTimeSettings: null, autoUpdateSettings: null },
++    };
++    const next = store.observe('tenant', obs({ assignments: summarizeAssignments([normalized]), checkedAt: '2026-01-02T12:00:00Z' }));
++    expect(next.revision).toBe(0);
++    expect(next.change).toBeNull();
++    expect(store.alerts('tenant')).toEqual([]);
++    expect(store.activity('tenant', 'Example.App')).toHaveLength(2);
++  });
++  it('clears a stored no-op notice without treating the next Edit groups save as drift', () => {
++    const before = summarizeAssignments([group()]);
++    const after = summarizeAssignments([group(A, 'required', { settings: { notifications: 'showAll', restartSettings: null } })]);
++    const saved: AppSnapshot = { ...obs({ assignments: after }), revision: 2, reviewedRevision: 1, change: { before, after, observedAt: '2026-01-01T12:00:00Z' } };
++    db.prepare('INSERT INTO hrm_app_observations (tenant_id, app_id, winget_id, snapshot) VALUES (?, ?, ?, ?)')
++      .run('tenant', A, saved.wingetId, JSON.stringify(saved));
++    expect(hasUnreviewedChange(saved)).toBe(false);
++    expect(needsReview(saved)).toBe(false);
++    const changed = store.observe('tenant', obs({ assignments: summarizeAssignments([group(A, 'available')]), checkedAt: '2026-01-02T12:00:00Z' }), 'Saved in IntuneGet', true);
++    expect(changed.revision).toBe(3);
++    expect(changed.reviewedRevision).toBe(3);
++    expect(changed.change).toBeNull();
++    expect(store.alerts('tenant')).toEqual([]);
 +  });
 +  it('detects exclusion, intent, filter, and assignment-setting changes', () => {
 +    store.observe('tenant', obs());
@@ -3275,13 +3321,13 @@ index 000000000..526eb10da
 +}
 diff --git a/lib/hrm/app-insights-store.ts b/lib/hrm/app-insights-store.ts
 new file mode 100644
-index 0000000..03cafd3
+index 000000000..f8075f49a
 --- /dev/null
 +++ b/lib/hrm/app-insights-store.ts
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,129 @@
 +/** SQLite activity store. Tenant and app are part of every key/read/write. */
 +import type Database from 'better-sqlite3';
-+import { assignmentsEqual, needsReview, type AppObservation, type AppSnapshot, type AppActivity } from './app-insights';
++import { assignmentsEqual, hasUnreviewedChange, knownGroupNames, needsReview, withGroupNames, type AppObservation, type AppSnapshot, type AppActivity } from './app-insights';
 +
 +export function createAppInsightsStore(getDb: () => Database.Database) {
 +  function snapshot(tenant: string, appId: string): AppSnapshot | null {
@@ -3317,14 +3363,29 @@ index 0000000..03cafd3
 +      return db.transaction(() => {
 +        const old = snapshot(tenant, observation.appId);
 +        if (old && old.checkedAt > observation.checkedAt) return old;
++        // Records made without a name lookup (Edit groups, Install dates, retirement) reuse the names
++        // an earlier check found, so groups are not shown by their ID.
++        const names = knownGroupNames(observation.assignments, old?.assignments ?? [], old?.change?.before ?? [], old?.change?.after ?? []);
++        observation = { ...observation, assignments: withGroupNames(observation.assignments, names) };
 +        const changed = old && observation.exists && !assignmentsEqual(old.assignments, observation.assignments);
 +        const revision = (old?.revision ?? 0) + (changed ? 1 : 0);
-+        const pending = old?.change && old.reviewedRevision < old.revision;
-+        const current: AppSnapshot = { ...observation, revision, reviewedRevision: knownChange && !pending ? revision : old?.reviewedRevision ?? 0,
-+          change: changed && (!knownChange || pending) ? { before: pending ? old!.change!.before : old!.assignments, after: observation.assignments, observedAt: observation.checkedAt } : old?.change ?? null };
++        const pending = old && hasUnreviewedChange(old) ? old.change : null;
++        const before = pending?.before ?? old?.assignments;
++        const undone = pending && observation.exists && assignmentsEqual(pending.before, observation.assignments);
++        const obsolete = old?.change && old.reviewedRevision < old.revision && !pending;
++        const current: AppSnapshot = {
++          ...observation,
++          revision,
++          reviewedRevision: undone || (knownChange && !pending) || (obsolete && !changed)
++            ? revision : old?.reviewedRevision ?? 0,
++          change: changed && before && (!knownChange || pending) && !undone
++            ? { before: withGroupNames(before, names), after: observation.assignments, observedAt: observation.checkedAt }
++            : undone || obsolete || !old?.change ? null
++              : { ...old.change, before: withGroupNames(old.change.before, names), after: withGroupNames(old.change.after, names) },
++        };
 +        if (!old || old.exists !== observation.exists || changed) {
 +          const title = !observation.exists ? 'No longer in Intune' : !old ? 'First checked in Intune' : !old.exists ? 'Found in Intune again' : changed ? 'Groups or assignment settings changed' : 'Version changed in Intune';
-+          const detail = changed ? `Previously: ${old!.assignments.map((a) => a.label).join('; ') || 'No groups'}\nNow: ${observation.assignments.map((a) => a.label).join('; ') || 'No groups'}` : observation.exists ? `Version ${observation.version || 'unknown'}` : 'This deployed copy was not found. It may have been replaced or deleted.';
++          const detail = changed ? `Previously: ${withGroupNames(old!.assignments, names).map((a) => a.label).join('; ') || 'No groups'}\nNow: ${observation.assignments.map((a) => a.label).join('; ') || 'No groups'}` : observation.exists ? `Version ${observation.version || 'unknown'}` : 'This deployed copy was not found. It may have been replaced or deleted.';
 +          event(tenant, observation.wingetId, { at: observation.checkedAt, title, detail, actor, appId: observation.appId });
 +        }
 +        if (old && observation.exists && old.version !== observation.version) {
@@ -3395,12 +3456,14 @@ index 0000000..03cafd3
 +export type AppInsightsStore = ReturnType<typeof createAppInsightsStore>;
 diff --git a/lib/hrm/app-insights.ts b/lib/hrm/app-insights.ts
 new file mode 100644
-index 0000000..e1ecba4
+index 000000000..84525f00d
 --- /dev/null
 +++ b/lib/hrm/app-insights.ts
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,117 @@
 +/** Shared, browser-safe app activity and assignment comparison types. */
-+export interface AssignmentSummary { key: string; label: string; installs: boolean }
++// groupName is kept when Entra returned the group's name, so later records made without a name
++// lookup (an Edit groups save, Install dates, retirement) can show it instead of the group's ID.
++export interface AssignmentSummary { key: string; label: string; installs: boolean; groupName?: string }
 +export interface AssignmentChange { before: AssignmentSummary[]; after: AssignmentSummary[]; observedAt: string }
 +export interface AppObservation {
 +  appId: string; wingetId: string; displayName: string; exists: boolean; version: string;
@@ -3450,17 +3513,69 @@ index 0000000..e1ecba4
 +    const options = describeSettings(r.settings);
 +    return {
 +      key: JSON.stringify(stable({ intent: r.intent, target: { ...target, groupId: id || undefined, targetType: type }, settings: r.settings ?? null })),
-+      label: `${excluded ? 'Excluded ' : ''}${name} · ${intent}${filter}${options ? ` · ${options}` : ''}`,
++      label: `${name} · ${excluded ? 'Excluded' : intent}${filter}${options ? ` · ${options}` : ''}`,
 +      installs: !excluded && (r.intent === 'required' || r.intent === 'available' || r.intent === 'availableWithoutEnrollment'),
++      ...(id && names[id] ? { groupName: names[id] } : {}),
 +    };
 +  });
 +  return [...new Map(entries.map((e) => [e.key, e])).values()].sort((a, b) => a.key.localeCompare(b.key));
 +}
++// Normalize both new and saved keys. Intune can fill in nulls and Win32 defaults
++// before returning assignments, including the explicit 'none' filter type.
++function comparableKey(key: string): string {
++  const dropNulls = (value: unknown): unknown => Array.isArray(value) ? value.map(dropNulls)
++    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v != null).map(([k, v]) => [k, dropNulls(v)]))
++    : value;
++  try {
++    const assignment = JSON.parse(key);
++    const { target, settings } = assignment;
++    if (target?.deviceAndAppManagementAssignmentFilterType === 'none') {
++      delete target.deviceAndAppManagementAssignmentFilterType;
++      delete target.deviceAndAppManagementAssignmentFilterId;
++    }
++    if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
++      // These match the defaults used when saving Win32 assignment settings.
++      if (settings.notifications === 'showAll') delete settings.notifications;
++      if (settings.deliveryOptimizationPriority === 'notConfigured') delete settings.deliveryOptimizationPriority;
++      const configured = dropNulls(settings) as Record<string, unknown>;
++      assignment.settings = Object.keys(configured).length ? configured : null;
++    }
++    return JSON.stringify(dropNulls(assignment));
++  } catch { return key; }
++}
 +export function assignmentsEqual(a: AssignmentSummary[], b: AssignmentSummary[]) {
-+  return JSON.stringify(a.map((e) => e.key).sort()) === JSON.stringify(b.map((e) => e.key).sort());
++  const keys = (list: AssignmentSummary[]) => JSON.stringify([...new Set(list.map((e) => comparableKey(e.key)))].sort());
++  return keys(a) === keys(b);
++}
++function groupIdOf(entry: AssignmentSummary): string {
++  try { const id = JSON.parse(entry.key)?.target?.groupId; return typeof id === 'string' ? id.toLowerCase() : ''; } catch { return ''; }
++}
++/** Entra group names already known from these entries (their own name, or an earlier label). */
++export function knownGroupNames(...lists: AssignmentSummary[][]): Record<string, string> {
++  const names: Record<string, string> = {};
++  for (const entry of lists.flat()) {
++    const id = groupIdOf(entry);
++    if (!id) continue;
++    const name = entry.groupName ?? entry.label.split(' · ')[0];
++    if (name && name !== `Group ${id}` && !names[id]) names[id] = name;
++  }
++  return names;
++}
++/** Replaces "Group <ID>" with the group's name when it is known. Unknown groups keep their ID. */
++export function withGroupNames(list: AssignmentSummary[], names: Record<string, string>): AssignmentSummary[] {
++  return list.map((entry) => {
++    const id = groupIdOf(entry);
++    const fallback = `Group ${id}`;
++    if (!id || !names[id] || !(entry.label === fallback || entry.label.startsWith(`${fallback} · `))) return entry;
++    return { ...entry, label: names[id] + entry.label.slice(fallback.length), groupName: names[id] };
++  });
++}
++/** A saved change still to review. One that ended where it started (switched and back) is not. */
++export function hasUnreviewedChange(s: AppSnapshot) {
++  return s.change !== null && s.reviewedRevision < s.revision && !assignmentsEqual(s.change.before, s.change.after);
 +}
 +export function needsReview(s: AppSnapshot) {
-+  return !s.exists || !s.assignments.some((a) => a.installs) || (s.change !== null && s.reviewedRevision < s.revision);
++  return !s.exists || !s.assignments.some((a) => a.installs) || hasUnreviewedChange(s);
 +}
 diff --git a/lib/hrm/install-error-guidance.ts b/lib/hrm/install-error-guidance.ts
 new file mode 100644
@@ -4140,7 +4255,7 @@ index 000000000..07785bd56
 +}
 diff --git a/hooks/__tests__/app-evidence-scope.test.ts b/hooks/__tests__/app-evidence-scope.test.ts
 new file mode 100644
-index 0000000..cd977cd
+index 000000000..0434abb89
 --- /dev/null
 +++ b/hooks/__tests__/app-evidence-scope.test.ts
 @@ -0,0 +1,13 @@
@@ -4152,8 +4267,475 @@ index 0000000..cd977cd
 +import {useInstallStatus,installStatusKey} from '../useInstallStatus';
 +import {useDeployedConfig} from '../use-deployed-config';
 +it('separates cached results and saved settings when the authorized user or tenant changes',()=>{
-+ const read=()=>{state.query.mockClear();useInstallStatus('copy');useDeployedConfig('Example.App','copy');return state.query.mock.calls.map(([q])=>q.queryKey);};
-+ const first=read();state.user={id:'second',tenantId:'tenant-a'};const colleague=read();state.user={id:'second',tenantId:'tenant-b'};const other=read();
++ const useEvidenceKeys=()=>{state.query.mockClear();useInstallStatus('copy');useDeployedConfig('Example.App','copy');return state.query.mock.calls.map(([q])=>q.queryKey);};
++ const first=useEvidenceKeys();state.user={id:'second',tenantId:'tenant-a'};const colleague=useEvidenceKeys();state.user={id:'second',tenantId:'tenant-b'};const other=useEvidenceKeys();
 + expect(first[0]).not.toEqual(colleague[0]);expect(first[1]).not.toEqual(colleague[1]);expect(colleague[0]).not.toEqual(other[0]);expect(colleague[1]).not.toEqual(other[1]);
 + expect(installStatusKey('copy','first','tenant-a')).not.toEqual(installStatusKey('other-copy','first','tenant-a'));
 +});
+diff --git a/app/api/intune/apps/[id]/route.ts b/app/api/intune/apps/[id]/route.ts
+index 40eb97483..401ac1edd 100644
+--- a/app/api/intune/apps/[id]/route.ts
++++ b/app/api/intune/apps/[id]/route.ts
+@@ -99,6 +99,14 @@ export async function GET(
+     }
+ 
+     const appData = await appResponse.json();
++    // HRM patch 0025: Inventory lists Win32 apps only, so a linked id for any
++    // other app type gets the same answer as an unknown one.
++    if (appData['@odata.type'] && appData['@odata.type'] !== '#microsoft.graph.win32LobApp') {
++      return NextResponse.json(
++        { error: 'App not found' },
++        { status: 404 }
++      );
++    }
+     let assignments: IntuneAppAssignment[] = [];
+ 
+     if (assignmentsResponse.ok) {
+diff --git a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
+index 7dd46a659..3147ac76c 100644
+--- a/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
++++ b/app/api/intune/apps/[id]/settings/route.sqlite.test.ts
+@@ -1,32 +1,33 @@
+-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
++import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { NextRequest } from 'next/server';
+ import { randomUUID } from 'node:crypto';
+ 
+ const state = vi.hoisted(() => {
+   vi.stubEnv('DATABASE_PATH', ':memory:');
+   vi.stubEnv('DATABASE_MODE', 'sqlite');
+-  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false };
++  return { authenticated: true, assign: vi.fn(), categories: vi.fn(), graphFails: false,real:false,live:[] as unknown[] };
+ });
+ vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: async () => state.authenticated
+   ? { userId: 'fixture-owner', tenantId: 'fixture-tenant' } : null }));
+ vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
+ vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: async () => 'fixture-token' }));
+-vi.mock('@/lib/intune-api', () => ({
++vi.mock('@/lib/intune-api', async () => {const actual=await vi.importActual<typeof import('@/lib/intune-api')>('@/lib/intune-api');return ({
++  getAppAssignments: async () => state.live,
+   getApp: async () => ({ displayName: 'Fixture app', rules: [] }),
+-  convertToGraphAssignments: (assignments: unknown) => assignments,
++  convertToGraphAssignments: (assignments: unknown) => state.real ? actual.convertToGraphAssignments(assignments as never) : assignments,
+   assignToGroups: async (...args: unknown[]) => {
+     await state.assign(...args);
+     if (state.graphFails) throw new Error('Fixture Graph failure');
+   },
+   syncAppCategories: state.categories, setAppRules: vi.fn(),
+-}));
++});});
+ vi.mock('@/lib/requirement-rules', () => ({ buildCartItemRequirementRules: () => undefined }));
+ vi.mock('@/lib/db', async () => {
+   const { sqliteDb } = await vi.importActual<typeof import('@/lib/db/sqlite')>('@/lib/db/sqlite');
+   return { getDatabase: () => sqliteDb, isSqliteMode: () => true };
+ });
+ 
+-import { sqliteDb, closeSqliteDb, sqliteDeployedConfig } from '@/lib/db/sqlite';
++import { sqliteDb, closeSqliteDb, sqliteDeployedConfig, sqliteAppInsights } from '@/lib/db/sqlite';
+ import { PATCH } from './route';
+ import { GET } from '../../deployed/config/route';
+ 
+@@ -45,9 +46,34 @@ const create = async (overrides: Record<string, unknown> = {}) => {
+ };
+ 
+ describe('deployed settings persistence with SQLite', () => {
+-  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false; });
++  it('preserves in-use, automatic-update and unknown untouched settings for both groups through the real converter and save entry point',async()=>{
++    await create();state.real=true;
++    const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222';
++    state.live=[a,b].map((groupId,index)=>({id:`live-${index}`,intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId},settings:{'@odata.type':'#microsoft.graph.win32LobAppAssignmentSettings',notifications:'showAll',inUseSettings:index?null:{countdownMinutes:15,minutesBetweenDeferrals:60,numberOfDeferrals:3},autoUpdateSettings:{autoUpdateSupersededAppsState:'enabled'},futureBehavior:{keep:true}}}));
++    vi.stubGlobal('fetch',vi.fn(async()=>Response.json({value:[]})));
++    const response=await call({wingetId:'Fixture.App',assignments:[a,b].map(groupId=>({type:'group',groupId,intent:'required'}))});
++    expect(response.status).toBe(200);
++    const sent=state.assign.mock.calls[0][2];expect(sent).toHaveLength(2);
++    for(let i=0;i<2;i++){expect(sent[i].settings).toMatchObject((state.live[i] as any).settings);expect(sent[i].target.groupId).toBe([a,b][i]);}
++  });
++  beforeEach(() => { closeSqliteDb(); vi.clearAllMocks(); state.authenticated = true; state.graphFails = false;state.real=false;state.live=[]; });
++  afterEach(() => vi.unstubAllGlobals());
+   afterAll(() => { closeSqliteDb(); vi.unstubAllEnvs(); });
+ 
++  it('records before and after groups with the known IntuneGet actor', async () => {
++    const appId = '11111111-1111-4111-8111-111111111111';
++    const job = await create({ intune_app_id: appId });
++    await sqliteDb.uploadHistory.create({ user_id: 'fixture-owner', intune_tenant_id: 'fixture-tenant', winget_id: 'Fixture.App',
++      intune_app_id: appId, packaging_job_id: job.id, version: '1', display_name: 'Fixture app' });
++    let current = [{ intent: 'required', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } }];
++    vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('/assignments') ? { value: current } : { id: appId, displayVersion: '1' })));
++    state.assign.mockImplementationOnce(() => { current = [{ intent: 'available', target: { '@odata.type': '#microsoft.graph.allUsersAssignmentTarget' } }]; });
++    expect((await call(undefined, appId)).status).toBe(200);
++    const events = sqliteAppInsights.activity('fixture-tenant', 'Fixture.App');
++    expect(events.some((e) => e.title === 'Groups or assignment settings changed' && e.actor === 'Saved in IntuneGet by a staff member')).toBe(true);
++    expect(sqliteAppInsights.alerts('fixture-tenant')).toEqual([]);
++  });
++
+   it('persists the edited assignment intent and preserves other configuration', async () => {
+     const job = await create();
+     expect((await call()).status).toBe(200);
+diff --git a/app/api/intune/apps/[id]/settings/route.ts b/app/api/intune/apps/[id]/settings/route.ts
+index 30c19873e..32a29f291 100644
+--- a/app/api/intune/apps/[id]/settings/route.ts
++++ b/app/api/intune/apps/[id]/settings/route.ts
+@@ -1,3 +1,4 @@
++import { preserveTiming } from '@/lib/hrm/app-timing';
+ /**
+  * Intune App Settings API Route
+  * Updates assignments and categories on an existing Intune app without repackaging
+@@ -5,11 +6,13 @@
+ 
+ import { NextRequest, NextResponse } from 'next/server';
+ import { getServerClientOrNull } from '@/lib/supabase';
+-import { getDatabase } from '@/lib/db';
++import { checkAppInsights } from '@/lib/hrm/app-insights-check';
++import { getDatabase, isSqliteMode } from '@/lib/db';
+ import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
+ import { getServicePrincipalToken } from '@/lib/intune/graph-client';
+ import {
+   getApp,
++  getAppAssignments,
+   assignToGroups,
+   convertToGraphAssignments,
+   syncAppCategories,
+@@ -77,6 +80,13 @@ export async function PATCH(
+       );
+     }
+ 
++    if (process.env.DATABASE_MODE?.toLowerCase() === 'sqlite') {
++      const { sqlitePilotRollouts, sqliteRetirements } = await import('@/lib/db/sqlite');
++      if ([intuneAppId].some((id) => sqlitePilotRollouts.holdsApp(tenantId,id))) return NextResponse.json({ error: 'This app is part of an active pilot. Review it in App updates first.' },{ status: 409 });
++      // HRM patch 0038: Save to Intune would undo the Uninstall groups of an app being retired.
++      if (sqliteRetirements.holdsApp(tenantId, intuneAppId)) return NextResponse.json({ error: 'This app is being retired. Cancel retiring it in Inventory first.' },{ status: 409 });
++    }
++
+     // Verify the app still exists in Intune
+     const existingApp = await getApp(graphToken, intuneAppId);
+ 
+@@ -112,8 +122,20 @@ export async function PATCH(
+       );
+     }
+ 
++    const captureGroups = async (knownChange: boolean) => {
++      if (!isSqliteMode()) return;
++      try {
++        const { sqliteAppInsights } = await import('@/lib/db/sqlite');
++        await checkAppInsights(sqliteAppInsights, { tenantId, appId: intuneAppId,
++          token: async () => graphToken, knownChange,
++          actor: knownChange ? `Saved in IntuneGet by ${user.userEmail || 'a staff member'}` : undefined });
++      } catch { /* Optional activity must never prevent saving Intune settings. */ }
++    };
++    const liveAssignments = assignments ? await getAppAssignments(graphToken, intuneAppId) : [];
++    if (assignments) await captureGroups(false);
+     // Apply assignments
+     if (assignments) {
++      const graphAssignments = preserveTiming(convertToGraphAssignments(assignments), liveAssignments);
+       const productCode = existingApp.msiInformation?.productCode;
+       const requirementRules = buildCartItemRequirementRules(
+         existingApp.displayName,
+@@ -134,8 +156,8 @@ export async function PATCH(
+         ]);
+       }
+ 
+-      const graphAssignments = convertToGraphAssignments(assignments);
+       await assignToGroups(graphToken, intuneAppId, graphAssignments);
++      await captureGroups(true);
+     }
+ 
+     // Sync categories
+diff --git a/app/api/intune/apps/[id]/win32-only.test.ts b/app/api/intune/apps/[id]/win32-only.test.ts
+new file mode 100644
+index 000000000..dd2461b5c
+--- /dev/null
++++ b/app/api/intune/apps/[id]/win32-only.test.ts
+@@ -0,0 +1,35 @@
++import { NextRequest } from 'next/server';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++const mocks = vi.hoisted(() => ({ auth: vi.fn(), token: vi.fn() }));
++vi.mock('@/lib/auth-utils', () => ({ parseAccessToken: mocks.auth }));
++vi.mock('@/lib/intune/graph-client', () => ({ getServicePrincipalToken: mocks.token }));
++vi.mock('@/lib/supabase', () => ({ getServerClientOrNull: () => null }));
++vi.mock('@/lib/msp/tenant-resolution', () => ({ resolveTargetTenantId: vi.fn() }));
++import { GET } from './route';
++
++// HRM patch 0025: Inventory links open Win32 apps only; any other app type reads as not found.
++const id = '11111111-1111-4111-8111-111111111111';
++const request = () => new NextRequest(`http://localhost/api/intune/apps/${id}`);
++const params = { params: Promise.resolve({ id }) };
++const graph = (type: string) => vi.fn(async (url: string) =>
++  Response.json(url.endsWith('/assignments') ? { value: [] } : { '@odata.type': type, id, displayName: 'Fixture' }));
++beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'user', tenantId: 'self' }); mocks.token.mockResolvedValue('token'); });
++afterEach(() => vi.unstubAllGlobals());
++
++describe('app details for linked ids', () => {
++  it('returns a Win32 app', async () => {
++    vi.stubGlobal('fetch', graph('#microsoft.graph.win32LobApp'));
++    const response = await GET(request(), params);
++    expect(response.status).toBe(200);
++    expect((await response.json()).app.displayName).toBe('Fixture');
++  });
++
++  it('answers App not found for other app types', async () => {
++    for (const type of ['#microsoft.graph.iosStoreApp', '#microsoft.graph.winGetApp', '#microsoft.graph.officeSuiteApp']) {
++      vi.stubGlobal('fetch', graph(type));
++      const response = await GET(request(), params);
++      expect(response.status).toBe(404);
++      expect(await response.json()).toEqual({ error: 'App not found' });
++    }
++  });
++});
+diff --git a/lib/intune/assignment-group-names.test.ts b/lib/intune/assignment-group-names.test.ts
+index 851c281fe..c617abf76 100644
+--- a/lib/intune/assignment-group-names.test.ts
++++ b/lib/intune/assignment-group-names.test.ts
+@@ -47,10 +47,11 @@ describe('assignment group name resolution',()=>{
+   it('labels includes, exclusions and unresolved groups without altering special targets',()=>{
+     expect(assignmentTargetLabel(assignment().target,{[id]:'Finance'})).toBe('Group: Finance');
+     expect(assignmentTargetLabel(assignment(id,true).target,{[id]:'Finance'})).toBe('Excluded group: Finance');
+-    expect(assignmentTargetLabel(assignment().target)).toBe('Group: 11111111... (name unavailable)');
+-    expect(assignmentTargetLabel(assignment().target,{},{[id]:'not_found'})).toBe('Group: 11111111... (group deleted or not found)');
+-    expect(assignmentTargetLabel(assignment(id.toUpperCase(),true).target,{},{[id]:'access_denied'})).toBe('Excluded group: 11111111... (no permission to read group name)');
+-    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'})).toBe('All Devices');
+-    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allUsersAssignmentTarget'})).toBe('All Users');
++    expect(assignmentTargetLabel(assignment().target)).toBe('Group: name unavailable');
++    expect(assignmentTargetLabel(assignment().target,{},{[id]:'not_found'})).toBe('Group: group deleted or not found');
++    expect(assignmentTargetLabel(assignment(id.toUpperCase(),true).target,{},{[id]:'access_denied'})).toBe('Excluded group: no permission to read group name');
++    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allDevicesAssignmentTarget'})).toBe('All devices');
++    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.allUsersAssignmentTarget'})).toBe('All users');
++    expect(assignmentTargetLabel({'@odata.type':'#microsoft.graph.groupAssignmentTarget'})).toBe('Unknown group');
+   });
+ });
+diff --git a/lib/intune/assignment-group-names.ts b/lib/intune/assignment-group-names.ts
+index 2c3370e23..bee5fc450 100644
+--- a/lib/intune/assignment-group-names.ts
++++ b/lib/intune/assignment-group-names.ts
+@@ -60,14 +60,14 @@ export function assignmentTargetLabel(
+   failures: Partial<Record<string, AssignmentGroupLookupFailure>> = {},
+ ): string {
+   const type = target['@odata.type'];
+-  if (type?.includes('allDevices')) return 'All Devices';
+-  if (type?.includes('allUsers')) return 'All Users';
+-  if (!target.groupId) return 'Unknown Target';
++  if (type?.includes('allDevices')) return 'All devices';
++  if (type?.includes('allUsers')) return 'All users';
++  if (!target.groupId) return 'Unknown group';
+   const excluded = type === '#microsoft.graph.exclusionGroupAssignmentTarget';
+   const prefix = excluded ? 'Excluded group' : 'Group';
+   const id = target.groupId.toLowerCase();
+   if (names[id]) return `${prefix}: ${names[id]}`;
+   const failure = failures[id];
+   const reason = failure ? FAILURE_LABELS[failure] : 'name unavailable';
+-  return `${prefix}: ${target.groupId.slice(0, 8)}... (${reason})`;
++  return `${prefix}: ${reason}`;
+ }
+diff --git a/components/inventory/InventoryFilters.tsx b/components/inventory/InventoryFilters.tsx
+index c0d1725cd..aed0c8884 100644
+--- a/components/inventory/InventoryFilters.tsx
++++ b/components/inventory/InventoryFilters.tsx
+@@ -1,6 +1,6 @@
+ 'use client';
+ 
+-import { useState, useEffect, useRef } from 'react';
++import { useState, useEffect } from 'react';
+ import { Search, SortAsc, SortDesc, LayoutGrid, List } from 'lucide-react';
+ import { Button } from '@/components/ui/button';
+ import { Input } from '@/components/ui/input';
+@@ -50,7 +50,6 @@ export function InventoryFilters({
+ }: InventoryFiltersProps) {
+   // Local state for immediate input feedback
+   const [localSearch, setLocalSearch] = useState(search);
+-  const searchInputRef = useRef<HTMLInputElement>(null);
+ 
+   // Debounce the search value
+   const debouncedSearch = useDebounce(localSearch, SEARCH_DEBOUNCE_MS);
+@@ -69,37 +68,16 @@ export function InventoryFilters({
+     }
+   }, [debouncedSearch]);
+ 
+-  // "/" keyboard shortcut to focus search
+-  useEffect(() => {
+-    function handleKeyDown(e: KeyboardEvent) {
+-      if (
+-        e.key === '/' &&
+-        !e.ctrlKey &&
+-        !e.metaKey &&
+-        !e.altKey &&
+-        document.activeElement?.tagName !== 'INPUT' &&
+-        document.activeElement?.tagName !== 'TEXTAREA'
+-      ) {
+-        e.preventDefault();
+-        searchInputRef.current?.focus();
+-      }
+-    }
+-
+-    document.addEventListener('keydown', handleKeyDown);
+-    return () => document.removeEventListener('keydown', handleKeyDown);
+-  }, []);
+-
+   return (
+     <div className="glass-light rounded-xl p-4 border border-overlay/5">
+-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
++      <div className="flex flex-wrap gap-3 items-center justify-between">
+         {/* Search + Publisher Filter */}
+-        <div className="flex items-center gap-3 w-full sm:w-auto">
++        <div className="grid w-full gap-2 sm:flex sm:w-auto sm:items-center">
+           <div className="relative w-full sm:w-80">
+             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+             <Input
+-              ref={searchInputRef}
+               type="text"
+-              placeholder="Search apps... (press / to focus)"
++              aria-label="Search inventory" placeholder="Search apps"
+               value={localSearch}
+               onChange={(e) => setLocalSearch(e.target.value)}
+               className="pl-10 bg-bg-elevated border-overlay/10 text-text-primary placeholder:text-text-muted focus:border-accent-cyan/50 focus:ring-accent-cyan/20"
+@@ -114,9 +92,9 @@ export function InventoryFilters({
+ 
+         {/* Sort controls + View toggle */}
+         <div className="flex flex-wrap items-center gap-2">
+-          <span className="text-sm text-text-muted">
++          {(search || selectedPublisher) && <span role="status" className="text-sm text-text-muted">
+             {filteredCount} of {totalCount} apps
+-          </span>
++          </span>}
+           <div className="flex flex-wrap items-center gap-1 sm:ml-4">
+             <span className="text-sm text-text-muted">Sort:</span>
+             {sortOptions.map((option) => (
+@@ -140,7 +118,7 @@ export function InventoryFilters({
+               variant="ghost"
+               size="sm"
+               onClick={onSortOrderToggle}
+-              aria-label={`Sort ${sortOrder === 'asc' ? 'ascending' : 'descending'}`}
++              aria-label={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
+               className="text-text-secondary hover:text-text-primary hover:bg-overlay/5"
+             >
+               {sortOrder === 'asc' ? (
+diff --git a/components/inventory/PublisherFilter.tsx b/components/inventory/PublisherFilter.tsx
+index a7000e0bb..3e8a27efc 100644
+--- a/components/inventory/PublisherFilter.tsx
++++ b/components/inventory/PublisherFilter.tsx
+@@ -1,9 +1,5 @@
+ 'use client';
+ 
+-import { useState, useRef, useEffect } from 'react';
+-import { Building2, ChevronDown, X } from 'lucide-react';
+-import { cn } from '@/lib/utils';
+-
+ interface PublisherFilterProps {
+   publishers: string[];
+   selectedPublisher: string | null;
+@@ -15,111 +11,12 @@ export function PublisherFilter({
+   selectedPublisher,
+   onPublisherChange,
+ }: PublisherFilterProps) {
+-  const [isOpen, setIsOpen] = useState(false);
+-  const containerRef = useRef<HTMLDivElement>(null);
+-
+-  // Close on click outside
+-  useEffect(() => {
+-    if (!isOpen) return;
+-
+-    function handleClickOutside(e: MouseEvent) {
+-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+-        setIsOpen(false);
+-      }
+-    }
+-
+-    document.addEventListener('mousedown', handleClickOutside);
+-    return () => document.removeEventListener('mousedown', handleClickOutside);
+-  }, [isOpen]);
+-
+-  // Close on Escape
+-  useEffect(() => {
+-    if (!isOpen) return;
+-
+-    function handleKeyDown(e: KeyboardEvent) {
+-      if (e.key === 'Escape') {
+-        setIsOpen(false);
+-      }
+-    }
+-
+-    document.addEventListener('keydown', handleKeyDown);
+-    return () => document.removeEventListener('keydown', handleKeyDown);
+-  }, [isOpen]);
+-
+-  const handleSelect = (publisher: string | null) => {
+-    onPublisherChange(publisher);
+-    setIsOpen(false);
+-  };
+-
+   return (
+-    <div ref={containerRef} className="relative">
+-      <button
+-        onClick={() => setIsOpen(!isOpen)}
+-        className={cn(
+-          'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors',
+-          selectedPublisher
+-            ? 'border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan'
+-            : 'border-overlay/10 bg-bg-elevated text-text-secondary hover:text-text-primary hover:border-overlay/20'
+-        )}
+-        aria-expanded={isOpen}
+-        aria-haspopup="listbox"
+-      >
+-        <Building2 className="w-4 h-4" />
+-        <span className="truncate max-w-[160px]">
+-          {selectedPublisher || 'All Publishers'}
+-        </span>
+-        {selectedPublisher ? (
+-          <X
+-            className="w-3.5 h-3.5 hover:text-text-primary"
+-            onClick={(e) => {
+-              e.stopPropagation();
+-              onPublisherChange(null);
+-            }}
+-          />
+-        ) : (
+-          <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', isOpen && 'rotate-180')} />
+-        )}
+-      </button>
+-
+-      {isOpen && (
+-        <div
+-          className="absolute top-full left-0 mt-1 w-64 bg-bg-elevated border border-overlay/10 rounded-xl shadow-soft-lg z-50 overflow-hidden"
+-          role="listbox"
+-          aria-label="Publisher filter"
+-        >
+-          <div className="max-h-60 overflow-y-auto p-1">
+-            <button
+-              onClick={() => handleSelect(null)}
+-              role="option"
+-              aria-selected={selectedPublisher === null}
+-              className={cn(
+-                'w-full text-left px-3 py-2 rounded-lg text-sm transition-colors',
+-                selectedPublisher === null
+-                  ? 'bg-accent-cyan/10 text-accent-cyan'
+-                  : 'text-text-secondary hover:bg-bg-surface hover:text-text-primary'
+-              )}
+-            >
+-              All Publishers
+-            </button>
+-            {publishers.map((publisher) => (
+-              <button
+-                key={publisher}
+-                onClick={() => handleSelect(publisher)}
+-                role="option"
+-                aria-selected={selectedPublisher === publisher}
+-                className={cn(
+-                  'w-full text-left px-3 py-2 rounded-lg text-sm transition-colors truncate',
+-                  selectedPublisher === publisher
+-                    ? 'bg-accent-cyan/10 text-accent-cyan'
+-                    : 'text-text-secondary hover:bg-bg-surface hover:text-text-primary'
+-                )}
+-              >
+-                {publisher}
+-              </button>
+-            ))}
+-          </div>
+-        </div>
+-      )}
+-    </div>
++    <select aria-label="Filter by publisher" value={selectedPublisher ?? ''}
++      onChange={(event) => onPublisherChange(event.target.value || null)}
++      className="max-w-full rounded-lg border border-overlay/10 bg-bg-elevated px-3 py-2 text-sm text-text-primary focus-visible:ring-2 focus-visible:ring-accent-cyan">
++      <option value="">All publishers</option>
++      {publishers.map(publisher => <option key={publisher} value={publisher}>{publisher}</option>)}
++    </select>
+   );
+ }
