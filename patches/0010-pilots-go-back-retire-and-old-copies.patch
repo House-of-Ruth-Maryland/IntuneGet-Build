@@ -1173,15 +1173,15 @@ index 000000000..464c2971c
 +});
 diff --git a/components/hrm/PilotRollouts.tsx b/components/hrm/PilotRollouts.tsx
 new file mode 100644
-index 000000000..8dac446f9
+index 000000000..677e636d3
 --- /dev/null
 +++ b/components/hrm/PilotRollouts.tsx
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,100 @@
 +'use client';
 +import { useEffect, useRef, useState } from 'react';
 +import { PilotGroupPicker } from './PilotGroupPicker';
 +import { usePilots } from '@/hooks/usePilots';
-+import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription } from '@/components/ui/dialog';
++import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from '@/components/ui/dialog';
 +import { Button } from '@/components/ui/button';
 +import type { AvailableUpdate } from '@/types/update-policies';
 +import type { PilotPreview,PilotView } from '@/lib/hrm/pilot-types';
@@ -1218,14 +1218,19 @@ index 000000000..8dac446f9
 +  if (!update.has_prior_deployment || !update.intune_app_id) return null;
 +  return <>
 +    {!controlled && <button className={`${secondary} mt-2`} onClick={()=>setOpen(true)}>Test with a pilot group</button>}
-+    <Dialog open={open} onOpenChange={(value)=>{if(!action.isPending)setOpen(value);}}><DialogContent className="max-w-lg"><DialogHeader>
++    <Dialog open={open} onOpenChange={(value)=>{if(!action.isPending)setOpen(value);}}><DialogContent className="max-w-lg"><DialogHeader className="pr-12">
 +      <DialogTitle>Test {update.display_name} with a pilot group</DialogTitle>
 +      <DialogDescription>The new version goes only to the security group you choose, as Required. Everyone else keeps the previous version. Other updates for this app are held until you approve wider rollout.</DialogDescription>
 +    </DialogHeader>
-+      <p className="text-sm text-text-secondary">Apps with saved New computer setup profiles cannot use pilots yet. Choose a small pilot group and review its results before approval. Self-updating apps can still update themselves independently.</p>
-+      <PilotGroupPicker selected={selected} onSelect={setSelected} enabled={open} disabled={action.isPending} />
-+      {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
-+      <Button disabled={!selected || action.isPending} onClick={()=>action.mutate({action:'start',wingetId:update.winget_id,appId:update.intune_app_id,groupId:selected!.id},{onSuccess:()=>setOpen(false)})}>{action.isPending?'Starting pilot…':'Deploy to pilot group'}</Button>
++      <div className="px-6 py-4 space-y-4">
++        <p className="text-sm text-text-secondary">Apps with saved New computer setup profiles cannot use pilots yet. Choose a small pilot group and review its results before approval. Self-updating apps can still update themselves independently.</p>
++        <PilotGroupPicker selected={selected} onSelect={setSelected} enabled={open} disabled={action.isPending} />
++        {action.error && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
++      </div>
++      <DialogFooter>
++        <Button variant="ghost" disabled={action.isPending} onClick={()=>setOpen(false)}>Cancel</Button>
++        <Button className="bg-accent-cyan hover:bg-accent-cyan-bright text-white font-medium" disabled={!selected || action.isPending} onClick={()=>action.mutate({action:'start',wingetId:update.winget_id,appId:update.intune_app_id,groupId:selected!.id},{onSuccess:()=>setOpen(false)})}>{action.isPending?'Starting pilot…':'Deploy to pilot group'}</Button>
++      </DialogFooter>
 +    </DialogContent></Dialog>
 +  </>;
 +}

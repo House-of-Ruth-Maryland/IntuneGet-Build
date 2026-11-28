@@ -16,37 +16,41 @@ index 7987a53b6..5b0d405c9 100644
    );
  }
 diff --git a/app/(app)/dashboard/updates/page.tsx b/app/(app)/dashboard/updates/page.tsx
-index b5d2996a2..f7ed2a8ec 100644
+index b5d2996a2..5f84321e5 100644
 --- a/app/(app)/dashboard/updates/page.tsx
 +++ b/app/(app)/dashboard/updates/page.tsx
-@@ -1,6 +1,12 @@
+@@ -1,6 +1,13 @@
  'use client';
 +import { VersionCheckStatus } from '@/components/hrm/VersionDiscovery';
 +import { StartupInstallations, StartupInstallationsAlert } from '@/components/hrm/StartupInstallations';
-+import {ManualUpdateReview} from '@/components/hrm/ManualUpdateReview';
-+import {useInstallationPolicy} from '@/hooks/useInstallationPolicy';
-+import type {ManualReviewInput} from '@/lib/hrm/manual-update-review';
++import { ManualUpdateReview, type ManualReviewSummary } from '@/components/hrm/ManualUpdateReview';
++import { useInstallationPolicy } from '@/hooks/useInstallationPolicy';
++import type { ManualReviewInput } from '@/lib/hrm/manual-update-review';
++import { AppIcon } from '@/components/AppIcon';
  
  import type { AutoUpdateScope } from '@/types/update-policies';
 +import { isCustomAppId } from '@/lib/hrm/new-version';
  
  import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
  import { T, Var } from "gt-next";
-@@ -22,6 +28,7 @@ import {
+@@ -20,8 +27,10 @@ import {
+   Filter,
+   Loader2,
    ArrowRight,
++  ExternalLink,
    Info,
    ShieldOff,
 +  BellOff,
  } from 'lucide-react';
  import { Button } from '@/components/ui/button';
  import { Input } from '@/components/ui/input';
-@@ -41,7 +48,12 @@ import {
+@@ -41,7 +50,12 @@ import {
    DropdownMenuSeparator,
    DropdownMenuLabel,
  } from '@/components/ui/dropdown-menu';
 -import { PageHeader, AnimatedStatCard, StatCardGrid, AnimatedEmptyState } from '@/components/dashboard';
 +import { AnimatedEmptyState } from '@/components/dashboard';
-+import { PilotRollouts } from '@/components/hrm/PilotRollouts';
++import { PilotRollouts, StartPilot, usePilotStart } from '@/components/hrm/PilotRollouts';
 +import { InstallationPolicyPanel } from '@/components/hrm/InstallationPolicyPanel';
 +import { AutomaticUpdatesPausedAlert, UpdateSchedule } from '@/components/hrm/UpdateSchedule';
 +import { VERSION_CHECK_TIMES, clock as checkClock, useVersionCheckStatus } from '@/components/hrm/VersionDiscovery';
@@ -54,7 +58,7 @@ index b5d2996a2..f7ed2a8ec 100644
  import { UpdateCard, UpdateCardSkeleton, AutoUpdateHistory } from '@/components/updates';
  import { AutoUpdateAppsModal } from '@/components/updates/AutoUpdateAppsModal';
  import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-@@ -54,13 +66,16 @@ import {
+@@ -54,13 +68,16 @@ import {
    useUpdatePolicies,
  } from '@/hooks/use-updates';
  import { useMspOptional } from '@/hooks/useMspOptional';
@@ -72,7 +76,7 @@ index b5d2996a2..f7ed2a8ec 100644
  
  const sortLabels: Record<SortOption, string> = {
    name: 'Name (A-Z)',
-@@ -69,6 +84,9 @@ const sortLabels: Record<SortOption, string> = {
+@@ -69,6 +86,9 @@ const sortLabels: Record<SortOption, string> = {
    detected: 'Oldest first',
  };
  
@@ -82,20 +86,22 @@ index b5d2996a2..f7ed2a8ec 100644
  export default function UpdatesPage() {
    const router = useRouter();
    const [search, setSearch] = useState('');
-@@ -80,8 +98,12 @@ export default function UpdatesPage() {
+@@ -80,8 +100,14 @@ export default function UpdatesPage() {
    const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
    const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
    const [autoUpdateModalOpen, setAutoUpdateModalOpen] = useState(false);
 +  const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
    const [newAppDialogOpen, setNewAppDialogOpen] = useState(false);
    const [pendingNewAppUpdate, setPendingNewAppUpdate] = useState<AvailableUpdate | null>(null);
-+  const [reviewUpdate,setReviewUpdate]=useState<AvailableUpdate|null>(null);
-+  const [singleReviewed,setSingleReviewed]=useState<ManualReviewInput[]|null>(null);
-+  const [bulkReviewed,setBulkReviewed]=useState<ManualReviewInput[]|null>(null);
++  const [reviewUpdate, setReviewUpdate] = useState<AvailableUpdate | null>(null);
++  const [singleReviewed, setSingleReviewed] = useState<ManualReviewInput[] | null>(null);
++  const [singleSummary, setSingleSummary] = useState<ManualReviewSummary | null>(null);
++  const [reviewPilotUpdate, setReviewPilotUpdate] = useState<AvailableUpdate | null>(null);
++  const [bulkReviewed, setBulkReviewed] = useState<ManualReviewInput[] | null>(null);
    const [bulkProgress, setBulkProgress] = useState<{
      phase: 'confirm' | 'updating' | 'done';
      completed: number;
-@@ -97,6 +119,14 @@ export default function UpdatesPage() {
+@@ -97,6 +123,14 @@ export default function UpdatesPage() {
      (tenant) => tenant.is_active && tenant.consent_status === 'granted' && Boolean(tenant.tenant_id)
    );
    const mspTenantSelectionRequired = isMspUser && hasGrantedManagedTenants && !selectedTenantId;
@@ -110,7 +116,7 @@ index b5d2996a2..f7ed2a8ec 100644
  
    // Data hooks
    const {
-@@ -107,8 +137,8 @@ export default function UpdatesPage() {
+@@ -107,8 +141,8 @@ export default function UpdatesPage() {
      isFetching: isFetchingUpdates,
    } = useAvailableUpdates({
      tenantId,
@@ -121,7 +127,7 @@ index b5d2996a2..f7ed2a8ec 100644
    });
  
    const {
-@@ -150,7 +180,7 @@ export default function UpdatesPage() {
+@@ -150,7 +184,7 @@ export default function UpdatesPage() {
  
      // Sort
      result = [...result].sort((a, b) => {
@@ -130,7 +136,7 @@ index b5d2996a2..f7ed2a8ec 100644
          case 'name':
            return a.display_name.localeCompare(b.display_name);
          case 'severity': {
-@@ -174,24 +204,20 @@ export default function UpdatesPage() {
+@@ -174,24 +208,20 @@ export default function UpdatesPage() {
      });
  
      return result;
@@ -166,7 +172,7 @@ index b5d2996a2..f7ed2a8ec 100644
  
    // Eligible updates for bulk action (exclude ignore and pinned).
    // "Update All" never includes unmanaged (fuzzy-matched) apps -- even when the
-@@ -199,6 +225,8 @@ export default function UpdatesPage() {
+@@ -199,6 +229,8 @@ export default function UpdatesPage() {
    const eligibleForBulkUpdate = filteredUpdates.filter(
      (u) =>
        u.is_managed &&
@@ -175,7 +181,7 @@ index b5d2996a2..f7ed2a8ec 100644
        u.policy?.policy_type !== 'ignore' &&
        u.policy?.policy_type !== 'pin_version'
    );
-@@ -215,7 +243,7 @@ export default function UpdatesPage() {
+@@ -215,7 +247,7 @@ export default function UpdatesPage() {
  
    // Oldest critical update age
    const oldestCriticalAge = (() => {
@@ -184,7 +190,7 @@ index b5d2996a2..f7ed2a8ec 100644
      if (criticals.length === 0) return null;
      const oldest = criticals.reduce((prev, curr) =>
        new Date(prev.detected_at) < new Date(curr.detected_at) ? prev : curr
-@@ -229,12 +257,17 @@ export default function UpdatesPage() {
+@@ -229,12 +261,17 @@ export default function UpdatesPage() {
    })();
  
    // Handlers
@@ -203,7 +209,7 @@ index b5d2996a2..f7ed2a8ec 100644
        });
        const result = response.results.find((r) => r.winget_id === update.winget_id)
          ?? response.results[0];
-@@ -253,7 +286,7 @@ export default function UpdatesPage() {
+@@ -253,7 +290,7 @@ export default function UpdatesPage() {
          return next;
        });
      }
@@ -212,7 +218,7 @@ index b5d2996a2..f7ed2a8ec 100644
  
    const handleTriggerUpdate = useCallback(async (update: AvailableUpdate) => {
      // Confirm before updating an app that is new to IntuneGet OR not managed by
-@@ -280,18 +313,20 @@ export default function UpdatesPage() {
+@@ -280,18 +317,20 @@ export default function UpdatesPage() {
    // pending update is for an app IntuneGet did not deploy/claim/map.
    const pendingIsUnmanaged = !!pendingNewAppUpdate && !pendingNewAppUpdate.is_managed;
  
@@ -239,7 +245,7 @@ index b5d2996a2..f7ed2a8ec 100644
          policy_type: policyType,
        });
        refetchUpdates();
-@@ -304,7 +339,20 @@ export default function UpdatesPage() {
+@@ -304,7 +343,20 @@ export default function UpdatesPage() {
      }
    }, [updatePolicy, refetchUpdates]);
  
@@ -260,7 +266,7 @@ index b5d2996a2..f7ed2a8ec 100644
      const total = eligibleForBulkUpdate.length;
      setBulkProgress({ phase: 'updating', completed: 0, failed: 0, total, errors: [] });
      setUpdatingIds(new Set(eligibleForBulkUpdate.map((u) => u.id)));
-@@ -323,6 +371,7 @@ export default function UpdatesPage() {
+@@ -323,6 +375,7 @@ export default function UpdatesPage() {
              updates: batch.map((u) => ({
                winget_id: u.winget_id,
                tenant_id: u.tenant_id,
@@ -268,7 +274,7 @@ index b5d2996a2..f7ed2a8ec 100644
              })),
            });
            completed += response.triggered;
-@@ -347,7 +396,7 @@ export default function UpdatesPage() {
+@@ -347,7 +400,7 @@ export default function UpdatesPage() {
        setUpdatingIds(new Set());
        setBulkProgress({ phase: 'done', completed, failed, total, errors });
      }
@@ -277,7 +283,7 @@ index b5d2996a2..f7ed2a8ec 100644
  
    const handleRefresh = useCallback(async () => {
      await refreshUpdates();
-@@ -369,8 +418,35 @@ export default function UpdatesPage() {
+@@ -369,8 +422,35 @@ export default function UpdatesPage() {
      }
    }, [isLoadingUpdates, isRefreshing, mspTenantSelectionRequired, updates.length, handleRefresh]);
  
@@ -314,7 +320,7 @@ index b5d2996a2..f7ed2a8ec 100644
  
    const clearAllFilters = () => {
      setSearch('');
-@@ -378,43 +454,57 @@ export default function UpdatesPage() {
+@@ -378,43 +458,57 @@ export default function UpdatesPage() {
      setUpdateTypeFilter(null);
    };
  
@@ -392,7 +398,7 @@ index b5d2996a2..f7ed2a8ec 100644
                      setBulkDialogOpen(true);
                    }}
 -                  className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
-+                  className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium whitespace-nowrap"
++                  className="bg-accent-cyan hover:bg-accent-cyan-bright text-white font-medium whitespace-nowrap"
                  >
 -                  <T>Update All</T> ({eligibleForBulkUpdate.length})
 -                </Button>
@@ -401,9 +407,34 @@ index b5d2996a2..f7ed2a8ec 100644
                  <Dialog
                    open={bulkDialogOpen}
                    onOpenChange={(open) => {
-@@ -443,11 +533,11 @@ export default function UpdatesPage() {
+@@ -423,7 +517,7 @@ export default function UpdatesPage() {
+                   }}
+                 >
+                   <DialogContent
+-                    className="bg-bg-surface border-overlay/10"
++                    className="bg-bg-surface border-overlay/10 sm:max-w-2xl"
+                     hideCloseButton={bulkProgress.phase === 'updating'}
+                     onInteractOutside={(e) => {
+                       if (bulkProgress.phase === 'updating') e.preventDefault();
+@@ -431,26 +525,26 @@ export default function UpdatesPage() {
+                   >
+                     {bulkProgress.phase === 'confirm' && (
+                       <>
+-                        <DialogHeader>
++                        <DialogHeader className="pr-12">
+                           <DialogTitle>
+                             <T>Update <Var>{eligibleForBulkUpdate.length}</Var> app{eligibleForBulkUpdate.length !== 1 ? 's' : ''}?</T>
+                           </DialogTitle>
+                           <DialogDescription asChild>
+-                            <div>
+-                              <span className="block mb-2">
++                            <div className="space-y-2 pt-1">
++                              <span className="block">
+                                 <T>This will trigger updates for the following apps:</T>
+                               </span>
                                {eligibleForBulkUpdate.some(u => classifyUpdateType(u.current_version, u.latest_version) === 'major') && (
-                                 <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-status-warning/10 border border-status-warning/20 rounded-lg text-sm text-status-warning">
+-                                <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-status-warning/10 border border-status-warning/20 rounded-lg text-sm text-status-warning">
++                                <span className="flex items-center gap-2 px-3 py-2 bg-status-warning/10 border border-status-warning/25 rounded-lg text-sm text-status-warning">
                                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
 -                                  <T>Includes major version updates -- review carefully</T>
 +                                  <T>Includes major version updates. Review them carefully.</T>
@@ -414,46 +445,74 @@ index b5d2996a2..f7ed2a8ec 100644
 +                                const newAppsCount = supabaseMode ? eligibleForBulkUpdate.filter(u => !u.has_prior_deployment).length : 0;
                                  if (newAppsCount === 0) return null;
                                  return (
-                                   <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-500">
-@@ -470,7 +560,7 @@ export default function UpdatesPage() {
-                                         {type}
+-                                  <span className="flex items-center gap-2 px-3 py-2 mb-2 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-500">
++                                  <span className="flex items-center gap-2 px-3 py-2 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-500">
+                                     <Info className="w-4 h-4 flex-shrink-0" />
+                                     <T><Var>{newAppsCount}</Var> app{newAppsCount !== 1 ? 's' : ''} will have new app objects created in Intune (not previously deployed through IntuneGet)</T>
+                                   </span>
+@@ -462,17 +556,17 @@ export default function UpdatesPage() {
+                                   return (
+                                     <span key={u.id} className="flex items-center gap-2 text-sm text-text-muted">
+                                       <span className={cn(
+-                                        'text-[10px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border',
++                                        'text-[11px] font-semibold px-1.5 py-0.5 rounded border',
+                                         type === 'major' ? 'text-status-warning bg-status-warning/10 border-status-warning/20' :
+                                         type === 'minor' ? 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/20' :
+                                         'text-text-muted bg-overlay/5 border-overlay/10'
+                                       )}>
+-                                        {type}
++                                        {type.charAt(0).toUpperCase() + type.slice(1)}
                                        </span>
                                        {u.display_name} ({u.current_version} &rarr; {u.latest_version})
 -                                      {!u.has_prior_deployment && (
+-                                        <span className="text-[10px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border text-violet-500 bg-violet-500/10 border-violet-500/20">
+-                                          NEW
 +                                      {supabaseMode && !u.has_prior_deployment && (
-                                         <span className="text-[10px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border text-violet-500 bg-violet-500/10 border-violet-500/20">
-                                           NEW
++                                        <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded border text-violet-500 bg-violet-500/10 border-violet-500/20">
++                                          New
                                          </span>
-@@ -482,6 +572,7 @@ export default function UpdatesPage() {
+                                       )}
+                                     </span>
+@@ -482,6 +576,13 @@ export default function UpdatesPage() {
                              </div>
                            </DialogDescription>
                          </DialogHeader>
-+                        {manualReviewEnabled&&<ManualUpdateReview updates={eligibleForBulkUpdate.map(u=>({winget_id:u.winget_id,tenant_id:u.tenant_id}))} onReady={setBulkReviewed}/>}
++                        {manualReviewEnabled && (
++                          <ManualUpdateReview
++                            layout="modal"
++                            updates={eligibleForBulkUpdate.map(u => ({ winget_id: u.winget_id, tenant_id: u.tenant_id }))}
++                            onReady={setBulkReviewed}
++                          />
++                        )}
                          <DialogFooter>
                            <Button
                              variant="ghost"
-@@ -492,9 +583,10 @@ export default function UpdatesPage() {
+@@ -492,9 +593,10 @@ export default function UpdatesPage() {
                            </Button>
                            <Button
                              onClick={() => void handleBulkUpdate()}
-+                            disabled={manualReviewEnabled&&!bulkReviewed}
-                             className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
+-                            className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
++                            disabled={manualReviewEnabled && !bulkReviewed}
++                            className="bg-accent-cyan hover:bg-accent-cyan-bright text-white font-medium"
                            >
 -                            <T>Update All</T>
 +                            <T>Update all</T>
                            </Button>
                          </DialogFooter>
                        </>
-@@ -582,7 +674,7 @@ export default function UpdatesPage() {
+@@ -580,9 +682,9 @@ export default function UpdatesPage() {
+                                 setBulkDialogOpen(false);
+                                 router.push('/dashboard/uploads');
                                }}
-                               className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
+-                              className="bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest font-medium"
++                              className="bg-accent-cyan hover:bg-accent-cyan-bright text-white font-medium"
                              >
 -                              <T>View Uploads</T>
 +                              <T>Open Deployments</T>
                                <ArrowRight className="w-4 h-4 ml-1.5" />
                              </Button>
                            )}
-@@ -594,10 +686,16 @@ export default function UpdatesPage() {
+@@ -594,10 +696,37 @@ export default function UpdatesPage() {
                </>
              )}
            </div>
@@ -461,18 +520,40 @@ index b5d2996a2..f7ed2a8ec 100644
 -      />
 +      </div>
  
-       {/* New App Info Dialog */}
-+      <Dialog open={Boolean(reviewUpdate)} onOpenChange={open=>{if(!open)setReviewUpdate(null)}}>
-+        <DialogContent className="bg-bg-surface border-overlay/10 sm:max-w-2xl">
-+          <DialogHeader><DialogTitle>Review update</DialogTitle><DialogDescription>Check who receives this version and when it can install.</DialogDescription></DialogHeader>
-+          {reviewUpdate&&<ManualUpdateReview updates={[{winget_id:reviewUpdate.winget_id,tenant_id:reviewUpdate.tenant_id}]} onReady={setSingleReviewed}/>}
-+          <DialogFooter><Button variant="ghost" onClick={()=>setReviewUpdate(null)}>Cancel</Button><Button disabled={!singleReviewed} onClick={()=>{const update=reviewUpdate,reviewed=singleReviewed?.[0];if(update&&reviewed){setReviewUpdate(null);void executeTriggerUpdate(update,reviewed)}}}>Send update to Intune</Button></DialogFooter>
-+        </DialogContent>
-+      </Dialog>
+-      {/* New App Info Dialog */}
++      {/* Single-app Review update slide-over sheet */}
++      <SingleReviewSheet
++        update={reviewUpdate}
++        reviewed={singleReviewed}
++        summary={singleSummary}
++        onClose={() => {
++          setReviewUpdate(null);
++          setSingleSummary(null);
++        }}
++        onReady={setSingleReviewed}
++        onSummaryChange={setSingleSummary}
++        onConfirm={(update, reviewed) => {
++          setReviewUpdate(null);
++          setSingleSummary(null);
++          void executeTriggerUpdate(update, reviewed);
++        }}
++        onStartPilot={(update) => {
++          setReviewUpdate(null);
++          setSingleSummary(null);
++          setReviewPilotUpdate(update);
++        }}
++      />
++      {reviewPilotUpdate && (
++        <StartPilot
++          update={reviewPilotUpdate}
++          open={Boolean(reviewPilotUpdate)}
++          onOpenChange={(open) => { if (!open) setReviewPilotUpdate(null); }}
++        />
++      )}
        <Dialog open={newAppDialogOpen} onOpenChange={setNewAppDialogOpen}>
          <DialogContent className="bg-bg-surface border-overlay/10">
            <DialogHeader>
-@@ -620,7 +718,7 @@ export default function UpdatesPage() {
+@@ -620,7 +749,7 @@ export default function UpdatesPage() {
                    <>
                      <p>
                        <T><Var><span className="font-medium text-text-primary">{pendingNewAppUpdate?.display_name}</span></Var> was matched
@@ -481,7 +562,7 @@ index b5d2996a2..f7ed2a8ec 100644
                      </p>
                      <ul className="space-y-1.5 text-sm">
                        <li className="flex items-start gap-2">
-@@ -698,7 +796,7 @@ export default function UpdatesPage() {
+@@ -698,7 +827,7 @@ export default function UpdatesPage() {
                    : 'bg-violet-600 hover:bg-violet-700'
                )}
              >
@@ -490,7 +571,7 @@ index b5d2996a2..f7ed2a8ec 100644
              </Button>
            </DialogFooter>
          </DialogContent>
-@@ -711,7 +809,7 @@ export default function UpdatesPage() {
+@@ -711,7 +840,7 @@ export default function UpdatesPage() {
            initial={shouldReduceMotion ? { opacity: 1 } : 'hidden'}
            animate={shouldReduceMotion ? { opacity: 1 } : 'visible'}
            role="alert"
@@ -499,7 +580,7 @@ index b5d2996a2..f7ed2a8ec 100644
          >
            <div className="flex items-center justify-between gap-3">
              <div className="flex items-center gap-3">
-@@ -732,114 +830,69 @@ export default function UpdatesPage() {
+@@ -732,114 +861,69 @@ export default function UpdatesPage() {
                  onClick={() => setShowCriticalOnly(true)}
                  className="text-status-warning hover:text-status-warning hover:bg-status-warning/10 text-xs font-medium flex-shrink-0"
                >
@@ -639,7 +720,7 @@ index b5d2996a2..f7ed2a8ec 100644
                      showCriticalOnly
                        ? 'bg-status-warning/20 text-status-warning hover:bg-status-warning/30 border border-status-warning/20'
                        : 'text-text-secondary hover:text-text-primary'
-@@ -850,17 +903,17 @@ export default function UpdatesPage() {
+@@ -850,17 +934,17 @@ export default function UpdatesPage() {
                    {criticalCount > 0 && (
                      <span className="ml-1 tabular-nums">{criticalCount}</span>
                    )}
@@ -661,7 +742,7 @@ index b5d2996a2..f7ed2a8ec 100644
                      showUnmanaged
                        ? 'bg-accent-violet/20 text-accent-violet hover:bg-accent-violet/30 border border-accent-violet/20'
                        : 'text-text-secondary hover:text-text-primary'
-@@ -868,16 +921,29 @@ export default function UpdatesPage() {
+@@ -868,16 +952,29 @@ export default function UpdatesPage() {
                  >
                    <ShieldOff className="w-3.5 h-3.5 mr-1.5" />
                    <T>Unmanaged</T>
@@ -694,7 +775,7 @@ index b5d2996a2..f7ed2a8ec 100644
                          updateTypeFilter
                            ? 'bg-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/30 border border-accent-cyan/20'
                            : 'text-text-secondary hover:text-text-primary'
-@@ -887,10 +953,11 @@ export default function UpdatesPage() {
+@@ -887,10 +984,11 @@ export default function UpdatesPage() {
                        {updateTypeFilter ? <T>{updateTypeFilter.charAt(0).toUpperCase() + updateTypeFilter.slice(1)}</T> : <T>Type</T>}
                      </Button>
                    </DropdownMenuTrigger>
@@ -708,7 +789,7 @@ index b5d2996a2..f7ed2a8ec 100644
                        onClick={() => setUpdateTypeFilter(null)}
                        className={cn('text-sm', !updateTypeFilter && 'text-accent-cyan')}
                      >
-@@ -898,6 +965,7 @@ export default function UpdatesPage() {
+@@ -898,6 +996,7 @@ export default function UpdatesPage() {
                        {!updateTypeFilter && <CheckCircle2 className="w-3.5 h-3.5 ml-auto text-accent-cyan" />}
                      </DropdownMenuItem>
                      <DropdownMenuItem
@@ -716,7 +797,7 @@ index b5d2996a2..f7ed2a8ec 100644
                        onClick={() => setUpdateTypeFilter('major')}
                        className={cn('text-sm', updateTypeFilter === 'major' && 'text-status-warning')}
                      >
-@@ -905,6 +973,7 @@ export default function UpdatesPage() {
+@@ -905,6 +1004,7 @@ export default function UpdatesPage() {
                        <span className="ml-auto text-[11px] text-text-muted tabular-nums">{updateTypeCounts.major}</span>
                      </DropdownMenuItem>
                      <DropdownMenuItem
@@ -724,7 +805,7 @@ index b5d2996a2..f7ed2a8ec 100644
                        onClick={() => setUpdateTypeFilter('minor')}
                        className={cn('text-sm', updateTypeFilter === 'minor' && 'text-accent-cyan')}
                      >
-@@ -912,6 +981,7 @@ export default function UpdatesPage() {
+@@ -912,6 +1012,7 @@ export default function UpdatesPage() {
                        <span className="ml-auto text-[11px] text-text-muted tabular-nums">{updateTypeCounts.minor}</span>
                      </DropdownMenuItem>
                      <DropdownMenuItem
@@ -732,7 +813,7 @@ index b5d2996a2..f7ed2a8ec 100644
                        onClick={() => setUpdateTypeFilter('patch')}
                        className={cn('text-sm', updateTypeFilter === 'patch' && 'text-status-success')}
                      >
-@@ -919,31 +989,32 @@ export default function UpdatesPage() {
+@@ -919,31 +1020,32 @@ export default function UpdatesPage() {
                        <span className="ml-auto text-[11px] text-text-muted tabular-nums">{updateTypeCounts.patch}</span>
                      </DropdownMenuItem>
                    </DropdownMenuContent>
@@ -775,7 +856,7 @@ index b5d2996a2..f7ed2a8ec 100644
  
                  {/* Results count + clear */}
                  {!isLoadingUpdates && updates.length > 0 && (
-@@ -971,6 +1042,10 @@ export default function UpdatesPage() {
+@@ -971,6 +1073,10 @@ export default function UpdatesPage() {
              </div>
            )}
  
@@ -786,7 +867,7 @@ index b5d2996a2..f7ed2a8ec 100644
            {mspTenantSelectionRequired ? (
              <AnimatedEmptyState
                icon={Package}
-@@ -988,7 +1063,7 @@ export default function UpdatesPage() {
+@@ -988,7 +1094,7 @@ export default function UpdatesPage() {
                description={updatesError.message}
                color="neutral"
                action={{
@@ -795,7 +876,7 @@ index b5d2996a2..f7ed2a8ec 100644
                  onClick: () => refetchUpdates(),
                  variant: 'secondary',
                }}
-@@ -997,7 +1072,7 @@ export default function UpdatesPage() {
+@@ -997,7 +1103,7 @@ export default function UpdatesPage() {
              <motion.div
                initial={{ opacity: 0 }}
                animate={{ opacity: 1 }}
@@ -804,7 +885,7 @@ index b5d2996a2..f7ed2a8ec 100644
              >
                {filteredUpdates.map((update, index) => (
                  <UpdateCard
-@@ -1007,6 +1082,7 @@ export default function UpdatesPage() {
+@@ -1007,6 +1113,7 @@ export default function UpdatesPage() {
                    onPolicyChange={handlePolicyChange}
                    isUpdating={updatingIds.has(update.id)}
                    index={index}
@@ -812,7 +893,7 @@ index b5d2996a2..f7ed2a8ec 100644
                  />
                ))}
              </motion.div>
-@@ -1018,28 +1094,34 @@ export default function UpdatesPage() {
+@@ -1018,28 +1125,34 @@ export default function UpdatesPage() {
                color="neutral"
                showOrbs={false}
                action={{
@@ -855,7 +936,7 @@ index b5d2996a2..f7ed2a8ec 100644
                color="neutral"
                showOrbs={false}
              />
-@@ -1054,30 +1136,43 @@ export default function UpdatesPage() {
+@@ -1054,30 +1167,168 @@ export default function UpdatesPage() {
          </TabsContent>
        </Tabs>
  
@@ -869,13 +950,15 @@ index b5d2996a2..f7ed2a8ec 100644
 +          tabIndex={-1}
 +          aria-label="Automatic updates"
 +          className={cn(
-+            'scroll-mt-24 rounded-xl border bg-bg-surface px-4 py-3 transition-shadow duration-500 focus-visible:outline-none',
++            'scroll-mt-24 rounded-xl border bg-bg-surface p-4 space-y-3 transition-shadow duration-500 focus-visible:outline-none',
 +            highlight ? 'border-accent-cyan/50 ring-2 ring-accent-cyan/40' : 'border-overlay/10'
 +          )}
 +        >
-+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
-+            <div className="min-w-0 lg:flex-1"><UpdateSchedule appsOn={isLoadingPolicies ? undefined : autoUpdateCount} onShowApps={() => setAutoUpdateModalOpen(true)} /></div>
-+            <div className="min-w-0 border-t border-overlay/10 pt-3 lg:max-w-[50%] lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
++          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
++            <div className="min-w-0 rounded-lg border border-overlay/10 bg-bg-elevated/60 p-4">
++              <UpdateSchedule appsOn={isLoadingPolicies ? undefined : autoUpdateCount} onShowApps={() => setAutoUpdateModalOpen(true)} />
++            </div>
++            <div className="min-w-0 rounded-lg border border-overlay/10 bg-bg-elevated/60 p-4">
 +              <InstallationPolicyPanel key={tenantId || 'current'} apps={autoUpdatePolicies} />
 +            </div>
 +          </div>
@@ -909,7 +992,7 @@ index b5d2996a2..f7ed2a8ec 100644
      </div>
    );
  }
--
+ 
 -function isWithinDays(dateString: string | null, days: number): boolean {
 -  if (!dateString) return false;
 -  const date = new Date(dateString);
@@ -917,7 +1000,128 @@ index b5d2996a2..f7ed2a8ec 100644
 -  const diffMs = now.getTime() - date.getTime();
 -  const diffDays = diffMs / (1000 * 60 * 60 * 24);
 -  return diffDays <= days;
--}
++const reviewTypeBadge: Record<UpdateType, { label: string; className: string }> = {
++  major: { label: 'Major', className: 'text-status-warning bg-status-warning/10 border-status-warning/25' },
++  minor: { label: 'Minor', className: 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/25' },
++  patch: { label: 'Patch', className: 'text-status-success bg-status-success/10 border-status-success/25' },
++};
++
++function SingleReviewSheet({
++  update,
++  reviewed,
++  summary,
++  onClose,
++  onReady,
++  onSummaryChange,
++  onConfirm,
++  onStartPilot,
++}: {
++  update: AvailableUpdate | null;
++  reviewed: ManualReviewInput[] | null;
++  summary: ManualReviewSummary | null;
++  onClose: () => void;
++  onReady: (rows: ManualReviewInput[] | null) => void;
++  onSummaryChange: (summary: ManualReviewSummary | null) => void;
++  onConfirm: (update: AvailableUpdate, reviewed: ManualReviewInput) => void;
++  onStartPilot: (update: AvailableUpdate) => void;
++}) {
++  const fallbackUpdate: AvailableUpdate = update ?? {
++    id: '', user_id: '', tenant_id: '', winget_id: '', intune_app_id: '', display_name: '',
++    current_version: '', latest_version: '', is_critical: false, detected_at: '', notified_at: null,
++    dismissed_at: null, has_prior_deployment: false, is_managed: true, policy: null,
++  };
++  const pilot = usePilotStart(fallbackUpdate);
++  const fromVersion = summary?.row?.fromVersion || update?.current_version || '';
++  const toVersion = summary?.row?.toVersion || update?.latest_version || '';
++  const updateType = update ? classifyUpdateType(fromVersion, toVersion) : 'patch';
++  const badge = reviewTypeBadge[updateType];
++
++  return (
++    <Dialog open={Boolean(update)} onOpenChange={open => { if (!open) onClose(); }}>
++      <DialogContent side="right" className="bg-bg-surface border-overlay/10">
++        <DialogHeader className="pr-12">
++          {update && (
++            <div className="flex items-start gap-3">
++              <AppIcon
++                packageId={update.winget_id}
++                packageName={update.display_name}
++                size="md"
++              />
++              <div className="min-w-0 flex-1 space-y-1.5">
++                <div className="flex flex-wrap items-center gap-2">
++                  <DialogTitle className="truncate">{summary?.row?.displayName || update.display_name}</DialogTitle>
++                  <span className={cn('px-2 py-0.5 text-[11px] font-semibold rounded-md border shrink-0', badge.className)}>
++                    {badge.label}
++                  </span>
++                </div>
++                <div className="flex flex-wrap items-center gap-1.5 text-xs font-mono">
++                  <span className="px-1.5 py-0.5 rounded bg-overlay/[0.04] border border-overlay/10 text-text-secondary break-all">
++                    {fromVersion}
++                  </span>
++                  <ArrowRight className="w-3 h-3 text-text-muted shrink-0" aria-label="to" />
++                  <span className={cn('px-1.5 py-0.5 rounded border font-semibold break-all', badge.className)}>
++                    {toVersion}
++                  </span>
++                </div>
++                {(summary?.row?.publisher || summary?.row?.releaseNotesUrl) && (
++                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
++                    {summary.row.publisher && <span>{summary.row.publisher}</span>}
++                    {summary.row.releaseNotesUrl && (
++                      <a
++                        href={summary.row.releaseNotesUrl}
++                        target="_blank"
++                        rel="noopener noreferrer"
++                        className="inline-flex items-center gap-1 text-accent-cyan hover:underline"
++                      >
++                        Release notes
++                        <ExternalLink className="h-3 w-3" aria-hidden="true" />
++                      </a>
++                    )}
++                  </div>
++                )}
++              </div>
++            </div>
++          )}
++          <DialogDescription className="sr-only">
++            Review update: check who receives this version, when it installs, and how it runs.
++          </DialogDescription>
++        </DialogHeader>
++        <div className="flex-1 min-h-0 overflow-y-auto">
++          {update && (
++            <ManualUpdateReview
++              layout="sheet"
++              updates={[{ winget_id: update.winget_id, tenant_id: update.tenant_id }]}
++              onReady={onReady}
++              onSummaryChange={onSummaryChange}
++              canStartPilot={pilot.canStart}
++              onStartPilot={() => onStartPilot(update)}
++            />
++          )}
++        </div>
++        <DialogFooter className="flex-col items-stretch gap-3 sm:flex-col">
++          {summary?.summaryLine && (
++            <p className="text-xs text-text-secondary">{summary.summaryLine}</p>
++          )}
++          <div className="flex items-center justify-end gap-3">
++            <Button variant="ghost" onClick={onClose} className="text-text-secondary hover:bg-overlay/5">
++              Cancel
++            </Button>
++            <Button
++              disabled={!reviewed}
++              onClick={() => {
++                const chosen = reviewed?.[0];
++                if (update && chosen) onConfirm(update, chosen);
++              }}
++              className="bg-accent-cyan hover:bg-accent-cyan-bright text-white font-medium"
++            >
++              {summary?.primaryLabel || 'Send update to Intune'}
++            </Button>
++          </div>
++        </DialogFooter>
++      </DialogContent>
++    </Dialog>
++  );
+ }
 diff --git a/app/api/cron/check-updates/route.sqlite.test.ts b/app/api/cron/check-updates/route.sqlite.test.ts
 index dc8230402..17592ba5b 100644
 --- a/app/api/cron/check-updates/route.sqlite.test.ts
@@ -2018,87 +2222,768 @@ index a7a6412be..8b1a126cd 100644
            .order('deployed_at', { ascending: false })
 diff --git a/components/hrm/ManualUpdateReview.test.ts b/components/hrm/ManualUpdateReview.test.ts
 new file mode 100644
-index 000000000..7c5b82976
+index 000000000..7fe9fec75
 --- /dev/null
 +++ b/components/hrm/ManualUpdateReview.test.ts
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,173 @@
 +// @vitest-environment happy-dom
-+import {act,createElement} from 'react';
-+import {createRoot,type Root} from 'react-dom/client';
-+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-+const auth=vi.hoisted(()=>({getAccessToken:vi.fn(async()=>'fixture-token')}));
-+vi.mock('@/hooks/useMicrosoftAuth',()=>({useMicrosoftAuth:()=>auth}));
-+import {ManualUpdateReview} from './ManualUpdateReview';
-+let root:Root;const ready=vi.fn();
-+(globalThis as typeof globalThis&{IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
-+const row={wingetId:'Example.App',displayName:'Example app',fromVersion:'1',toVersion:'2',source:'saved',behavior:'Silent',restart:'Suppress',groups:['Example group · Required'],dates:['Example group · Required: deadline 2020-01-01 · UTC'],dateReviewRequired:true,token:'review-token'};
-+beforeEach(()=>{ready.mockReset();const node=document.createElement('div');document.body.append(node);root=createRoot(node)});
-+afterEach(async()=>{await act(async()=>root.unmount());document.body.innerHTML='';vi.unstubAllGlobals()});
-+async function render(){await act(async()=>{root.render(createElement(ManualUpdateReview,{updates:[{winget_id:'Example.App',tenant_id:'fixture'}],onReady:ready}));await new Promise(resolve=>setTimeout(resolve,0))})}
-+it('requires an explicit past-date choice and forwards only a reviewed request',async()=>{
-+ const fetch=vi.fn(async()=>Response.json({rows:[row]}));vi.stubGlobal('fetch',fetch);await render();
-+ expect(ready.mock.lastCall?.[0]).toBeNull();expect(document.body.textContent).toContain('Required');
-+ await act(async()=>document.querySelector<HTMLInputElement>('input[type="radio"]')!.click());
-+ expect(ready.mock.lastCall?.[0]).toEqual([{winget_id:'Example.App',tenant_id:'fixture',reviewToken:'review-token',expiredDates:'keep'}]);
-+ expect(fetch.mock.calls).toHaveLength(1);
++import { act, createElement, type ReactNode } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++
++const auth = vi.hoisted(() => ({ getAccessToken: vi.fn(async () => 'fixture-token') }));
++const panelCallbacks = vi.hoisted(() => ({ onGroupsSaved: undefined as (() => void) | undefined, onDatesSaved: undefined as (() => void) | undefined }));
++vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => auth }));
++vi.mock('next/link', () => ({ default: ({ href, children, className }: { href: string; children: ReactNode; className?: string }) => createElement('a', { href, className }, children) }));
++vi.mock('./EditAssignments', () => ({
++  EditAssignments: ({ appId, open, onSaved }: { appId: string; open?: boolean; onSaved?: () => void }) => {
++    panelCallbacks.onGroupsSaved = onSaved;
++    return open ? createElement('div', { role: 'dialog', 'data-panel': 'edit-groups' }, `Edit groups for ${appId}`) : null;
++  },
++}));
++vi.mock('./AppTimingPanel', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('./AppTimingPanel')>();
++  return {
++    ...actual,
++    AppTimingPanel: ({ appId, open, onSaved }: { appId: string; open?: boolean; onSaved?: () => void }) => {
++      panelCallbacks.onDatesSaved = onSaved;
++      return open ? createElement('div', { role: 'dialog', 'data-panel': 'edit-dates' }, `Edit dates for ${appId}`) : null;
++    },
++  };
 +});
-+it('blocks starting on a per-app read failure and offers a fresh review',async()=>{
-+ const fetch=vi.fn(async()=>Response.json({rows:[{wingetId:'Example.App',error:'Could not read assignments.'}]}));vi.stubGlobal('fetch',fetch);await render();
-+ expect(ready.mock.lastCall?.[0]).toBeNull();expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not read');
-+ const button=[...document.querySelectorAll('button')].find(button=>button.textContent==='Retry review')!;
-+ await act(async()=>{button.click();await new Promise(resolve=>setTimeout(resolve,0))});expect(fetch.mock.calls).toHaveLength(2);
++
++import { ManualUpdateReview, type ManualReviewSummary } from './ManualUpdateReview';
++
++let root: Root;
++const ready = vi.fn();
++const summaryChange = vi.fn<(s: ManualReviewSummary | null) => void>();
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++const row = {
++  wingetId: 'Example.App',
++  displayName: 'Example app',
++  fromVersion: '1',
++  toVersion: '2',
++  source: 'saved' as const,
++  sourceAppId: '11111111-1111-4111-8111-111111111111',
++  behavior: 'No toolkit windows',
++  restart: 'Suppressed',
++  groups: ['Example group · Required'],
++  structuredGroups: [{ id: 'a1', label: 'Example group', intent: 'required' as const, intentLabel: 'Required' }],
++  dates: ['Example group · Required: deadline 2020-01-01 · UTC'],
++  structuredDates: [{ groupLabel: 'Example group', intent: 'Required', startDateTime: null, deadlineDateTime: '2020-01-01T00:00:00Z', useLocalTime: false }],
++  installCounts: { installed: 10, failed: 1, pending: 2, notInstalled: 0, notApplicable: 0, other: 0, checkedAt: '2026-11-26T15:30:00Z' },
++  dateReviewRequired: true,
++  token: 'review-token',
++};
++
++beforeEach(() => {
++  ready.mockReset();
++  summaryChange.mockReset();
++  panelCallbacks.onGroupsSaved = undefined;
++  panelCallbacks.onDatesSaved = undefined;
++  const node = document.createElement('div');
++  document.body.append(node);
++  root = createRoot(node);
++});
++afterEach(async () => {
++  await act(async () => root.unmount());
++  document.body.innerHTML = '';
++  vi.unstubAllGlobals();
++});
++
++async function render(props: Partial<Parameters<typeof ManualUpdateReview>[0]> = {}) {
++  await act(async () => {
++    root.render(createElement(ManualUpdateReview, {
++      updates: [{ winget_id: 'Example.App', tenant_id: 'fixture' }],
++      onReady: ready,
++      onSummaryChange: summaryChange,
++      ...props,
++    }));
++    await new Promise(resolve => setTimeout(resolve, 0));
++  });
++}
++
++it('requires an explicit past-date choice and forwards only a reviewed request', async () => {
++  const fetch = vi.fn(async () => Response.json({ rows: [row] }));
++  vi.stubGlobal('fetch', fetch);
++  await render();
++  expect(ready.mock.lastCall?.[0]).toBeNull();
++  expect(document.body.textContent).toContain('Required');
++  await act(async () => document.querySelector<HTMLInputElement>('input[type="radio"]')!.click());
++  expect(ready.mock.lastCall?.[0]).toEqual([{ winget_id: 'Example.App', tenant_id: 'fixture', reviewToken: 'review-token', expiredDates: 'keep' }]);
++  expect(fetch.mock.calls).toHaveLength(1);
++});
++
++it('blocks starting on a per-app read failure and offers a fresh review', async () => {
++  const fetch = vi.fn(async () => Response.json({ rows: [{ wingetId: 'Example.App', error: 'Could not read assignments.' }] }));
++  vi.stubGlobal('fetch', fetch);
++  await render();
++  expect(ready.mock.lastCall?.[0]).toBeNull();
++  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not read');
++  const button = [...document.querySelectorAll('button')].find(button => button.textContent === 'Retry review')!;
++  await act(async () => {
++    button.click();
++    await new Promise(resolve => setTimeout(resolve, 0));
++  });
++  expect(fetch.mock.calls).toHaveLength(2);
++});
++
++it('renders the structured slide-over sections and refreshes after inline Edit groups or Edit dates saves', async () => {
++  const fetch = vi.fn(async () => Response.json({ rows: [{ ...row, dateReviewRequired: false }] }));
++  vi.stubGlobal('fetch', fetch);
++  const onStartPilot = vi.fn();
++  await render({ layout: 'sheet', canStartPilot: true, onStartPilot });
++  const text = document.body.textContent ?? '';
++  expect(text).toContain('Who gets it');
++  expect(text).toContain('Example group');
++  expect(text).toContain('10 installed');
++  expect(text).toContain('1 failed');
++  expect(text).toContain('2 pending');
++  expect(text).toContain('When it installs');
++  expect(text).toContain('Jan 1, 2020');
++  expect(text).toContain('How it installs');
++  expect(text).toContain('Install prompts');
++  expect(text).toContain('No toolkit windows');
++  expect(text).toContain('Suppressed');
++  expect(text).toContain('Open app workspace');
++  expect(summaryChange.mock.lastCall?.[0]?.primaryLabel).toBe('Send update to Intune');
++
++  const pilotBtn = [...document.querySelectorAll('button')].find(b => b.textContent?.includes('Test with a pilot group'))!;
++  await act(async () => pilotBtn.click());
++  expect(onStartPilot).toHaveBeenCalledOnce();
++
++  const editGroupsBtn = [...document.querySelectorAll('button')].find(b => b.textContent === 'Edit groups')!;
++  await act(async () => editGroupsBtn.click());
++  expect(document.querySelector('[data-panel="edit-groups"]')).not.toBeNull();
++  await act(async () => {
++    panelCallbacks.onGroupsSaved?.();
++    await new Promise(resolve => setTimeout(resolve, 0));
++  });
++  expect(fetch.mock.calls).toHaveLength(2);
++
++  const editDatesBtn = [...document.querySelectorAll('button')].find(b => b.textContent === 'Edit dates')!;
++  await act(async () => editDatesBtn.click());
++  expect(document.querySelector('[data-panel="edit-dates"]')).not.toBeNull();
++  await act(async () => {
++    panelCallbacks.onDatesSaved?.();
++    await new Promise(resolve => setTimeout(resolve, 0));
++  });
++  expect(fetch.mock.calls).toHaveLength(3);
++});
++
++it('soft-gates unassigned apps until explicitly confirmed and offers Assign groups', async () => {
++  const unassignedRow = {
++    ...row,
++    groups: [],
++    structuredGroups: [],
++    dates: [],
++    structuredDates: [],
++    dateReviewRequired: false,
++  };
++  const fetch = vi.fn(async () => Response.json({ rows: [unassignedRow] }));
++  vi.stubGlobal('fetch', fetch);
++  await render({ layout: 'sheet' });
++  expect(document.body.textContent).toContain('No groups assigned');
++  expect(summaryChange.mock.lastCall?.[0]?.isUnassigned).toBe(true);
++  expect(summaryChange.mock.lastCall?.[0]?.primaryLabel).toBe('Upload unassigned version');
++  // Blocked until explicit confirmation checkbox is ticked.
++  expect(ready.mock.lastCall?.[0]).toBeNull();
++
++  const assignBtn = [...document.querySelectorAll('button')].find(b => b.textContent === 'Assign groups')!;
++  expect(assignBtn).toBeDefined();
++  await act(async () => assignBtn.click());
++  expect(document.querySelector('[data-panel="edit-groups"]')).not.toBeNull();
++
++  const checkbox = document.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
++  await act(async () => checkbox.click());
++  expect(ready.mock.lastCall?.[0]).toEqual([{ winget_id: 'Example.App', tenant_id: 'fixture', reviewToken: 'review-token', expiredDates: 'keep' }]);
 +});
 diff --git a/components/hrm/ManualUpdateReview.tsx b/components/hrm/ManualUpdateReview.tsx
 new file mode 100644
-index 000000000..6f628e5d9
+index 000000000..9afdff1c8
 --- /dev/null
 +++ b/components/hrm/ManualUpdateReview.tsx
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,580 @@
 +'use client';
-+import {useEffect,useState} from 'react';
-+import {useMicrosoftAuth} from '@/hooks/useMicrosoftAuth';
-+import type {ManualReviewInput,ManualReviewRow} from '@/lib/hrm/manual-update-review';
-+import {Button} from '@/components/ui/button';
-+type Row = ManualReviewRow & {error?:string};
++
++import { useEffect, useState } from 'react';
++import Link from 'next/link';
++import { AlertTriangle, Calendar, ExternalLink, FlaskConical, SlidersHorizontal, Users } from 'lucide-react';
++import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
++import type { ManualReviewGroup, ManualReviewInput, ManualReviewRow } from '@/lib/hrm/manual-update-review';
++import { appWorkspaceUrl } from '@/lib/hrm/rollout-workspace';
++import { Button } from '@/components/ui/button';
++import { Term, type IntuneTerm } from './Term';
++import { EditAssignments } from './EditAssignments';
++import { AppTimingPanel, formatTimingClock } from './AppTimingPanel';
++
++type Row = ManualReviewRow & { error?: string };
++
++export interface ManualReviewSummary {
++  isUnassigned: boolean;
++  unassignedCount: number;
++  summaryLine: string;
++  primaryLabel: string;
++  row?: ManualReviewRow;
++}
++
++function fallbackGroups(groups: string[]): ManualReviewGroup[] {
++  return groups.map((entry, index) => {
++    const parts = entry.split(' · ');
++    const label = parts[0] || entry;
++    const rawIntent = (parts[1] || '').trim().toLowerCase();
++    const intent: ManualReviewGroup['intent'] =
++      rawIntent === 'excluded' ? 'excluded'
++        : rawIntent === 'required' ? 'required'
++          : rawIntent === 'available' || rawIntent === 'availablewithoutenrollment' ? 'available'
++            : rawIntent === 'uninstall' ? 'uninstall'
++              : 'other';
++    const intentLabel =
++      intent === 'excluded' ? 'Excluded'
++        : intent === 'required' ? 'Required'
++          : intent === 'available' ? 'Available'
++            : intent === 'uninstall' ? 'Uninstall'
++              : parts[1] || 'Assigned';
++    const filter = parts.length > 2 ? parts.slice(2).join(' · ') : null;
++    return { id: String(index), label, intent, intentLabel, filter };
++  });
++}
++
++function intentBadgeClass(intent: ManualReviewGroup['intent']): string {
++  switch (intent) {
++    case 'required':
++      return 'bg-accent-cyan/10 text-accent-cyan border-accent-cyan/25';
++    case 'available':
++      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25';
++    case 'excluded':
++    case 'uninstall':
++      return 'bg-status-error/10 text-status-error border-status-error/25';
++    default:
++      return 'bg-overlay/5 text-text-secondary border-overlay/15';
++  }
++}
++
++function intentTerm(intent: ManualReviewGroup['intent']): IntuneTerm | null {
++  if (intent === 'required' || intent === 'available' || intent === 'excluded' || intent === 'uninstall') {
++    return intent;
++  }
++  return null;
++}
++
 +/** Reads current settings only. The caller owns the separate start action. */
-+export function ManualUpdateReview({updates,onReady}:{updates:ManualReviewInput[];onReady:(rows:ManualReviewInput[]|null)=>void}){
-+ const {getAccessToken}=useMicrosoftAuth();
-+ const key=JSON.stringify(updates.map(({winget_id,tenant_id})=>({winget_id,tenant_id})));
-+ const [rows,setRows]=useState<Row[]>([]),[error,setError]=useState(''),[loading,setLoading]=useState(true),[retry,setRetry]=useState(0);
-+ const [choices,setChoices]=useState<Record<string,'keep'|'reset'>>({});
-+ const [deadlines,setDeadlines]=useState<Record<string,{decision:'retain'|'reschedule';value?:string}>>({});
-+ useEffect(()=>{
-+  const controller=new AbortController();setLoading(true);setError('');setRows([]);setChoices({});setDeadlines({});onReady(null);
-+  void(async()=>{try{
-+   const token=await getAccessToken();if(!token)throw Error('Sign in again to review assignments.');
-+   const input:ManualReviewInput[]=JSON.parse(key),result:Row[]=[];
-+   for(let i=0;i<input.length;i+=10){
-+    const response=await fetch('/api/hrm/manual-update-review',{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({updates:input.slice(i,i+10)})});
-+    const body=await response.json();if(!response.ok)throw Error(body.error||'Could not review these updates.');result.push(...body.rows);
-+   }
-+   if(!controller.signal.aborted)setRows(result);
-+  }catch(e){if(!controller.signal.aborted)setError(e instanceof Error?e.message:'Could not review these updates.');}finally{if(!controller.signal.aborted)setLoading(false)}})();
-+  return()=>controller.abort();
-+ // onReady is a React state setter; the request identity is the serialized selection.
-+ // eslint-disable-next-line react-hooks/exhaustive-deps
-+ },[key,retry,getAccessToken]);
-+ useEffect(()=>{
-+  const input:ManualReviewInput[]=JSON.parse(key);
-+  if(loading||error||rows.length!==input.length||rows.some(row=>row.error||!row.token||(row.deadlineReviewRequired?(!deadlines[row.wingetId]||(deadlines[row.wingetId].decision==='reschedule'&&!deadlines[row.wingetId].value)):(row.dateReviewRequired&&!choices[row.wingetId])))){onReady(null);return;}
-+  onReady(input.map(row=>({...row,reviewToken:rows.find(r=>r.wingetId===row.winget_id)!.token,expiredDates:choices[row.winget_id]||'keep',deadlineDecision:deadlines[row.winget_id]?.decision,newDeadline:deadlines[row.winget_id]?.value?`${deadlines[row.winget_id].value}:00Z`:undefined})));
-+ },[key,rows,choices,deadlines,loading,error,onReady]);
-+ if(loading)return <p role="status" className="text-sm text-text-secondary">Reading saved settings and current Intune assignments…</p>;
-+ if(error)return <div role="alert"><p>{error}</p><Button variant="outline" onClick={()=>setRetry(v=>v+1)}>Retry review</Button></div>;
-+ return <div className="max-h-[50vh] overflow-y-auto space-y-3" aria-label="Effective update settings">{rows.map(row=><section key={row.wingetId} className="rounded-lg border border-overlay/10 p-3 text-sm space-y-2">
-+  <h3 className="font-medium">{row.displayName||row.wingetId}</h3>
-+  {row.error?<p role="alert" className="text-status-error">{row.error}</p>:<>
-+   <p>{row.fromVersion} → {row.toVersion}</p>
-+   <p>{row.source==='curated'?'Curated':'Saved app settings'} · {row.behavior} · Restart: {row.restart}</p>
-+   <p>{row.groups.length?row.groups.join('; '):'No assignments. This update will not target devices.'}</p>
-+   <p>{row.dates.length?row.dates.join('; '):'Install dates: ASAP'}</p>
-+   {row.deadlineReviewRequired?<fieldset className="space-y-2"><legend className="font-medium">Confirm replacement deadlines</legend><p className="text-text-secondary">This update is paused until IT confirms. Retaining an expired deadline can make installation due at the next Intune attempt. Availability, groups and other settings stay unchanged.</p>{(['retain','reschedule'] as const).map(decision=><label key={decision} className="flex gap-2 items-start"><input type="radio" name={`deadline-${row.wingetId}`} checked={deadlines[row.wingetId]?.decision===decision} onChange={()=>setDeadlines(old=>({...old,[row.wingetId]:{...old[row.wingetId],decision}}))}/>{decision==='retain'?'Retain the existing deadlines':'Choose a new deadline'}</label>)}{deadlines[row.wingetId]?.decision==='reschedule'&&<label className="block">New deadline (each assignment keeps its time zone)<input className="block rounded border bg-transparent p-2" type="datetime-local" value={deadlines[row.wingetId]?.value||''} onChange={event=>setDeadlines(old=>({...old,[row.wingetId]:{decision:'reschedule',value:event.target.value}}))}/></label>}{row.localDeadline&&<p className="text-text-secondary">This device-local deadline may already be due in another time zone. A new deadline needs at least 14 hours of lead time.</p>}</fieldset>:row.dateReviewRequired&&<fieldset className="space-y-2"><legend className="font-medium">Review past or device-local dates</legend><p className="text-text-secondary">Past deadlines may make installation due as soon as Intune processes the assignment.</p>{(['keep','reset'] as const).map(value=><label key={value} className="flex gap-2 items-start"><input type="radio" name={`dates-${row.wingetId}`} checked={choices[row.wingetId]===value} onChange={()=>setChoices(old=>({...old,[row.wingetId]:value}))}/>{value==='keep'?'Keep the current assignment dates':'Reset availability and deadline to ASAP'}</label>)}</fieldset>}
-+  </>}
-+ </section>)}{rows.some(row=>row.error)&&<Button variant="outline" onClick={()=>setRetry(v=>v+1)}>Retry review</Button>}<p className="text-xs text-text-muted">Starting sends a new app version to Intune. Device installation follows its assignments and check-in.</p></div>;
++export function ManualUpdateReview({
++  updates,
++  onReady,
++  layout = 'modal',
++  onSummaryChange,
++  onStartPilot,
++  canStartPilot = false,
++}: {
++  updates: ManualReviewInput[];
++  onReady: (rows: ManualReviewInput[] | null) => void;
++  layout?: 'sheet' | 'modal';
++  onSummaryChange?: (summary: ManualReviewSummary | null) => void;
++  onStartPilot?: () => void;
++  canStartPilot?: boolean;
++}) {
++  const { getAccessToken } = useMicrosoftAuth();
++  const key = JSON.stringify(updates.map(({ winget_id, tenant_id }) => ({ winget_id, tenant_id })));
++  const [rows, setRows] = useState<Row[]>([]);
++  const [error, setError] = useState('');
++  const [loading, setLoading] = useState(true);
++  const [retry, setRetry] = useState(0);
++  const [choices, setChoices] = useState<Record<string, 'keep' | 'reset'>>({});
++  const [deadlines, setDeadlines] = useState<Record<string, { decision: 'retain' | 'reschedule'; value?: string }>>({});
++  const [unassignedAllowed, setUnassignedAllowed] = useState<Record<string, boolean>>({});
++  const [editGroupsAppId, setEditGroupsAppId] = useState<string | null>(null);
++  const [editDatesAppId, setEditDatesAppId] = useState<string | null>(null);
++
++  useEffect(() => {
++    const controller = new AbortController();
++    setLoading(true);
++    setError('');
++    setRows([]);
++    setChoices({});
++    setDeadlines({});
++    setUnassignedAllowed({});
++    onReady(null);
++    onSummaryChange?.(null);
++    void (async () => {
++      try {
++        const token = await getAccessToken();
++        if (!token) throw Error('Sign in again to review assignments.');
++        const input: ManualReviewInput[] = JSON.parse(key);
++        const result: Row[] = [];
++        for (let i = 0; i < input.length; i += 10) {
++          const response = await fetch('/api/hrm/manual-update-review', {
++            method: 'POST',
++            signal: controller.signal,
++            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
++            body: JSON.stringify({ updates: input.slice(i, i + 10) }),
++          });
++          const body = await response.json();
++          if (!response.ok) throw Error(body.error || 'Could not review these updates.');
++          result.push(...body.rows);
++        }
++        if (!controller.signal.aborted) setRows(result);
++      } catch (e) {
++        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Could not review these updates.');
++      } finally {
++        if (!controller.signal.aborted) setLoading(false);
++      }
++    })();
++    return () => controller.abort();
++    // onReady and onSummaryChange are React state setters; the request identity is the serialized selection.
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [key, retry, getAccessToken]);
++
++  useEffect(() => {
++    const input: ManualReviewInput[] = JSON.parse(key);
++    if (loading || error || rows.length !== input.length) {
++      onReady(null);
++      onSummaryChange?.(null);
++      return;
++    }
++    const validRows = rows.filter(row => !row.error);
++    const unassignedCount = validRows.filter(row => row.groups.length === 0).length;
++    const single = validRows.length === 1 && input.length === 1 ? validRows[0] : undefined;
++    const isUnassigned = single ? single.groups.length === 0 : unassignedCount > 0;
++    const summaryLine = single
++      ? single.groups.length === 0
++        ? `Uploads ${single.toVersion} to Intune with no assigned groups.`
++        : `Deploys ${single.toVersion} to ${single.groups.length === 1 ? '1 group' : `${single.groups.length} groups`} in Intune. Computers install at next check-in.`
++      : unassignedCount > 0
++        ? `${unassignedCount} of ${validRows.length} apps have no assigned groups.`
++        : `Deploys ${validRows.length} updates to Intune. Computers install at next check-in.`;
++    const primaryLabel = single
++      ? isUnassigned ? 'Upload unassigned version' : 'Send update to Intune'
++      : 'Update all';
++    onSummaryChange?.({ isUnassigned, unassignedCount, summaryLine, primaryLabel, row: single });
++
++    const blocked = rows.some(row =>
++      row.error ||
++      !row.token ||
++      (row.groups.length === 0 && !unassignedAllowed[row.wingetId]) ||
++      (row.deadlineReviewRequired
++        ? (!deadlines[row.wingetId] || (deadlines[row.wingetId].decision === 'reschedule' && !deadlines[row.wingetId].value))
++        : (row.dateReviewRequired && !choices[row.wingetId]))
++    );
++    if (blocked) {
++      onReady(null);
++      return;
++    }
++    onReady(input.map(row => ({
++      ...row,
++      reviewToken: rows.find(r => r.wingetId === row.winget_id)!.token,
++      expiredDates: choices[row.winget_id] || 'keep',
++      deadlineDecision: deadlines[row.winget_id]?.decision,
++      newDeadline: deadlines[row.winget_id]?.value ? `${deadlines[row.winget_id].value}:00Z` : undefined,
++    })));
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [key, rows, choices, deadlines, unassignedAllowed, loading, error, onReady]);
++
++  if (loading) {
++    return (
++      <div className={layout === 'sheet' ? 'px-6 py-6' : 'px-6 py-4'}>
++        <p role="status" className="text-sm text-text-secondary">Reading saved settings and current Intune assignments…</p>
++      </div>
++    );
++  }
++  if (error) {
++    return (
++      <div role="alert" className={layout === 'sheet' ? 'px-6 py-6 space-y-3' : 'px-6 py-4 space-y-3'}>
++        <p className="text-sm text-status-error">{error}</p>
++        <Button variant="outline" size="sm" onClick={() => setRetry(v => v + 1)}>Retry review</Button>
++      </div>
++    );
++  }
++
++  const renderDateReview = (row: Row) => {
++    if (row.deadlineReviewRequired) {
++      return (
++        <fieldset className="rounded-lg border border-status-warning/35 bg-status-warning/10 p-3.5 space-y-2.5 text-sm">
++          <legend className="font-semibold text-text-primary px-1">Confirm replacement deadlines</legend>
++          <p className="text-xs text-text-secondary leading-relaxed">
++            This update is paused until IT confirms. Retaining an expired deadline can make installation due at the next Intune attempt. Availability, groups and other settings stay unchanged.
++          </p>
++          <div className="space-y-2">
++            {(['retain', 'reschedule'] as const).map(decision => (
++              <label key={decision} className="flex gap-2.5 items-start cursor-pointer text-text-primary">
++                <input
++                  type="radio"
++                  className="mt-1 accent-accent-cyan"
++                  name={`deadline-${row.wingetId}`}
++                  checked={deadlines[row.wingetId]?.decision === decision}
++                  onChange={() => setDeadlines(old => ({ ...old, [row.wingetId]: { ...old[row.wingetId], decision } }))}
++                />
++                <span>{decision === 'retain' ? 'Retain the existing deadlines' : 'Choose a new deadline'}</span>
++              </label>
++            ))}
++          </div>
++          {deadlines[row.wingetId]?.decision === 'reschedule' && (
++            <label className="block text-xs font-medium text-text-primary space-y-1">
++              <span>New deadline (each assignment keeps its time zone)</span>
++              <input
++                className="block w-full rounded-lg border border-overlay/20 bg-bg-elevated px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan"
++                type="datetime-local"
++                value={deadlines[row.wingetId]?.value || ''}
++                onChange={event => setDeadlines(old => ({ ...old, [row.wingetId]: { decision: 'reschedule', value: event.target.value } }))}
++              />
++            </label>
++          )}
++          {row.localDeadline && (
++            <p className="text-xs text-status-warning">
++              This <Term term="deviceLocalTime">device-local</Term> deadline may already be due in another time zone. A new deadline needs at least 14 hours of lead time.
++            </p>
++          )}
++        </fieldset>
++      );
++    }
++    if (row.dateReviewRequired) {
++      return (
++        <fieldset className="rounded-lg border border-status-warning/35 bg-status-warning/10 p-3.5 space-y-2.5 text-sm">
++          <legend className="font-semibold text-text-primary px-1">Review past or device-local dates</legend>
++          <p className="text-xs text-text-secondary leading-relaxed">
++            Past deadlines may make installation due as soon as Intune processes the assignment.
++          </p>
++          <div className="space-y-2">
++            {(['keep', 'reset'] as const).map(value => (
++              <label key={value} className="flex gap-2.5 items-start cursor-pointer text-text-primary">
++                <input
++                  type="radio"
++                  className="mt-1 accent-accent-cyan"
++                  name={`dates-${row.wingetId}`}
++                  checked={choices[row.wingetId] === value}
++                  onChange={() => setChoices(old => ({ ...old, [row.wingetId]: value }))}
++                />
++                <span>{value === 'keep' ? 'Keep the current assignment dates' : 'Reset availability and deadline to ASAP'}</span>
++              </label>
++            ))}
++          </div>
++        </fieldset>
++      );
++    }
++    return null;
++  };
++
++  const renderUnassignedSoftGate = (row: Row) => (
++    <div role="status" className="rounded-lg border border-status-warning/40 bg-status-warning/10 p-3.5 space-y-3 text-sm">
++      <div className="flex items-start gap-2.5">
++        <AlertTriangle className="h-4 w-4 text-status-warning shrink-0 mt-0.5" aria-hidden="true" />
++        <div className="min-w-0 space-y-1">
++          <p className="font-medium text-text-primary">No groups assigned</p>
++          <p className="text-xs text-text-secondary leading-relaxed">
++            This update will upload to Intune without targeting any computers until you assign a group.
++          </p>
++        </div>
++      </div>
++      {row.sourceAppId && (
++        <div>
++          <Button
++            type="button"
++            variant="outline"
++            size="sm"
++            onClick={() => setEditGroupsAppId(row.sourceAppId)}
++            className="border-status-warning/40 bg-bg-elevated text-text-primary hover:bg-overlay/5"
++          >
++            Assign groups
++          </Button>
++        </div>
++      )}
++      <label className="flex items-start gap-2.5 text-xs font-medium text-text-primary cursor-pointer pt-1 border-t border-status-warning/20">
++        <input
++          type="checkbox"
++          className="mt-0.5 h-4 w-4 rounded border-overlay/30 accent-accent-cyan"
++          checked={!!unassignedAllowed[row.wingetId]}
++          onChange={event => setUnassignedAllowed(old => ({ ...old, [row.wingetId]: event.target.checked }))}
++        />
++        <span>Allow uploading an unassigned version without targeting devices</span>
++      </label>
++    </div>
++  );
++
++  // Single-app right-hand slide-over sheet layout
++  if (layout === 'sheet' && rows.length === 1) {
++    const row = rows[0];
++    if (row.error) {
++      return (
++        <div className="px-6 py-6 space-y-3" aria-label="Effective update settings">
++          <p role="alert" className="text-sm text-status-error">{row.error}</p>
++          <Button variant="outline" size="sm" onClick={() => setRetry(v => v + 1)}>Retry review</Button>
++        </div>
++      );
++    }
++    const groupItems = row.structuredGroups ?? fallbackGroups(row.groups);
++    const counts = row.installCounts;
++    const totalReported = counts ? counts.installed + counts.failed + counts.pending + counts.notInstalled + counts.notApplicable + counts.other : 0;
++
++    return (
++      <div className="px-6 py-5 space-y-6" aria-label="Effective update settings">
++        {/* Section 1: Who gets it */}
++        <section aria-labelledby="review-who-gets-it" className="space-y-3">
++          <div className="flex items-center justify-between gap-2">
++            <h3 id="review-who-gets-it" className="flex items-center gap-2 text-sm font-semibold text-text-primary">
++              <Users className="h-4 w-4 text-text-muted" aria-hidden="true" />
++              Who gets it
++            </h3>
++            {row.sourceAppId && groupItems.length > 0 && (
++              <Button
++                type="button"
++                variant="outline"
++                size="sm"
++                className="h-7 px-2.5 text-xs"
++                onClick={() => setEditGroupsAppId(row.sourceAppId)}
++              >
++                Edit groups
++              </Button>
++            )}
++          </div>
++
++          {groupItems.length === 0 ? (
++            renderUnassignedSoftGate(row)
++          ) : (
++            <ul className="flex flex-wrap gap-2">
++              {groupItems.map(group => {
++                const term = intentTerm(group.intent);
++                return (
++                  <li
++                    key={group.id}
++                    className="inline-flex flex-wrap items-center gap-1.5 rounded-lg border border-overlay/10 bg-bg-elevated px-2.5 py-1.5 text-xs"
++                  >
++                    <span className="font-medium text-text-primary">{group.label}</span>
++                    <span className={`rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${intentBadgeClass(group.intent)}`}>
++                      {term ? <Term term={term}>{group.intentLabel}</Term> : group.intentLabel}
++                    </span>
++                    {group.filter && (
++                      <span className="text-[11px] text-text-muted">{group.filter}</span>
++                    )}
++                  </li>
++                );
++              })}
++            </ul>
++          )}
++
++          {counts && totalReported > 0 && (
++            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-overlay/10 bg-bg-elevated/70 px-3 py-2 text-xs text-text-secondary">
++              <span className="font-medium text-text-primary">Current version:</span>
++              <span className="inline-flex items-center gap-1.5">
++                <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
++                {counts.installed} installed
++              </span>
++              {counts.failed > 0 && (
++                <span className="inline-flex items-center gap-1.5 font-medium text-status-error">
++                  <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
++                  {counts.failed} failed
++                </span>
++              )}
++              {counts.pending > 0 && (
++                <span className="inline-flex items-center gap-1.5">
++                  <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden="true" />
++                  {counts.pending} pending
++                </span>
++              )}
++              {counts.notInstalled > 0 && (
++                <span className="inline-flex items-center gap-1.5">
++                  <span className="h-2 w-2 rounded-full bg-slate-400" aria-hidden="true" />
++                  {counts.notInstalled} not installed
++                </span>
++              )}
++            </div>
++          )}
++        </section>
++
++        {/* Section 2: When it installs */}
++        <section aria-labelledby="review-when-installs" className="space-y-3 border-t border-overlay/10 pt-5">
++          <div className="flex items-center justify-between gap-2">
++            <h3 id="review-when-installs" className="flex items-center gap-2 text-sm font-semibold text-text-primary">
++              <Calendar className="h-4 w-4 text-text-muted" aria-hidden="true" />
++              When it installs
++            </h3>
++            {row.sourceAppId && (
++              <Button
++                type="button"
++                variant="outline"
++                size="sm"
++                className="h-7 px-2.5 text-xs"
++                onClick={() => setEditDatesAppId(row.sourceAppId)}
++              >
++                Edit dates
++              </Button>
++            )}
++          </div>
++
++          {row.structuredDates && row.structuredDates.length > 0 ? (
++            <ul className="divide-y divide-overlay/10 rounded-lg border border-overlay/10 bg-bg-elevated text-sm">
++              {row.structuredDates.map((item, index) => (
++                <li key={`${item.groupLabel}-${index}`} className="px-3.5 py-2.5 space-y-1">
++                  <p className="font-medium text-text-primary text-xs">
++                    {item.groupLabel}{item.intent ? ` · ${item.intent}` : ''}
++                  </p>
++                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
++                    <span>
++                      <Term term="availableFrom">Available from</Term>: {formatTimingClock(item.startDateTime, item.useLocalTime) ?? 'As soon as possible'}
++                    </span>
++                    <span>
++                      <Term term="mustInstallBy">Must install by</Term>: {formatTimingClock(item.deadlineDateTime, item.useLocalTime) ?? 'As soon as available'}
++                    </span>
++                    {item.useLocalTime && (
++                      <span className="text-text-muted">
++                        (<Term term="deviceLocalTime">Each computer&apos;s own clock</Term>)
++                      </span>
++                    )}
++                  </div>
++                </li>
++              ))}
++            </ul>
++          ) : row.dates.length > 0 ? (
++            <ul className="space-y-1.5 text-xs text-text-secondary">
++              {row.dates.map((line, index) => (
++                <li key={index} className="rounded-lg border border-overlay/10 bg-bg-elevated px-3 py-2">{line}</li>
++              ))}
++            </ul>
++          ) : (
++            <p className="text-sm text-text-secondary">As soon as possible (no scheduled install dates).</p>
++          )}
++
++          {renderDateReview(row)}
++        </section>
++
++        {/* Section 3: How it installs */}
++        <section aria-labelledby="review-how-installs" className="space-y-3 border-t border-overlay/10 pt-5">
++          <h3 id="review-how-installs" className="flex items-center gap-2 text-sm font-semibold text-text-primary">
++            <SlidersHorizontal className="h-4 w-4 text-text-muted" aria-hidden="true" />
++            How it installs
++          </h3>
++          <dl className="divide-y divide-overlay/10 rounded-lg border border-overlay/10 bg-bg-elevated text-sm">
++            <div className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 px-3.5 py-2.5">
++              <dt className="text-text-secondary"><Term term="installPrompts">Install prompts</Term></dt>
++              <dd className="text-right font-medium text-text-primary">{row.behavior}</dd>
++            </div>
++            <div className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 px-3.5 py-2.5">
++              <dt className="text-text-secondary"><Term term="restartBehavior">Restart</Term></dt>
++              <dd className="text-right font-medium text-text-primary">{row.restart}</dd>
++            </div>
++            <div className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 px-3.5 py-2.5">
++              <dt className="text-text-secondary"><Term term="settingsSource">Settings source</Term></dt>
++              <dd className="text-right font-medium text-text-primary">
++                {row.source === 'curated' ? 'Curated catalog defaults' : 'Saved app settings'}
++              </dd>
++            </div>
++          </dl>
++
++          {(canStartPilot || row.sourceAppId) && (
++            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 text-xs">
++              {canStartPilot && onStartPilot && (
++                <button
++                  type="button"
++                  onClick={onStartPilot}
++                  className="inline-flex items-center gap-1.5 font-medium text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded"
++                >
++                  <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
++                  Test with a pilot group
++                </button>
++              )}
++              {row.sourceAppId && (
++                <Link
++                  href={appWorkspaceUrl(row.sourceAppId)}
++                  className="inline-flex items-center gap-1.5 font-medium text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded"
++                >
++                  Open app workspace
++                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
++                </Link>
++              )}
++            </div>
++          )}
++        </section>
++
++        {editGroupsAppId && (
++          <EditAssignments
++            appId={editGroupsAppId}
++            open={Boolean(editGroupsAppId)}
++            onOpenChange={open => { if (!open) setEditGroupsAppId(null); }}
++            onSaved={() => setRetry(v => v + 1)}
++          />
++        )}
++        {editDatesAppId && (
++          <AppTimingPanel
++            appId={editDatesAppId}
++            open={Boolean(editDatesAppId)}
++            onOpenChange={open => { if (!open) setEditDatesAppId(null); }}
++            onSaved={() => setRetry(v => v + 1)}
++          />
++        )}
++      </div>
++    );
++  }
++
++  // Bulk / modal layout
++  const unassignedRows = rows.filter(row => !row.error && row.groups.length === 0);
++
++  return (
++    <div className="px-6 py-4 max-h-[50vh] overflow-y-auto space-y-3" aria-label="Effective update settings">
++      {unassignedRows.length > 0 && rows.length > 1 && (
++        <div role="status" className="flex items-start gap-2.5 rounded-lg border border-status-warning/40 bg-status-warning/10 p-3 text-xs text-text-primary">
++          <AlertTriangle className="h-4 w-4 text-status-warning shrink-0 mt-0.5" aria-hidden="true" />
++          <span>
++            {unassignedRows.length === 1 ? '1 app has' : `${unassignedRows.length} apps have`} no assigned groups. Assign groups or confirm below before starting.
++          </span>
++        </div>
++      )}
++      {rows.map(row => (
++        <section key={row.wingetId} className="rounded-lg border border-overlay/10 bg-bg-elevated/50 p-3.5 text-sm space-y-2">
++          <div className="flex flex-wrap items-baseline justify-between gap-2">
++            <h3 className="font-semibold text-text-primary">{row.displayName || row.wingetId}</h3>
++            {!row.error && (
++              <span className="text-xs font-mono text-text-secondary">{row.fromVersion} → {row.toVersion}</span>
++            )}
++          </div>
++          {row.error ? (
++            <p role="alert" className="text-status-error">{row.error}</p>
++          ) : (
++            <>
++              <p className="text-xs text-text-secondary">
++                {row.source === 'curated' ? 'Curated' : 'Saved app settings'} · {row.behavior} · Restart: {row.restart}
++              </p>
++              {row.groups.length === 0 ? (
++                renderUnassignedSoftGate(row)
++              ) : (
++                <p className="text-xs text-text-primary">
++                  {(row.structuredGroups ?? fallbackGroups(row.groups)).map((g, i) => (
++                    <span key={g.id}>
++                      {i > 0 && '; '}
++                      {g.label} · {g.intentLabel}
++                      {g.filter ? ` (${g.filter})` : ''}
++                    </span>
++                  ))}
++                </p>
++              )}
++              <p className="text-xs text-text-secondary">
++                {row.structuredDates && row.structuredDates.length > 0
++                  ? row.structuredDates.map(d => `${d.groupLabel}: available ${formatTimingClock(d.startDateTime, d.useLocalTime) ?? 'ASAP'} · deadline ${formatTimingClock(d.deadlineDateTime, d.useLocalTime) ?? 'ASAP'}`).join('; ')
++                  : row.dates.length ? row.dates.join('; ') : 'Install dates: ASAP'}
++              </p>
++              {renderDateReview(row)}
++            </>
++          )}
++        </section>
++      ))}
++      {rows.some(row => row.error) && (
++        <Button variant="outline" size="sm" onClick={() => setRetry(v => v + 1)}>Retry review</Button>
++      )}
++      <p className="text-xs text-text-muted">
++        Starting sends a new app version to Intune. Device installation follows its assignments and check-in.
++      </p>
++      {editGroupsAppId && (
++        <EditAssignments
++          appId={editGroupsAppId}
++          open={Boolean(editGroupsAppId)}
++          onOpenChange={open => { if (!open) setEditGroupsAppId(null); }}
++          onSaved={() => setRetry(v => v + 1)}
++        />
++      )}
++    </div>
++  );
 +}
 diff --git a/components/hrm/UpdateBehaviorSettings.test.ts b/components/hrm/UpdateBehaviorSettings.test.ts
 new file mode 100644
@@ -2314,10 +3199,10 @@ index 000000000..9f815af75
 +});
 diff --git a/components/hrm/UpdateSchedule.tsx b/components/hrm/UpdateSchedule.tsx
 new file mode 100644
-index 000000000..73ff9aead
+index 000000000..2250b2f47
 --- /dev/null
 +++ b/components/hrm/UpdateSchedule.tsx
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,151 @@
 +'use client';
 +import Link from 'next/link';
 +import { useEffect, useState } from 'react';
@@ -2428,16 +3313,15 @@ index 000000000..73ff9aead
 +  const appsText = appsOn === undefined ? null : `${appsOn === 1 ? '1 app' : `${appsOn} apps`} with Automatic updates on`;
 +  const summary = isLoading ? 'Loading the update schedule…' : !schedule ? null : schedule.paused ? 'Paused for all apps' : `${windowLabel(schedule)}${schedule.enabled ? ', Maryland time' : ''}`;
 +  const state = schedule && (schedule.paused ? <StripPill tone="warn">Paused</StripPill> : w && !w.open ? <StripPill tone="warn">Waiting</StripPill> : <StripPill tone="ok">On</StripPill>);
-+  return <section aria-label="When can IntuneGet send automatic updates to Intune?" className="min-w-0 space-y-1">
-+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-+      {state}
-+      <h3 className="whitespace-nowrap font-medium text-text-primary">Publishing window:</h3>
-+      <span className="text-text-secondary">{summary}</span>
-+      {appsText && <>
-+        <span aria-hidden="true" className="text-text-muted">·</span>
-+        {onShowApps ? <button type="button" className="text-left text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded" onClick={onShowApps}>{appsText}</button> : <span className="text-text-secondary">{appsText}</span>}
-+      </>}
-+      {schedule && <span className="flex flex-wrap items-center gap-2">
++  return <section aria-label="When can IntuneGet send automatic updates to Intune?" className="min-w-0 space-y-2">
++    <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 text-sm">
++      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
++        {state}
++        <div className="min-w-0">
++          <h3 className="inline font-medium text-text-primary">Publishing window:</h3><span className="ml-1 text-text-secondary break-words">{summary}</span>
++        </div>
++      </div>
++      {schedule && <span className="flex shrink-0 flex-wrap items-center gap-2">
 +      <Dialog open={editing} onOpenChange={value => { if (!action.isPending) { if (value) { action.reset(); setDraft(schedule); } setEditing(value); } }}>
 +        <DialogTrigger asChild><Button variant="ghost" size="sm" className="h-7 whitespace-nowrap px-0 text-accent-cyan hover:bg-transparent hover:text-accent-cyan hover:underline">Edit publishing window</Button></DialogTrigger>
 +        <DialogContent side="right" hideCloseButton={action.isPending} onInteractOutside={e => { if (action.isPending) e.preventDefault(); }} onEscapeKeyDown={e => { if (action.isPending) e.preventDefault(); }}>
@@ -2460,6 +3344,11 @@ index 000000000..73ff9aead
 +      </Dialog>
 +      </span>}
 +    </div>
++    {appsText && (
++      <div className="text-sm">
++        {onShowApps ? <button type="button" className="text-left text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded" onClick={onShowApps}>{appsText}</button> : <span className="text-text-secondary">{appsText}</span>}
++      </div>
++    )}
 +    {error && <p role="alert" className="text-sm text-status-error">{error.message}</p>}
 +    {schedule && !!data?.blackouts?.length && <p className="text-xs text-text-muted">{data.blackouts.length === 1 ? '1 blackout' : `${data.blackouts.length} blackouts`} current or upcoming.</p>}
 +    {action.error && !editing && <p role="alert" className="text-sm text-status-error">{action.error.message}</p>}
@@ -2467,10 +3356,10 @@ index 000000000..73ff9aead
 +}
 diff --git a/components/hrm/VersionDiscovery.tsx b/components/hrm/VersionDiscovery.tsx
 new file mode 100644
-index 000000000..c612321bc
+index 000000000..f7764f9cf
 --- /dev/null
 +++ b/components/hrm/VersionDiscovery.tsx
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,70 @@
 +'use client';
 +import Link from 'next/link';
 +import { useQuery } from '@tanstack/react-query';
@@ -2491,19 +3380,25 @@ index 000000000..c612321bc
 +// older links.
 +export function VersionDiscoverySettings() {
 +  const mode = useDatabaseMode();
-+  return <section id="app-updates" aria-labelledby="set-elsewhere" className="space-y-3 scroll-mt-24 border-t border-overlay/10 px-1 pt-6">
-+    <h2 id="set-elsewhere" className="text-sm font-semibold text-text-secondary">Not set on this page</h2>
-+    <dl className="divide-y divide-overlay/10 text-sm">
-+      {ELSEWHERE.map(row => <div key={row.what} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 py-2.5">
-+        <div className="min-w-0"><dt className="font-medium text-text-primary">{row.what}</dt><dd className="text-text-secondary">{row.detail}</dd></div>
-+        {row.href && <dd><Link href={row.href} className="text-accent-cyan hover:underline">{row.link}</Link></dd>}
-+      </div>)}
-+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 py-2.5">
-+        <div className="min-w-0"><dt className="font-medium text-text-primary">New version checks</dt><dd className="text-text-secondary">{VERSION_CHECK_TIMES}. Fixed on the server.</dd></div>
-+        <dd><Link href="/dashboard/updates#version-checks" className="text-accent-cyan hover:underline">See the last check in App updates</Link></dd>
-+      </div>
-+      {mode === 'sqlite' && <div className="py-2.5"><dt className="font-medium text-text-primary">What an update replaces</dt><dd className="text-text-secondary">An update replaces the previous version and keeps its groups. Fixed on this server.</dd></div>}
-+    </dl>
++  return <section id="app-updates" aria-labelledby="set-elsewhere" className="scroll-mt-24 border-t border-overlay/10 px-1 pt-6">
++    <details className="group rounded-xl border border-overlay/10 bg-bg-surface/60 px-4 py-3">
++      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-sm font-semibold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded">
++        <h2 id="set-elsewhere" className="text-sm font-semibold">Not set on this page</h2>
++        <span className="text-xs font-normal text-text-muted group-open:hidden">Show where updates, groups and dates are changed</span>
++        <span className="hidden text-xs font-normal text-text-muted group-open:inline">Hide</span>
++      </summary>
++      <dl className="mt-3 divide-y divide-overlay/10 border-t border-overlay/10 text-sm">
++        {ELSEWHERE.map(row => <div key={row.what} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 py-2.5">
++          <div className="min-w-0"><dt className="font-medium text-text-primary">{row.what}</dt><dd className="text-text-secondary">{row.detail}</dd></div>
++          {row.href && <dd><Link href={row.href} className="text-accent-cyan hover:underline">{row.link}</Link></dd>}
++        </div>)}
++        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 py-2.5">
++          <div className="min-w-0"><dt className="font-medium text-text-primary">New version checks</dt><dd className="text-text-secondary">{VERSION_CHECK_TIMES}. Fixed on the server.</dd></div>
++          <dd><Link href="/dashboard/updates#version-checks" className="text-accent-cyan hover:underline">See the last check in App updates</Link></dd>
++        </div>
++        {mode === 'sqlite' && <div className="py-2.5"><dt className="font-medium text-text-primary">What an update replaces</dt><dd className="text-text-secondary">An update replaces the previous version and keeps its groups. Fixed on this server.</dd></div>}
++      </dl>
++    </details>
 +  </section>;
 +}
 +interface CheckStatus { supported: boolean; reported: boolean; lastAttemptAt: string | null; result: string | null; nextExpectedAt: string }
@@ -3175,10 +4070,10 @@ index 2f6dbf69d..31bf9520e 100644
    );
 diff --git a/components/updates/UpdateCard.test.ts b/components/updates/UpdateCard.test.ts
 new file mode 100644
-index 000000000..45237b5d2
+index 000000000..e6c2a454f
 --- /dev/null
 +++ b/components/updates/UpdateCard.test.ts
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,206 @@
 +// @vitest-environment happy-dom
 +// HRM patch 0036: policy badges use the menu's names, auto-update turned off by failures says so,
 +// and Critical, Unmanaged and "new app" markers show only in Supabase mode.
@@ -3208,7 +4103,15 @@ index 000000000..45237b5d2
 +  return { INSTALL_DATES: 'Install dates', AppTimingPanel: ({ open }: { open?: boolean }) => open ? h('div', { role: 'dialog' }, 'Install dates panel') : null };
 +});
 +const schedule = vi.hoisted(() => ({ value: { supported: true, schedule: { enabled: true, paused: false, days: [1, 2, 3, 4, 5], startHour: 19, endHour: 5 }, window: { open: false, reason: 'x', blackout: null, nextOpen: null } } as Record<string, unknown> }));
++const appDetails = vi.hoisted(() => ({ value: { app: { assignments: [{ id: 'a1' }] } } as { app?: { assignments?: unknown[] } } | null }));
++const installStatus = vi.hoisted(() => ({ value: null as { installed: number; failed: number; pending: number; notInstalled?: number; notApplicable: number; other: number } | null }));
 +vi.mock('@/hooks/useUpdateSchedule', () => ({ useUpdateSchedule: () => ({ data: schedule.value }) }));
++vi.mock('@/hooks/use-inventory', () => ({ useAppDetails: () => ({ data: appDetails.value }) }));
++vi.mock('@/hooks/useInstallStatus', () => ({ useInstallStatus: () => ({ data: installStatus.value }) }));
++vi.mock('@/components/hrm/EditAssignments', async () => {
++  const { createElement: h } = await import('react');
++  return { EditAssignments: ({ open }: { open?: boolean }) => open ? h('div', { role: 'dialog' }, 'Edit groups panel') : null };
++});
 +vi.mock('@/components/ui/dropdown-menu', async () => {
 +  const { createElement: h } = await import('react');
 +  const pass = ({ children }: { children?: ReactNode }) => h('div', null, children);
@@ -3233,6 +4136,8 @@ index 000000000..45237b5d2
 +beforeEach(() => {
 +  const el = document.createElement('div'); document.body.append(el); root = createRoot(el); mode.value = 'sqlite';
 +  pilot.value = { active: false, canStart: true };
++  appDetails.value = { app: { assignments: [{ id: 'a1' }] } };
++  installStatus.value = null;
 +  schedule.value = { supported: true, schedule: { enabled: true, paused: false, days: [1, 2, 3, 4, 5], startHour: 19, endHour: 5 }, window: { open: false, reason: 'x', blackout: null, nextOpen: null } };
 +});
 +afterEach(async () => { await act(async () => root.unmount()); document.body.innerHTML = ''; });
@@ -3354,16 +4259,32 @@ index 000000000..45237b5d2
 +    expect(await render(update({ policy: null, detected_at: new Date(Date.now() - 2 * 86400000).toISOString() }))).toContain('Waiting for your review · Detected 2 days ago');
 +  });
 +
-+  it('uses theme borders that stay visible in dark mode', async () => {
++  it('uses theme borders that stay visible in dark mode and white text on primary actions', async () => {
 +    await render(update({ policy: policy({ policy_type: 'notify' }) }));
 +    expect(document.body.innerHTML).not.toMatch(/border-black|bg-black/);
++    const [review] = buttons('Review update');
++    expect(review.className).toContain('text-white');
++    expect(review.className).not.toContain('text-bg-deepest');
++  });
++
++  it('surfaces cached device install counts and an amber unassigned warning with Edit groups', async () => {
++    appDetails.value = { app: { assignments: [] } };
++    installStatus.value = { installed: 18, failed: 2, pending: 1, notApplicable: 0, other: 0 };
++    const text = await render(update({ policy: policy({ policy_type: 'notify' }) }));
++    expect(text).toContain('No groups assigned');
++    expect(text).toContain('18 installed');
++    expect(text).toContain('2 failed');
++    expect(text).toContain('1 pending');
++    expect(document.body.textContent).not.toContain('Edit groups panel');
++    await act(async () => buttons('Edit groups')[0].click());
++    expect(document.body.textContent).toContain('Edit groups panel');
 +  });
 +});
 diff --git a/components/updates/UpdateCard.tsx b/components/updates/UpdateCard.tsx
-index 479225ee5..3c0b53c5e 100644
+index 479225ee5..e06a987c4 100644
 --- a/components/updates/UpdateCard.tsx
 +++ b/components/updates/UpdateCard.tsx
-@@ -10,19 +10,28 @@ import {
+@@ -10,19 +10,31 @@ import {
    RefreshCw,
    XCircle,
    Clock,
@@ -3388,8 +4309,11 @@ index 479225ee5..3c0b53c5e 100644
 +import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 +import { AutoUpdateTimingSummary } from '@/components/hrm/InstallationPolicyPanel';
 +import { AppTimingPanel } from '@/components/hrm/AppTimingPanel';
++import { EditAssignments } from '@/components/hrm/EditAssignments';
 +import { AppGroupsLine } from '@/components/hrm/AppGroupsLine';
  import { AppIcon } from '@/components/AppIcon';
++import { useAppDetails } from '@/hooks/use-inventory';
++import { useInstallStatus } from '@/hooks/useInstallStatus';
  import { UpdatePolicySelector } from './UpdatePolicySelector';
  import { cn } from '@/lib/utils';
 -import { autoUpdateScopeReason, classifyUpdateType } from '@/types/update-policies';
@@ -3398,7 +4322,7 @@ index 479225ee5..3c0b53c5e 100644
  import { fadeUp, springPresets } from '@/lib/animations/variants';
  import type { AvailableUpdate, UpdatePolicyType } from '@/types/update-policies';
  
-@@ -33,29 +42,10 @@ interface UpdateCardProps {
+@@ -33,29 +45,10 @@ interface UpdateCardProps {
    onDismiss?: (update: AvailableUpdate) => void;
    isUpdating?: boolean;
    index?: number;
@@ -3430,7 +4354,7 @@ index 479225ee5..3c0b53c5e 100644
  const updateTypeConfig: Record<string, { label: string; color: string; bgColor: string; borderColor: string; dotColor: string }> = {
    patch: {
      label: 'Patch',
-@@ -87,21 +77,36 @@ export function UpdateCard({
+@@ -87,21 +80,44 @@ export function UpdateCard({
    onDismiss,
    isUpdating = false,
    index = 0,
@@ -3462,14 +4386,22 @@ index 479225ee5..3c0b53c5e 100644
 +  // A quiet button only where IntuneGet will deploy it itself; an update held by scope needs IT.
 +  const quiet = isAutoUpdateEnabled && !scopeReason;
 +  const [datesOpen, setDatesOpen] = useState(false);
++  const [groupsOpen, setGroupsOpen] = useState(false);
 +  const [pilotOpen, setPilotOpen] = useState(false);
 +  const pilot = usePilotStart(update);
++  const trackedAppId = update.is_managed !== false ? update.intune_app_id || null : null;
++  const { data: appDetailsData } = useAppDetails(trackedAppId);
++  const { data: installStatus } = useInstallStatus(trackedAppId);
++  const isUnassigned = Array.isArray(appDetailsData?.app?.assignments) && appDetailsData.app.assignments.length === 0;
++  const installTotal = installStatus
++    ? installStatus.installed + installStatus.failed + installStatus.pending + (installStatus.notInstalled ?? 0) + installStatus.notApplicable + installStatus.other
++    : 0;
 +  // HRM: the More menu holds only actions that work for this copy; with none, it is not shown.
 +  const moreActions = !isCustom && update.is_managed !== false && (!!update.intune_app_id || pilot.canStart);
  
    // Calculate how old the detected update is
    const detectedDaysAgo = Math.floor(
-@@ -116,29 +121,30 @@ export function UpdateCard({
+@@ -116,29 +132,30 @@ export function UpdateCard({
        transition={shouldReduceMotion ? undefined : { delay: index * 0.04 }}
        whileHover={shouldReduceMotion ? undefined : { y: -2, transition: springPresets.snappy }}
        className={cn(
@@ -3509,7 +4441,7 @@ index 479225ee5..3c0b53c5e 100644
            {/* App Icon with subtle ring */}
            <div className="relative flex-shrink-0">
              <AppIcon
-@@ -156,170 +162,218 @@ export function UpdateCard({
+@@ -156,170 +173,259 @@ export function UpdateCard({
            <div className="flex-1 min-w-0">
              <div className="flex items-center gap-2 mb-0.5">
                <h3 className="text-sm font-semibold text-text-primary truncate">
@@ -3618,21 +4550,59 @@ index 479225ee5..3c0b53c5e 100644
 -              <XCircle className="w-3 h-3" />
 -              {policyStatus?.consecutive_failures} <T>failed</T>
 -            </span>
--          )}
++        {/* Status: who handles this update and what happens next */}
++        <div className="space-y-1.5 mb-3">
++          {update.is_managed !== false && (
++            isUnassigned ? (
++              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-status-warning/35 bg-status-warning/10 px-2.5 py-1.5 text-xs">
++                <span className="flex items-center gap-1.5 font-medium text-status-warning">
++                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
++                  No groups assigned
++                </span>
++                {update.intune_app_id && (
++                  <button
++                    type="button"
++                    onClick={() => setGroupsOpen(true)}
++                    className="font-medium text-accent-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan rounded"
++                  >
++                    Edit groups
++                  </button>
++                )}
++              </div>
++            ) : (
++              <AppGroupsLine intuneAppId={update.intune_app_id} />
++            )
+           )}
 -          {policyStatus?.last_auto_update_at && (
 -            <span className="flex items-center gap-1 text-[11px] text-text-muted">
 -              <Clock className="w-3 h-3" />
 -              <T>Last:</T> {new Date(policyStatus.last_auto_update_at).toLocaleDateString()}
 -            </span>
--          )}
++          {installStatus && installTotal > 0 && (
++            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-text-secondary">
++              <span className="inline-flex items-center gap-1">
++                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
++                {installStatus.installed} installed
++              </span>
++              {installStatus.failed > 0 && (
++                <span className="inline-flex items-center gap-1 font-medium text-status-error">
++                  <span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden="true" />
++                  {installStatus.failed} failed
++                </span>
++              )}
++              {installStatus.pending > 0 && (
++                <span className="inline-flex items-center gap-1">
++                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
++                  {installStatus.pending} pending
++                </span>
++              )}
++            </div>
+           )}
 -          {detectedDaysAgo > 0 && !policyStatus?.last_auto_update_at && !hasFailures && !isAutoUpdateEnabled && (
 -            <span className="flex items-center gap-1 text-[11px] text-text-muted">
 -              <Clock className="w-3 h-3" />
 -              <T>Detected <Var>{detectedDaysAgo === 1 ? '1 day' : `${detectedDaysAgo} days`}</Var> ago</T>
 -            </span>
-+        {/* Status: who handles this update and what happens next */}
-+        <div className="space-y-1.5 mb-3">
-+          {update.is_managed !== false && <AppGroupsLine intuneAppId={update.intune_app_id} />}
 +          {autoUpdateTurnedOff ? (
 +            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-status-warning">
 +              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
@@ -3683,7 +4653,7 @@ index 479225ee5..3c0b53c5e 100644
 +        // HRM patch 0020: a custom app's new GitHub release opens the filled-in custom app form; never automatic.
 +        <div className="relative flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 border-t border-overlay/10">
 +          <span className="text-xs text-text-muted">New GitHub release. You check it before it deploys.</span>
-+          <Button asChild size="sm" className="font-medium text-[13px] h-8 px-3.5 whitespace-nowrap bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest shadow-sm">
++          <Button asChild size="sm" className="font-medium text-[13px] h-8 px-3.5 whitespace-nowrap bg-accent-cyan hover:bg-accent-cyan-bright text-white shadow-sm">
 +            <Link href={`/dashboard/apps?newVersionOfApp=${encodeURIComponent(update.intune_app_id)}`}>
 +              Deploy new version
 +              <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
@@ -3761,10 +4731,10 @@ index 479225ee5..3c0b53c5e 100644
 +              className={cn(
 +                'font-medium text-xs sm:text-[13px] h-8 px-3 sm:px-3.5 whitespace-nowrap',
 +                isUpdating
-+                  ? 'bg-accent-cyan/50 text-bg-deepest/70'
++                  ? 'bg-accent-cyan/50 text-white/80'
 +                  : quiet
 +                    ? 'border-overlay/15 text-text-primary hover:bg-overlay/5'
-+                    : 'bg-accent-cyan hover:bg-accent-cyan-bright text-bg-deepest shadow-sm hover:shadow-glow-cyan transition-shadow'
++                    : 'bg-accent-cyan hover:bg-accent-cyan-bright text-white shadow-sm hover:shadow-glow-cyan transition-shadow'
                )}
 -            </AnimatePresence>
 -          </Button>
@@ -3799,8 +4769,9 @@ index 479225ee5..3c0b53c5e 100644
          </div>
 -      </div>
 +      )}
-+      {/* Opened from the More menu; they live outside it so closing the menu does not close them. */}
++      {/* Opened from the More menu or unassigned quick action; they live outside menus so closing a menu does not close them. */}
 +      {update.intune_app_id && !isCustom && <AppTimingPanel appId={update.intune_app_id} open={datesOpen} onOpenChange={setDatesOpen} />}
++      {update.intune_app_id && !isCustom && <EditAssignments appId={update.intune_app_id} open={groupsOpen} onOpenChange={setGroupsOpen} />}
 +      {pilot.canStart && <StartPilot update={update} open={pilotOpen} onOpenChange={setPilotOpen} />}
      </motion.div>
    );
@@ -3848,7 +4819,7 @@ index 479225ee5..3c0b53c5e 100644
          >
            <div className="p-5">
              {/* Top row */}
-@@ -343,7 +397,7 @@ export function UpdateCardSkeleton({ count = 3 }: UpdateCardSkeletonProps) {
+@@ -343,7 +449,7 @@ export function UpdateCardSkeleton({ count = 3 }: UpdateCardSkeletonProps) {
              <div className="h-3 w-28 bg-overlay/[0.04] rounded-md animate-pulse mb-3.5" />
  
              {/* Bottom row */}
@@ -5333,21 +6304,31 @@ index 000000000..3fea9ca51
 +});
 diff --git a/lib/hrm/__tests__/manual-update-review.test.ts b/lib/hrm/__tests__/manual-update-review.test.ts
 new file mode 100644
-index 000000000..87f935c81
+index 000000000..081769d49
 --- /dev/null
 +++ b/lib/hrm/__tests__/manual-update-review.test.ts
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,86 @@
 +import {beforeEach,expect,it,vi} from 'vitest';
-+const state=vi.hoisted(()=>({assignments:[] as unknown[]}));
++const state=vi.hoisted(()=>({
++  assignments:[] as unknown[],
++  homepage:'https://vendor.example/release-notes' as string|null,
++  installStatus:[] as Array<{tenant_id:string;intune_app_id:string;user_id:string;display_name:string;installed:number;failed:number;pending:number;notInstalled?:number;notApplicable:number;other:number;topErrors:Array<{code:string;description:string;count:number}>;previous_failed:number;alerted_on:string|null;checked_at:string}>,
++}));
 +vi.mock('@/lib/auto-update/trigger',()=>({getLatestInstallerInfo:async()=>({ok:true,info:{latestVersion:'2.0',installerUrl:'https://example.test/app.exe',installerSha256:'a'.repeat(64),installerType:'exe'}})}));
 +vi.mock('@/lib/intune/graph-client',()=>({getServicePrincipalToken:async()=>'fixture-token'}));
 +vi.mock('@/lib/hrm/pilot-graph',()=>({pilotGraph:()=>({assignments:async()=>state.assignments})}));
 +vi.mock('@/lib/intune/assignment-group-names',()=>({resolveAssignmentGroupNames:async()=>({names:{'33333333-3333-4333-8333-333333333333':'Current group'}})}));
++vi.mock('@/lib/catalog',()=>({getCatalogSource:()=>({getSccmCuratedApp:async()=>state.homepage?{homepage:state.homepage}:null})}));
++vi.mock('@/lib/hrm/install-status-check',()=>({listInstallStatus:async()=>state.installStatus}));
 +import {readManualUpdateReview,reviewedAssignmentSettings} from '../manual-update-review';
 +const user={userId:'fixture-user',tenantId:'fixture-tenant'},input={winget_id:'Example.App',tenant_id:'fixture-tenant'};
-+const config={displayName:'Example app',architecture:'x64',installScope:'machine',psadtConfig:{deployMode:'Silent'},assignments:[{type:'group',groupId:'33333333-3333-4333-8333-333333333333',groupName:'Stale saved label',intent:'required'}]};
-+const db={updateCheckResults:{list:async()=>[{winget_id:'Example.App',intune_app_id:'source-app',current_version:'1.0',latest_version:'2.0'}]},updatePolicies:{getByKey:async()=>({deployment_config:config,original_upload_history_id:'original'})},uploadHistory:{getLatestInTenant:async()=>({intune_app_id:'source-app',version:'1.0'})}} as never;
-+beforeEach(()=>{state.assignments=[{id:'assignment',intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:'33333333-3333-4333-8333-333333333333'},settings:{installTimeSettings:{useLocalTime:false,deadlineDateTime:'2020-01-01T00:00:00Z'}}}]});
++const config={displayName:'Example app',publisher:'Example Corp',architecture:'x64',installScope:'machine',psadtConfig:{deployMode:'Silent',restartBehavior:'suppress'},assignments:[{type:'group',groupId:'33333333-3333-4333-8333-333333333333',groupName:'Stale saved label',intent:'required'}]};
++const db={updateCheckResults:{list:async()=>[{winget_id:'Example.App',intune_app_id:'source-app',current_version:'1.0',latest_version:'2.0'}]},updatePolicies:{getByKey:async()=>({deployment_config:config,original_upload_history_id:'original'})},uploadHistory:{getLatestInTenant:async()=>({intune_app_id:'source-app',version:'1.0',publisher:'Example Corp'})}} as never;
++beforeEach(()=>{
++  state.homepage='https://vendor.example/release-notes';
++  state.installStatus=[];
++  state.assignments=[{id:'assignment',intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:'33333333-3333-4333-8333-333333333333'},settings:{installTimeSettings:{useLocalTime:false,deadlineDateTime:'2020-01-01T00:00:00Z'}}}];
++});
 +it('uses live labels and group-paired dates, requires a date decision, and rejects a changed snapshot',async()=>{
 + const first=await readManualUpdateReview(db,user,input);
 + expect(first.row.groups).toEqual(['Current group · required']);expect(first.row.dates[0]).toContain('Current group · required:');expect(first.row.dateReviewRequired).toBe(true);
@@ -5356,6 +6337,41 @@ index 000000000..87f935c81
 + state.assignments=[];const changed=await readManualUpdateReview(db,user,input);
 + expect(changed.row.groups).toEqual([]);expect(changed.row.groups).not.toContain('Stale saved label');
 + expect(()=>reviewedAssignmentSettings(changed,{...input,reviewToken:first.row.token,expiredDates:'keep',deadlineDecision:'retain'})).toThrow('changed after review');
++});
++it('returns structured groups, dates, publisher, release URL, concise behavior and cached install counts only',async()=>{
++ state.installStatus=[{
++  tenant_id:'fixture-tenant',intune_app_id:'source-app',user_id:'secret-user@example.test',display_name:'Example app',
++  installed:14,failed:2,pending:1,notInstalled:3,notApplicable:4,other:0,
++  topErrors:[{code:'0x80070643',description:'Device LAPTOP-SECRET failed',count:2}],
++  previous_failed:0,alerted_on:null,checked_at:'2026-11-26T15:30:00Z',
++ }];
++ state.assignments=[
++  {id:'a1',intent:'required',target:{'@odata.type':'#microsoft.graph.groupAssignmentTarget',groupId:'33333333-3333-4333-8333-333333333333',deviceAndAppManagementAssignmentFilterId:'filter-1',deviceAndAppManagementAssignmentFilterType:'include'},settings:{installTimeSettings:{useLocalTime:true,startDateTime:'2099-02-01T08:00:00Z',deadlineDateTime:'2099-02-03T17:00:00Z'}}},
++  {id:'a2',intent:'required',target:{'@odata.type':'#microsoft.graph.exclusionGroupAssignmentTarget',groupId:'44444444-4444-4444-8444-444444444444'},settings:null},
++ ];
++ const result=await readManualUpdateReview(db,user,input);
++ expect(result.row.sourceAppId).toBe('source-app');
++ expect(result.row.publisher).toBe('Example Corp');
++ expect(result.row.releaseNotesUrl).toBe('https://vendor.example/release-notes');
++ expect(result.row.behavior).toBe('No toolkit windows');
++ expect(result.row.restart).toBe('Suppressed');
++ expect(result.row.structuredGroups).toEqual([
++  {id:'a1',label:'Current group',intent:'required',intentLabel:'Required',filter:'Include filter'},
++  {id:'a2',label:'Group 44444444-4444-4444-8444-444444444444',intent:'excluded',intentLabel:'Excluded'},
++ ]);
++ expect(result.row.structuredDates).toEqual([
++  {groupLabel:'Current group',intent:'Required',startDateTime:'2099-02-01T08:00:00Z',deadlineDateTime:'2099-02-03T17:00:00Z',useLocalTime:true},
++ ]);
++ expect(result.row.installCounts).toEqual({
++  installed:14,failed:2,pending:1,notInstalled:3,notApplicable:4,other:0,checkedAt:'2026-11-26T15:30:00Z',
++ });
++ expect(JSON.stringify(result.row)).not.toContain('LAPTOP-SECRET');
++ expect(JSON.stringify(result.row)).not.toContain('secret-user@example.test');
++});
++it('omits invalid or credential-bearing release URLs',async()=>{
++ state.homepage='https://user:pass@vendor.example/notes';
++ const result=await readManualUpdateReview(db,user,input);
++ expect(result.row.releaseNotesUrl).toBeNull();
 +});
 +it('rejects another tenant before reading deployment or assignment data',async()=>{
 + await expect(readManualUpdateReview(db,user,{...input,tenant_id:'other'})).rejects.toThrow('another tenant');
@@ -6215,27 +7231,98 @@ index 000000000..8672cd10f
 +}
 diff --git a/lib/hrm/manual-update-review.ts b/lib/hrm/manual-update-review.ts
 new file mode 100644
-index 000000000..2b42f78a5
+index 000000000..fcff3bc3c
 --- /dev/null
 +++ b/lib/hrm/manual-update-review.ts
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,228 @@
 +import { createHash } from 'node:crypto';
 +import type { DatabaseAdapter } from '@/lib/db/types';
 +import type { DeploymentConfig } from '@/types/update-policies';
 +import { buildDeploymentConfigFromAdapter } from '@/lib/update-policies/build-deployment-config';
 +import { getLatestInstallerInfo } from '@/lib/auto-update/trigger';
 +import { getServicePrincipalToken } from '@/lib/intune/graph-client';
-+import {resolveAssignmentGroupNames} from '@/lib/intune/assignment-group-names';
-+import type {IntuneAppAssignment} from '@/types/inventory';
++import { resolveAssignmentGroupNames } from '@/lib/intune/assignment-group-names';
++import type { IntuneAppAssignment } from '@/types/inventory';
 +import { pilotGraph } from './pilot-graph';
-+import { savedInstallationSummary } from './rollout-workspace';
++import { conciseInstallationSummary, formatRestartBehavior } from './rollout-workspace';
++import { listInstallStatus } from './install-status-check';
 +import { isCuratedPackageId } from '@/lib/curated-catalog/core.mjs';
 +import { assertCuratedInstaller } from '@/lib/curated-catalog/server';
 +import { buildCuratedCartItem } from '@/lib/curated-catalog/package';
++import { officialReleaseNotesUrl } from '@/lib/catalog/release-enrichment';
++import { getCatalogSource } from '@/lib/catalog';
 +import { assignmentSnapshot, canonical, needsDateReview, deadlineAssignments, deadlineProblem, asObject, type AssignmentTimingReview } from '@/packager/src/assignment-settings';
-+export interface ManualReviewInput { winget_id: string; tenant_id: string; reviewToken?: string; expiredDates?: 'keep' | 'reset'; deadlineDecision?: 'retain' | 'reschedule'; newDeadline?: string }
-+export interface ManualReviewRow { wingetId: string; displayName: string; fromVersion: string; toVersion: string; source: 'saved' | 'curated'; behavior: string; restart: string; groups: string[]; dates: string[]; dateReviewRequired: boolean; deadlineReviewRequired?: boolean; localDeadline?: boolean; token: string }
++
++export interface ManualReviewInput {
++  winget_id: string;
++  tenant_id: string;
++  reviewToken?: string;
++  expiredDates?: 'keep' | 'reset';
++  deadlineDecision?: 'retain' | 'reschedule';
++  newDeadline?: string;
++}
++
++export interface ManualReviewGroup {
++  id: string;
++  label: string;
++  intent: 'required' | 'available' | 'uninstall' | 'excluded' | 'other';
++  intentLabel: string;
++  filter?: string | null;
++}
++
++export interface ManualReviewDate {
++  groupLabel: string;
++  intent: string;
++  startDateTime: string | null;
++  deadlineDateTime: string | null;
++  useLocalTime: boolean;
++}
++
++/** Cached fleet install counts only. Never device or user names. */
++export interface ManualReviewInstallCounts {
++  installed: number;
++  failed: number;
++  pending: number;
++  notInstalled: number;
++  notApplicable: number;
++  other: number;
++  checkedAt: string;
++}
++
++export interface ManualReviewRow {
++  wingetId: string;
++  displayName: string;
++  fromVersion: string;
++  toVersion: string;
++  source: 'saved' | 'curated';
++  sourceAppId: string | null;
++  publisher?: string | null;
++  releaseNotesUrl?: string | null;
++  behavior: string;
++  restart: string;
++  groups: string[];
++  structuredGroups?: ManualReviewGroup[];
++  dates: string[];
++  structuredDates?: ManualReviewDate[];
++  installCounts?: ManualReviewInstallCounts | null;
++  dateReviewRequired: boolean;
++  deadlineReviewRequired?: boolean;
++  localDeadline?: boolean;
++  token: string;
++}
++
 +const hash = (v: unknown) => createHash('sha256').update(canonical(JSON.parse(JSON.stringify(v)))).digest('hex');
++
++function normalizeGroupIntent(rawIntent: unknown, excluded: boolean): { intent: ManualReviewGroup['intent']; intentLabel: string } {
++  if (excluded) return { intent: 'excluded', intentLabel: 'Excluded' };
++  const value = String(rawIntent || '').toLowerCase();
++  if (value === 'required') return { intent: 'required', intentLabel: 'Required' };
++  if (value === 'available' || value === 'availablewithoutenrollment') return { intent: 'available', intentLabel: 'Available' };
++  if (value === 'uninstall') return { intent: 'uninstall', intentLabel: 'Uninstall' };
++  const raw = String(rawIntent || '');
++  return { intent: 'other', intentLabel: raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Assigned' };
++}
++
 +export async function readManualUpdateReview(db: DatabaseAdapter, user: { userId: string; tenantId: string }, req: ManualReviewInput) {
 +  if (req.tenant_id !== user.tenantId) throw new Error('This update belongs to another tenant.');
 +  const detected = (await db.updateCheckResults.list(user.userId, { tenantId: user.tenantId, includeDismissed: true })).find(row => row.winget_id.toLowerCase() === req.winget_id.toLowerCase());
@@ -6254,52 +7341,127 @@ index 000000000..2b42f78a5
 +  const info = resolved.info;
 +  const installerFingerprint = hash([info.latestVersion, info.installerUrl, info.installerSha256, info.curatedReleaseId]);
 +  let source: ManualReviewRow['source'] = 'saved';
++  let releaseNotesUrl: string | null = null;
 +  if (isCuratedPackageId(req.winget_id)) {
 +    const approved = assertCuratedInstaller({ wingetId: req.winget_id, version: info.latestVersion, architecture: config.architecture, installScope: config.installScope, installerUrl: info.installerUrl, installerSha256: info.installerSha256, installerType: info.installerType, curatedReleaseId: info.curatedReleaseId });
-+    config = { ...config, ...buildCuratedCartItem(approved.app, approved.release) }; source = 'curated';
++    config = { ...config, ...buildCuratedCartItem(approved.app, approved.release) };
++    source = 'curated';
++    releaseNotesUrl = officialReleaseNotesUrl(approved.release.candidate?.releaseNotesUrl) ?? officialReleaseNotesUrl(approved.app.homepage);
++  } else {
++    try {
++      const catalogApp = await getCatalogSource().getSccmCuratedApp(req.winget_id);
++      releaseNotesUrl = officialReleaseNotesUrl(catalogApp?.homepage);
++    } catch {
++      releaseNotesUrl = null;
++    }
 +  }
 +  const latest = await db.uploadHistory.getLatestInTenant(user.tenantId, req.winget_id);
 +  const sourceAppId = latest?.intune_app_id || detected.intune_app_id || null;
 +  let snapshot: unknown[] = [];
-+  let liveNames:Record<string,string>={};
++  let liveNames: Record<string, string> = {};
 +  if (sourceAppId) {
 +    const token = await getServicePrincipalToken(user.tenantId);
 +    if (!token) throw new Error('Could not read current assignments from Intune. Try reviewing this update again.');
 +    snapshot = assignmentSnapshot(await pilotGraph(token).assignments(sourceAppId));
-+    const targets:IntuneAppAssignment[]=snapshot.map(value=>{
-+      const row=asObject(value),target=asObject(row.target);
-+      return {id:String(row.id),intent:row.intent as IntuneAppAssignment['intent'],target:{'@odata.type':String(target['@odata.type']),...(typeof target.groupId==='string'?{groupId:target.groupId}:{})},settings:null};
++    const targets: IntuneAppAssignment[] = snapshot.map(value => {
++      const row = asObject(value), target = asObject(row.target);
++      return { id: String(row.id), intent: row.intent as IntuneAppAssignment['intent'], target: { '@odata.type': String(target['@odata.type']), ...(typeof target.groupId === 'string' ? { groupId: target.groupId } : {}) }, settings: null };
 +    });
-+    liveNames=(await resolveAssignmentGroupNames(targets,token,AbortSignal.timeout(5000)).catch(()=>({names:{}}))).names;
++    liveNames = (await resolveAssignmentGroupNames(targets, token, AbortSignal.timeout(5000)).catch(() => ({ names: {} }))).names;
 +  }
 +  const names = new Map(Object.entries(liveNames));
++  const structuredGroups: ManualReviewGroup[] = sourceAppId ? snapshot.map((value, index) => {
++    const row = asObject(value), target = asObject(row.target), id = String(target.groupId || '');
++    const excluded = String(target['@odata.type']).includes('exclusionGroup');
++    const label = id ? names.get(id.toLowerCase()) || `Group ${id}` : String(target['@odata.type']).includes('allDevices') ? 'All devices' : 'All users';
++    const hasFilter = typeof target.deviceAndAppManagementAssignmentFilterId === 'string' && target.deviceAndAppManagementAssignmentFilterType !== 'none';
++    const filter = hasFilter ? `${target.deviceAndAppManagementAssignmentFilterType === 'exclude' ? 'Exclude' : 'Include'} filter` : null;
++    const { intent, intentLabel } = normalizeGroupIntent(row.intent, excluded);
++    return { id: String(row.id || id || index), label, intent, intentLabel, ...(filter ? { filter } : {}) };
++  }) : (config.assignments || []).map((row, index) => {
++    const excluded = row.type === 'exclusionGroup';
++    const label = row.groupName || row.groupId || (row.type === 'allDevices' ? 'All devices' : row.type === 'allUsers' ? 'All users' : row.type);
++    const { intent, intentLabel } = normalizeGroupIntent(row.intent, excluded);
++    return { id: row.groupId || String(index), label, intent, intentLabel };
++  });
 +  const groups = sourceAppId ? snapshot.map(value => {
-+    const row=asObject(value), target=asObject(row.target), id=String(target.groupId || '');
-+    const label=id ? names.get(id.toLowerCase()) || `Group ${id}` : String(target['@odata.type']).includes('allDevices') ? 'All devices' : 'All users';
-+    const filter=typeof target.deviceAndAppManagementAssignmentFilterId==='string'&&target.deviceAndAppManagementAssignmentFilterType!=='none'?` · ${target.deviceAndAppManagementAssignmentFilterType || 'include'} filter ${target.deviceAndAppManagementAssignmentFilterId}`:'';
++    const row = asObject(value), target = asObject(row.target), id = String(target.groupId || '');
++    const label = id ? names.get(id.toLowerCase()) || `Group ${id}` : String(target['@odata.type']).includes('allDevices') ? 'All devices' : 'All users';
++    const filter = typeof target.deviceAndAppManagementAssignmentFilterId === 'string' && target.deviceAndAppManagementAssignmentFilterType !== 'none' ? ` · ${target.deviceAndAppManagementAssignmentFilterType || 'include'} filter ${target.deviceAndAppManagementAssignmentFilterId}` : '';
 +    return `${label} · ${String(target['@odata.type']).includes('exclusionGroup') ? 'Excluded' : row.intent}${filter}`;
 +  }) : (config.assignments || []).map(row => `${row.groupName || row.groupId || row.type} · ${row.intent}`);
-+  const dates=snapshot.flatMap((value,index) => {
-+    const timing=asObject(asObject(asObject(value).settings).installTimeSettings);
-+    if(!timing.startDateTime && !timing.deadlineDateTime)return [];
++  const structuredDates: ManualReviewDate[] = [];
++  const dates = snapshot.flatMap((value, index) => {
++    const timing = asObject(asObject(asObject(value).settings).installTimeSettings);
++    if (!timing.startDateTime && !timing.deadlineDateTime) return [];
++    const groupInfo = structuredGroups[index];
++    structuredDates.push({
++      groupLabel: groupInfo?.label ?? groups[index],
++      intent: groupInfo?.intentLabel ?? '',
++      startDateTime: typeof timing.startDateTime === 'string' ? timing.startDateTime : null,
++      deadlineDateTime: typeof timing.deadlineDateTime === 'string' ? timing.deadlineDateTime : null,
++      useLocalTime: timing.useLocalTime === true,
++    });
 +    return [`${groups[index]}: available ${timing.startDateTime || 'ASAP'} · deadline ${timing.deadlineDateTime || 'ASAP'} · ${timing.useLocalTime ? 'device local time' : 'UTC'}`];
 +  });
++  let installCounts: ManualReviewInstallCounts | null = null;
++  if (sourceAppId) {
++    try {
++      const records = await listInstallStatus(user.tenantId);
++      const hit = records.find(record => record.intune_app_id.toLowerCase() === sourceAppId.toLowerCase());
++      if (hit) {
++        installCounts = {
++          installed: hit.installed,
++          failed: hit.failed,
++          pending: hit.pending,
++          notInstalled: hit.notInstalled ?? 0,
++          notApplicable: hit.notApplicable,
++          other: hit.other,
++          checkedAt: hit.checked_at,
++        };
++      }
++    } catch {
++      installCounts = null;
++    }
++  }
 +  const affected = deadlineAssignments(snapshot);
-+  const token=hash([user.tenantId,user.userId,req.winget_id.toLowerCase(),baseConfigHash,installerFingerprint,sourceAppId,snapshot,affected.map(row=>row.id)]);
-+  const row: ManualReviewRow={wingetId:req.winget_id,displayName:config.displayName || detected.display_name,fromVersion:latest?.version || detected.current_version,toVersion:info.latestVersion,source,behavior:savedInstallationSummary(config.psadtConfig),restart:config.psadtConfig?.restartBehavior || 'Installer default',groups,dates,dateReviewRequired:needsDateReview(snapshot),deadlineReviewRequired:affected.length>0,localDeadline:affected.some(row=>asObject(asObject(row.settings).installTimeSettings).useLocalTime===true),token};
-+  return {row,baseConfigHash,installerFingerprint,sourceAppId,snapshot};
++  const token = hash([user.tenantId, user.userId, req.winget_id.toLowerCase(), baseConfigHash, installerFingerprint, sourceAppId, snapshot, affected.map(row => row.id)]);
++  const row: ManualReviewRow = {
++    wingetId: req.winget_id,
++    displayName: config.displayName || detected.display_name,
++    fromVersion: latest?.version || detected.current_version,
++    toVersion: info.latestVersion,
++    source,
++    sourceAppId,
++    publisher: config.publisher || latest?.publisher || null,
++    releaseNotesUrl,
++    behavior: conciseInstallationSummary(config.psadtConfig),
++    restart: formatRestartBehavior(config.psadtConfig?.restartBehavior),
++    groups,
++    structuredGroups,
++    dates,
++    structuredDates,
++    installCounts,
++    dateReviewRequired: needsDateReview(snapshot),
++    deadlineReviewRequired: affected.length > 0,
++    localDeadline: affected.some(row => asObject(asObject(row.settings).installTimeSettings).useLocalTime === true),
++    token,
++  };
++  return { row, baseConfigHash, installerFingerprint, sourceAppId, snapshot };
 +}
++
 +export function reviewedAssignmentSettings(review: Awaited<ReturnType<typeof readManualUpdateReview>>, input: ManualReviewInput): AssignmentTimingReview | undefined {
 +  if (input.reviewToken !== review.row.token) throw new Error('Settings or assignments changed after review. Review this update again.');
 +  const affected = deadlineAssignments(review.snapshot);
-+  if (!affected.length && review.row.dateReviewRequired && !['keep','reset'].includes(input.expiredDates || '')) throw new Error('Choose whether to keep or reset the past or device-local assignment dates.');
++  if (!affected.length && review.row.dateReviewRequired && !['keep', 'reset'].includes(input.expiredDates || '')) throw new Error('Choose whether to keep or reset the past or device-local assignment dates.');
 +  if (!review.sourceAppId) return undefined;
-+  const result: AssignmentTimingReview = {sourceAppId:review.sourceAppId,expected:review.snapshot,expiredDates:affected.length ? 'keep' : input.expiredDates || 'keep'};
-+  if (affected.length && ['retain','reschedule'].includes(input.deadlineDecision || '')) result.deadlineConfirmation={decision:input.deadlineDecision!,assignmentIds:affected.map(row=>String(row.id)),...(input.deadlineDecision==='reschedule'?{newDeadline:input.newDeadline}:{})};
++  const result: AssignmentTimingReview = { sourceAppId: review.sourceAppId, expected: review.snapshot, expiredDates: affected.length ? 'keep' : input.expiredDates || 'keep' };
++  if (affected.length && ['retain', 'reschedule'].includes(input.deadlineDecision || '')) result.deadlineConfirmation = { decision: input.deadlineDecision!, assignmentIds: affected.map(row => String(row.id)), ...(input.deadlineDecision === 'reschedule' ? { newDeadline: input.newDeadline } : {}) };
 +  const problem = deadlineProblem(review.snapshot, review.sourceAppId, result);
 +  if (problem) throw new Error(problem);
 +  return result;
 +}
++
 +export const manualReviewConfigHash = hash;
 diff --git a/lib/hrm/manual-update.ts b/lib/hrm/manual-update.ts
 new file mode 100644

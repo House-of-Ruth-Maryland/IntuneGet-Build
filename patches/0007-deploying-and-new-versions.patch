@@ -152,7 +152,7 @@ index 000000000..854f2245d
 + expect(listUrls()).toEqual(['/api/package?scope=tenant&limit=50','/api/package?scope=tenant&limit=100','/api/package?scope=tenant&limit=150','/api/package?limit=50']);
 +});
 diff --git a/app/(app)/dashboard/uploads/page.tsx b/app/(app)/dashboard/uploads/page.tsx
-index 93f7400e8..8a23d8741 100644
+index 93f7400e8..b1825c5ed 100644
 --- a/app/(app)/dashboard/uploads/page.tsx
 +++ b/app/(app)/dashboard/uploads/page.tsx
 @@ -1,5 +1,11 @@
@@ -450,6 +450,15 @@ index 93f7400e8..8a23d8741 100644
                      </AlertDialogAction>
                    </AlertDialogFooter>
                  </AlertDialogContent>
+@@ -451,7 +469,7 @@ export default function UploadsPage() {
+               onClick={handleRefresh}
+               disabled={isRefreshing}
+               variant="outline"
+-              className="border-overlay/10 text-text-secondary hover:bg-overlay/5 hover:border-black/20"
++              className="border-overlay/10 text-text-secondary hover:bg-overlay/5 hover:border-overlay/20"
+             >
+               {isRefreshing ? (
+                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
 @@ -485,7 +503,7 @@ export default function UploadsPage() {
                variant="outline"
                className="border-status-warning/30 text-status-warning hover:bg-status-warning/10 flex-shrink-0"
@@ -538,7 +547,7 @@ index 93f7400e8..8a23d8741 100644
        </motion.div>
  
        {/* Filters */}
-@@ -583,15 +565,13 @@ export default function UploadsPage() {
+@@ -583,24 +565,22 @@ export default function UploadsPage() {
          animate={{ opacity: 1 }}
          transition={{ delay: 0.2 }}
          className="flex flex-wrap gap-2"
@@ -557,7 +566,9 @@ index 93f7400e8..8a23d8741 100644
              onClick={() => setFilter(f)}
              className={cn(
                'px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:outline-none',
-@@ -600,7 +580,7 @@ export default function UploadsPage() {
+               filter === f
+-                ? 'bg-gradient-to-r from-accent-cyan to-accent-violet text-bg-elevated'
++                ? 'bg-gradient-to-r from-accent-cyan to-accent-violet text-white'
                  : 'bg-overlay/5 text-text-secondary hover:text-text-primary hover:bg-overlay/10 border border-overlay/5'
              )}
            >
@@ -722,6 +733,15 @@ index 93f7400e8..8a23d8741 100644
                      </span>
                    ))}
                  </div>
+@@ -882,7 +875,7 @@ function UploadJobCard({
+                       variant="outline"
+                       className={cn(
+                         isDismissable
+-                          ? "border-overlay/10 text-text-secondary hover:bg-overlay/10 hover:border-black/20"
++                          ? "border-overlay/10 text-text-secondary hover:bg-overlay/10 hover:border-overlay/20"
+                           : "border-status-error/30 text-status-error hover:bg-status-error/10 hover:border-status-error/50"
+                       )}
+                       disabled={isCancelling}
 @@ -900,21 +893,21 @@ function UploadJobCard({
                    <AlertDialogContent>
                      <AlertDialogHeader>
@@ -6766,10 +6786,10 @@ index 7a6edf5c0..15baee731 100644
      expect(button('Deploy to Intune').disabled).toBe(true);
      expect(button('Review current version')).toBeDefined();
 diff --git a/components/UploadCart.tsx b/components/UploadCart.tsx
-index 5078f56a0..ce9aed547 100644
+index 5078f56a0..c0380c3ae 100644
 --- a/components/UploadCart.tsx
 +++ b/components/UploadCart.tsx
-@@ -1,4 +1,7 @@
+@@ -1,10 +1,13 @@
  'use client';
 +import { CuratedBadge } from './CuratedBadge';
 +
@@ -6777,6 +6797,13 @@ index 5078f56a0..ce9aed547 100644
  
  import { useState, useEffect } from 'react';
  import { useRouter } from 'next/navigation';
+ import {
+   X,
+-  ShoppingCart,
++  ListChecks,
+   Trash2,
+   Upload,
+   ChevronRight,
 @@ -20,6 +23,7 @@ import { Button } from '@/components/ui/button';
  import { AppIcon } from '@/components/AppIcon';
  import { useCartStore } from '@/stores/cart-store';
@@ -6916,7 +6943,7 @@ index 5078f56a0..ce9aed547 100644
  
    return (
      <>
-@@ -340,7 +356,7 @@ export function UploadCart() {
+@@ -340,10 +356,10 @@ export function UploadCart() {
        {!isOpen && items.length > 0 && (
          <button
            onClick={toggleCart}
@@ -6924,7 +6951,11 @@ index 5078f56a0..ce9aed547 100644
 +          aria-label={`Open Deployment list with ${items.length} app${items.length !== 1 ? 's' : ''}`}
            className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-accent-cyan hover:bg-accent-cyan-dim text-white shadow-lg transition-all hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base"
          >
-           <ShoppingCart className="w-5 h-5" />
+-          <ShoppingCart className="w-5 h-5" />
++          <ListChecks className="w-5 h-5" />
+           <span className="font-semibold">{items.length}</span>
+         </button>
+       )}
 @@ -353,7 +369,7 @@ export function UploadCart() {
          <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="cart-title">
            {/* Backdrop with blur */}
@@ -6934,9 +6965,12 @@ index 5078f56a0..ce9aed547 100644
              onClick={closeCart}
              aria-hidden="true"
            />
-@@ -365,7 +381,7 @@ export function UploadCart() {
+@@ -363,9 +379,9 @@ export function UploadCart() {
+             {/* Header */}
+             <div className="flex items-center justify-between px-6 py-4 border-b border-overlay/5">
                <div className="flex items-center gap-3">
-                 <ShoppingCart className="w-5 h-5 text-accent-cyan" />
+-                <ShoppingCart className="w-5 h-5 text-accent-cyan" />
++                <ListChecks className="w-5 h-5 text-accent-cyan" />
                  <h2 id="cart-title" className="text-lg font-semibold text-text-primary">
 -                  Selected Apps
 +                  Deployment list
@@ -6952,9 +6986,12 @@ index 5078f56a0..ce9aed547 100644
                  className="text-text-secondary hover:text-text-primary transition-colors"
                >
                  <X className="w-6 h-6" />
-@@ -387,9 +403,9 @@ export function UploadCart() {
+@@ -385,11 +401,11 @@ export function UploadCart() {
+               {items.length === 0 ? (
+                 <div className="flex flex-col items-center justify-center h-full text-center px-6">
                    <div className="w-16 h-16 rounded-full bg-bg-elevated flex items-center justify-center mb-4 animate-float-slow">
-                     <ShoppingCart className="w-8 h-8 text-text-muted" />
+-                    <ShoppingCart className="w-8 h-8 text-text-muted" />
++                    <ListChecks className="w-8 h-8 text-text-muted" />
                    </div>
 -                  <h3 className="text-text-primary font-medium mb-1">No apps selected</h3>
 +                  <h3 className="text-text-primary font-medium mb-1">The Deployment list is empty</h3>
@@ -7061,9 +7098,12 @@ index 5078f56a0..ce9aed547 100644
                          </p>
                        )}
                      </div>
-@@ -635,27 +673,27 @@ export function UploadCart() {
+@@ -633,29 +671,29 @@ export function UploadCart() {
+                       <Button
+                         variant="outline"
                          disabled={isDeploying}
-                         className="flex-1 border-overlay/10 text-text-secondary hover:bg-overlay/5 hover:border-black/20"
+-                        className="flex-1 border-overlay/10 text-text-secondary hover:bg-overlay/5 hover:border-black/20"
++                        className="flex-1 border-overlay/10 text-text-secondary hover:bg-overlay/5 hover:border-overlay/20"
                        >
 -                        Clear All
 +                        Clear list
@@ -7178,9 +7218,18 @@ index 237f34882..4a2afb020 100644
 +  });
 +});
 diff --git a/components/dashboard/DeploymentStatusIndicator.tsx b/components/dashboard/DeploymentStatusIndicator.tsx
-index 8a22d86ce..30e4ecaca 100644
+index 8a22d86ce..8bf3c125d 100644
 --- a/components/dashboard/DeploymentStatusIndicator.tsx
 +++ b/components/dashboard/DeploymentStatusIndicator.tsx
+@@ -5,7 +5,7 @@ import { Rocket } from 'lucide-react';
+ import { useDashboardStats } from '@/hooks/useAnalytics';
+ 
+ export function DeploymentStatusIndicator() {
+-  const { data: stats } = useDashboardStats();
++  const { data: stats } = useDashboardStats('tenant');
+   const pendingCount = stats?.pending ?? 0;
+ 
+   if (pendingCount === 0) return null;
 @@ -15,7 +15,7 @@ export function DeploymentStatusIndicator() {
        href="/dashboard/uploads?status=pending"
        className="relative flex h-11 w-11 shrink-0 items-center justify-center gap-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-all sm:w-auto sm:px-2.5"

@@ -281,7 +281,7 @@ index f818738c1..246e51c23 100644
              )}
            </button>
 diff --git a/app/(app)/dashboard/layout.tsx b/app/(app)/dashboard/layout.tsx
-index bade6e949..7f4313f2f 100644
+index bade6e949..4c270cbc9 100644
 --- a/app/(app)/dashboard/layout.tsx
 +++ b/app/(app)/dashboard/layout.tsx
 @@ -1,10 +1,10 @@
@@ -420,7 +420,7 @@ index bade6e949..7f4313f2f 100644
                </kbd>
              </button>
              <div className="flex-1 lg:hidden" />
-@@ -177,15 +196,16 @@ export default function DashboardLayout({
+@@ -177,17 +196,18 @@ export default function DashboardLayout({
              <div className="flex min-w-0 items-center gap-1 sm:gap-3">
                <TenantSwitcher />
                <DeploymentStatusIndicator />
@@ -438,8 +438,11 @@ index bade6e949..7f4313f2f 100644
 -                <ShoppingCart className="w-5 h-5" />
 +                <ListChecks className="w-5 h-5" />
                  {cartItemCount > 0 && (
-                   <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-accent-cyan to-accent-violet text-bg-elevated text-xs font-medium rounded-full flex items-center justify-center shadow-glow-cyan animate-scale-in">
+-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-accent-cyan to-accent-violet text-bg-elevated text-xs font-medium rounded-full flex items-center justify-center shadow-glow-cyan animate-scale-in">
++                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-accent-cyan to-accent-violet text-white text-xs font-medium rounded-full flex items-center justify-center shadow-glow-cyan animate-scale-in">
                      {cartItemCount}
+                   </span>
+                 )}
 @@ -239,12 +259,13 @@ export default function DashboardLayout({
                <div className="flex items-start sm:items-center gap-3 min-w-0">
                  <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5 sm:mt-0" />
@@ -480,7 +483,7 @@ index bade6e949..7f4313f2f 100644
          toastOptions={{
            className: 'bg-bg-surface border border-overlay/10 text-text-primary',
 diff --git a/app/(app)/dashboard/page.tsx b/app/(app)/dashboard/page.tsx
-index 24e1de8db..6efba5adc 100644
+index 24e1de8db..d6132d7cd 100644
 --- a/app/(app)/dashboard/page.tsx
 +++ b/app/(app)/dashboard/page.tsx
 @@ -10,11 +10,9 @@ import {
@@ -695,7 +698,12 @@ index 24e1de8db..6efba5adc 100644
              {attentionItems.map((item) => {
                const colorMap = {
                  error: {
-@@ -142,35 +232,67 @@ export default function DashboardPage() {
+@@ -138,39 +228,71 @@ export default function DashboardPage() {
+               return (
+                 <div
+                   key={item.id}
+-                  className={`glass-light rounded-xl p-4 border-l-4 ${colors.border} border-t border-r border-b border-black/[0.08] bg-gradient-to-r ${colors.bg} to-transparent`}
++                  className={`glass-light rounded-xl p-4 border-l-4 ${colors.border} border-t border-r border-b border-overlay/[0.08] bg-gradient-to-r ${colors.bg} to-transparent`}
                  >
                    <div className="flex items-center justify-between gap-4">
                      <div className="flex items-center gap-3 min-w-0">
@@ -1001,7 +1009,7 @@ index 24e1de8db..6efba5adc 100644
 -  return content;
 -}
 diff --git a/app/(app)/dashboard/reports/page.tsx b/app/(app)/dashboard/reports/page.tsx
-index 648e311ff..ebef36f86 100644
+index 648e311ff..6c94d5b8a 100644
 --- a/app/(app)/dashboard/reports/page.tsx
 +++ b/app/(app)/dashboard/reports/page.tsx
 @@ -18,16 +18,21 @@ import { PageHeader, AnimatedStatCard, StatCardGrid, SkeletonGrid, AnimatedEmpty
@@ -1098,6 +1106,15 @@ index 648e311ff..ebef36f86 100644
          gradient
          gradientColors="mixed"
          actions={
+@@ -119,7 +153,7 @@ export default function ReportsPage() {
+             <Button
+               onClick={handleExport}
+               disabled={isExporting}
+-              className="bg-gradient-to-r from-accent-cyan to-accent-violet hover:opacity-90 text-bg-elevated"
++              className="bg-gradient-to-r from-accent-cyan to-accent-violet hover:opacity-90 text-white"
+             >
+               {isExporting ? (
+                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
 @@ -132,6 +166,9 @@ export default function ReportsPage() {
          }
        />
@@ -1154,7 +1171,7 @@ index 648e311ff..ebef36f86 100644
        </motion.div>
      </div>
 diff --git a/app/(app)/dashboard/settings/page.tsx b/app/(app)/dashboard/settings/page.tsx
-index fa4896636..19024cbfb 100644
+index fa4896636..bfc671832 100644
 --- a/app/(app)/dashboard/settings/page.tsx
 +++ b/app/(app)/dashboard/settings/page.tsx
 @@ -1,4 +1,5 @@
@@ -1211,7 +1228,7 @@ index fa4896636..19024cbfb 100644
      setTimeout(() => setCopiedField(null), 2000);
    }, []);
  
-@@ -270,16 +283,17 @@ export default function SettingsPage() {
+@@ -270,20 +283,21 @@ export default function SettingsPage() {
          >
            <div className="glass-light rounded-xl border border-overlay/5 p-2 lg:sticky lg:top-24">
              {/* Mobile: horizontal scroll, Desktop: vertical stack */}
@@ -1231,6 +1248,11 @@ index fa4896636..19024cbfb 100644
                        'lg:w-full',
                        isActive
                          ? 'bg-accent-cyan/10 text-accent-cyan'
+-                        : 'text-text-secondary hover:text-text-primary hover:bg-black/[0.03]'
++                        : 'text-text-secondary hover:text-text-primary hover:bg-overlay/[0.04]'
+                     )}
+                   >
+                     {isActive && (
 @@ -305,7 +319,9 @@ export default function SettingsPage() {
                          {tab.label}
                        </p>
@@ -1469,6 +1491,15 @@ index fa4896636..19024cbfb 100644
                          <p className="text-sm text-text-muted"><T>Cache, sync, and storage settings</T></p>
                        </div>
                      </div>
+@@ -884,7 +902,7 @@ function ExportPreferencesSection() {
+                 'px-4 py-2 rounded-lg border text-sm transition-all uppercase tracking-wide',
+                 exportFormat === format
+                   ? 'bg-accent-cyan/10 border-accent-cyan/50 text-accent-cyan font-medium'
+-                  : 'bg-bg-elevated border-overlay/10 text-text-secondary hover:border-black/20'
++                  : 'bg-bg-elevated border-overlay/10 text-text-secondary hover:border-overlay/20'
+               )}
+             >
+               {format}
 @@ -905,6 +923,7 @@ function ExportPreferencesSection() {
            <p className="text-sm text-text-secondary"><T>Embed base64-encoded icons in export files</T></p>
          </div>
@@ -1485,6 +1516,15 @@ index fa4896636..19024cbfb 100644
            checked={includeMetadata}
            onChange={setIncludeMetadata}
          />
+@@ -1061,7 +1081,7 @@ function AutoRefreshSelector() {
+             'px-4 py-2 rounded-lg border text-sm transition-all',
+             refreshInterval === option.value
+               ? 'bg-accent-cyan/10 border-accent-cyan/50 text-accent-cyan font-medium'
+-              : 'bg-bg-elevated border-overlay/10 text-text-secondary hover:border-black/20'
++              : 'bg-bg-elevated border-overlay/10 text-text-secondary hover:border-overlay/20'
+           )}
+         >
+           {option.label}
 @@ -1072,10 +1092,12 @@ function AutoRefreshSelector() {
  }
  
@@ -1650,7 +1690,7 @@ index 8b7cfe81a..18839a80a 100644
  
  function isStoredSettings(value: unknown): value is Record<string, unknown> {
 diff --git a/app/globals.css b/app/globals.css
-index d1fdf2c7d..1f81add45 100644
+index d1fdf2c7d..e345f60e6 100644
 --- a/app/globals.css
 +++ b/app/globals.css
 @@ -100,11 +100,11 @@ pre {
@@ -1739,8 +1779,9 @@ index d1fdf2c7d..1f81add45 100644
    --popover: 222 47% 16%;
    --popover-foreground: 210 20% 95%;
 -  --primary: 191 91% 61%;
-+  --primary: 275 30% 63%;
-   --primary-foreground: 222 47% 11%;
+-  --primary-foreground: 222 47% 11%;
++  --primary: 273 39% 47%;
++  --primary-foreground: 0 0% 100%;
    --secondary: 216 17% 24%;
    --secondary-foreground: 210 20% 95%;
    --muted: 216 17% 24%;
@@ -1759,7 +1800,7 @@ index d1fdf2c7d..1f81add45 100644
    --chart-2: 262 83% 68%;
    --chart-3: 142 76% 45%;
    --chart-4: 38 92% 58%;
-@@ -232,21 +239,21 @@ pre {
+@@ -232,21 +239,42 @@ pre {
  
    /* ===== GRADIENT TEXT UTILITIES ===== */
    .gradient-text-cyan {
@@ -1781,10 +1822,31 @@ index d1fdf2c7d..1f81add45 100644
    .gradient-text-mixed {
 -    background: linear-gradient(135deg, #0891b2, #7c3aed, #06b6d4);
 +    background: linear-gradient(135deg, #673090, #5a838c, #855aa6);
++    -webkit-background-clip: text;
++    -webkit-text-fill-color: transparent;
++    background-clip: text;
++  }
++
++  .dark .gradient-text-cyan {
++    background: linear-gradient(135deg, #c4a3e3, #d8b4fe, #e9d5ff);
++    -webkit-background-clip: text;
++    -webkit-text-fill-color: transparent;
++    background-clip: text;
++  }
++
++  .dark .gradient-text-violet {
++    background: linear-gradient(135deg, #7fb3bd, #6fd3ae, #a7f3d0);
++    -webkit-background-clip: text;
++    -webkit-text-fill-color: transparent;
++    background-clip: text;
++  }
++
++  .dark .gradient-text-mixed {
++    background: linear-gradient(135deg, #c4a3e3, #7fb3bd, #d8b4fe);
      -webkit-background-clip: text;
      -webkit-text-fill-color: transparent;
      background-clip: text;
-@@ -266,28 +273,28 @@ pre {
+@@ -266,28 +294,28 @@ pre {
    }
  
    .glow-cyan {
@@ -1819,7 +1881,7 @@ index d1fdf2c7d..1f81add45 100644
    }
  
    /* ===== GLASS MORPHISM EFFECTS (Light) ===== */
-@@ -301,7 +308,7 @@ pre {
+@@ -301,7 +329,7 @@ pre {
  
    .glass-light-hover:hover {
      background: var(--glass-bg);
@@ -1828,7 +1890,7 @@ index d1fdf2c7d..1f81add45 100644
    }
  
    /* ===== BACKGROUND PATTERNS (Light Theme) ===== */
-@@ -310,7 +317,7 @@ pre {
+@@ -310,7 +338,7 @@ pre {
    }
  
    .bg-dots-light {
@@ -1837,7 +1899,7 @@ index d1fdf2c7d..1f81add45 100644
      background-size: 24px 24px;
    }
  
-@@ -337,33 +344,33 @@ pre {
+@@ -337,33 +365,33 @@ pre {
    }
  
    .bg-gradient-radial-cyan {
@@ -1879,7 +1941,7 @@ index d1fdf2c7d..1f81add45 100644
    }
  
    /* ===== MASK UTILITIES ===== */
-@@ -444,7 +451,7 @@ pre {
+@@ -444,7 +472,7 @@ pre {
      background: linear-gradient(
        90deg,
        transparent 0%,
@@ -1888,7 +1950,7 @@ index d1fdf2c7d..1f81add45 100644
        transparent 100%
      );
      background-size: 200% 100%;
-@@ -591,10 +598,10 @@ pre {
+@@ -591,10 +619,10 @@ pre {
  
  @keyframes ring-pulse {
    0%, 100% {
@@ -1901,7 +1963,7 @@ index d1fdf2c7d..1f81add45 100644
    }
  }
  
-@@ -652,3 +659,36 @@ pre {
+@@ -652,3 +680,36 @@ pre {
    outline: 2px solid var(--focus-ring);
    outline-offset: 2px;
  }
@@ -2501,7 +2563,7 @@ index e941306a7..78610833d 100644
      </TooltipProvider>
    );
 diff --git a/components/dashboard/SidebarUserSection.tsx b/components/dashboard/SidebarUserSection.tsx
-index d834efe1b..37e2e2629 100644
+index d834efe1b..499907e12 100644
 --- a/components/dashboard/SidebarUserSection.tsx
 +++ b/components/dashboard/SidebarUserSection.tsx
 @@ -2,7 +2,7 @@
@@ -2533,7 +2595,19 @@ index d834efe1b..37e2e2629 100644
    isCollapsed,
    onSignOut,
    onNavigate,
-@@ -66,7 +69,7 @@ export function SidebarUserSection({
+@@ -38,6 +41,11 @@ export function SidebarUserSection({
+   const prefersReducedMotion = useReducedMotion();
+   const profileImage = useProfileStore((state) => state.profileImage);
+   const initials = user?.name?.charAt(0) || user?.email?.charAt(0) || 'U';
++  const isSettingsActive = pathname === '/dashboard/settings' || pathname.startsWith('/dashboard/settings/');
++  const settingsAriaCurrent = isSettingsActive ? (pathname === '/dashboard/settings' ? 'page' : 'location') : undefined;
++  const settingsActiveClass = cn(
++    isSettingsActive && 'bg-accent-cyan/12 dark:bg-accent-cyan/20 text-accent-cyan dark:text-accent-cyan-bright font-medium'
++  );
+ 
+   const avatar = (
+     <div className="relative flex-shrink-0">
+@@ -66,7 +74,7 @@ export function SidebarUserSection({
            <Tooltip delayDuration={0}>
              <TooltipTrigger asChild>
                <DropdownMenuTrigger asChild>
@@ -2542,7 +2616,7 @@ index d834efe1b..37e2e2629 100644
                    {avatar}
                  </button>
                </DropdownMenuTrigger>
-@@ -88,19 +91,16 @@ export function SidebarUserSection({
+@@ -88,19 +96,21 @@ export function SidebarUserSection({
                </div>
              </DropdownMenuLabel>
              <DropdownMenuSeparator />
@@ -2555,7 +2629,12 @@ index d834efe1b..37e2e2629 100644
 -            </DropdownMenuItem>
 -            <DropdownMenuItem asChild>
 -              <Link href="/dashboard/settings" onClick={onNavigate}>
-+              <Link href="/dashboard/settings" aria-current={pathname === '/dashboard/settings' ? 'page' : undefined} onClick={onNavigate}>
++              <Link
++                href="/dashboard/settings"
++                aria-current={settingsAriaCurrent}
++                onClick={onNavigate}
++                className={settingsActiveClass}
++              >
                  <Settings className="w-4 h-4 mr-2" />
                  <T>Settings</T>
                </Link>
@@ -2566,7 +2645,7 @@ index d834efe1b..37e2e2629 100644
              <DropdownMenuItem onClick={onSignOut}>
                <LogOut className="w-4 h-4 mr-2" />
                <T>Sign out</T>
-@@ -115,7 +115,7 @@ export function SidebarUserSection({
+@@ -115,7 +125,7 @@ export function SidebarUserSection({
      <div className="p-3 border-t border-overlay/5">
        <DropdownMenu>
          <DropdownMenuTrigger asChild>
@@ -2575,7 +2654,7 @@ index d834efe1b..37e2e2629 100644
              {avatar}
              <AnimatePresence mode="wait">
                {!isCollapsed && (
-@@ -144,8 +144,9 @@ export function SidebarUserSection({
+@@ -144,8 +154,9 @@ export function SidebarUserSection({
            </button>
          </DropdownMenuTrigger>
          <DropdownMenuContent
@@ -2587,13 +2666,12 @@ index d834efe1b..37e2e2629 100644
            sideOffset={12}
            className="w-56"
          >
-@@ -158,21 +159,10 @@ export function SidebarUserSection({
+@@ -158,31 +169,21 @@ export function SidebarUserSection({
              </div>
            </DropdownMenuLabel>
            <DropdownMenuSeparator />
-+          {/* HRM patch 0036: no Account link. That page repeats Settings > General and the Home counts. */}
-           <DropdownMenuItem asChild>
-             <Link
+-          <DropdownMenuItem asChild>
+-            <Link
 -              href="/dashboard/account"
 -              onClick={onNavigate}
 -              className={cn(
@@ -2604,14 +2682,19 @@ index d834efe1b..37e2e2629 100644
 -              <T>Account</T>
 -            </Link>
 -          </DropdownMenuItem>
--          <DropdownMenuItem asChild>
--            <Link
--              href="/dashboard/settings"
-+              href="/dashboard/settings" aria-current={pathname === '/dashboard/settings' ? 'page' : undefined}
++          {/* HRM patch 0036: no Account link. That page repeats Settings > General and the Home counts. */}
+           <DropdownMenuItem asChild>
+             <Link
+               href="/dashboard/settings"
++              aria-current={settingsAriaCurrent}
                onClick={onNavigate}
-               className={cn(
-                 pathname.startsWith('/dashboard/settings') && 'text-accent-cyan'
-@@ -183,6 +173,8 @@ export function SidebarUserSection({
+-              className={cn(
+-                pathname.startsWith('/dashboard/settings') && 'text-accent-cyan'
+-              )}
++              className={settingsActiveClass}
+             >
+               <Settings className="w-4 h-4 mr-2" />
+               <T>Settings</T>
              </Link>
            </DropdownMenuItem>
            <DropdownMenuSeparator />
@@ -2755,7 +2838,7 @@ index 000000000..e58cf6be7
 +});
 diff --git a/components/hrm/SectionNavigation.tsx b/components/hrm/SectionNavigation.tsx
 new file mode 100644
-index 000000000..dc061c667
+index 000000000..920ccdf90
 --- /dev/null
 +++ b/components/hrm/SectionNavigation.tsx
 @@ -0,0 +1,19 @@
@@ -2773,8 +2856,8 @@ index 000000000..dc061c667
 +  if (!pages.length) return null;
 +  return <nav aria-label={pages[0].name === 'Inventory' ? 'Apps pages' : 'Activity pages'} className="mb-5 flex flex-wrap gap-1 border-b border-overlay/10 pb-3">{pages.map(page => {
 +    const active = path === page.href || path.startsWith(page.href + '/');
-+    return <Link key={page.href} href={page.href} aria-current={active ? path === page.href ? 'page' : 'location' : undefined} className={`relative rounded-lg px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan ${active ? 'text-accent-cyan' : 'text-text-secondary hover:bg-overlay/5 hover:text-text-primary'}`}>
-+      {active && <motion.span layoutId={reduced ? undefined : 'section-page'} transition={reduced ? { duration: 0 } : { duration: 0.15 }} className="absolute inset-0 rounded-lg bg-accent-cyan/10" aria-hidden="true" />}<span className="relative">{page.name}</span>
++    return <Link key={page.href} href={page.href} aria-current={active ? path === page.href ? 'page' : 'location' : undefined} className={`relative rounded-lg px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan ${active ? 'text-accent-cyan dark:text-accent-cyan-bright font-semibold' : 'text-text-secondary hover:bg-overlay/5 hover:text-text-primary'}`}>
++      {active && <motion.span layoutId={reduced ? undefined : 'section-page'} transition={reduced ? { duration: 0 } : { duration: 0.15 }} className="absolute inset-0 rounded-lg bg-accent-cyan/12 dark:bg-accent-cyan/20 ring-1 ring-inset ring-accent-cyan/25 dark:ring-accent-cyan/35" aria-hidden="true" />}<span className="relative">{page.name}</span>
 +    </Link>;
 +  })}</nav>;
 +}
@@ -4298,7 +4381,7 @@ index 2e3513b5d..34010cfa1 100644
            )}
          >
 diff --git a/components/dashboard/SidebarNavItem.tsx b/components/dashboard/SidebarNavItem.tsx
-index 4514623bb..2abccc5e3 100644
+index 4514623bb..c8072d59f 100644
 --- a/components/dashboard/SidebarNavItem.tsx
 +++ b/components/dashboard/SidebarNavItem.tsx
 @@ -4,6 +4,7 @@ import Link from 'next/link';
@@ -4309,7 +4392,7 @@ index 4514623bb..2abccc5e3 100644
  import { listItem } from '@/lib/animations/variants';
  import {
    Tooltip,
-@@ -37,16 +38,14 @@ export function SidebarNavItem({
+@@ -37,33 +38,31 @@ export function SidebarNavItem({
    const pathname = usePathname();
    const prefersReducedMotion = useReducedMotion();
  
@@ -4328,6 +4411,35 @@ index 4514623bb..2abccc5e3 100644
          className={cn(
            'group relative flex items-center gap-3 rounded-lg transition-colors duration-150',
            isCollapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2.5',
+           isActive
+-            ? 'bg-accent-cyan/8 text-text-primary'
++            ? 'bg-accent-cyan/12 dark:bg-accent-cyan/20 text-text-primary ring-1 ring-inset ring-accent-cyan/20 dark:ring-accent-cyan/35'
+             : 'text-text-secondary hover:text-text-primary hover:bg-overlay/[0.04]'
+         )}
+       >
+         {isActive && (
+-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-accent-cyan rounded-r-full shadow-glow-cyan" />
++          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-accent-cyan dark:bg-accent-cyan-bright rounded-r-full shadow-glow-cyan" />
+         )}
+ 
+         <Icon
+           className={cn(
+             'w-5 h-5 flex-shrink-0 relative z-10 transition-colors duration-150',
+             isActive
+-              ? 'text-accent-cyan'
++              ? 'text-accent-cyan dark:text-accent-cyan-bright'
+               : 'group-hover:text-accent-cyan-bright'
+           )}
+         />
+@@ -78,7 +77,7 @@ export function SidebarNavItem({
+               transition={{ duration: 0.15 }}
+               className={cn(
+                 'font-medium relative z-10 whitespace-nowrap overflow-hidden',
+-                isActive ? 'text-accent-cyan-bright' : ''
++                isActive ? 'text-accent-cyan dark:text-accent-cyan-bright font-semibold' : ''
+               )}
+             >
+               {name}
 @@ -86,6 +85,7 @@ export function SidebarNavItem({
            )}
          </AnimatePresence>
@@ -4336,3 +4448,136 @@ index 4514623bb..2abccc5e3 100644
          {!isCollapsed && badge}
        </Link>
      </motion.div>
+diff --git a/components/dashboard/__tests__/navigation-active-states.test.ts b/components/dashboard/__tests__/navigation-active-states.test.ts
+new file mode 100644
+index 000000000..6f18969a3
+--- /dev/null
++++ b/components/dashboard/__tests__/navigation-active-states.test.ts
+@@ -0,0 +1,127 @@
++// @vitest-environment happy-dom
++import { act, createElement, type ReactNode } from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { Package } from 'lucide-react';
++
++const nav = vi.hoisted(() => ({ pathname: '/dashboard/updates' }));
++vi.mock('next/navigation', () => ({ usePathname: () => nav.pathname }));
++vi.mock('next/link', () => ({
++  default: ({ href, children, ...props }: { href: string; children: ReactNode; [k: string]: unknown }) =>
++    createElement('a', { href, ...props }, children),
++}));
++vi.mock('gt-next', () => ({ T: ({ children }: { children: ReactNode }) => children }));
++vi.mock('framer-motion', async () => {
++  const { createElement: h } = await import('react');
++  const strip = (tag: string) => ({ children, className, 'aria-hidden': ariaHidden }: { children?: ReactNode; className?: string; 'aria-hidden'?: boolean }) =>
++    h(tag, { className, 'aria-hidden': ariaHidden }, children);
++  return {
++    motion: { div: strip('div'), span: strip('span') },
++    AnimatePresence: ({ children }: { children: ReactNode }) => children,
++    useReducedMotion: () => true,
++  };
++});
++vi.mock('@/components/ui/tooltip', () => ({
++  Tooltip: ({ children }: { children: ReactNode }) => children,
++  TooltipTrigger: ({ children }: { children: ReactNode }) => children,
++  TooltipContent: () => null,
++}));
++vi.mock('@/components/ui/dropdown-menu', async () => {
++  const { createElement: h } = await import('react');
++  const pass = ({ children }: { children: ReactNode }) => h('div', null, children);
++  return {
++    DropdownMenu: pass,
++    DropdownMenuTrigger: pass,
++    DropdownMenuContent: pass,
++    DropdownMenuItem: pass,
++    DropdownMenuSeparator: () => null,
++    DropdownMenuLabel: pass,
++  };
++});
++vi.mock('@/components/hrm/ThemeMenuItems', () => ({ ThemeMenuItems: () => null }));
++vi.mock('@/stores/profile-store', () => ({
++  useProfileStore: (selector: (s: { profileImage: string | null }) => unknown) => selector({ profileImage: null }),
++}));
++
++import { SidebarNavItem } from '../SidebarNavItem';
++import { SidebarUserSection } from '../SidebarUserSection';
++import { SectionNavigation } from '@/components/hrm/SectionNavigation';
++
++(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++
++let root: Root;
++beforeEach(() => {
++  const node = document.createElement('div');
++  document.body.append(node);
++  root = createRoot(node);
++});
++afterEach(async () => {
++  await act(async () => root.unmount());
++  document.body.innerHTML = '';
++});
++
++describe('Navigation active states and dark-mode contrast', () => {
++  it('applies high-contrast dark-mode highlight classes to active SidebarNavItem', async () => {
++    nav.pathname = '/dashboard/updates';
++    await act(async () => root.render(createElement(SidebarNavItem, {
++      name: 'App updates',
++      href: '/dashboard/updates',
++      icon: Package,
++      isCollapsed: false,
++    })));
++    const link = document.querySelector('a[href="/dashboard/updates"]')!;
++    expect(link.getAttribute('aria-current')).toBe('page');
++    expect(link.className).toContain('dark:bg-accent-cyan/20');
++    expect(link.className).toContain('dark:ring-accent-cyan/35');
++    expect(link.innerHTML).toContain('dark:text-accent-cyan-bright');
++
++    // Child route under Apps uses aria-current="location"
++    nav.pathname = '/dashboard/apps';
++    await act(async () => root.render(createElement(SidebarNavItem, {
++      name: 'Apps',
++      href: '/dashboard/inventory',
++      icon: Package,
++      isCollapsed: true,
++    })));
++    const appsLink = document.querySelector('a[href="/dashboard/inventory"]')!;
++    expect(appsLink.getAttribute('aria-current')).toBe('location');
++    expect(appsLink.className).toContain('dark:bg-accent-cyan/20');
++  });
++
++  it('unifies collapsed and expanded Settings active state in SidebarUserSection', async () => {
++    nav.pathname = '/dashboard/settings';
++    for (const isCollapsed of [false, true]) {
++      await act(async () => root.render(createElement(SidebarUserSection, {
++        user: { name: 'Staff Member', email: 'staff@example.test' },
++        isCollapsed,
++        onSignOut: vi.fn(),
++      })));
++      const settingsLink = document.querySelector('a[href="/dashboard/settings"]')!;
++      expect(settingsLink.getAttribute('aria-current')).toBe('page');
++      expect(settingsLink.className).toContain('bg-accent-cyan/12');
++      expect(settingsLink.className).toContain('dark:bg-accent-cyan/20');
++      expect(settingsLink.className).toContain('dark:text-accent-cyan-bright');
++    }
++
++    nav.pathname = '/dashboard/settings/notifications';
++    await act(async () => root.render(createElement(SidebarUserSection, {
++      user: { name: 'Staff Member', email: 'staff@example.test' },
++      isCollapsed: true,
++      onSignOut: vi.fn(),
++    })));
++    const subLink = document.querySelector('a[href="/dashboard/settings"]')!;
++    expect(subLink.getAttribute('aria-current')).toBe('location');
++    expect(subLink.className).toContain('dark:bg-accent-cyan/20');
++  });
++
++  it('gives SectionNavigation active tabs strong light and dark contrast', async () => {
++    nav.pathname = '/dashboard/inventory';
++    await act(async () => root.render(createElement(SectionNavigation)));
++    const activeTab = document.querySelector('a[href="/dashboard/inventory"]')!;
++    const inactiveTab = document.querySelector('a[href="/dashboard/apps"]')!;
++    expect(activeTab.getAttribute('aria-current')).toBe('page');
++    expect(activeTab.className).toContain('dark:text-accent-cyan-bright');
++    expect(activeTab.innerHTML).toContain('dark:bg-accent-cyan/20');
++    expect(inactiveTab.getAttribute('aria-current')).toBeNull();
++  });
++});
