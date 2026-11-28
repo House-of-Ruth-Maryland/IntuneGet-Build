@@ -1647,7 +1647,7 @@ index 000000000..7c9442fac
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..157c94eff
+index 000000000..7aa64a328
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,406 @@
@@ -2039,7 +2039,7 @@ index 000000000..157c94eff
 +    success: 'You can distinguish failed and cancelled outcomes and hide only the finished history you own, with audit records preserved.',
 +    caution: 'History controls do not stop active deployments or hide other staff’s records. Deployment trends describe deployment outcomes, not proof of installation on each computer.',
 +    related: ['install-results', 'app-activity', 'support'],
-+    troubleshoot: [{ problem: 'Export CSV failed', action: 'Could not export this report. Try again. means the export did not finish. Press Export CSV again.' }, { problem: 'Another staff member’s deployment is absent', action: 'Choose All in tenant in Deployments or Reports. For an older one, press Show older deployments. Dismissed and cleared deployments stay hidden.' }, { problem: 'A count or status filter in Deployments looks too low', action: 'Counts and filters cover only the loaded deployments. Press Show older deployments until the button no longer shows.' }, { problem: 'There is no clear-history action', action: 'Active has no clear action. Choose a finished-outcome filter with at least one of your own deployments; other staff’s history cannot be cleared.' }],
++    troubleshoot: [{ problem: 'Export CSV failed', action: 'Could not export this report. Try again. means the export did not finish. Press Export CSV again.' }, { problem: 'Another staff member’s deployment is absent', action: 'Choose All in tenant in Deployments or Reports. For an older one, press Show older deployments. Dismissed and cleared deployments stay hidden.' }, { problem: 'A count or status filter in Deployments looks too low', action: 'Counts and filters cover only the loaded deployments. Show older deployments loads 50 more. The list holds up to 2,000 deployments.' }, { problem: 'There is no clear-history action', action: 'Active has no clear action. Choose a finished-outcome filter with at least one of your own deployments; other staff’s history cannot be cleared.' }],
 +    referenceGroups: [reference('Report scope and export', [0, 1]), reference('Deployments scope and older history', [2, 3, 5]), reference('Outcomes and history controls', [4, 6])],
 +  },
 +  {

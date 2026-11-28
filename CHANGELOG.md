@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Item 105 follow-up: hide Show older deployments once 2,000 rows are loaded and correct
+  the Reports Help explanation of the list limit; retain the current release changes.
+
 - Inventory separates group changes from copies with no install assignments and shows the changed assignments on demand. The dashboard exposes page and guide search on phones, labels tenant update policies in the app workspace, and shares clearer selection states across filters, Settings and Reports. Deployments now shows each status count once. Home keeps the chosen scope when opening Pending or Failed deployments. Notification actions identify the webhook and report errors.
 
 - Group change notices fixed (item 122 follow-up). After an Edit groups save, the app page's
