@@ -11,7 +11,7 @@ index 000000000..ceaaa2f16
 +}
 diff --git a/components/hrm/help/HelpVisual.tsx b/components/hrm/help/HelpVisual.tsx
 new file mode 100644
-index 000000000..a67ae60d8
+index 000000000..c53a8812b
 --- /dev/null
 +++ b/components/hrm/help/HelpVisual.tsx
 @@ -0,0 +1,95 @@
@@ -92,7 +92,7 @@ index 000000000..a67ae60d8
 +            {guideId === 'deploying' && step.screen === 'catalog' && <ExampleRow label="Curated apps" value="Tested releases · App catalog returns to catalog"/>}
 +            {['catalog', 'deployment-list'].includes(step.screen) && (installSettings ? <>{row('Toolkit windows', 'No toolkit windows')}{row('App setup and checks', 'Disk space check remains active')}{row('Staff experience', 'Saved postponement is inactive')}<p className="mt-3 text-xs text-text-muted">Vendor installer switches and Intune notifications are separate. Switching mode keeps saved values.</p></> : <>{row('Who gets it', 'Pilot device group')}{guideId === 'deploying' && <ExampleRow label="Install dates" value="As soon as possible · Set install dates"/>}{row('When a new version comes out', 'Notify only')}{guideId === 'deploying' && <ExampleRow label="Curated" value="Installation settings are provided by the IntuneGet catalog."/>}</>)}
 +            {step.screen === 'updates' && (manualReview ? <>{row('Effective update settings', 'Example app · version 1 to 2')}{row('Who gets it', 'Example pilot group · Required · Edit groups')}{row('When it installs', 'Install dates · Edit dates')}{row('How it installs', 'Install prompts · Restart · Settings source')}{row('Confirm replacement deadlines', 'Paused for IT')}{row('Retain the existing deadlines', 'Availability and other settings stay unchanged')}{row('Choose a new deadline', 'Future date for affected required assignments')}{row('Send update to Intune', 'Single app; unassigned asks to confirm; bulk uses Update all')}<p className="mt-3 text-xs text-text-muted">Edit groups and Edit dates refresh this review inline. Unassigned apps require Assign groups or confirmation. Expired required deadlines need explicit IT confirmation. Single app uses Send update to Intune; bulk uses Update all. Reviewing starts nothing. Device installation follows assignments and check-in.</p></> : <>{row('Checked', 'New version checks · hover for the schedule')}<ExampleRow label="Available updates" value="Example app · Minor · 1.2.0 → 1.3.0"/>{row('Publishing window:', 'Example hours, Maryland time · On')}{row('How automatic updates install', 'Users can postpone · 3 days · 1 app exception')}{guideId === 'startup-beta' && row('Startup install results', 'Beta · shown while a Beta package is recorded')}{guideId === 'updates' && step.focus !== 'Check for app updates' && <ExampleRow label="Check for app updates" value="May start enabled automatic updates"/>}{guideId === 'pilot-rollouts' && <ExampleRow label="Refresh pilot status" value="Read pilot status only"/>}</>)}
-+            {step.screen === 'inventory' && (groupReview ? <>{row('Group changes to review', 'Expand Example app')}{row('Check now', 'Read current assignments')}{row('Previously', 'Removed assignments only')}{row('Now', 'Added assignments only')}{row('Assignment details', 'Expand settings or unavailable group name')}{row('Open app', 'Review live groups')}{row('Mark reviewed', 'Acknowledge this change')}<ExampleRow label="Copies no longer in Intune" value="Collapsed list"/><ExampleRow label="No install assignments" value="Collapsed list"/></> : restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save for this app', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{step.focus === 'Edit groups' && target}{step.focus === 'Review change' && <><ExampleRow label="Groups on this app" value="Example pilot group · Required"/><ExampleRow label="Add a group" value="Find an Entra group"/>{target}<ExampleRow label="Check this change" value="Read it, then Save to Intune"/></>}{step.focus === 'Install dates' ? target : <ExampleRow label="Install dates" value="Read from Intune for each group"/>}{row('Install behavior', 'Saved installer settings')}{row('What employees see', 'Saved installer experience')}{row('Future updates', 'Future automatic packages only')}{step.focus === 'Change how it installs' && <><ExampleRow label="How it installs" value="Users can postpone · 3 days"/>{target}</>}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
++            {step.screen === 'inventory' && (groupReview ? <>{row('Group changes to review', 'Expand Example app')}{row('Check now', 'Read current assignments')}{row('Previously', 'Removed assignments only')}{row('Now', 'Added assignments only')}{row('Assignment details', 'Expand settings or unavailable group name')}{row('Open app', 'Review live groups')}{row('Mark reviewed', 'Acknowledge this change')}<ExampleRow label="Copies no longer in Intune" value="Collapsed list"/><ExampleRow label="No install assignments" value="Collapsed list"/></> : restartEditor ? <>{row('Install after next restart · Beta', 'App-scoped pilot only')}{row('Find a pilot group', 'Example pilot security group')}{row('Save for this app', 'Saves rule and target; no deployment')}{row('Saved target', 'Example pilot security group')}{row('Start restart Beta pilot', 'Required for selected group only')}<p className="mt-3 text-xs text-text-muted">Broad automatic updates held. Previous wider assignments remain intact. Local startup testing only; Intune delivery unverified.</p></> : actionsPanel ? <>{row('Install results', 'Check received reports')}{target}{row('Groups', isRemoval ? 'Review removal assignments' : 'Required / Available')}</> : <>{row('Install results', 'Check received reports')}{row('Current release', 'Saved in Intune')}{row('Who gets it', isRemoval ? 'Review removal assignments' : 'Required / Available')}{step.focus === 'Edit groups' && target}{step.focus === 'Review change' && <><ExampleRow label="Groups on this app" value="Example pilot group · Required"/><ExampleRow label="Add a group" value="Find an Entra group"/>{target}<ExampleRow label="Check this change" value="Read it, then Save to Intune"/></>}{step.focus === 'Install dates' ? target : <ExampleRow label="Install dates" value="Live per-group dates · Install dates to edit"/>}{row('Install behavior', 'Saved installer experience · hover for details')}{row('Future updates', 'Future automatic packages only')}<ExampleRow label="Tenant update policy" value="Change Auto-update, Notify only or Ignore here"/>{step.focus === 'Change how it installs' && <><ExampleRow label="How it installs" value="Users can postpone · 3 days"/>{target}</>}{row('Timing and policy details', 'Expand for timing limits')}{row('App activity', 'Expand recorded changes')}</>)}
 +            {step.screen === 'discovered' && <>{row('How this works', 'Open the collapsed guide')}{row('App found on computers', 'Review match and eligibility')}</>}
 +            {step.screen === 'deployments' && <div className="my-4 rounded-lg border border-overlay/10 bg-overlay/[0.02] p-3"><p className="text-xs font-medium text-text-primary">All · Active · Completed · Failed · Cancelled</p><p className="mt-1 text-xs text-text-muted">Status buttons include loaded counts.</p><p className="mt-1 text-xs leading-relaxed text-text-muted">Read the recorded status. Installing on computers is a separate result.</p></div>}
 +            {step.screen === 'reports' && <><ExampleRow label="Report period" value="7 days · 30 days · 90 days · 1 year"/><ExampleRow label="Scope" value="All in tenant / My deployments"/></>}
@@ -112,10 +112,10 @@ index 000000000..a67ae60d8
 +}
 diff --git a/components/hrm/help/HelpWorkspace.test.ts b/components/hrm/help/HelpWorkspace.test.ts
 new file mode 100644
-index 000000000..e907584f8
+index 000000000..47786b9dd
 --- /dev/null
 +++ b/components/hrm/help/HelpWorkspace.test.ts
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,228 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot, type Root } from 'react-dom/client';
@@ -252,7 +252,8 @@ index 000000000..e907584f8
 +  await act(async () => button('Next step').click());
 +  const visual = document.querySelector('[aria-label^="Visual reference:"]')!;
 +  const text = visual.textContent!;
-+  for (const label of ['Current release', 'Future updates', 'How it installs', 'Who gets it', 'Install dates', 'Install behavior', 'What employees see', 'Timing and policy details', 'App activity']) expect(text).toContain(label);
++  for (const label of ['Current release', 'Future updates', 'Tenant update policy', 'How it installs', 'Who gets it', 'Install dates', 'Install behavior', 'Timing and policy details', 'App activity']) expect(text).toContain(label);
++  expect(text).not.toContain('What employees see');
 +  expect(visual.getAttribute('aria-label')).toContain('Change how it installs');
 +  expect(text).toContain('App workspace · Future updates · Change how it installs');
 +  expect(text.indexOf('Future automatic packages only')).toBeLessThan(text.indexOf('Change how it installs', text.indexOf('Future automatic packages only')));
@@ -470,7 +471,7 @@ index 000000000..fdf7f6b35
 +}
 diff --git a/lib/hrm/__tests__/help-content.test.ts b/lib/hrm/__tests__/help-content.test.ts
 new file mode 100644
-index 000000000..a21d4b47a
+index 000000000..2b8567fde
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-content.test.ts
 @@ -0,0 +1,249 @@
@@ -551,9 +552,9 @@ index 000000000..a21d4b47a
 +    // HRM patch 0058: the panel's button is Refresh dates; the app header icon keeps Reload from Intune.
 +    expect(timing.points.join(' ')).toContain('Refresh dates button reloads only its groups and dates');
 +    const policy = HELP_SECTIONS.find((s) => s.id === 'automatic-installation-policy')!.points.join(' ');
-+    for (const label of ['Current release', 'Future updates', 'Change how it installs', 'What staff see', 'Install behavior', 'What employees see', 'Timing and policy details']) expect(policy).toContain(label);
++    for (const label of ['Current release', 'Future updates', 'Tenant update policy', 'Change how it installs', 'What staff see', 'Install behavior', 'Restart after installation', 'Timing and policy details']) expect(policy).toContain(label);
 +    // One name per control: the labels replaced on the app page, App updates and Settings are gone from every section.
-+    for (const old of ['Edit next rollout', 'Next automatic update', 'Edit assignments', 'Installation timing', 'Effective install rule', 'Publish timing', 'Check for new app versions', 'Update behavior', 'Review next rollout', 'in Updates', 'Updates opens']) expect(all).not.toContain(old);
++    for (const old of ['Edit next rollout', 'Next automatic update', 'Edit assignments', 'Installation timing', 'Effective install rule', 'Publish timing', 'Check for new app versions', 'Update behavior', 'Review next rollout', 'What employees see', 'in Updates', 'Updates opens']) expect(all).not.toContain(old);
 +    const points = (id: string) => HELP_SECTIONS.find((s) => s.id === id)!.points.join(' ');
 +    expect(points('automatic-installation-policy')).not.toContain('When it installs');
 +    expect(points('installation-timing')).not.toContain('When it installs');
@@ -725,7 +726,7 @@ index 000000000..a21d4b47a
 +});
 diff --git a/lib/hrm/__tests__/help-guides.test.ts b/lib/hrm/__tests__/help-guides.test.ts
 new file mode 100644
-index 000000000..c330501ed
+index 000000000..1ee2a5fee
 --- /dev/null
 +++ b/lib/hrm/__tests__/help-guides.test.ts
 @@ -0,0 +1,186 @@
@@ -853,7 +854,7 @@ index 000000000..c330501ed
 +  expect(prose('installation-timing')).toContain('Yes. Install dates changes one group’s dates on the version in Intune now');
 +  // The renamed controls are never given as current steps or focus labels.
 +  const current = HELP_GUIDES.flatMap(item => [item.title, item.summary, ...item.before, item.success, item.caution ?? '', ...item.steps.flatMap(step => [step.instruction, step.focus, step.result]), ...item.troubleshoot.flatMap(issue => [issue.problem, issue.action])]).join(' ');
-+  for (const old of ['Edit next rollout', 'Next automatic update', 'Edit assignments', 'Effective install rule', 'Publish timing', 'Check for new app versions', 'Update behavior card', 'In Updates', 'Installation timing']) expect(current).not.toContain(old);
++  for (const old of ['Edit next rollout', 'Next automatic update', 'Edit assignments', 'Effective install rule', 'Publish timing', 'Check for new app versions', 'Update behavior card', 'What employees see', 'In Updates', 'Installation timing']) expect(current).not.toContain(old);
 +  expect(prose('automatic-installation-policy')).not.toContain('When it installs');
 +  expect(prose('installation-timing')).not.toContain('When it installs');
 +  expect(prose('updating')).toContain('Who gets it, When it installs and How it installs');
@@ -1001,10 +1002,10 @@ index 000000000..6990bc2e9
 +});
 diff --git a/lib/hrm/help-content.ts b/lib/hrm/help-content.ts
 new file mode 100644
-index 000000000..0b7aa5a42
+index 000000000..a6272abdf
 --- /dev/null
 +++ b/lib/hrm/help-content.ts
-@@ -0,0 +1,657 @@
+@@ -0,0 +1,658 @@
 +/**
 + * HRM patch: the Help page's content, written for HRM IT. Kept as data so it's
 + * easy to edit in one place.
@@ -1125,7 +1126,7 @@ index 000000000..0b7aa5a42
 +    points: [
 +      'The server checks for new app versions at 3:30 AM and 3:30 PM, and sends update alerts at 4:00 AM and 4:00 PM (Maryland time).',
 +      'Authorized staff in your tenant share App updates, its counts and badges, the Home update card and Update history. Dismissing an update changes the shared list. Personal notification preferences stay personal.',
-+      'Each app’s Notify only, Auto-update or Ignore rule applies across your tenant. Notify only shows versions for staff review. Change the rule with the card’s bottom-left policy pill, named Automatic update policy: followed by its current rule.',
++      'Each app’s Notify only, Auto-update or Ignore rule applies across your tenant. Notify only shows versions for staff review. Change the rule with the card’s bottom-left Automatic update policy: pill, or under Future updates in the app workspace.',
 +      'The Automatic updates bar below the list shows how many apps have Automatic updates on, such as 12 apps with Automatic updates on. Press it to open the Auto-update on list and change each app there.',
 +      'Pause automatic updates, in Edit publishing window, holds automatic updates for every app without changing these app rules.',
 +      'Apps set to Ignore are left out of App updates and the Teams update alert. To bring one back, press Ignored apps in App updates and choose Notify only or Auto-update for it.',
@@ -1314,20 +1315,20 @@ index 000000000..0b7aa5a42
 +  {
 +    id: 'automatic-installation-policy',
 +    title: 'How automatic updates install',
-+    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Future updates', 'Saved settings', 'Who gets it', 'Install behavior', 'Restart after installation', 'What employees see', 'Timing and policy details', 'App activity', 'Install results', 'Edit shared policy', 'Change how it installs', 'How it installs', 'What staff see', 'When it deploys to Intune', 'Change the publishing window in App updates', 'Review future updates', 'Review current copy and install dates', 'Find a page or guide', 'Apply to', 'All apps with Auto-update on', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot', 'How automatic updates install', 'App exceptions', 'Edit app exception', 'Startup install results'],
++    uiLabels: ['App updates', 'Deployments', 'Open app workspace', 'Inventory', 'Current release', 'Future updates', 'Saved settings', 'Tenant update policy', 'Who gets it', 'Install behavior', 'Restart after installation', 'Timing and policy details', 'App activity', 'Install results', 'Edit shared policy', 'Change how it installs', 'How it installs', 'What staff see', 'When it deploys to Intune', 'Change the publishing window in App updates', 'Review future updates', 'Review current copy and install dates', 'Find a page or guide', 'Apply to', 'All apps with Auto-update on', 'Use shared policy', 'Let users install now or postpone', 'Days users can postpone', 'Install automatically', 'Use each app’s saved settings', 'Save shared policy', 'Save for this app', 'Update history', 'Deployed to Intune', 'Install dates', 'Installation policy for this release', 'Install after next restart · Beta', 'Start restart Beta pilot', 'How automatic updates install', 'App exceptions', 'Edit app exception', 'Startup install results'],
 +    flow: ['Open app workspace', 'Review current saved version', 'Press Change how it installs', 'Review saved rule', 'Save for this app'],
 +    points: [
 +      'In Deployments, press Open app workspace. In App updates, press the app name on its card, or choose Open app workspace from its More actions menu (…). Inventory opens the app, with Install results above Current release and Future updates.',
 +      'How automatic updates install controls prompts and postponement in packages. Future updates and its Saved settings describe future automatic updates; they do not describe what the current installed copy will do.',
-+      'Tenant update policy is shared by IT admins in this tenant. While a verified app uses Auto-update, Future updates shows How it installs with Change how it installs beside it. Find a page or guide offers Review future updates and Review current copy and install dates; both jump within this app.',
++      'Under Future updates, Tenant update policy lets IT admins change Auto-update, Notify only or Ignore right in the workspace. While Auto-update is on, How it installs shows Change how it installs beside it.',
 +      'Change how it installs is scoped to this app. Clear Use shared policy to edit an exception. For the shared rule, open App updates, press Edit shared policy in the Automatic updates bar below the list and select All apps with Auto-update on in Apply to.',
 +      'Under What staff see, choose Let users install now or postpone and Days users can postpone. Save for this app saves this app’s rule. To restore inheritance, select Use shared policy and press Use shared policy. Save shared policy saves the shared rule from App updates.',
 +      'Use each app’s saved settings preserves existing configurations and is the default; restart Beta is off by default. It does not mean silent installation. Install automatically is separate. Current and queued packages keep their settings.',
 +      'Postponement starts at each computer’s first install attempt, not when the server finds or deploys a version. Offline computers start later. After expiry, the next Intune attempt enforces installation, without an exact appointment.',
 +      'Postponement uses the installer toolkit. Prompts may be skipped when nobody is signed in or no app needs closing. Retry and reminder times follow Intune attempts, not an employee-selected time.',
-+      'An employee time picker, absolute release cutoff and bounded startup fallback are unavailable. What employees see describes the saved installer experience; it does not schedule installation or save employee choices.',
++      'An employee time picker, absolute release cutoff and bounded startup fallback are unavailable. Install behavior describes the saved installer experience; it does not schedule installation or save employee choices.',
 +      'Ordinary rules affect future automatic packages; manual updates and ordinary pilots keep their reviewed settings. Restart Beta requires an enabled validated startup workflow, holds broad automatic updates and requires Start restart Beta pilot. Saving a rule never starts deployment or rewrites a current package.',
-+      'Current release shows Who gets it, Install dates, Install behavior, Restart after installation and What employees see. Install behavior is built into the package of the version in Intune. Expand Timing and policy details for timing limits, or App activity for recorded changes.',
++      'Current release shows Who gets it, live Install dates, Install behavior and Restart after installation. Install behavior and Restart after installation explain themselves on hover or focus. Expand Timing and policy details for timing limits, or App activity for recorded changes.',
 +      'Update history records packaging and deployment. Deployed to Intune means the app reached Intune, not that computers installed it. The workspace shows live aggregate results and their last check time.',
 +      'Installation policy for this release in expanded Update history is the snapshot saved when packaging was queued. Each computer’s postponement and deadlines are not reported there.',
 +      'Install dates edits one group’s dates and restart grace on the current Intune copy. When enabled, reviewed manual updates can retain or explicitly reset assignment dates. Login-only installation is unavailable.',
@@ -1335,6 +1336,7 @@ index 000000000..0b7aa5a42
 +      'Future updates also shows Who gets it and When it deploys to Intune. Change the publishing window in App updates goes to the Automatic updates bar and highlights it. Nothing under Future updates changes the current release.',
 +      'The Automatic updates bar reads How automatic updates install: the shared rule, then how many apps have their own, such as 1 app exception. In Edit shared policy, App exceptions lists each with Edit app exception.',
 +      'Startup install results (Beta), at the bottom of Edit shared policy, opens the startup Beta results (see Startup installation beta).',
++      'Find a page or guide offers Review future updates and Review current copy and install dates; both jump within this app workspace.',
 +    ],
 +    links: [{ label: 'Open App updates', href: '/dashboard/updates' }, { label: 'Open Inventory', href: '/dashboard/inventory' }],
 +  },
@@ -1664,7 +1666,7 @@ index 000000000..0b7aa5a42
 +];
 diff --git a/lib/hrm/help-guides.ts b/lib/hrm/help-guides.ts
 new file mode 100644
-index 000000000..f9edb7f1a
+index 000000000..76dc051c7
 --- /dev/null
 +++ b/lib/hrm/help-guides.ts
 @@ -0,0 +1,406 @@
@@ -1736,7 +1738,7 @@ index 000000000..f9edb7f1a
 +    summary: 'Change one group’s Available from date, Must install by deadline or restart grace period on a copy already in Intune.', keywords: ['install dates', 'availability and deadline', 'availability', 'deadline', 'must install by', 'available from', 'restart grace', 'UTC', 'time zone', 'local time', 'timing', 'dates', 'when it installs', 'change install timing afterwards', 'after deploying'],
 +    start: inventory, before: ['Choose the app copy and group you intend to change.', 'These dates cannot change during a pilot or retirement.'],
 +    steps: [
-+      step('Read current dates', 'In Apps, open the app’s name in Inventory. Under Current release, press Install dates to read this copy’s groups and dates from Intune.', 'inventory', 'Install dates', 'The current dates appear for each Required and Available group.'),
++      step('Read current dates', 'In Apps, open the app’s name in Inventory. Under Current release, read live Install dates, then press Install dates to change a group’s dates or restart grace.', 'inventory', 'Install dates', 'The current dates appear for each Required and Available group.'),
 +      step('Choose dates', 'If there are several groups, choose one under Group. Press Edit dates, then set Available from and, for a Required group, Must install by. Confirm the Time zone.', 'inventory', 'Must install by', 'The selected group’s dates are ready for review.'),
 +      step('Review restart settings', 'If the app supports it, turn on Restart grace period and set Grace period, Countdown and Snooze in minutes. Check the clock times again if you changed Time zone.', 'inventory', 'Restart grace period', 'Restart settings match the selected group and app behavior.'),
 +      step('Save and read back', 'Press Save to Intune. The panel reads the dates back from Intune and shows them.', 'inventory', 'Save to Intune', 'Only the selected group’s dates and restart settings change.'),
@@ -1844,7 +1846,7 @@ index 000000000..f9edb7f1a
 +  },
 +  {
 +    id: 'automatic-installation-policy', category: 'updates', title: 'Set automatic installation choices',
-+    summary: 'Set how automatic updates install for all apps or one app; restart Beta requires a separately started pilot.', keywords: ['installation timing', 'how automatic updates install', 'what staff see', 'when computers install', 'app workspace', 'next rollout', 'edit next rollout', 'future updates', 'change how it installs', 'how it installs', 'effective install rule', 'publish timing', 'employee preview', 'Current release', 'Next automatic update', 'Who gets it', 'Install behavior', 'What employees see', 'Timing and policy details', 'choose time', 'absolute cutoff', 'shared policy', 'exception', 'postpone', 'three days', 'prompt', 'silent', 'automatic timing'],
++    summary: 'Set how automatic updates install for all apps or one app; restart Beta requires a separately started pilot.', keywords: ['installation timing', 'how automatic updates install', 'what staff see', 'when computers install', 'app workspace', 'next rollout', 'edit next rollout', 'future updates', 'change how it installs', 'how it installs', 'effective install rule', 'publish timing', 'employee preview', 'Current release', 'Next automatic update', 'Who gets it', 'Install behavior', 'What employees see', 'Tenant update policy', 'Timing and policy details', 'choose time', 'absolute cutoff', 'shared policy', 'exception', 'postpone', 'three days', 'prompt', 'silent', 'automatic timing'],
 +    start: updates, before: ['Ordinary rules affect future automatic packages. Restart Beta requires an enabled validated startup workflow, an app exception and a separate pilot start.', 'Current and queued packages keep their settings. Existing saved configurations are preserved.'],
 +    steps: [
 +      step('Open the policy', 'In App updates, press the app name on its card, or choose Open app workspace from its More actions menu (…). Read Install results, Current release and Future updates first.', 'updates', 'Open app workspace', 'Inventory opens the selected app workspace.'),
@@ -1854,10 +1856,10 @@ index 000000000..f9edb7f1a
 +      step('Check a deployed release', 'In Update history, expand the deployed version and read Installation policy for this release. Its install results show there and in Inventory.', 'updates', 'Installation policy for this release', 'You can separate a package’s saved rule from install results on computers.'),
 +    ],
 +    success: 'Future updates reflects the saved policy; the current copy and its live results remain separately visible.',
-+    caution: 'Postponement starts at each computer’s first install attempt and isn’t reported in Update history. Employee choose time, an absolute cutoff and bounded startup fallback are unavailable; What employees see describes the saved installer experience.',
++    caution: 'Postponement starts at each computer’s first install attempt and isn’t reported in Update history. Employee choose time, an absolute cutoff and bounded startup fallback are unavailable; Install behavior describes the saved installer experience.',
 +    related: ['update-schedule', 'installation-timing', 'startup-beta'],
-+    troubleshoot: [{ problem: 'Change how it installs is missing', action: 'It shows only while the tenant’s update policy for the app is Auto-update. Choose Auto-update for the app in App updates first.', guide: 'updates' }, { problem: 'An existing package did not change', action: 'Policy edits do not change queued or deployed packages. Check the release’s saved policy.' }, { problem: 'You need to see which apps have their own rule', action: 'In App updates, press Edit shared policy below the list. App exceptions lists each app with Edit app exception.' }, { problem: 'You need installation only after restart', action: 'Save the per-app startup Beta target, then use Start restart Beta pilot; saving alone does not deploy.', guide: 'startup-beta' }],
-+    referenceGroups: [reference('App workspace, scope and saving', [0, 1, 2, 3, 4, 5, 9, 10, 15]), reference('Shared policy and app exceptions on App updates', [16, 17]), reference('Postponement and prompts on computers', [6, 7, 8]), reference('Deployed release evidence and other timing controls', [11, 12, 13, 14])],
++    troubleshoot: [{ problem: 'Change how it installs is missing', action: 'It shows only while Tenant update policy is Auto-update. Switch the pill beside Tenant update policy to Auto-update (or change it in App updates).', guide: 'updates' }, { problem: 'An existing package did not change', action: 'Policy edits do not change queued or deployed packages. Check the release’s saved policy.' }, { problem: 'You need to see which apps have their own rule', action: 'In App updates, press Edit shared policy below the list. App exceptions lists each app with Edit app exception.' }, { problem: 'You need installation only after restart', action: 'Save the per-app startup Beta target, then use Start restart Beta pilot; saving alone does not deploy.', guide: 'startup-beta' }],
++    referenceGroups: [reference('App workspace, scope and saving', [0, 1, 2, 3, 4, 5, 9, 10, 15, 18]), reference('Shared policy and app exceptions on App updates', [16, 17]), reference('Postponement and prompts on computers', [6, 7, 8]), reference('Deployed release evidence and other timing controls', [11, 12, 13, 14])],
 +  },
 +  {
 +    id: 'update-schedule', category: 'updates', title: 'Control when automatic updates deploy',

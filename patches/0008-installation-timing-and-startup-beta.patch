@@ -1213,55 +1213,143 @@ index 000000000..ec4612cd0
 +}
 diff --git a/components/hrm/AppWorkspace.test.ts b/components/hrm/AppWorkspace.test.ts
 new file mode 100644
-index 000000000..23dd38bad
+index 000000000..f84d9c415
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.test.ts
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,180 @@
 +// @vitest-environment happy-dom
 +import { act, createElement } from 'react';
 +import { createRoot } from 'react-dom/client';
 +import { afterEach, expect, it, vi } from 'vitest';
-+const state = vi.hoisted(() => ({ otherTenant: false, policyTenant:'own',policyError:false, defer:false, attempt:null as any }));
-+vi.mock('@/hooks/use-inventory', () => ({ useInventoryIcon: () => ({data:null}), useAppDetails: () => ({ data: { app: { id: 'one', displayName: 'Fixture app', displayVersion: '1', installExperience: { deviceRestartBehavior: 'suppress' } } } }) }));
-+vi.mock('@/hooks/useAppInsights', () => ({ useAppInsights: () => ({ data: { appId:'one',family:'Vendor.App',latestAttempt:state.attempt,snapshot: { appId: 'one', wingetId: 'Vendor.App' } } }) }));
-+vi.mock('@/hooks/use-deployed-config', () => ({ useDeployedConfig: () => ({ deployedConfig: { psadtConfig: { deployMode: 'Silent',allowDefer:state.defer,deferTimes:3 } } }) }));
-+vi.mock('@/hooks/use-updates', () => ({ useUpdatePolicies: () => ({error:state.policyError?Error('read failed'):null, data: { policies: [{ id: 'policy',tenant_id:state.policyTenant, winget_id: 'Vendor.App', policy_type: 'auto_update' }] } }) }));
++
++const state = vi.hoisted(() => ({
++  otherTenant: false,
++  policyTenant: 'own',
++  policyError: false,
++  defer: false,
++  attempt: null as any,
++  assignments: [] as any[],
++  groupNames: {} as Record<string, string>,
++  pilots: [] as any[],
++  updatePolicy: vi.fn(async () => ({})),
++  refetchPolicies: vi.fn(async () => ({})),
++}));
++
++vi.mock('@/hooks/use-inventory', () => ({
++  useInventoryIcon: () => ({ data: null }),
++  useAppDetails: () => ({
++    data: {
++      app: {
++        id: 'one',
++        displayName: 'Fixture app',
++        displayVersion: '1',
++        installExperience: { deviceRestartBehavior: 'suppress' },
++        assignments: state.assignments,
++        assignmentGroupNames: state.groupNames,
++      },
++    },
++  }),
++}));
++vi.mock('@/hooks/useAppInsights', () => ({ useAppInsights: () => ({ data: { appId: 'one', family: 'Vendor.App', latestAttempt: state.attempt, snapshot: { appId: 'one', wingetId: 'Vendor.App' } } }) }));
++vi.mock('@/hooks/use-deployed-config', () => ({ useDeployedConfig: () => ({ deployedConfig: { psadtConfig: { deployMode: 'Silent', allowDefer: state.defer, deferTimes: 3 } } }) }));
++vi.mock('@/hooks/use-updates', () => ({
++  useUpdatePolicies: () => ({
++    error: state.policyError ? Error('read failed') : null,
++    data: { policies: [{ id: 'policy', tenant_id: state.policyTenant, winget_id: 'Vendor.App', policy_type: 'auto_update', is_enabled: true }] },
++    refetch: state.refetchPolicies,
++  }),
++  useUpdatePolicy: () => ({ updatePolicy: state.updatePolicy }),
++}));
 +vi.mock('@/hooks/useInstallationPolicy', () => ({ useInstallationPolicy: () => ({ data: { shared: { mode: 'prompt', days: 3 }, exceptions: [] } }) }));
 +vi.mock('@/hooks/useMspOptional', () => ({ useMspOptional: () => ({ isMspUser: true, selectedTenantId: state.otherTenant ? 'other' : 'own' }) }));
 +vi.mock('@/hooks/useMicrosoftAuth', () => ({ useMicrosoftAuth: () => ({ account: { tenantId: 'own' } }) }));
++vi.mock('@/components/updates/UpdatePolicySelector', () => ({
++  UpdatePolicySelector: ({ currentPolicy, onPolicyChange }: { currentPolicy?: string | null; onPolicyChange: (policy: 'notify' | 'auto_update') => Promise<void> }) =>
++    createElement('button', { 'data-policy-selector': currentPolicy ?? 'none', onClick: () => void onPolicyChange('notify') }, currentPolicy === 'auto_update' ? 'Auto-update' : 'Notify only'),
++}));
 +vi.mock('./InstallationPolicyPanel', () => ({ InstallationPolicyPanel: () => createElement('button', null, 'Change how it installs') }));
 +vi.mock('./EditAssignments', () => ({ EditAssignments: () => createElement('button', null, 'Edit groups') }));
-+vi.mock('./AppTimingPanel', () => ({ AppTimingPanel: () => createElement('div', null, 'Install dates') }));
++vi.mock('./AppTimingPanel', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('./AppTimingPanel')>();
++  return { ...actual, AppTimingPanel: () => createElement('div', null, 'Install dates') };
++});
 +vi.mock('./AppGroupsLine', () => ({ AppGroupsLine: () => createElement('div', null, 'Groups') }));
-+vi.mock('@/hooks/useInstallStatus',()=>({useInstallStatus:()=>({data:{installed:10,failed:0,pending:0,notInstalled:0,notApplicable:0,other:0,checkedAt:'2026-01-01T00:00:00Z',topErrors:[]}}),useCheckInstallsNow:()=>({canCheck:false,check:{}})}));
++vi.mock('@/hooks/useInstallStatus', () => ({ useInstallStatus: () => ({ data: { installed: 10, failed: 0, pending: 0, notInstalled: 0, notApplicable: 0, other: 0, checkedAt: '2026-01-01T00:00:00Z', topErrors: [] } }), useCheckInstallsNow: () => ({ canCheck: false, check: {} }) }));
 +vi.mock('./PreviousCopy', () => ({ PreviousCopyNote: () => null }));
 +vi.mock('./AppInsights', () => ({ AppActivityTimeline: () => null }));
 +vi.mock('@/hooks/useUpdateSchedule', () => ({ useUpdateSchedule: () => ({ data: { schedule: { paused: false }, window: { open: true } } }) }));
-+vi.mock('@/hooks/usePilots', () => ({ usePilots: () => ({ data: { supported: true, pilots: [] } }) }));
++vi.mock('@/hooks/usePilots', () => ({ usePilots: () => ({ data: { supported: true, pilots: state.pilots } }) }));
++
 +import { AppWorkspace } from './AppWorkspace';
++
 +(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-+afterEach(() => { document.body.innerHTML = ''; state.otherTenant = false;state.policyTenant='own';state.policyError=false;state.defer=false;state.attempt=null; });
-+it('shows current and next scopes, outcomes first and effective rules without speculative controls', async () => {
++
++afterEach(() => {
++  document.body.innerHTML = '';
++  state.otherTenant = false;
++  state.policyTenant = 'own';
++  state.policyError = false;
++  state.defer = false;
++  state.attempt = null;
++  state.assignments = [];
++  state.groupNames = {};
++  state.pilots = [];
++  state.updatePolicy.mockClear();
++  state.refetchPolicies.mockClear();
++});
++
++it('shows current and next scopes, inline UpdatePolicySelector, live install dates, and hides empty Pilot status', async () => {
++  state.assignments = [
++    {
++      id: 'a1',
++      intent: 'required',
++      target: { '@odata.type': '#microsoft.graph.groupAssignmentTarget', groupId: 'g1' },
++      settings: { installTimeSettings: { useLocalTime: false, startDateTime: '2099-02-01T08:00:00Z', deadlineDateTime: '2099-02-03T17:00:00Z' } },
++    },
++  ];
++  state.groupNames = { g1: 'All staff computers' };
 +  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
 +  await act(async () => root.render(createElement(AppWorkspace, { appId: 'one' })));
 +  expect(node.textContent).toContain('Current release');
 +  expect(node.textContent).toContain('Future updates');
-+  // The page says what it controls, each control sits with its field, and the page links to App updates.
 +  expect(node.querySelector('h1')?.textContent).toBe('Fixture app');
 +  const field = (name: string) => [...node.querySelectorAll('dt')].find(dt => dt.textContent === name)!.parentElement!;
 +  expect(field('Who gets it').textContent).toContain('Edit groups');
 +  expect(field('Install dates').textContent).toContain('Install dates');
++  expect(field('Install dates').textContent).toContain('All staff computers');
++  expect(field('Install dates').textContent).toContain('Feb 1, 2099');
++  expect(field('Install dates').textContent).toContain('Feb 3, 2099');
++  expect(node.textContent).not.toContain('Open Install dates to read them from Intune.');
 +  expect(field('How it installs').textContent).toContain('Change how it installs');
-+  expect([...node.querySelectorAll('a[href="/dashboard/updates"]')].map(a => a.textContent)).toContain('Change it in App updates');
 +  expect(node.textContent).not.toContain('Edit next rollout');
++  expect(node.textContent).not.toContain('What employees see');
++  expect(node.textContent).not.toContain('No pilot reported for this copy.');
 +  expect(node.textContent).toContain('Shared policy');
 +  expect(node.textContent).toContain('3 days');
 +  expect(node.querySelector('fieldset')).toBeNull();
 +  expect(node.textContent).not.toContain('Proposed employee choices');
 +  expect(node.textContent).toContain('No toolkit windows');
 +  expect(node.textContent!.indexOf('Install results')).toBeLessThan(node.textContent!.lastIndexOf('Current release'));
++
++  // Inline UpdatePolicySelector updates policy directly without leaving the workspace
++  const selector = node.querySelector<HTMLButtonElement>('[data-policy-selector="auto_update"]')!;
++  expect(selector).not.toBeNull();
++  await act(async () => selector.click());
++  expect(state.updatePolicy).toHaveBeenCalledWith({ winget_id: 'Vendor.App', tenant_id: 'own', policy_type: 'notify' });
++  expect(state.refetchPolicies).toHaveBeenCalledOnce();
++
 +  await act(async () => root.unmount());
 +});
++
++it('shows Pilot status only when an active or recorded pilot exists for this copy', async () => {
++  state.pilots = [{ id: 'p1', previous_app_id: 'one', new_app_id: 'two', group_name: 'IT Pilot', phase: 'testing', job_status: 'deployed' }];
++  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
++  await act(async () => root.render(createElement(AppWorkspace, { appId: 'one' })));
++  expect(node.textContent).toContain('Pilot status');
++  expect(node.textContent).toContain('IT Pilot · testing · package deployed');
++  await act(async () => root.unmount());
++});
++
 +it('does not mix another tenant’s current copy with signed-in tenant automatic policy editing', async () => {
 +  state.otherTenant = true;
 +  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
@@ -1271,39 +1359,71 @@ index 000000000..23dd38bad
 +  expect(node.textContent).not.toContain('Shared policy');
 +  expect(node.textContent).not.toContain('Latest deployment attempt');
 +  expect(node.textContent).not.toContain('App activity');
++  expect(node.querySelector('[data-policy-selector]')).toBeNull();
 +  await act(async () => root.unmount());
 +});
 +
-+it('keeps a healthy current copy alongside failed newer and archived attempt evidence, with inactive saved deferrals',async()=>{state.defer=true;state.attempt={id:'attempt-v2',version:'2',status:'failed',createdAt:'2026-01-02T00:00:00Z',archived:true,owned:false,errorCode:'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED',errorMessage:'Unsupported assignment settings.'};const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Version 2');expect(node.textContent).toContain('Installed10');expect(node.textContent).toContain('Archived from deployment history');expect(node.textContent).toContain('Version in Intune');expect(node.textContent).toContain('Saved postponement is inactive');expect(node.textContent).not.toContain('The installer may ask employees');await act(async()=>root.unmount());});
++it('keeps a healthy current copy alongside failed newer and archived attempt evidence, with inactive saved deferrals', async () => {
++  state.defer = true;
++  state.attempt = { id: 'attempt-v2', version: '2', status: 'failed', createdAt: '2026-01-02T00:00:00Z', archived: true, owned: false, errorCode: 'EXPIRED_ASSIGNMENT_DEADLINE_REVIEW_REQUIRED', errorMessage: 'Unsupported assignment settings.' };
++  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
++  await act(async () => root.render(createElement(AppWorkspace, { appId: 'one' })));
++  expect(node.textContent).toContain('Version 2');
++  expect(node.textContent).toContain('Installed10');
++  expect(node.textContent).toContain('Archived from deployment history');
++  expect(node.textContent).toContain('Version in Intune');
++  expect(node.textContent).toContain('Saved postponement is inactive');
++  expect(node.textContent).not.toContain('The installer may ask employees');
++  await act(async () => root.unmount());
++});
 +
-+it('does not show a same-family policy from a different tenant',async()=>{state.policyTenant='foreign';const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Tenant update policy: Not reported');expect(node.textContent).not.toContain('Change how it installs');await act(async()=>root.unmount());});
++it('does not show a same-family policy from a different tenant', async () => {
++  state.policyTenant = 'foreign';
++  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
++  await act(async () => root.render(createElement(AppWorkspace, { appId: 'one' })));
++  expect(node.querySelector('[data-policy-selector="none"]')).not.toBeNull();
++  expect(node.textContent).not.toContain('Change how it installs');
++  expect(node.textContent).toContain('Auto-update is not on for this app in this tenant');
++  await act(async () => root.unmount());
++});
 +
-+it('does not describe a policy read failure as no active policy',async()=>{state.policyError=true;const node=document.createElement('div');document.body.append(node);const root=createRoot(node);await act(async()=>root.render(createElement(AppWorkspace,{appId:'one'})));expect(node.textContent).toContain('Could not read the tenant update policy');expect(node.textContent).not.toContain('Auto-update is not on');expect(node.textContent).not.toContain('Change how it installs');await act(async()=>root.unmount());});
++it('does not describe a policy read failure as no active policy', async () => {
++  state.policyError = true;
++  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
++  await act(async () => root.render(createElement(AppWorkspace, { appId: 'one' })));
++  expect(node.textContent).toContain('Could not read the tenant update policy');
++  expect(node.textContent).not.toContain('Auto-update is not on');
++  expect(node.textContent).not.toContain('Change how it installs');
++  expect(node.querySelector('[data-policy-selector]')).toBeNull();
++  await act(async () => root.unmount());
++});
 diff --git a/components/hrm/AppWorkspace.tsx b/components/hrm/AppWorkspace.tsx
 new file mode 100644
-index 000000000..596e913ab
+index 000000000..4f795d0f3
 --- /dev/null
 +++ b/components/hrm/AppWorkspace.tsx
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,211 @@
 +'use client';
 +import Link from 'next/link';
 +import { useEffect, useState } from 'react';
++import { toast } from 'sonner';
 +import { AppIcon } from '@/components/AppIcon';
++import { UpdatePolicySelector } from '@/components/updates/UpdatePolicySelector';
 +import { useUpdateSchedule } from '@/hooks/useUpdateSchedule';
 +import { usePilots } from '@/hooks/usePilots';
 +import { useInventoryIcon, useAppDetails } from '@/hooks/use-inventory';
 +import { useAppInsights } from '@/hooks/useAppInsights';
 +import { useDeployedConfig } from '@/hooks/use-deployed-config';
-+import { useUpdatePolicies } from '@/hooks/use-updates';
++import { useUpdatePolicies, useUpdatePolicy } from '@/hooks/use-updates';
 +import { useInstallationPolicy } from '@/hooks/useInstallationPolicy';
 +import { useMspOptional } from '@/hooks/useMspOptional';
 +import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
-+import { installationPolicySummary } from '@/lib/hrm/installation-policy';
++import { assignmentTargetLabel } from '@/lib/intune/assignment-group-names';
 +import { effectiveInstallationRule, formatRestartBehavior, savedInstallationSummary } from '@/lib/hrm/rollout-workspace';
-+import type { AppUpdatePolicy } from '@/types/update-policies';
-+import { LatestAppAttempt } from "./LatestAppAttempt";
-+import { EditAssignments } from "./EditAssignments";
-+import { AppTimingPanel } from './AppTimingPanel';
++import type { AppUpdatePolicy, AutoUpdateScope, UpdatePolicyType } from '@/types/update-policies';
++import { LatestAppAttempt } from './LatestAppAttempt';
++import { EditAssignments } from './EditAssignments';
++import { AppTimingPanel, formatTimingClock } from './AppTimingPanel';
 +import { AppGroupsLine } from './AppGroupsLine';
 +import { InstallStatusBar } from './InstallStatusBar';
 +import { PreviousCopyNote } from './PreviousCopy';
@@ -1313,6 +1433,7 @@ index 000000000..596e913ab
 +import { Term } from './Term';
 +
 +const section = 'rounded-xl border border-overlay/10 bg-bg-surface p-5 sm:p-6 space-y-4';
++
 +export function AppWorkspace({ appId }: { appId: string }) {
 +  const details = useAppDetails(appId);
 +  const insights = useAppInsights(appId);
@@ -1326,6 +1447,7 @@ index 000000000..596e913ab
 +  const family = ownTenant ? insights.data?.appId === appId ? insights.data.family ?? null : insights.data?.snapshot?.appId === appId ? insights.data.snapshot.wingetId : null : null;
 +  const current = useDeployedConfig(family, appId);
 +  const policies = useUpdatePolicies(account?.tenantId);
++  const { updatePolicy } = useUpdatePolicy();
 +  const rules = useInstallationPolicy();
 +  const pilots = usePilots();
 +  const publishing = useUpdateSchedule();
@@ -1334,23 +1456,60 @@ index 000000000..596e913ab
 +  const automatic = policy?.policy_type === 'auto_update';
 +  const effective = family && rules.data?.shared ? effectiveInstallationRule(rules.data.shared, rules.data.exceptions ?? [], family) : null;
 +  const config = current.deployedConfig && 'psadtConfig' in current.deployedConfig ? current.deployedConfig.psadtConfig : null;
++
++  const handlePolicyChange = async (policyType: UpdatePolicyType, scope?: AutoUpdateScope) => {
++    if (!family || !account?.tenantId) return;
++    try {
++      if (scope !== undefined) {
++        if (!policy?.id) throw new Error('No saved policy to update');
++        await updatePolicy({ id: policy.id, auto_update_scope: scope });
++      } else {
++        await updatePolicy({
++          winget_id: family,
++          tenant_id: account.tenantId,
++          policy_type: policyType,
++        });
++      }
++      await policies.refetch();
++    } catch (err) {
++      toast.error(err instanceof Error ? err.message : 'Failed to update the policy. Please try again.');
++    }
++  };
++
 +  if (details.isLoading) return <p role="status" className="p-6 text-text-secondary">Loading app workspace…</p>;
 +  if (!app || app.id.toLowerCase() !== appId.toLowerCase()) return <section className={section}><h1 className="text-xl font-semibold text-text-primary">App workspace unavailable</h1><p role="alert" className="text-text-secondary">{details.error?.message || 'This copy could not be confirmed.'}</p><Button variant="outline" onClick={() => void details.refetch()}>Try again</Button><Link className="block text-accent-cyan" href="/dashboard/inventory">Back to Inventory</Link></section>;
-+  const savedGroups = policy?.deployment_config?.assignments?.map(row => `${row.groupName || (row.groupId ? 'Group name unavailable' : '') || ({allDevices:'All devices',allUsers:'All users',group:'Group',exclusionGroup:'Excluded group'} as Record<string,string>)[row.type] || 'Target not reported'} · ${row.type === 'exclusionGroup' ? 'Excluded' : row.intent.charAt(0).toUpperCase() + row.intent.slice(1)}`) ?? policy?.deployment_config?.assignedGroups?.map(row => `${row.groupName || 'Group name unavailable'} · ${row.assignmentType}`) ?? [];
-+  const timed = (app.assignments ?? []).filter(row => row.intent === 'required' && row.settings && Object.hasOwn(row.settings, 'installTimeSettings'));
-+  const times = [...new Set(timed.map(row => { const value = row.settings?.installTimeSettings; const format = (date: string | null | undefined) => date ? `${date.replace('T', ' ').replace(/:00(?:\.000)?Z$/, '')} ${value?.useLocalTime ? "on each computer's clock" : 'UTC'}` : 'as soon as possible'; return `Available from ${format(value?.startDateTime)} · must install by ${format(value?.deadlineDateTime)}`; }))];
-+  const ASAP = 'Available from as soon as possible · must install by as soon as possible';
-+  const currentTiming = times.length === 1 ? times[0] === ASAP ? 'As soon as possible' : times[0] : times.length > 1 ? 'Different for each Required group. Open Install dates to see them.' : 'Open Install dates to read them from Intune.';
++
++  const savedGroups = policy?.deployment_config?.assignments?.map(row => `${row.groupName || (row.groupId ? 'Group name unavailable' : '') || ({ allDevices: 'All devices', allUsers: 'All users', group: 'Group', exclusionGroup: 'Excluded group' } as Record<string, string>)[row.type] || 'Target not reported'} · ${row.type === 'exclusionGroup' ? 'Excluded' : row.intent.charAt(0).toUpperCase() + row.intent.slice(1)}`) ?? policy?.deployment_config?.assignedGroups?.map(row => `${row.groupName || 'Group name unavailable'} · ${row.assignmentType}`) ?? [];
++
++  const assignments = app.assignments ?? [];
++  const scheduledDates = assignments.flatMap((row) => {
++    if (String(row.target['@odata.type'] ?? '').includes('exclusionGroup')) return [];
++    if (row.intent !== 'required' && row.intent !== 'available' && row.intent !== 'availableWithoutEnrollment') return [];
++    const timing = row.settings?.installTimeSettings;
++    if (!timing || (!timing.startDateTime && !timing.deadlineDateTime)) return [];
++    const label = assignmentTargetLabel(row.target, app.assignmentGroupNames, app.assignmentGroupLookupFailures).replace(/^Group: /, '');
++    const useLocalTime = timing.useLocalTime === true;
++    const start = formatTimingClock(timing.startDateTime, useLocalTime);
++    const deadline = row.intent === 'required' ? formatTimingClock(timing.deadlineDateTime, useLocalTime) : null;
++    if (!start && !deadline) return [];
++    return [{ id: row.id, label, intent: row.intent === 'required' ? 'Required' : 'Available', start, deadline, useLocalTime }];
++  });
++
 +  const restart = app.installExperience?.deviceRestartBehavior ? formatRestartBehavior(app.installExperience.deviceRestartBehavior) : 'Not reported';
 +  const behavior = (value: typeof config) => !value ? 'Not reported' : value.installAfterRestartBeta ? 'After next restart · Beta' : value.deployMode === 'Silent' ? 'No toolkit windows' : value.deployMode === 'NonInteractive' ? 'No toolkit questions' : value.allowDefer ? 'Postponement when interactive' : 'Automatic toolkit mode';
 +  const nextSummary = effective?.policy.mode === 'existing' ? behavior(policy?.deployment_config?.psadtConfig ?? null) : effective?.policy.mode === 'restart' ? 'After next restart · Beta' : effective?.policy.mode === 'prompt' ? `Install or Defer · ${effective.policy.days} days` : effective?.policy.mode === 'silent' ? 'Silent' : 'Not reported';
-+  const preview = savedInstallationSummary(config);
++  const hasAvailable = assignments.some(row => row.intent === 'available' || row.intent === 'availableWithoutEnrollment');
 +  const publishStatus = publishing.data?.schedule?.paused ? 'Paused' : publishing.data?.window ? publishing.data.window.open ? 'Publishing allowed now' : 'Outside publishing window' : 'Publishing status unavailable';
++  const showPilotSection = ownTenant && (appPilots.length > 0 || Boolean(pilots.error));
++
 +  return <div className="mx-auto max-w-7xl space-y-5">
 +    <nav aria-label="Breadcrumb" className="text-sm text-text-secondary"><Link href="/dashboard/inventory" className="text-accent-cyan hover:underline">Inventory</Link><span aria-hidden="true"> / </span>{app.displayName}</nav>
 +    <header className="flex flex-wrap items-center gap-4">
 +      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-overlay/10 bg-bg-elevated">{icon.data?.icon?.value && !iconFailed ? <img onError={() => setIconFailed(true)} src={`data:${icon.data.icon.type || 'image/png'};base64,${icon.data.icon.value}`} alt={app.displayName} className="h-10 w-10 object-contain" /> : <AppIcon packageId={family || app.displayName} packageName={app.displayName} size="xl" className="h-12 w-12" />}</div>
-+      <div className="min-w-0"><h1 className="break-words text-2xl font-semibold text-text-primary">{app.displayName}</h1><p className="mt-1 text-sm text-text-secondary">App workspace · {app.displayVersion || 'Version unavailable'}</p></div>
++      <div className="min-w-0">
++        <h1 className="break-words text-2xl font-semibold text-text-primary">{app.displayName}</h1>
++        <p className="mt-1 text-sm text-text-secondary">Version in Intune: <span className="font-medium text-text-primary">{app.displayVersion || 'Version unavailable'}</span></p>
++      </div>
 +    </header>
 +
 +    {ownTenant && <LatestAppAttempt attempt={insights.data?.appId === appId ? insights.data.latestAttempt : null} loading={insights.isLoading} error={Boolean(insights.error)} supported={insights.data?.supported} />}
@@ -1358,22 +1517,76 @@ index 000000000..596e913ab
 +    <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
 +      <section className={section} aria-labelledby="current-copy">
 +        <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="current-copy" className="scroll-mt-24 text-lg font-semibold text-text-primary">Current release</h2><span className="rounded-md bg-overlay/5 px-2 py-1 text-xs text-text-secondary">Saved in Intune</span></div>
-+        <p className="text-xs text-text-muted">Version in Intune</p><p className="font-medium text-text-primary">{app.displayVersion || 'Version unavailable'}</p><PreviousCopyNote appId={appId} />
++        <PreviousCopyNote appId={appId} />
 +        <p className="text-xs text-text-muted">Install results describe this Intune copy. Per-computer versions are not collected.</p>
 +        <dl className="grid gap-x-5 gap-y-4 text-sm sm:grid-cols-2">
-+          <div><dt className="font-medium text-text-primary">Who gets it</dt><dd className="mt-1 space-y-2"><AppGroupsLine intuneAppId={appId} /><p className="text-xs text-text-muted">Each group is <Term term="required">Required</Term> or <Term term="available">Available</Term>.</p><EditAssignments appId={appId} /></dd></div>
-+          <div><dt className="font-medium text-text-primary">Install dates</dt><dd className="mt-1 space-y-2 text-text-secondary"><p>{currentTiming}</p><AppTimingPanel appId={appId} groupNames={app.assignmentGroupNames} /></dd></div>
-+          <div><dt className="font-medium text-text-primary">Install behavior</dt><dd className="mt-1 text-text-secondary">{current.isLoading ? 'Loading saved settings…' : behavior(config)}<span className="mt-1 block text-xs text-text-muted">Built into this package; changes take effect on the next deployment.</span></dd></div>
-+          <div><dt className="font-medium text-text-primary">Restart after installation</dt><dd className="mt-1 text-text-secondary">{restart}</dd></div>
-+
++          <div>
++            <dt className="font-medium text-text-primary">Who gets it</dt>
++            <dd className="mt-1 space-y-2">
++              <AppGroupsLine intuneAppId={appId} />
++              <p className="text-xs text-text-muted">Each group is <Term term="required">Required</Term> or <Term term="available">Available</Term>.</p>
++              <EditAssignments appId={appId} />
++            </dd>
++          </div>
++          <div>
++            <dt className="font-medium text-text-primary">Install dates</dt>
++            <dd className="mt-1 space-y-2 text-text-secondary">
++              {scheduledDates.length > 0 ? (
++                <ul className="space-y-1.5 text-xs">
++                  {scheduledDates.map((item) => (
++                    <li key={item.id} className="rounded-lg border border-overlay/10 bg-bg-elevated px-3 py-2 space-y-0.5">
++                      <p className="font-medium text-text-primary">{item.label} · {item.intent}</p>
++                      <p>
++                        <Term term="availableFrom">Available from</Term>: {item.start ?? 'As soon as possible'}
++                        {item.intent === 'Required' && <> · <Term term="mustInstallBy">Must install by</Term>: {item.deadline ?? 'As soon as available'}</>}
++                        {item.useLocalTime && <> (<Term term="deviceLocalTime">Each computer&apos;s own clock</Term>)</>}
++                      </p>
++                    </li>
++                  ))}
++                </ul>
++              ) : (
++                <p>{assignments.length === 0 ? 'No install assignments.' : 'As soon as possible (no scheduled dates).'}</p>
++              )}
++              <AppTimingPanel appId={appId} groupNames={app.assignmentGroupNames} />
++            </dd>
++          </div>
++          <div>
++            <dt className="font-medium text-text-primary"><Term term="installPrompts">Install behavior</Term></dt>
++            <dd className="mt-1 space-y-1 text-text-secondary">
++              <p>{current.isLoading ? 'Loading saved settings…' : savedInstallationSummary(config)}{!current.isLoading && hasAvailable && ' Available assignments remain optional in Company Portal.'}</p>
++              <span className="block text-xs text-text-muted">Built into this package; changes take effect on the next deployment.</span>
++            </dd>
++          </div>
++          <div>
++            <dt className="font-medium text-text-primary"><Term term="restartBehavior">Restart after installation</Term></dt>
++            <dd className="mt-1 text-text-secondary">{restart}</dd>
++          </div>
 +        </dl>
-+        <div className="rounded-lg bg-overlay/5 p-3 text-sm"><h3 className="font-medium text-text-primary">What employees see</h3><p className="mt-1 text-text-secondary">{preview}{app.assignments?.some(row => row.intent === 'available' || row.intent === 'availableWithoutEnrollment') && ' Available assignments remain optional in Company Portal.'}</p></div>
 +        {current.error && <p role="alert" className="text-sm text-status-warning">Could not load saved installer settings.</p>}
 +      </section>
 +      <section className={section} aria-labelledby="next-rollout">
 +        <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="next-rollout" className="scroll-mt-24 text-lg font-semibold text-text-primary">Future updates</h2><span className="rounded-md bg-overlay/5 px-2 py-1 text-xs text-text-secondary">Saved settings</span></div>
 +        <p className="text-xs text-text-muted">How new versions of this app reach Intune and install. Nothing here changes the current release.</p>
-+        {ownTenant && <p className="text-sm text-text-secondary">Tenant update policy: {policies.error ? 'Unavailable' : policy ? <Term term="autoUpdate">{({auto_update:'Auto-update',notify:'Notify only',ignore:'Ignore',pin_version:'Pin version'} as const)[policy.policy_type]}</Term> : 'Not reported'}. <Link href="/dashboard/updates" className="text-accent-cyan hover:underline">Change it in App updates</Link></p>}
++        {ownTenant && (
++          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-text-secondary">
++            <span><Term term="autoUpdate">Tenant update policy</Term></span>
++            {policies.error ? (
++              <span className="font-medium text-text-primary">Unavailable</span>
++            ) : family && !policies.isLoading && !insights.isLoading ? (
++              <UpdatePolicySelector
++                currentPolicy={policy?.policy_type ?? null}
++                currentScope={policy?.auto_update_scope}
++                isEnabled={policy?.is_enabled !== false}
++                onPolicyChange={handlePolicyChange}
++                size="sm"
++                showLabel
++                variant="pill"
++              />
++            ) : (
++              <span className="font-medium text-text-primary">Not reported</span>
++            )}
++          </div>
++        )}
 +        {!ownTenant ? <p className="text-sm text-text-secondary">Automatic installation policies are available only for your signed-in tenant.</p> : policies.isLoading || insights.isLoading ? <p role="status">Loading future update settings…</p> : policies.error ? <p role="alert">Could not read the tenant update policy. Refresh before editing.</p> : !family ? <p className="text-sm text-text-secondary">IntuneGet has no verified match for this app, so future update settings are not shown here.</p> : !automatic ? <p className="text-sm text-text-secondary">Auto-update is not on for this app in this tenant, so IntuneGet does not deploy its new versions on its own.</p> : <dl className="space-y-3 text-sm">
 +          <div><dt className="font-medium text-text-primary">Automatic updates</dt><dd className="mt-1 text-text-secondary">{policy?.is_enabled ? effective?.policy.mode === 'restart' ? 'On · broad updates held for restart Beta pilot' : 'On' : 'Off'}</dd></div>
 +          <div><dt className="font-medium text-text-primary">How it installs</dt><dd className="mt-1 space-y-2 text-text-secondary"><p>{nextSummary}{' · '}<span className="ml-2 text-xs text-text-muted">{effective?.source}</span></p>{!insights.error && <InstallationPolicyPanel apps={policy ? [policy] : []} appId={family} intuneAppId={appId} compact />}</dd></div>
@@ -1384,7 +1597,19 @@ index 000000000..596e913ab
 +        <p className="border-t border-overlay/10 pt-3 text-xs text-text-muted">{effective?.policy.mode === 'restart' ? `Restart Beta pilot only${effective.policy.restartPilot ? ` · ${effective.policy.restartPilot.groupName}` : ' · choose a pilot target before starting'}. Broad automatic updates are held.` : 'Changes apply to future automatic updates. Current and queued copies keep their settings.'}</p>
 +      </section>
 +    </div>
-+    <section className={section} aria-label="Pilot status"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-base font-semibold text-text-primary">Pilot status</h2><Link href="/dashboard/updates" className="text-sm text-accent-cyan hover:underline">Open App updates</Link></div>{pilots.isLoading ? <p role="status">Loading pilot status…</p> : pilots.error ? <p role="alert">Pilot status unavailable.</p> : appPilots.length ? appPilots.map(row => <p key={row.id} className="text-sm text-text-secondary">{row.group_name} · {row.phase} · package {row.job_status || 'not reported'}</p>) : <p className="text-sm text-text-muted">No pilot reported for this copy.</p>}</section>
++    {showPilotSection && (
++      <section className={section} aria-label="Pilot status">
++        <div className="flex flex-wrap items-center justify-between gap-2">
++          <h2 className="text-base font-semibold text-text-primary">Pilot status</h2>
++          <Link href="/dashboard/updates" className="text-sm text-accent-cyan hover:underline">Open App updates</Link>
++        </div>
++        {pilots.error ? (
++          <p role="alert">Pilot status unavailable.</p>
++        ) : (
++          appPilots.map(row => <p key={row.id} className="text-sm text-text-secondary">{row.group_name} · {row.phase} · package {row.job_status || 'not reported'}</p>)
++        )}
++      </section>
++    )}
 +    <details className={section}><summary className="cursor-pointer text-sm font-medium text-text-primary">Timing and policy details</summary><div className="space-y-3 text-sm text-text-secondary"><p>{savedInstallationSummary(config)}</p><p>Install dates edits live availability, deadlines and restart grace for this copy. Offline computers install after reconnecting.</p><p>Intune in-use handling, restart grace and toolkit postponement are separate settings.</p><div className="flex flex-wrap gap-x-4 gap-y-2"><Link href="/dashboard/updates#automatic-updates" className="text-accent-cyan hover:underline">When can IntuneGet send automatic updates to Intune?</Link><Link href="/dashboard/help#automatic-installation-policy" className="text-accent-cyan hover:underline">Installation policy help</Link></div></div></details>
 +    {ownTenant && <details className={section}><summary className="cursor-pointer text-sm font-medium text-text-primary">App activity</summary><div className="pt-3"><AppActivityTimeline appId={appId} /></div></details>}
 +  </div>;
